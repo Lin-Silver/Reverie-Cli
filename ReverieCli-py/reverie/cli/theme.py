@@ -196,6 +196,11 @@ class DreamDecorators:
     CHEVRON_RIGHT = "›"
     CHEVRON_DOUBLE = "»"
     TRIANGLE_RIGHT = "▸"
+
+    # Inline tags (pinned skills and similar sticky selections)
+    TAG_OPEN = "⟦"
+    TAG_CLOSE = "⟧"
+    PIN = "⚲"
     
     # Box drawing (dreamy style)
     LINE_HORIZONTAL = "─"
@@ -408,6 +413,7 @@ _BASE_DECO_VALUES = {
         "SPARKLE", "SPARKLE_FILLED", "TWINKLE", "DIAMOND", "DIAMOND_FILLED", "RHOMBUS",
         "DOT_SMALL", "DOT_MEDIUM", "CHEVRON_RIGHT", "LINE_HORIZONTAL", "LINE_VERTICAL",
         "CHECK", "CHECK_FANCY", "CROSS", "CROSS_FANCY", "SEARCH", "THOUGHT_BUBBLE",
+        "TAG_OPEN", "TAG_CLOSE", "PIN",
     )
 }
 
@@ -477,6 +483,7 @@ def apply_theme(name: str) -> str:
             "CHEVRON_RIGHT": ">", "LINE_HORIZONTAL": "-", "LINE_VERTICAL": "|",
             "CHECK": "OK", "CHECK_FANCY": "OK", "CROSS": "X", "CROSS_FANCY": "X",
             "SEARCH": "?", "THOUGHT_BUBBLE": "",
+            "TAG_OPEN": "[", "TAG_CLOSE": "]", "PIN": "*",
         }
         for key, value in minimal_decorators.items():
             setattr(DECO, key, value)

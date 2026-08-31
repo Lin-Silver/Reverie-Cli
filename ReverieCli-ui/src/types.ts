@@ -1,4 +1,4 @@
-export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "plugins" | "recovery" | "settings";
+export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings";
 
 export interface SubagentSpecRecord {
   id: string;
@@ -461,6 +461,41 @@ export interface PluginsState {
   records: PluginRecord[];
 }
 
+export interface SkillRecord {
+  key: string;
+  name: string;
+  description: string;
+  summary: string;
+  path: string;
+  scope: string;
+  root: string;
+  plugin_id: string;
+  allow_implicit_invocation: boolean;
+  pinned: boolean;
+}
+
+/** A pinned skill is mandatory for every turn until it is released. */
+export interface PinnedSkillsState {
+  max: number;
+  keys: string[];
+  names: string[];
+  /** Pins whose SKILL.md has since disappeared from disk. */
+  unresolved: string[];
+}
+
+export interface SkillsState {
+  count: number;
+  invalid_count: number;
+  records: SkillRecord[];
+  pinned: PinnedSkillsState;
+  errors: Record<string, unknown>[];
+}
+
+export interface SkillDetail extends SkillRecord {
+  body: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface CommandRecord {
   id: string;
   command: string;
@@ -509,6 +544,7 @@ export interface DesktopState {
   settings: SettingsState;
   sessions: SessionListState;
   plugins: PluginsState;
+  skills: SkillsState;
   commands: CommandsState;
   recovery: RecoveryState;
 }

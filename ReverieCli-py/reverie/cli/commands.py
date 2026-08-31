@@ -170,6 +170,7 @@ class CommandHandler:
             'tools': self.cmd_tools,
             'browser': self.cmd_browser,
             'skills': self.cmd_skills,
+            'skill': self.cmd_skill,
             'plugins': self.cmd_plugins,
             'mcp': self.cmd_mcp,
             'setting': self.cmd_setting,
@@ -663,6 +664,14 @@ class CommandHandler:
             box=box.ROUNDED,
         )
 
+    def _pinned_skill_keys(self) -> set:
+        """Return the normalized lookup keys of every pinned skill."""
+        skills_manager = self.app.get('skills_manager')
+        try:
+            return set(getattr(skills_manager, "pinned_keys", ()) or ())
+        except Exception:
+            return set()
+
     def _build_skill_browser_list_panel(
         self,
         filtered_records: List[Any],
@@ -699,17 +708,22 @@ class CommandHandler:
 
         end_idx = min(scroll_offset + max_visible, len(filtered_records))
         visible_records = filtered_records[scroll_offset:end_idx]
+        pinned_keys = self._pinned_skill_keys()
         for row_index, record in enumerate(visible_records):
             actual_idx = scroll_offset + row_index
             is_selected = actual_idx == selected_idx
+            is_pinned = str(getattr(record, "lookup_key", "") or "") in pinned_keys
             indicator = Text("›" if is_selected else "", style=f"bold {self.theme.PINK_SOFT}")
             skill_style = f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}" if is_selected else f"bold {self.theme.BLUE_SOFT}"
             meta_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_DIM
             preview_style = self.theme.TEXT_PRIMARY if is_selected else self.theme.TEXT_SECONDARY
+            skill_label = str(getattr(record, "name", "") or "").strip()
+            if is_pinned:
+                skill_label = f"{self.deco.PIN} {skill_label}"
             table.add_row(
                 indicator,
                 Text(str(actual_idx + 1), style=self.theme.TEXT_DIM),
-                Text(self._truncate_middle(str(getattr(record, "name", "") or "").strip(), 26), style=skill_style, overflow="ellipsis", no_wrap=True),
+                Text(self._truncate_middle(skill_label, 26), style=skill_style, overflow="ellipsis", no_wrap=True),
                 Text(str(getattr(record, "scope_label", "") or "").strip(), style=meta_style, overflow="ellipsis", no_wrap=True),
                 Text(str(getattr(record, "root_label", "") or "").strip(), style=meta_style, overflow="ellipsis", no_wrap=True),
                 Text(
@@ -850,6 +864,7 @@ class CommandHandler:
                 ("Scope", getattr(record, "scope_label", "")),
                 ("Root", getattr(record, "root_label", "")),
                 ("Path", getattr(record, "display_path", "")),
+                ("Pinned", "yes — mandatory every turn" if str(getattr(record, "lookup_key", "") or "") in self._pinned_skill_keys() else "no"),
                 ("Description", getattr(record, "description", "")),
             ]
         )
@@ -4748,6 +4763,157 @@ class CommandHandler:
 
         self._print_skill_detail_page(record)
         return True
+
+    def cmd_skill(self, args: str) -> bool:
+        """Pin one skill so every following turn is required to use it."""
+        skills_manager = self.app.get('skills_manager')
+        if not skills_manager:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skills manager is not available.[/{self.theme.CORAL_SOFT}]"
+            )
+            return True
+
+        raw = str(args or "").strip()
+        lowered = raw.lower()
+        if lowered in ("", "status", "show"):
+            return self._print_pinned_skill_status()
+        if lowered in ("clear", "off", "none", "reset", "unpin"):
+            released = skills_manager.clear_pinned_skills()
+            self._after_pinned_skills_changed()
+            if released:
+                self.console.print(
+                    f"[{self.theme.MINT_SOFT}]{self.deco.CHECK} Released pinned skill(s): "
+                    f"{escape(', '.join(released))}[/{self.theme.MINT_SOFT}]"
+                )
+            else:
+                self.console.print(
+                    f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No skill was pinned.[/{self.theme.TEXT_DIM}]"
+                )
+            return True
+        if lowered in ("list", "available"):
+            return self._cmd_skills_ui(force_refresh=True)
+
+        target = raw
+        for prefix in ("pin ", "add ", "use "):
+            if lowered.startswith(prefix):
+                target = raw[len(prefix):].strip()
+                break
+        else:
+            if lowered.startswith("unpin ") or lowered.startswith("remove "):
+                wanted = raw.split(" ", 1)[1].strip()
+                outcome = skills_manager.unpin_skill(wanted)
+                self._after_pinned_skills_changed()
+                if outcome.get("status") == "unpinned":
+                    self.console.print(
+                        f"[{self.theme.MINT_SOFT}]{self.deco.CHECK} Unpinned "
+                        f"{escape(str(outcome.get('name') or wanted))}.[/{self.theme.MINT_SOFT}]"
+                    )
+                else:
+                    self.console.print(
+                        f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
+                        f"{escape(wanted)} is not pinned.[/{self.theme.AMBER_GLOW}]"
+                    )
+                return True
+
+        target = target.lstrip("$").strip()
+        if not target:
+            return self._print_pinned_skill_status()
+
+        outcome = skills_manager.pin_skill(target, force_refresh=True)
+        status = str(outcome.get("status") or "")
+        name = str(outcome.get("name") or target)
+        if status == "missing":
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Skill not found: {escape(target)}"
+                f"[/{self.theme.CORAL_SOFT}]"
+            )
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Run /skills to list detected skills."
+                f"[/{self.theme.TEXT_DIM}]"
+            )
+            return True
+        if status == "full":
+            self.console.print(
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} At most "
+                f"{skills_manager.max_pinned_skills} skills can be pinned at once. Run /skill clear first."
+                f"[/{self.theme.AMBER_GLOW}]"
+            )
+            return True
+        if status == "already":
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} {escape(name)} is already pinned."
+                f"[/{self.theme.TEXT_DIM}]"
+            )
+            return self._print_pinned_skill_status()
+
+        self._after_pinned_skills_changed()
+        record = outcome.get("record")
+        self.console.print()
+        self.console.print(self._build_pinned_skill_tag_line(name))
+        summary = str(getattr(record, "summary", "") or "")
+        if summary:
+            self.console.print(f"[{self.theme.TEXT_SECONDARY}]{escape(summary)}[/{self.theme.TEXT_SECONDARY}]")
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} Every following turn must load and follow this skill. "
+            f"Run /skill clear to release it.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print()
+        return True
+
+    def _build_pinned_skill_tag_line(self, name: str) -> Text:
+        """Render the pinned-skill chip the same way the prompt and footer do."""
+        line = Text()
+        line.append(f"{self.deco.PIN} ", style=self.theme.PURPLE_SOFT)
+        line.append(
+            f"{self.deco.TAG_OPEN}{name}{self.deco.TAG_CLOSE}",
+            style=f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}",
+        )
+        line.append("  pinned", style=self.theme.MINT_SOFT)
+        return line
+
+    def _print_pinned_skill_status(self) -> bool:
+        """Show which skills are pinned and how to change that."""
+        skills_manager = self.app.get('skills_manager')
+        state = skills_manager.pinned_state(force_refresh=True)
+        names = list(state.get("names", []) or [])
+        unresolved = list(state.get("unresolved", []) or [])
+        self._show_command_panel(
+            "Pinned Skills",
+            subtitle="A pinned skill is mandatory for every turn until it is released.",
+            accent=self.theme.PURPLE_VIBRANT,
+            meta=f"{len(names)}/{state.get('max', 0)} pinned",
+        )
+        if not names and not unresolved:
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]{self.deco.DOT_MEDIUM} No skill is pinned. "
+                f"Use /skill <skill-name> to pin one.[/{self.theme.TEXT_DIM}]"
+            )
+        for name in names:
+            self.console.print(self._build_pinned_skill_tag_line(name))
+        for name in unresolved:
+            self.console.print(
+                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {escape(str(name))} is pinned but no longer on disk."
+                f"[/{self.theme.CORAL_SOFT}]"
+            )
+        rows = [
+            ("/skill <name>", "Pin a skill for every following turn"),
+            ("/skill unpin <name>", "Release one pinned skill"),
+            ("/skill clear", "Release every pinned skill"),
+            ("/skills", "Browse every detected skill"),
+        ]
+        self.console.print()
+        self.console.print(self._build_key_value_table(rows, value_style=self.theme.TEXT_SECONDARY))
+        self.console.print()
+        return True
+
+    def _after_pinned_skills_changed(self) -> None:
+        """Rebuild the system prompt so the pin takes effect on the next turn."""
+        refresh = self.app.get('refresh_agent_prompt_guidance')
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                report_suppressed_exception("refresh agent prompt guidance")
 
     def cmd_plugins(self, args: str) -> bool:
         """Inspect plugin-style runtime discovery and install locations."""

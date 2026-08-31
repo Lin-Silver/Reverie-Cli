@@ -10,6 +10,8 @@ import type {
   SessionListState,
   SessionState,
   SettingsState,
+  SkillDetail,
+  SkillsState,
   SubagentRunLog,
   SubagentsState,
   ToolRecord,
@@ -24,6 +26,11 @@ type Envelope<Type extends string, Body extends object> = { id?: string | number
 type CustomProviderEnvelope = Envelope<
   "custom-provider.updated",
   { provider: CustomProviderRecord | null; models: ModelSourcesState; workspace: WorkspaceState }
+>;
+/** Pin, unpin, and clear all answer with the outcome plus the whole pin set. */
+type SkillPinEnvelope = Envelope<
+  "skill.pinned",
+  { status: string; name: string; released: string[]; skills: SkillsState }
 >;
 
 /** Decisions the approval prompt can return. `message` carries a free-form reply to the model. */
@@ -103,6 +110,11 @@ interface CoreRequestMap {
   setPluginEnabled: { payload: { pluginId: string; enabled: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   setPluginTrust: { payload: { pluginId: string; trusted: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   refreshPlugins: { payload: EmptyPayload; response: Envelope<"plugins", { plugins: PluginsState }> };
+  refreshSkills: { payload: EmptyPayload; response: Envelope<"skills", { skills: SkillsState }> };
+  pinSkill: { payload: { skill: string }; response: SkillPinEnvelope };
+  unpinSkill: { payload: { skill: string }; response: SkillPinEnvelope };
+  clearPinnedSkills: { payload: EmptyPayload; response: SkillPinEnvelope };
+  inspectSkill: { payload: { skill: string }; response: Envelope<"skill.inspect", { record: SkillDetail | null }> };
   indexWorkspace: { payload: EmptyPayload; response: Envelope<"workspace.indexed", { result: Record<string, unknown>; workspace: WorkspaceState }> };
   rollbackCheckpoint: { payload: { checkpointId: string; confirmed: true }; response: Envelope<"rollback.result", { result: Record<string, unknown>; recovery: RecoveryState }> };
   workspaceMentions: { payload: { query: string; limit: number }; response: Envelope<"workspace.mentions", { query: string; items: WorkspaceMention[]; elapsed_ms: number; context_engine: NonNullable<WorkspaceState["context_engine"]> }> };

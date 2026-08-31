@@ -73,7 +73,7 @@ The Python directory provides the platform-native one-file core:
 - Installs the project in editable mode
 - Validates dependency health
 - Does not run packaging-time regression tests automatically
-- Supports Codex-style progressive Skill discovery from repository `.agents/skills` roots, `~/.agents/skills`, bundled Skills, and legacy application `.reverie/Skills` / `.reverie/skills` roots. The model receives only Skill metadata initially and reads a selected `SKILL.md` through `skill_lookup`.
+- Supports Codex-style progressive Skill discovery from repository `.agents/skills` roots, `~/.agents/skills`, bundled Skills, and legacy application `.reverie/Skills` / `.reverie/skills` roots. The model receives only Skill metadata initially and reads a selected `SKILL.md` through `skill_lookup`. `/skill <name>` pins a Skill for the session, which promotes it into a mandatory system-prompt block and bypasses model-side selection; pins live in memory only. A bundled Skill ships `SKILL.md`, optional `agents/*.yaml`, and optional `references/*.md` — the three patterns `setup.py` `package_data` covers, so a new file type there needs a packaging change.
 - Bundles required Comfy assets
 - Bundles `ffmpeg` into the one-file executable when it is available at build time
 - Builds `dist/reverie.exe` with PyInstaller

@@ -1176,6 +1176,58 @@ def test_skills_manager_discovers_builtin_browser_controler_skill(tmp_path: Path
     assert "check_endpoint" in record.body
 
 
+def test_skills_manager_discovers_builtin_photo_to_3d_skill(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    manager = SkillsManager(project_root=project_root, app_root=app_root)
+    record = manager.get_record("photo-to-3d", force_refresh=True)
+
+    assert record is not None
+    assert record.root.scope == "builtin"
+    assert record.allow_implicit_invocation is True
+    # The description is the only thing the model sees before inspecting, so the
+    # phrasings a user actually types have to be in it.
+    for trigger in ("photo to 3D", "image to 3D model", "picture to mesh", "THREE.Group"):
+        assert trigger in record.description
+
+    for pass_name in ("Blockout", "Structural", "Form", "Material", "Surface", "Lighting", "Interaction", "Optimization"):
+        assert pass_name in record.body
+    assert "Fail closed" in record.body
+    assert "browser_session_start" in record.body
+    assert "devtools_screenshot" in record.body
+    assert "state.json" in record.body
+    # The output is code, never a downloaded or generated mesh.
+    assert "photogrammetry" in record.body
+    assert "AI-generated 3D asset" in record.body
+    assert "img2threejs" in record.body
+
+    references = record.skill_dir / "references"
+    expected = {"attribution.md", "character-track.md", "materials.md", "pass-pipeline.md", "render-review.md"}
+    assert {path.name for path in references.glob("*.md")} == expected
+    for name in sorted(expected):
+        # Every reference the body links to must resolve, or progressive disclosure dead-ends.
+        assert f"({name})" in record.body or f"(references/{name})" in record.body
+
+    pipeline = (references / "pass-pipeline.md").read_text(encoding="utf-8")
+    assert pipeline.index("## 1. Blockout") < pipeline.index("## 4. Material") < pipeline.index("## 8. Optimization")
+
+    attribution = (references / "attribution.md").read_text(encoding="utf-8")
+    assert "Apache License 2.0" in attribution
+    assert "github.com/img2threejs/img2threejs" in attribution
+    # The upstream `python3 forge/` script farm is deliberately not ported: a frozen
+    # build has no guaranteed external interpreter.
+    assert "python3 forge/" in attribution
+    assert "python3 forge/" not in pipeline
+
+
+def test_photo_to_3d_skill_is_not_gated_to_a_mode() -> None:
+    from reverie.builtin_skills import BUILTIN_SKILL_MODES
+
+    assert "photo-to-3d" not in BUILTIN_SKILL_MODES
+
+
 def test_browser_controler_manifest_mentions_embedded_browser_contract() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     manifest = json.loads((repo_root / "reverie" / "agent" / "tool_manifest.json").read_text(encoding="utf-8"))

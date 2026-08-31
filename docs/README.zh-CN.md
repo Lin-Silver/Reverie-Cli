@@ -10,6 +10,7 @@ Reverie CLI 是一个面向大型代码仓库的上下文引擎驱动 AI 助手�
 - `Writer`：磁盘持久化的长篇写作、连续性检查和完成审计。
 - `Computer Controller`：Windows 桌面控制与受管子代理。
 - Context Engine：符号、依赖、语义、提交历史和项目记忆检索。
+- Skills：Codex 风格的 `SKILL.md` 渐进式发现；`/skill <名称>` 可固定某个 skill，之后每一轮都必须加载并遵循它，并在输入提示和桌面输入框中显示为彩色标签。内置 skill 包含 `photo-to-3d`，用于把照片中的主体重建为程序化的 Three.js 代码。
 
 ## 安装
 

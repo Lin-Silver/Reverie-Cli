@@ -22,6 +22,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{1,}")
 _SKILL_SCAN_SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv"}
 _SKILL_METADATA_RELATIVE_PATH = Path("agents") / "openai.yaml"
 _DEFAULT_SKILL_METADATA_CHAR_BUDGET = 8_000
+_MAX_PINNED_SKILLS = 4
 _SKILL_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "into", "your", "when", "use", "using",
     "user", "wants", "want", "anything", "files", "file", "skill", "guide", "whenever", "does",
@@ -248,6 +249,10 @@ class SkillsManager:
         self._snapshot: Optional[SkillsSnapshot] = None
         self._generation = 0
         self._signature = ""
+        # Pinned skills are session state, not configuration: a pin steers every
+        # following turn, so it must not survive a restart the user forgot about.
+        # Maps normalized lookup key -> last known display name, in pin order.
+        self._pinned: dict[str, str] = {}
 
     def _build_root_candidates(self) -> tuple[SkillRoot, ...]:
         package_root = Path(__file__).resolve().parent
@@ -640,6 +645,119 @@ class SkillsManager:
             )
         return "\n".join(blocks).strip()
 
+    # ------------------------------------------------------------------
+    # Pinned skills
+    # ------------------------------------------------------------------
+
+    @property
+    def max_pinned_skills(self) -> int:
+        return _MAX_PINNED_SKILLS
+
+    @property
+    def has_pinned_skills(self) -> bool:
+        return bool(self._pinned)
+
+    @property
+    def pinned_keys(self) -> tuple[str, ...]:
+        return tuple(self._pinned.keys())
+
+    def pin_skill(self, identifier: str, *, force_refresh: bool = False) -> dict[str, Any]:
+        """Pin one skill so every following turn is required to use it."""
+        wanted = str(identifier or "").strip()
+        if not wanted:
+            return {"status": "invalid", "name": "", "record": None}
+
+        record = self.get_record(wanted, force_refresh=force_refresh)
+        if record is None:
+            return {"status": "missing", "name": wanted, "record": None}
+        if record.lookup_key in self._pinned:
+            self._pinned[record.lookup_key] = record.name
+            return {"status": "already", "name": record.name, "record": record}
+        if len(self._pinned) >= _MAX_PINNED_SKILLS:
+            return {"status": "full", "name": record.name, "record": record}
+
+        self._pinned[record.lookup_key] = record.name
+        return {"status": "pinned", "name": record.name, "record": record}
+
+    def unpin_skill(self, identifier: str) -> dict[str, Any]:
+        """Release one pinned skill, matching either its name or its stored key."""
+        wanted = str(identifier or "").strip()
+        key = _normalize_skill_key(wanted)
+        if not key:
+            return {"status": "invalid", "name": wanted}
+
+        if key not in self._pinned:
+            record = self.get_record(wanted, force_refresh=False)
+            if record is not None and record.lookup_key in self._pinned:
+                key = record.lookup_key
+        if key not in self._pinned:
+            return {"status": "missing", "name": wanted}
+
+        name = self._pinned.pop(key)
+        return {"status": "unpinned", "name": name or wanted}
+
+    def clear_pinned_skills(self) -> list[str]:
+        """Release every pinned skill and return the names that were released."""
+        released = list(self._pinned.values())
+        self._pinned.clear()
+        return released
+
+    def pinned_records(self, *, force_refresh: bool = False) -> list[SkillRecord]:
+        """Resolve pinned keys against the current scan, refreshing stored names."""
+        if not self._pinned:
+            return []
+        records: list[SkillRecord] = []
+        for key in list(self._pinned.keys()):
+            record = self.get_record(key, force_refresh=force_refresh)
+            force_refresh = False
+            if record is None:
+                continue
+            self._pinned[key] = record.name
+            records.append(record)
+        return records
+
+    def pinned_names(self) -> list[str]:
+        """Return pinned display names, including pins whose skill is missing."""
+        return [name or key for key, name in self._pinned.items()]
+
+    def pinned_state(self, *, force_refresh: bool = False) -> dict[str, Any]:
+        """Describe the pin set for the CLI footer and the Desktop bridge."""
+        records = self.pinned_records(force_refresh=force_refresh)
+        resolved_keys = {record.lookup_key for record in records}
+        return {
+            "max": _MAX_PINNED_SKILLS,
+            "names": [record.name for record in records],
+            "records": records,
+            "unresolved": [name or key for key, name in self._pinned.items() if key not in resolved_keys],
+        }
+
+    def describe_pinned_for_prompt(self, *, force_refresh: bool = False) -> str:
+        """Render the mandatory-skill block that outranks model-side selection."""
+        state = self.pinned_state(force_refresh=force_refresh)
+        records: list[SkillRecord] = state["records"]
+        unresolved: list[str] = state["unresolved"]
+        if not records and not unresolved:
+            return ""
+
+        lines = ["### Pinned skills (mandatory)"]
+        if records:
+            lines.append(
+                "The user pinned these skills. Call `skill_lookup(operation=\"inspect\")` on each one "
+                "before taking any task action in this turn, read every returned body chunk, and follow "
+                "its workflow. A pinned skill applies to every turn until the user unpins it."
+            )
+            for record in records:
+                description = _trim_text(record.description, limit=1024)
+                lines.append(f"- {record.name}: {description} (file: {record.source_uri or record.path_to_skill_md})")
+            lines.append(
+                "Do not substitute a different skill for a pinned one and do not skip a pinned skill "
+                "because the request looks simple. If a pinned skill genuinely cannot apply to the "
+                "request, say so explicitly before doing anything else."
+            )
+        for name in unresolved:
+            lines.append(f"- {name}: pinned but no longer present on disk; tell the user the pin is stale.")
+        return "\n".join(lines)
+
     def describe_for_prompt(
         self,
         *,
@@ -654,14 +772,23 @@ class SkillsManager:
             "A skill is a reusable workflow stored in a `SKILL.md` file. The list below contains only name, description, and path.",
             "If the user names a skill or the task clearly matches its description, call `skill_lookup` with `operation=inspect` before acting. Read every returned body chunk before using that skill.",
             "Use `$skill-name` for an explicit request. Do not load a skill body merely because its description shares generic words with the task.",
-            "### Available skills",
         ]
+        pinned_block = self.describe_pinned_for_prompt(force_refresh=False)
+        if pinned_block:
+            lines.append(pinned_block)
+        lines.append("### Available skills")
         used = sum(len(line) + 1 for line in lines)
         omitted = 0
-        implicit_records = [record for record in snapshot.records if record.allow_implicit_invocation]
+        pinned_keys = set(self.pinned_keys)
+        implicit_records = [
+            record
+            for record in snapshot.records
+            if record.allow_implicit_invocation or record.lookup_key in pinned_keys
+        ]
         for record in implicit_records:
             description = _trim_text(record.description, limit=1024)
-            line = f"- {record.name}: {description} (file: {record.source_uri or record.path_to_skill_md})"
+            marker = " [PINNED]" if record.lookup_key in pinned_keys else ""
+            line = f"- {record.name}{marker}: {description} (file: {record.source_uri or record.path_to_skill_md})"
             if used + len(line) + 1 > budget:
                 omitted += 1
                 continue

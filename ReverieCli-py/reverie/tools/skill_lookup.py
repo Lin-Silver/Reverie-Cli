@@ -126,7 +126,7 @@ acting; if the body is returned in chunks, request every remaining chunk.
 
         return score
 
-    def _list_rows(self, records: List[SkillRecord], max_results: int) -> List[Dict[str, Any]]:
+    def _list_rows(self, records: List[SkillRecord], max_results: int, pinned_keys: frozenset = frozenset()) -> List[Dict[str, Any]]:
         visible = records[:max_results]
         return [
             {
@@ -135,14 +135,16 @@ acting; if the body is returned in chunks, request every remaining chunk.
                 "path": record.display_path,
                 "scope": record.scope_label,
                 "root": record.root_label,
+                "pinned": record.lookup_key in pinned_keys,
             }
             for record in visible
         ]
 
-    def _render_rows(self, records: List[SkillRecord]) -> List[str]:
+    def _render_rows(self, records: List[SkillRecord], pinned_keys: frozenset = frozenset()) -> List[str]:
         return [
             (
-                f"- {record.name} [{record.scope_label} / {record.root_label}]\n"
+                f"- {record.name}{' [PINNED]' if record.lookup_key in pinned_keys else ''}"
+                f" [{record.scope_label} / {record.root_label}]\n"
                 f"  description: {record.summary}\n"
                 f"  path: {record.display_path}"
             )
@@ -170,15 +172,18 @@ acting; if the body is returned in chunks, request every remaining chunk.
         manager = self._skills_manager()
         snapshot = manager.get_snapshot(force_refresh=force_refresh)
         records = list(snapshot.records)
+        pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
 
         if operation == "list":
             visible = records[:max_results]
             lines = [f"Discovered skills: {len(records)} valid, {len(snapshot.errors)} invalid"]
+            if pinned_keys:
+                lines.append("Pinned skills are mandatory for every turn until the user unpins them.")
             if not visible:
                 lines.append("- No valid SKILL.md files were found.")
             else:
                 lines.append("")
-                lines.extend(self._render_rows(visible))
+                lines.extend(self._render_rows(visible, pinned_keys))
                 if len(records) > len(visible):
                     lines.append("")
                     lines.append(f"... {len(records) - len(visible)} additional skills omitted.")
@@ -187,7 +192,8 @@ acting; if the body is returned in chunks, request every remaining chunk.
                 data={
                     "count": len(records),
                     "invalid_count": len(snapshot.errors),
-                    "items": self._list_rows(records, max_results),
+                    "items": self._list_rows(records, max_results, pinned_keys),
+                    "pinned": sorted(pinned_keys),
                 },
             )
 
@@ -206,7 +212,7 @@ acting; if the body is returned in chunks, request every remaining chunk.
                 lines.append("- No matching skills found.")
             else:
                 lines.append("")
-                lines.extend(self._render_rows(visible))
+                lines.extend(self._render_rows(visible, pinned_keys))
                 if len(matches) > len(visible):
                     lines.append("")
                     lines.append(f"... {len(matches) - len(visible)} additional matches omitted.")
@@ -215,7 +221,7 @@ acting; if the body is returned in chunks, request every remaining chunk.
                 data={
                     "query": query,
                     "count": len(matches),
-                    "items": self._list_rows(matches, max_results),
+                    "items": self._list_rows(matches, max_results, pinned_keys),
                 },
             )
 
@@ -236,16 +242,23 @@ acting; if the body is returned in chunks, request every remaining chunk.
             complete = next_offset >= len(body)
 
             metadata_keys = sorted(str(key) for key in (record.metadata or {}).keys())
+            is_pinned = record.lookup_key in pinned_keys
             lines = [
-                f"Skill: {record.name}",
+                f"Skill: {record.name}{' [PINNED]' if is_pinned else ''}",
                 f"Scope: {record.scope_label} / {record.root_label}",
                 f"Path: {record.display_path}",
                 f"Description: {_clip(record.description, 320)}",
                 f"Metadata keys: {', '.join(metadata_keys) if metadata_keys else '(none)'}",
-                "",
-                "Skill body:",
-                body_chunk or "(empty skill body)",
             ]
+            if is_pinned:
+                lines.append("Pinned: the user requires this skill on every turn until it is unpinned.")
+            lines.extend(
+                [
+                    "",
+                    "Skill body:",
+                    body_chunk or "(empty skill body)",
+                ]
+            )
             if not complete:
                 lines.append("")
                 lines.append(f"[more Skill instructions remain; inspect again with body_offset={next_offset}]")
@@ -258,6 +271,7 @@ acting; if the body is returned in chunks, request every remaining chunk.
                     "path": record.display_path,
                     "scope": record.scope_label,
                     "root": record.root_label,
+                    "pinned": is_pinned,
                     "metadata": dict(record.metadata or {}),
                     "body": body_chunk,
                     "body_offset": body_offset,

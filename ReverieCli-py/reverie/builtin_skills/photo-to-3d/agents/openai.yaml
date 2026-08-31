@@ -1,0 +1,4 @@
+interface:
+  display_name: "Photo to 3D"
+  short_description: "Rebuild a photographed subject as Three.js code"
+  default_prompt: "Use $photo-to-3d to rebuild the subject in this photo as a Three.js factory."

@@ -18,6 +18,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
 - **Specialist runtime plugins**: Ren'Py and Live2D/Cubism Galgame workflows are delivered through plugin-owned `rc_*` tools, skills, and prompt guidance
+- **Skills**: Codex-style progressive `SKILL.md` discovery, plus `/skill <name>` to pin one so every following turn is required to load and follow it; pinned skills render as a coloured tag in the CLI prompt and the Desktop composer. Bundled skills include `photo-to-3d`, which rebuilds a photographed subject as procedural Three.js code
 - **Roadmap**: Planned game-runtime and Gamer work is maintained in [one roadmap](docs/ROADMAP.md)
 
 ---

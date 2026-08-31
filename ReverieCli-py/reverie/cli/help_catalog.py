@@ -386,6 +386,21 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         ],
         "examples": ["/skills", "/skills rescan", "/skills path", "/skills inspect openai-docs"],
     },
+    "skill": {
+        "command": "/skill",
+        "section": "Tools & Context",
+        "summary": "Pin one skill so every following turn is required to load and follow it.",
+        "detail": "Pinning removes model-side skill selection for the pinned entry. The pinned skill is promoted into a mandatory block in the system prompt, marked `[PINNED]` in the skill metadata list, and rendered as a coloured tag in the input prompt and the live footer. A pin stays active for every following turn until it is released, applies to a pinned skill even when `agents/openai.yaml` disables implicit invocation, and is session state — it is never written to the configuration file, so restarting Reverie clears it. Up to 4 skills can be pinned at once.",
+        "overview": "<skill-name>, status, unpin <skill-name>, clear, list",
+        "subcommands": [
+            {"usage": "/skill", "description": "Show which skills are pinned."},
+            {"usage": "/skill <skill-name>", "description": "Pin a skill for every following turn."},
+            {"usage": "/skill unpin <skill-name>", "description": "Release one pinned skill."},
+            {"usage": "/skill clear", "description": "Release every pinned skill."},
+            {"usage": "/skill list", "description": "Browse every detected skill and pin state."},
+        ],
+        "examples": ["/skill photo-to-3d", "/skill", "/skill unpin photo-to-3d", "/skill clear"],
+    },
     "plugins": {
         "command": "/plugins",
         "section": "Tools & Context",

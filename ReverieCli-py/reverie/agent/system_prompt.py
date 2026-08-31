@@ -996,6 +996,7 @@ Reverie owns long-running, verification-heavy work directly. There is no separat
 - Prefer `web_fetch` for fetching selected pages, docs, release notes, manifests, or metadata.
 - Prefer `task_manager` over ad-hoc long-running workflow systems when a checklist is enough.
 - When the Skills metadata list names a matching workflow or the user explicitly writes `$skill-name`, call `skill_lookup(operation="inspect")` before taking task actions. Read every returned body chunk before using that Skill. Do not infer a Skill from generic keywords alone.
+- A Skill listed under "Pinned skills (mandatory)" or marked `[PINNED]` was pinned by the user: inspect it and follow it on every turn until it is unpinned, and never silently substitute another Skill for it.
 - Dynamic `mcp_*` and `rc_*` tools may be present; use their submitted schemas exactly.
 - Use those tool names and schemas rather than inventing Codex-specific tool names.
 

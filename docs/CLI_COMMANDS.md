@@ -140,6 +140,27 @@ reverie compact "preserve failed tests and uncommitted files"
 reverie --path C:\work\project setting workspace on
 ```
 
+## Skills
+
+| Command | Description |
+| --- | --- |
+| `/skills` | Show the detected skill summary and table |
+| `/skills status` | Explicit status view |
+| `/skills rescan` | Rescan repository, user, bundled, plugin, and legacy skill roots |
+| `/skills path` | Show the scanned skill roots |
+| `/skills inspect <skill-name>` | Show one skill's metadata and its on-demand `SKILL.md` body |
+| `/skill` | Show which skills are pinned |
+| `/skill <skill-name>` | Pin a skill so every following turn must load and follow it |
+| `/skill unpin <skill-name>` | Release one pinned skill |
+| `/skill clear` | Release every pinned skill |
+| `/skill list` | Browse every detected skill and its pin state |
+
+Skills are discovered from repository `.agents/skills` roots between the project root and the current workspace, `~/.agents/skills`, bundled skills, plugin-owned skills, and the legacy `.reverie/Skills` / `.reverie/skills` locations. The model initially receives only each skill's name, description, and path, then reads a body on demand through `skill_lookup`. Write `$skill-name` in a prompt to request one explicitly.
+
+Pinning removes model-side selection for that entry: the skill is promoted into a mandatory system-prompt block, marked `[PINNED]` in the metadata list and in `skill_lookup` output, and drawn as a coloured tag in the input prompt and the live footer. A pin applies even when the skill's `agents/openai.yaml` sets `policy.allow_implicit_invocation: false`, since an explicit pin is a user instruction. Up to 4 skills can be pinned at once. Pins are session state and are never written to the configuration file, so restarting Reverie clears them.
+
+In Reverie Desktop, typing `/skill <skill-name>` in the composer and pressing Enter converts the text into a pinned-skill chip above the input instead of sending a message; the Skills page lists every skill with its pin controls.
+
 ## Project and Rules
 
 | Command | Description |

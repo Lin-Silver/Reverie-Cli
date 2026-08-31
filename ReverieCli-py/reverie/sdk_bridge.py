@@ -230,6 +230,47 @@ class ReverieSdkBridge:
         if interface.agent is not None:
             interface._refresh_agent_prompt_guidance()
 
+    @staticmethod
+    def _skill_record(record: Any, pinned_keys: Any = ()) -> Dict[str, Any]:
+        lookup_key = str(getattr(record, "lookup_key", "") or "")
+        return {
+            "key": lookup_key,
+            "name": getattr(record, "name", ""),
+            "description": getattr(record, "description", ""),
+            "summary": getattr(record, "summary", ""),
+            "path": getattr(record, "display_path", ""),
+            "scope": getattr(record, "scope_label", ""),
+            "root": getattr(record, "root_label", ""),
+            "plugin_id": getattr(record, "plugin_id", ""),
+            "allow_implicit_invocation": bool(getattr(record, "allow_implicit_invocation", True)),
+            "pinned": lookup_key in pinned_keys,
+        }
+
+    def skills_payload(self, *, force_refresh: bool = False) -> Dict[str, Any]:
+        """Describe every discovered skill plus the session pin set for the desktop."""
+        manager = self.ensure_interface().skills_manager
+        snapshot = manager.get_snapshot(force_refresh=force_refresh)
+        state = manager.pinned_state(force_refresh=False)
+        pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
+        return {
+            "count": len(snapshot.records),
+            "invalid_count": len(snapshot.errors),
+            "records": [self._skill_record(record, pinned_keys) for record in snapshot.records],
+            "pinned": {
+                "max": int(state.get("max", 0) or 0),
+                "keys": sorted(pinned_keys),
+                "names": [str(name) for name in state.get("names", [])],
+                "unresolved": [str(name) for name in state.get("unresolved", [])],
+            },
+            "errors": _json_safe(manager.list_error_rows(force_refresh=False)),
+        }
+
+    def _refresh_pinned_skills(self) -> None:
+        """Rebuild the system prompt so a pin change lands on the next desktop turn."""
+        interface = self.ensure_interface()
+        if interface.agent is not None:
+            interface._refresh_agent_prompt_guidance()
+
     def _refresh_agent(self) -> None:
         interface = self.ensure_interface()
         if interface.agent is not None:
@@ -481,6 +522,7 @@ class ReverieSdkBridge:
             "settings": self.settings_payload(),
             "sessions": self.sessions_payload(),
             "plugins": self.plugins_payload(),
+            "skills": self.skills_payload(),
             "commands": self.commands_payload(),
             "recovery": self.recovery_payload(),
         }
@@ -1034,6 +1076,56 @@ class ReverieSdkBridge:
                 "id": request_id,
                 "type": "plugin.inspect",
                 "record": self._plugin_record(record) if record else None,
+            }
+        if action in {"listSkills", "refreshSkills"}:
+            return {
+                "id": request_id,
+                "type": "skills",
+                "skills": self.skills_payload(force_refresh=action == "refreshSkills"),
+            }
+        if action in {"pinSkill", "unpinSkill", "clearPinnedSkills"}:
+            manager = self.ensure_interface().skills_manager
+            wanted = str(payload.get("skill") or payload.get("name") or payload.get("key") or "").strip()
+            if action == "clearPinnedSkills":
+                released = manager.clear_pinned_skills()
+                result = {"status": "cleared", "name": "", "released": released}
+            else:
+                if not wanted:
+                    raise ValueError("Skill name is required.")
+                if action == "pinSkill":
+                    outcome = manager.pin_skill(wanted.lstrip("$"), force_refresh=True)
+                else:
+                    outcome = manager.unpin_skill(wanted.lstrip("$"))
+                result = {
+                    "status": str(outcome.get("status") or ""),
+                    "name": str(outcome.get("name") or wanted),
+                    "released": [],
+                }
+            # A pin is an instruction for the next turn, so the system prompt has
+            # to be rebuilt now rather than at the next agent re-init.
+            self._refresh_pinned_skills()
+            return {
+                "id": request_id,
+                "type": "skill.pinned",
+                "status": result["status"],
+                "name": result["name"],
+                "released": result["released"],
+                "skills": self.skills_payload(),
+            }
+        if action == "inspectSkill":
+            manager = self.ensure_interface().skills_manager
+            wanted = str(payload.get("skill") or payload.get("name") or payload.get("key") or "").strip()
+            record = manager.get_record(wanted.lstrip("$"), force_refresh=False) if wanted else None
+            pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
+            detail = None
+            if record is not None:
+                detail = self._skill_record(record, pinned_keys)
+                detail["body"] = str(getattr(record, "body", "") or "")
+                detail["metadata"] = _json_safe(dict(getattr(record, "metadata", {}) or {}))
+            return {
+                "id": request_id,
+                "type": "skill.inspect",
+                "record": detail,
             }
         if action == "listTools":
             mode = str(payload.get("mode") or "reverie").strip()

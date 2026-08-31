@@ -42,6 +42,7 @@ import {
   PanelRightOpen,
   Paperclip,
   Pencil,
+  Pin,
   Plug,
   Plus,
   RefreshCw,
@@ -101,6 +102,7 @@ import type {
   SessionMessage,
   SessionState,
   SettingItem,
+  SkillsState,
   SubagentRunLog,
   SubagentRunRecord,
   SubagentSpecRecord,
@@ -682,6 +684,9 @@ function Sidebar({
         </button>
         <button type="button" className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}>
           <Clock3 size={16} /> {t("RTP 任务")}
+        </button>
+        <button type="button" className={view === "skills" ? "active" : ""} onClick={() => setView("skills")}>
+          <Sparkles size={16} /> {t("技能")}
         </button>
         <button type="button" className={view === "plugins" ? "active" : ""} onClick={() => setView("plugins")}>
           <Plug size={16} /> {t("插件")}
@@ -1367,6 +1372,9 @@ function Composer({
   attachments,
   selectAttachment,
   removeAttachment,
+  pinnedSkills,
+  unresolvedSkills,
+  unpinSkill,
   modelName,
   disabled = false,
 }: {
@@ -1383,6 +1391,9 @@ function Composer({
   attachments: ComposerAttachment[];
   selectAttachment: () => void;
   removeAttachment: (attachment: ComposerAttachment) => void;
+  pinnedSkills: string[];
+  unresolvedSkills: string[];
+  unpinSkill: (name: string) => void;
   modelName: string;
   disabled?: boolean;
 }) {
@@ -1405,6 +1416,24 @@ function Composer({
     <div className="composer-shell">
       <MentionPicker items={mentionItems} choose={chooseMention} open={mentionOpen} loading={mentionLoading} />
       <div className="composer">
+        {(pinnedSkills.length > 0 || unresolvedSkills.length > 0) && (
+          <div className="skill-strip">
+            {pinnedSkills.map((name) => (
+              <span className="skill-chip" key={name} title={t("skill.pinned.hint", { name })}>
+                <Sparkles size={12} />
+                <span>{name}</span>
+                <button type="button" aria-label={t("skill.unpin", { name })} onClick={() => unpinSkill(name)}><X size={11} /></button>
+              </span>
+            ))}
+            {unresolvedSkills.map((name) => (
+              <span className="skill-chip skill-chip-stale" key={`stale-${name}`} title={t("skill.pinned.stale", { name })}>
+                <Sparkles size={12} />
+                <span>{name}</span>
+                <button type="button" aria-label={t("skill.unpin", { name })} onClick={() => unpinSkill(name)}><X size={11} /></button>
+              </span>
+            ))}
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="attachment-strip">
             {attachments.map((attachment) => (
@@ -1545,6 +1574,9 @@ function ChatView({
   attachments,
   selectAttachment,
   removeAttachment,
+  pinnedSkills,
+  unresolvedSkills,
+  unpinSkill,
   modelName,
   sessionBusy,
   renameSession,
@@ -1569,6 +1601,9 @@ function ChatView({
   attachments: ComposerAttachment[];
   selectAttachment: () => void;
   removeAttachment: (attachment: ComposerAttachment) => void;
+  pinnedSkills: string[];
+  unresolvedSkills: string[];
+  unpinSkill: (name: string) => void;
   modelName: string;
   sessionBusy: boolean;
   renameSession: () => void;
@@ -1631,6 +1666,9 @@ function ChatView({
         attachments={attachments}
         selectAttachment={selectAttachment}
         removeAttachment={removeAttachment}
+        pinnedSkills={pinnedSkills}
+        unresolvedSkills={unresolvedSkills}
+        unpinSkill={unpinSkill}
         modelName={modelName}
         disabled={sessionBusy}
       />
@@ -1769,6 +1807,99 @@ function PluginsView({
         ))}
         {plugins.length === 0 && <div className="empty-panel"><Plug size={26} /><strong>{t("没有发现运行时插件")}</strong><span>{t("将插件放入 Reverie 插件目录后重新扫描。")}</span></div>}
       </div>
+    </div>
+  );
+}
+
+function SkillsView({
+  skills,
+  pinSkill,
+  unpinSkill,
+  clearPinned,
+  refresh,
+}: {
+  skills: SkillsState;
+  pinSkill: (name: string) => void;
+  unpinSkill: (name: string) => void;
+  clearPinned: () => void;
+  refresh: () => void;
+}) {
+  const { t } = useI18n();
+  const [query, setQuery] = useState("");
+  const pinnedCount = skills.pinned.names.length + skills.pinned.unresolved.length;
+  const full = pinnedCount >= skills.pinned.max;
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return skills.records;
+    return skills.records.filter((record) =>
+      record.name.toLowerCase().includes(needle) || record.description.toLowerCase().includes(needle));
+  }, [query, skills.records]);
+  return (
+    <div className="page-scroll">
+      <PageHeader
+        icon={<Sparkles size={20} />}
+        title={t("技能")}
+        description={t("固定一个技能后，Reverie 每一轮都必须先读取它的 SKILL.md 并遵循其中的流程，直到你取消固定。固定只作用于当前会话，不会写入配置文件。")}
+        action={<button type="button" className="secondary-button" onClick={refresh}><RefreshCw size={14} />{t("重新扫描")}</button>}
+      />
+      <div className="metric-grid">
+        <div><Sparkles size={16} /><span>{t("已发现技能")}</span><strong>{skills.count}</strong></div>
+        <div><Pin size={16} /><span>{t("已固定")}</span><strong>{pinnedCount} / {skills.pinned.max}</strong></div>
+        <div><AlertCircle size={16} /><span>{t("无效技能")}</span><strong>{skills.invalid_count}</strong></div>
+      </div>
+      {pinnedCount > 0 && (
+        <section className="page-section">
+          <div className="section-heading">
+            <div><h2>{t("固定的技能")}</h2><p>{t("这些技能对每一轮都是强制的，并会显示在输入框上方。")}</p></div>
+            <button type="button" className="secondary-button danger-ghost" onClick={clearPinned}><X size={13} />{t("全部取消")}</button>
+          </div>
+          <div className="skill-strip skill-strip-page">
+            {skills.pinned.names.map((name) => (
+              <span className="skill-chip" key={name}>
+                <Sparkles size={12} /><span>{name}</span>
+                <button type="button" aria-label={t("skill.unpin", { name })} onClick={() => unpinSkill(name)}><X size={11} /></button>
+              </span>
+            ))}
+            {skills.pinned.unresolved.map((name) => (
+              <span className="skill-chip skill-chip-stale" key={`stale-${name}`} title={t("skill.pinned.stale", { name })}>
+                <Sparkles size={12} /><span>{name}</span>
+                <button type="button" aria-label={t("skill.unpin", { name })} onClick={() => unpinSkill(name)}><X size={11} /></button>
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+      <section className="page-section">
+        <div className="section-heading">
+          <div><h2>{t("全部技能")}</h2><p>{t("按名称或描述筛选，然后固定需要强制使用的技能。")}</p></div>
+          <div className="inline-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("筛选技能")} aria-label={t("筛选技能")} /></div>
+        </div>
+        <div className="plugin-list">
+          {visible.map((record) => (
+            <div className={`plugin-card ${record.pinned ? "skill-card-pinned" : ""}`} key={record.key || record.path}>
+              <div className="plugin-icon"><Sparkles size={18} /></div>
+              <div className="plugin-main">
+                <div className="plugin-title">
+                  <strong>{record.name}</strong>
+                  <span className="status-pill">{record.scope}</span>
+                  {record.pinned && <span className="status-pill pinned">{t("已固定")}</span>}
+                  {!record.allow_implicit_invocation && <span className="status-pill">{t("仅显式调用")}</span>}
+                </div>
+                <p>{record.description}</p>
+                <div className="plugin-stats"><span>{record.root}</span><span>{record.path}</span></div>
+              </div>
+              <div className="plugin-toggles">
+                {record.pinned ? (
+                  <button type="button" className="secondary-button danger-ghost" onClick={() => unpinSkill(record.name)}><X size={13} />{t("取消固定")}</button>
+                ) : (
+                  <button type="button" className="secondary-button" disabled={full} onClick={() => pinSkill(record.name)}><Pin size={13} />{t("固定")}</button>
+                )}
+              </div>
+            </div>
+          ))}
+          {visible.length === 0 && <div className="empty-panel"><Sparkles size={26} /><strong>{t("没有匹配的技能")}</strong><span>{t("把 SKILL.md 放进 .reverie/skills 或 .agents/skills 后重新扫描。")}</span></div>}
+        </div>
+      </section>
     </div>
   );
 }
@@ -4477,9 +4608,81 @@ export default function App() {
     }
   }, [running, session, sessionBusy, state, toast]);
 
+  const skillsState = state?.skills;
+  const pinnedSkills = useMemo(() => skillsState?.pinned.names ?? [], [skillsState]);
+  const unresolvedSkills = useMemo(() => skillsState?.pinned.unresolved ?? [], [skillsState]);
+
+  const refreshSkills = useCallback(async () => {
+    try {
+      const response = await window.reverie.request("refreshSkills", {});
+      setState((current) => current ? { ...current, skills: response.skills } : current);
+      toast(t("技能目录已刷新"), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  // Pinning is session state on the core side, so every mutation answers with the
+  // whole pin set: the composer chip and the Skills page can never drift apart.
+  const pinSkill = useCallback(async (name: string) => {
+    try {
+      const response = await window.reverie.request("pinSkill", { skill: name });
+      setState((current) => current ? { ...current, skills: response.skills } : current);
+      if (response.status === "full") {
+        toast(t("skill.pin.full", { max: String(response.skills.pinned.max) }), "error");
+      } else if (response.status === "missing") {
+        toast(t("skill.pin.missing", { name }), "error");
+      } else if (response.status === "already") {
+        toast(t("skill.pin.already", { name: response.name }), "info");
+      } else {
+        toast(t("skill.pin.done", { name: response.name }), "success");
+      }
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const unpinSkill = useCallback(async (name: string) => {
+    try {
+      const response = await window.reverie.request("unpinSkill", { skill: name });
+      setState((current) => current ? { ...current, skills: response.skills } : current);
+      if (response.status === "missing") toast(t("skill.pin.missing", { name }), "error");
+      else toast(t("skill.unpin.done", { name: response.name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
+  const clearPinnedSkills = useCallback(async () => {
+    try {
+      const response = await window.reverie.request("clearPinnedSkills", {});
+      setState((current) => current ? { ...current, skills: response.skills } : current);
+      toast(t("skill.pin.cleared"), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
   const sendPrompt = useCallback(async () => {
     const text = prompt.trim();
     if (!text || running || sessionBusy || !state) return;
+    // `/skill …` is a composer control, not a turn: Enter converts the typed text
+    // into a pinned-skill chip instead of sending anything to the model.
+    const skillMatch = /^\/skill(?:s)?(?:\s+([\s\S]*))?$/i.exec(text);
+    if (skillMatch) {
+      const argument = (skillMatch[1] || "").trim();
+      const lowered = argument.toLowerCase();
+      setPrompt("");
+      setMentionItems([]);
+      setMentionOpen(false);
+      if (!argument || lowered === "status" || lowered === "show" || lowered === "list" || lowered === "available") {
+        setView("skills");
+        return;
+      }
+      if (lowered === "clear" || lowered === "off" || lowered === "none" || lowered === "reset") {
+        await clearPinnedSkills();
+        return;
+      }
+      const unpinMatch = /^(?:unpin|remove)\s+([\s\S]+)$/i.exec(argument);
+      if (unpinMatch) {
+        await unpinSkill(unpinMatch[1].trim().replace(/^\$/, ""));
+        return;
+      }
+      await pinSkill(argument.replace(/^(?:pin|add|use)\s+/i, "").trim().replace(/^\$/, ""));
+      return;
+    }
     const compactMatch = /^\/compact(?:\s+([\s\S]*))?$/i.exec(text);
     if (compactMatch) {
       setPrompt("");
@@ -4540,7 +4743,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [compactContext, prompt, resetLiveBatch, running, session, sessionBusy, state, t, toast]);
+  }, [clearPinnedSkills, compactContext, pinSkill, prompt, resetLiveBatch, running, session, sessionBusy, state, t, toast, unpinSkill]);
 
   const cancelPrompt = useCallback(async () => {
     const retryText = liveTurn?.userText ?? "";
@@ -5139,7 +5342,7 @@ export default function App() {
 
   const chooseCommand = useCallback((command: CommandRecord) => {
     setCommandOpen(false);
-    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/plugins": "plugins", "/checkpoints": "recovery", "/rollback": "recovery" };
+    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/skill": "skills", "/skills": "skills", "/plugins": "plugins", "/checkpoints": "recovery", "/rollback": "recovery" };
     const target = navigation[command.command];
     if (target) { setView(target); return; }
     setView("chat");
@@ -5154,11 +5357,12 @@ export default function App() {
     if (view === "rats") return <RatsView />;
     if (view === "tasks") return <RtpTasksView preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
     if (view === "subagents") return <SubagentsView />;
+    if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
-    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
-  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
+    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
+  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void initialize()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;

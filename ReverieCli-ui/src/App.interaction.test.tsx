@@ -174,6 +174,38 @@ const desktopState: DesktopState = {
     ],
   },
   plugins: { summary: {}, records: [] },
+  skills: {
+    count: 2,
+    invalid_count: 0,
+    records: [
+      {
+        key: "photo-to-3d",
+        name: "photo-to-3d",
+        description: "Reconstruct a photographed subject as Three.js code",
+        summary: "Reconstruct a photographed subject as Three.js code",
+        path: "builtin_skills/photo-to-3d/SKILL.md",
+        scope: "Built-in",
+        root: "builtin",
+        plugin_id: "",
+        allow_implicit_invocation: true,
+        pinned: false,
+      },
+      {
+        key: "reverie-engine",
+        name: "reverie-engine",
+        description: "Build and verify unified Reverie Engine games",
+        summary: "Build and verify unified Reverie Engine games",
+        path: "builtin_skills/reverie-engine/SKILL.md",
+        scope: "Built-in",
+        root: "builtin",
+        plugin_id: "",
+        allow_implicit_invocation: true,
+        pinned: false,
+      },
+    ],
+    pinned: { max: 4, keys: [], names: [], unresolved: [] },
+    errors: [],
+  },
   commands: {
     sections: ["Workspace"],
     items: [

@@ -45,6 +45,21 @@ class InputHandler:
         self.deco = DECO
         self.attachment_selector = attachment_selector
         self.command_provider = command_provider
+        # Pinned-skill tags rendered as chips between the prompt label and the
+        # chevron. The interface owns the content; this class only draws it.
+        self.prompt_tags: List[str] = []
+
+    def set_prompt_tags(self, tags: Optional[List[str]]) -> None:
+        """Replace the chips drawn inside the input prompt."""
+        cleaned: List[str] = []
+        for tag in list(tags or []):
+            label = str(tag or "").strip()
+            if label and label not in cleaned:
+                cleaned.append(label)
+        self.prompt_tags = cleaned
+
+    def _prompt_tag_labels(self) -> List[str]:
+        return [f"{self.deco.TAG_OPEN}{tag}{self.deco.TAG_CLOSE}" for tag in self.prompt_tags]
 
     def _console_width(self) -> int:
         """Best-effort terminal width."""
@@ -65,12 +80,29 @@ class InputHandler:
     def _plain_prompt_text(self, prompt_text: str, is_continuation: bool = False) -> str:
         if is_continuation:
             return ""
+        tags = "".join(f"{label} " for label in self._prompt_tag_labels())
         return (
             f"{self.deco.DIAMOND_FILLED} "
             f"{prompt_text.rstrip('> ')} "
+            f"{tags}"
             f"{self.deco.DOT_MEDIUM} "
             f"{self.deco.CHEVRON_RIGHT} "
         )
+
+    def _prompt_toolkit_message(self, prompt_text: str) -> Any:
+        """Build the prompt_toolkit message, colouring pinned-skill chips."""
+        if not self.prompt_tags:
+            return self._plain_prompt_text(prompt_text)
+        fragments: List[Tuple[str, str]] = [
+            (f"fg:{self.theme.BLUE_SOFT}", f"{self.deco.DIAMOND_FILLED} "),
+            (f"bold fg:{self.theme.PURPLE_SOFT}", f"{prompt_text.rstrip('> ')} "),
+        ]
+        for label in self._prompt_tag_labels():
+            fragments.append((f"bold fg:{self.theme.TEXT_PRIMARY} bg:{self.theme.PURPLE_DEEP}", label))
+            fragments.append(("", " "))
+        fragments.append((f"fg:{self.theme.TEXT_DIM}", f"{self.deco.DOT_MEDIUM} "))
+        fragments.append((f"fg:{self.theme.BLUE_SOFT}", f"{self.deco.CHEVRON_RIGHT} "))
+        return fragments
 
     @staticmethod
     def _char_cell_width(char: str) -> int:
@@ -292,7 +324,14 @@ class InputHandler:
             prompt_parts = Text()
             prompt_parts.append(f"{self.deco.DIAMOND_FILLED} ", style=self.theme.BLUE_SOFT)
             prompt_parts.append(prompt_text.rstrip("> "), style=f"bold {self.theme.PURPLE_SOFT}")
-            prompt_parts.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            prompt_parts.append(" ")
+            for label in self._prompt_tag_labels():
+                prompt_parts.append(
+                    label,
+                    style=f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}",
+                )
+                prompt_parts.append(" ")
+            prompt_parts.append(f"{self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
             prompt_parts.append(f"{self.deco.CHEVRON_RIGHT} ", style=self.theme.BLUE_SOFT)
             self.console.print(prompt_parts, end="")
 
@@ -713,7 +752,7 @@ class InputHandler:
         )
         try:
             result = session.prompt(
-                self._plain_prompt_text(prompt_text),
+                self._prompt_toolkit_message(prompt_text),
                 default=initial_text,
             )
         except (EOFError, KeyboardInterrupt):

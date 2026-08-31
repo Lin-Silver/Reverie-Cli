@@ -169,6 +169,26 @@ Optional heavyweight SDKs live under the executable-local `.reverie/plugins/<plu
 - Blender uses `rc_blender_mcp_install`, `rc_blender_mcp_start`, `rc_blender_mcp_stop`, `rc_blender_mcp_status`, and `rc_blender_mcp_info` to deploy and control the plugin-local Blender MCP bridge.
 - Do not place optional SDK payloads in global user folders; Reverie expects them beside the executable under `.reverie/plugins`.
 
+## Skills
+
+Skills are files on disk, not configuration keys. Reverie scans these roots in this order:
+
+| Root | Scope |
+| --- | --- |
+| `reverie/builtin_skills/<name>/SKILL.md` | Bundled with the package |
+| plugin-owned skill directories | Contributed by an installed runtime plugin |
+| `~/.agents/skills/<name>/SKILL.md` | User-wide |
+| `<app_root>/.reverie/Skills` and `.reverie/skills` | Legacy application roots |
+| `.agents/skills/<name>/SKILL.md` | Repository, from the project root down to the current workspace |
+
+Two skills may share a name; both are listed by `/skills`, but a lookup by name resolves to the first in the order above, so a bundled skill shadows a repository one. Rename the repository skill rather than relying on shadowing.
+
+A skill directory holds `SKILL.md` with YAML frontmatter (`name`, `description`), an optional `agents/openai.yaml`, and optional `references/*.md` that the body links to for progressive disclosure. `agents/openai.yaml` may set `interface.display_name`, `interface.short_description`, `interface.default_prompt`, and `policy.allow_implicit_invocation: false` to keep a skill out of automatic selection.
+
+A few bundled skills are gated to one mode — `reverie-engine` only appears in `reverie-gamer`. The rest, including `browser-controler` and `photo-to-3d`, are available in every mode that allows skill discovery.
+
+Pinned skills (`/skill <name>`) are session state held in memory only. They are never written to `config.json`, so restarting Reverie releases every pin. A pin overrides `allow_implicit_invocation: false` because it is an explicit user instruction. See [CLI_COMMANDS.md](CLI_COMMANDS.md) for the commands.
+
 ## Built-In Model Sources
 
 Supported values for `active_model_source`:

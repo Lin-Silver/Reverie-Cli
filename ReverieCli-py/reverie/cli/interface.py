@@ -1598,6 +1598,20 @@ class ReverieInterface:
         summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
         summary.append("Mode ", style=self.theme.TEXT_DIM)
         summary.append(str(mode).upper(), style=f"bold {self.theme.BLUE_SOFT}")
+        pinned_labels = self._pinned_skill_labels()
+        if pinned_labels:
+            summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
+            summary.append("Skill ", style=self.theme.TEXT_DIM)
+            visible_pins = pinned_labels if not tiny else pinned_labels[:1]
+            for index, label in enumerate(visible_pins):
+                if index:
+                    summary.append(" ", style=self.theme.TEXT_DIM)
+                summary.append(
+                    f"{self.deco.TAG_OPEN}{self._truncate_label(label, 14 if tiny else 24)}{self.deco.TAG_CLOSE}",
+                    style=f"bold {self.theme.TEXT_PRIMARY} on {self.theme.PURPLE_DEEP}",
+                )
+            if len(pinned_labels) > len(visible_pins):
+                summary.append(f" +{len(pinned_labels) - len(visible_pins)}", style=self.theme.PURPLE_SOFT)
         if reasoning_label:
             summary.append(f" {self.deco.DOT_MEDIUM} ", style=self.theme.TEXT_DIM)
             summary.append("Reasoning ", style=self.theme.TEXT_DIM)
@@ -2943,6 +2957,30 @@ class ReverieInterface:
 
         return self._process_message(user_input)
 
+    def _pinned_skill_labels(self) -> List[str]:
+        """Return pinned-skill names for the prompt chip and the live footer."""
+        manager = getattr(self, "skills_manager", None)
+        if manager is None or not getattr(manager, "has_pinned_skills", False):
+            return []
+        try:
+            state = manager.pinned_state(force_refresh=False)
+        except Exception:
+            report_suppressed_exception("run optional CLI integration")
+            return []
+        labels = [str(name) for name in state.get("names", []) if str(name).strip()]
+        labels.extend(f"{name} (missing)" for name in state.get("unresolved", []) if str(name).strip())
+        return labels
+
+    def _sync_prompt_skill_tags(self) -> None:
+        """Push the pinned-skill chips into the input prompt before each read."""
+        handler = getattr(self, "input_handler", None)
+        if handler is None or not hasattr(handler, "set_prompt_tags"):
+            return
+        try:
+            handler.set_prompt_tags(self._pinned_skill_labels())
+        except Exception:
+            report_suppressed_exception("run optional CLI integration")
+
     def main_loop(self) -> None:
         """Main interaction loop"""
         self.input_handler = InputHandler(
@@ -2955,6 +2993,7 @@ class ReverieInterface:
         
         while True:
             try:
+                self._sync_prompt_skill_tags()
                 user_input = self.input_handler.interactive_input(
                     "Reverie> ",
                     initial_text=self._consume_pending_input_draft(),
@@ -3028,6 +3067,22 @@ class ReverieInterface:
                         completions[f"/plugins info {plugin_id}"] = "Inspect runtime plugin"
             except Exception:
                 report_suppressed_exception("load runtime plugin command completions")
+        # Pinning a skill is a name lookup, so every detected skill completes
+        # after `/skill` instead of forcing the user to run `/skills` first.
+        manager = getattr(self, "skills_manager", None)
+        if manager is not None:
+            try:
+                pinned_keys = set(getattr(manager, "pinned_keys", ()) or ())
+                for record in getattr(manager.get_snapshot(force_refresh=False), "records", ()) or ():
+                    name = str(getattr(record, "name", "") or "").strip()
+                    if not name:
+                        continue
+                    if str(getattr(record, "lookup_key", "") or "") in pinned_keys:
+                        completions[f"/skill unpin {name}"] = "Release this pinned skill"
+                    else:
+                        completions[f"/skill {name}"] = "Pin this skill for every turn"
+            except Exception:
+                report_suppressed_exception("load skill command completions")
         # A user's own providers should complete like built-in commands, so every
         # stored provider contributes its own `/provider <id> <action>` entries.
         try:
@@ -3110,6 +3165,15 @@ class ReverieInterface:
                 "Requested skill was not found",
                 status="warning",
                 detail=missing_name,
+            )
+
+        pinned_labels = self._pinned_skill_labels()
+        if pinned_labels:
+            self._show_activity_event(
+                "Skills",
+                "Pinned skill enforced for this turn",
+                status="info",
+                detail=", ".join(pinned_labels),
             )
 
         for warning in inline_warnings:
@@ -4140,6 +4204,15 @@ class ReverieInterface:
                 config=getattr(self.agent, "config", None),
             )
 
+            pinned_labels = self._pinned_skill_labels()
+            if pinned_labels:
+                self._show_activity_event(
+                    "Skills",
+                    "Pinned skill enforced for this turn",
+                    status="info",
+                    detail=", ".join(pinned_labels),
+                )
+
             def _capture_ui_event(event: Dict[str, Any]) -> None:
                 if not isinstance(event, dict):
                     return
@@ -4437,6 +4510,16 @@ class ReverieInterface:
             else ""
         )
 
+        # Skill metadata is part of lazy discovery, but a pin is an explicit user
+        # instruction: keep the mandatory block even before discovery is ready.
+        if include_discovery_status:
+            skills_block = self.skills_manager.describe_for_prompt(
+                force_refresh=False, max_chars=skill_metadata_budget
+            )
+        else:
+            pinned_block = self.skills_manager.describe_pinned_for_prompt(force_refresh=False)
+            skills_block = f"## Skills\n{pinned_block}" if pinned_block else ""
+
         merged_blocks = [
             tti_block
             for tti_block in [
@@ -4444,7 +4527,7 @@ class ReverieInterface:
                 harness_guidance,
                 self.mcp_runtime.describe_for_prompt(),
                 self.runtime_plugin_manager.describe_for_prompt(normalized_mode) if include_discovery_status else "",
-                self.skills_manager.describe_for_prompt(force_refresh=False, max_chars=skill_metadata_budget) if include_discovery_status else "",
+                skills_block,
                 atlas_block,
                 memory_block,
             ]

@@ -1623,6 +1623,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 .attachment-chip button { width: 25px; height: 25px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
 .attachment-chip button:hover { background: var(--hover); color: var(--text); }
 
+/* Pinned-skill chips. A pin is an instruction to the model, so it reads louder
+   than an attachment: filled violet rather than the accent-tinted outline. */
+.skill-strip { padding: 10px 11px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-strip-page { padding: 0; }
+.skill-chip { max-width: 280px; min-height: 26px; padding: 3px 4px 3px 9px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #a855f7; border-radius: 999px; background: linear-gradient(135deg, #7e22ce, #a855f7); color: #fdf7ff; font-size: var(--font-small); box-shadow: 0 1px 8px rgba(168,85,247,.28); }
+.skill-chip > span { overflow: hidden; font-weight: 600; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
+.skill-chip > svg { flex: 0 0 auto; opacity: .9; }
+.skill-chip button { width: 19px; height: 19px; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 999px; background: rgba(253,247,255,.14); color: inherit; cursor: pointer; }
+.skill-chip button:hover { background: rgba(253,247,255,.3); }
+.skill-chip-stale { border-color: var(--amber, #d99a3d); background: linear-gradient(135deg, #7c4a12, #b8791f); box-shadow: none; }
+.skill-card-pinned { border-color: #a855f7; background: color-mix(in srgb, #a855f7 8%, var(--panel)); }
+.status-pill.pinned { background: rgba(168,85,247,.16); color: #d8a5ff; }
+
 .context-engine-card { margin-top: 8px; overflow: hidden; border: 1px solid var(--accent-soft); border-radius: 11px; background: linear-gradient(145deg, var(--accent-bg), color-mix(in srgb, var(--panel) 92%, transparent)); }
 .context-engine-card > div:first-child { min-height: 50px; padding: 8px 9px; display: flex; align-items: center; gap: 9px; }
 .context-engine-card > div:first-child > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }

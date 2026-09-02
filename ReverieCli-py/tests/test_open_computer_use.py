@@ -295,12 +295,158 @@ def test_press_key_focuses_the_observed_target_before_sending(monkeypatch) -> No
     service = _bare_service(auto=_Automation())
     service._snapshots = {"chrome": _snapshot(query="chrome")}
     monkeypatch.setattr(service, "_resolve_app", lambda _app: _Control())
+    monkeypatch.setattr(service, "_focused_control", lambda: None)
     _silence_world(monkeypatch, service)
 
     report = service.press_key("chrome", "win+down")
 
     assert calls == ["focus", ("keys", "{Win}{DOWN}", False)]
-    assert "No window change was observed" in report
+    assert "No window or value change was observed" in report
+
+
+def test_keyboard_actions_target_the_window_that_was_observed(monkeypatch) -> None:
+    """The observation and the action must not resolve the app separately.
+
+    Re-resolving by name ranks the app's windows again, so a second window can
+    win between get_app_state and the keystroke meant for the first one.
+    """
+    focused: List[int] = []
+
+    class _Control:
+        def __init__(self, handle: int) -> None:
+            self.handle = handle
+
+        def SetFocus(self):
+            focused.append(self.handle)
+
+    class _Automation:
+        def SendKeys(self, keys, *, charMode):
+            pass
+
+    service = _bare_service(auto=_Automation())
+    service._snapshots = {"chrome": _snapshot(query="chrome", window_handle=100)}
+    monkeypatch.setattr(service, "_window_exists", lambda _handle: True)
+    monkeypatch.setattr(service, "_control_from_handle", lambda handle: _Control(int(handle)))
+    monkeypatch.setattr(service, "_focused_control", lambda: None)
+    monkeypatch.setattr(
+        service,
+        "_resolve_app",
+        lambda _app: pytest.fail("press_key re-resolved the app instead of using the observed window"),
+    )
+    _silence_world(monkeypatch, service)
+
+    service.press_key("chrome", "Return")
+
+    assert focused == [100]
+
+
+def test_press_key_reports_a_value_change_the_window_diff_cannot_see(monkeypatch) -> None:
+    """F5 in Notepad inserts a timestamp: no window changes, but the text does."""
+
+    class _Field:
+        def __init__(self) -> None:
+            self.value = "before"
+
+    field = _Field()
+
+    class _Automation:
+        def SendKeys(self, keys, *, charMode):
+            field.value = "before 13:52"
+
+    service = _bare_service(auto=_Automation())
+    service._snapshots = {"notepad": _snapshot(query="notepad")}
+    monkeypatch.setattr(service, "_resolve_app", lambda _app: object())
+    monkeypatch.setattr(service, "_activate", lambda _control: None)
+    monkeypatch.setattr(service, "_focused_control", lambda: field)
+    monkeypatch.setattr(service, "_raw_value", lambda control: control.value)
+    _silence_world(monkeypatch, service)
+
+    report = service.press_key("notepad", "F5")
+
+    assert "Focused value is now: before 13:52" in report
+    assert "No window or value change" not in report
+
+
+def _typing_service(monkeypatch, field: Any, automation: Any) -> OpenComputerUseService:
+    service = _bare_service(auto=automation)
+    service._snapshots = {"notepad": _snapshot(query="notepad")}
+    monkeypatch.setattr(service, "_resolve_app", lambda _app: object())
+    monkeypatch.setattr(service, "_activate", lambda _control: None)
+    monkeypatch.setattr(service, "_focused_control", lambda: field)
+    monkeypatch.setattr(service, "_raw_value", lambda control: control.value)
+    _silence_world(monkeypatch, service)
+    return service
+
+
+class _Editor:
+    """A field that stores whatever SendKeys resolves to, minus the escapes."""
+
+    def __init__(self, value: str = "") -> None:
+        self.value = value
+        self.sent: List[str] = []
+
+    def SendKeys(self, keys, *, charMode):
+        self.sent.append(keys)
+        self.value += keys.replace("{{}", "{").replace("{}}", "}")
+
+
+def test_type_text_escapes_send_keys_syntax_so_literal_text_stays_literal(monkeypatch) -> None:
+    """SendKeys read "{a}" as the key 'a', and "{braces}" raised TypeError.
+
+    The transcript this comes from typed a URL and a brace-laden string; both
+    arrived corrupted while the tool reported the character count as success.
+    """
+    editor = _Editor()
+    service = _typing_service(monkeypatch, editor, editor)
+
+    report = service.type_text("notepad", "{braces} and }close{ 100%+2^3~")
+
+    assert editor.sent == ["{{}braces{}} and {}}close{{} 100%+2^3~"]
+    assert editor.value == "{braces} and }close{ 100%+2^3~"
+    assert report == "Typed 30 character(s) into notepad."
+
+
+def test_type_text_reports_mistyped_text_instead_of_a_character_count(monkeypatch) -> None:
+    """The measured failure: 33 keystrokes landed, but not the ones that were sent."""
+    editor = _Editor()
+
+    class _DroppingEditor(_Editor):
+        def SendKeys(self, keys, *, charMode):
+            self.value = "https:wwwww.ooutube.oom/aatch?111"
+
+    editor = _DroppingEditor()
+    service = _typing_service(monkeypatch, editor, editor)
+
+    report = service.type_text("notepad", "https://www.youtube.com/watch?v=1")
+
+    assert "Typed 33 character(s)" not in report
+    assert "unverified" in report
+    assert "Some keystrokes were mistyped" in report
+    assert "https:wwwww.ooutube.oom/aatch?111" in report
+
+
+def test_type_text_confirms_the_text_it_can_read_back(monkeypatch) -> None:
+    editor = _Editor(value="draft: ")
+    service = _typing_service(monkeypatch, editor, editor)
+
+    report = service.type_text("notepad", "hello")
+
+    assert editor.value == "draft: hello"
+    assert report.startswith("Typed 5 character(s) into notepad.")
+
+
+def test_type_text_says_nothing_landed_when_the_field_does_not_change(monkeypatch) -> None:
+    class _ReadOnly(_Editor):
+        def SendKeys(self, keys, *, charMode):
+            self.sent.append(keys)
+
+    editor = _ReadOnly(value="locked")
+    service = _typing_service(monkeypatch, editor, editor)
+
+    report = service.type_text("notepad", "hello")
+
+    assert "The field did not change, so nothing was typed." in report
+    assert "set_value" in report
 
 
 def test_a_click_that_changes_nothing_says_so_instead_of_reporting_success(monkeypatch) -> None:

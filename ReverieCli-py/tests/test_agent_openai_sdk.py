@@ -1021,6 +1021,48 @@ def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path)
     assert create_kwargs["max_tokens"] == 16384
 
 
+def test_nvidia_kimi_k3_replays_reasoning_history_and_uses_native_effort(tmp_path):
+    config = _nvidia_config()
+    config.nvidia = {
+        "selected_model_id": "moonshotai/kimi-k3",
+        "selected_model_display_name": "Kimi K3",
+        "reasoning_effort": "max",
+    }
+    agent = ReverieAgent(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="x",
+        model="moonshotai/kimi-k3",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=config,
+    )
+    agent.messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": "The first three are 473, 921, and 235.",
+                "reasoning_content": "I also selected 215 and 222.",
+            },
+            {"role": "user", "content": "What were the other two?"},
+        ]
+    )
+
+    messages = agent._build_messages()
+    prior_assistant = next(message for message in messages if message["role"] == "assistant")
+    kwargs = agent._build_openai_chat_completion_kwargs(messages=messages, tools=[], stream=True)
+
+    assert prior_assistant["reasoning_content"] == "I also selected 215 and 222."
+    assert kwargs["extra_body"] == {"reasoning_effort": "max"}
+    assert kwargs["temperature"] == 1.0
+    assert kwargs["max_tokens"] == 16_384
+    assert "top_p" not in kwargs
+
+    agent.model = "meta/muse-glimmer-30b"
+    replay_without_kimi = agent._build_messages()
+    ordinary_assistant = next(message for message in replay_without_kimi if message["role"] == "assistant")
+    assert "reasoning_content" not in ordinary_assistant
+
+
 def test_repository_turn_requires_one_context_engine_call_then_returns_to_auto(tmp_path):
     agent = ReverieAgent(
         base_url="https://example.test/v1",

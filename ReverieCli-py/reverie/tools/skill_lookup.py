@@ -172,6 +172,15 @@ acting; if the body is returned in chunks, request every remaining chunk.
         manager = self._skills_manager()
         snapshot = manager.get_snapshot(force_refresh=force_refresh)
         records = list(snapshot.records)
+        hidden_paths = frozenset(getattr(snapshot, "shadowed_paths", ()) or ())
+        if hidden_paths:
+            # A duplicate name resolves to the higher-precedence skill, so listing
+            # the unreachable copy would advertise a body inspect can never return.
+            records = [
+                record
+                for record in records
+                if str(record.path_to_skill_md).lower() not in hidden_paths
+            ]
         pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
 
         if operation == "list":

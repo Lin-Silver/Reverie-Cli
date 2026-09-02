@@ -316,7 +316,11 @@ class SetValueTool(_ComputerUseTool):
 
 class TypeTextTool(_ComputerUseTool):
     name = "type_text"
-    description = "Type literal text into the focused element of an observed app."
+    description = (
+        "Type literal text into the focused element of an observed app. The text is read back and "
+        "compared, so a report of 'unverified' means the field does not hold what was sent; prefer "
+        "set_value when the target exposes a value and the exact string matters."
+    )
     parameters = {
         "type": "object",
         "properties": {"app": {"type": "string"}, "text": {"type": "string"}},

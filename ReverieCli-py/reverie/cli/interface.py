@@ -60,6 +60,7 @@ from ..config import (
 from ..harness import build_harness_prompt_guidance, build_prompt_harness_report, persist_prompt_harness_run
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..mcp import MCPConfigManager, MCPRuntime
+from ..rats import RatsRuntime
 from ..engine.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 from ..rules_manager import RulesManager
 from ..skills_manager import SkillsManager
@@ -986,7 +987,12 @@ class ReverieInterface:
             runtime_plugin_manager=self.runtime_plugin_manager,
         )
         self.mcp_runtime.set_discovery_listener(self._handle_mcp_discovery_complete)
-        self.rats_runtime = None
+        # Built on first use rather than at startup. Creating it reads the
+        # diagnostics journal off disk, and a session that never touches a RATS
+        # service should not pay for that; ``ensure_rats_runtime`` is what every
+        # caller goes through.
+        self.rats_runtime: Optional[RatsRuntime] = None
+        self._rats_runtime_lock = threading.RLock()
         self.rules_manager = RulesManager(project_root)
         self._context_engine_init_lock = threading.RLock()
         self._context_engine_warmup_thread: Optional[threading.Thread] = None
@@ -1042,6 +1048,29 @@ class ReverieInterface:
         """Return a deep-ish copy of config through the canonical serializer."""
         return Config.from_dict(config.to_dict())
 
+    def ensure_rats_runtime(self) -> Optional[RatsRuntime]:
+        """Return the shared RATS runtime, building it on first use.
+
+        Only this client's own state is touched: the runtime discovers services by
+        reading descriptors that a running engine published under its own
+        executable's directory. It starts nothing and connects to nothing until
+        something asks it to refresh.
+        """
+        existing = getattr(self, "rats_runtime", None)
+        if existing is not None:
+            return existing
+        with self._rats_runtime_lock:
+            if self.rats_runtime is not None:
+                return self.rats_runtime
+            try:
+                self.rats_runtime = RatsRuntime()
+            except Exception:
+                # A client that cannot build the runtime must still run; the
+                # tools and the ``/rats`` command report its absence themselves.
+                report_suppressed_exception("initialize RATS runtime")
+                return None
+            return self.rats_runtime
+
     def close(self) -> None:
         """Release workspace-scoped background services before switching projects."""
         self._stop_stream_input_capture()
@@ -1058,6 +1087,15 @@ class ReverieInterface:
                 mcp_runtime.close()
             except Exception:
                 report_suppressed_exception("close MCP runtime")
+        rats_runtime = getattr(self, "rats_runtime", None)
+        if rats_runtime is not None:
+            try:
+                # Closes the RTP sessions this client opened, so a service is not
+                # left holding one for a client that has gone away.
+                rats_runtime.shutdown()
+            except Exception:
+                report_suppressed_exception("shut down RATS runtime")
+            self.rats_runtime = None
         workspace_stats = getattr(self, "workspace_stats_manager", None)
         if workspace_stats is not None:
             try:
@@ -1357,10 +1395,12 @@ class ReverieInterface:
             number = int(value)
         except (TypeError, ValueError):
             return str(value)
+        # Trim the fraction before the suffix; stripping afterwards never matched,
+        # so every rounded figure kept a dead ``.0``/``.00`` ("200.0K", "1.00M").
         if abs(number) >= 1_000_000:
-            return f"{number / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+            return f"{number / 1_000_000:.2f}".rstrip("0").rstrip(".") + "M"
         if abs(number) >= 1_000:
-            return f"{number / 1_000:.1f}K".rstrip("0").rstrip(".")
+            return f"{number / 1_000:.1f}".rstrip("0").rstrip(".") + "K"
         return str(number)
 
     def _resolve_provider_label(self, config: Config) -> str:
@@ -1557,13 +1597,22 @@ class ReverieInterface:
         if self.agent:
             try:
                 total_tokens = max(int(self.agent.get_token_estimate()), 0) + current_content_tokens
-                if active_model and active_model.max_context_tokens:
-                    max_tokens = active_model.max_context_tokens
+                # Resolve the window through the agent so this footer, /status and
+                # the auto-compaction gate all divide by the same number. Only a
+                # stub agent without the resolver falls back to the model record.
+                resolve = getattr(self.agent, "_resolve_max_context_tokens", None)
+                if callable(resolve):
+                    max_tokens = max(int(resolve() or 0), 0)
+                elif active_model and active_model.max_context_tokens:
+                    max_tokens = max(int(active_model.max_context_tokens), 0)
 
                 percentage = (total_tokens / max_tokens * 100) if max_tokens else 0
-                if percentage >= 80:
+                # Recolour exactly where the agent rotates, then where it compacts,
+                # so the bar never reads calm while a gate is already firing.
+                agent_class = type(self.agent)
+                if percentage >= float(getattr(agent_class, "CONTEXT_ROTATION_RATIO", 0.82)) * 100:
                     token_color = self.theme.CORAL_VIBRANT
-                elif percentage >= 70:
+                elif percentage >= float(getattr(agent_class, "CONTEXT_COMPACTION_RATIO", 0.7)) * 100:
                     token_color = self.theme.AMBER_GLOW
             except Exception:
                 total_tokens = None
@@ -1628,11 +1677,12 @@ class ReverieInterface:
             context_row.append("Context ", style=self.theme.TEXT_DIM)
             context_row.append_text(meter)
             context_row.append("  ", style=self.theme.TEXT_DIM)
+            limit_label = self._format_compact_quantity(max_tokens) if max_tokens else "?"
             context_row.append(
-                f"{self._format_compact_quantity(total_tokens)}/{self._format_compact_quantity(max_tokens)}",
+                f"{self._format_compact_quantity(total_tokens)}/{limit_label}",
                 style=token_color,
             )
-            if not tiny:
+            if not tiny and max_tokens:
                 context_row.append(f" ({percentage:.0f}%)", style=token_color)
             renderables.append(context_row)
 
@@ -1649,7 +1699,7 @@ class ReverieInterface:
 
         body = Panel(
             body_content,
-            border_style=token_color if total_tokens is not None and percentage >= 70 else self.theme.BORDER_SUBTLE,
+            border_style=token_color if total_tokens is not None and token_color != self.theme.MINT_SOFT else self.theme.BORDER_SUBTLE,
             box=box.ROUNDED,
             padding=(0, 1),
         )
@@ -3803,8 +3853,11 @@ class ReverieInterface:
         # the startup critical path; ToolExecutor synchronizes them lazily on
         # the first tool/schema lookup and then tracks catalog generations.
         self.agent.tool_executor.update_context('mcp_runtime', self.mcp_runtime, sync_dynamic=False)
-        if self.rats_runtime is not None:
-            self.agent.tool_executor.update_context('rats_runtime', self.rats_runtime, sync_dynamic=False)
+        # RATS tool definitions come from live services, so the same rule applies:
+        # bind the runtime now, let ToolExecutor scan on the first lookup.
+        rats_runtime = self.ensure_rats_runtime()
+        if rats_runtime is not None:
+            self.agent.tool_executor.update_context('rats_runtime', rats_runtime, sync_dynamic=False)
         self.agent.tool_executor.update_context(
             'runtime_plugin_manager',
             self.runtime_plugin_manager,
@@ -4620,6 +4673,11 @@ class ReverieInterface:
         return {
             'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
             'mcp_config_manager': self.mcp_config_manager, 'mcp_runtime': self.mcp_runtime,
+            # Both the instance and the accessor: a command that only reports
+            # state should not force the runtime into existence, while one that
+            # changes configuration needs it built.
+            'rats_runtime': self.rats_runtime,
+            'ensure_rats_runtime': self.ensure_rats_runtime,
             'skills_manager': self.skills_manager,
             'runtime_plugin_manager': self.runtime_plugin_manager,
             'session_manager': self.session_manager, 'indexer': self.indexer,

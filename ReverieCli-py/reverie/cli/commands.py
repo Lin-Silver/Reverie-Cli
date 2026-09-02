@@ -173,6 +173,7 @@ class CommandHandler:
             'skill': self.cmd_skill,
             'plugins': self.cmd_plugins,
             'mcp': self.cmd_mcp,
+            'rats': self.cmd_rats,
             'setting': self.cmd_setting,
             'settings': self.cmd_setting,
             'permission': self.cmd_permission,
@@ -491,11 +492,59 @@ class CommandHandler:
             table.add_row(where_cell, issue_cell, path_cell)
         return table
 
+    def _build_shadowed_skill_table(self, shadow_rows: List[Dict[str, str]]) -> Table:
+        """Build the unreachable same-name skill table."""
+        compact = self._is_compact(118)
+        table = Table(
+            title=f"[bold {self.theme.AMBER_GLOW}]{self.deco.CRYSTAL} Shadowed Skills[/bold {self.theme.AMBER_GLOW}]",
+            caption="These files are never loaded: the name resolves to the skill listed under Hidden by.",
+            caption_style=self.theme.TEXT_DIM,
+            box=box.SIMPLE_HEAVY if compact else box.ROUNDED,
+            border_style=self.theme.AMBER_GLOW,
+            header_style=f"bold {self.theme.TEXT_SECONDARY}",
+            expand=True,
+            show_lines=not compact,
+            pad_edge=False,
+        )
+        table.add_column("Skill", width=24 if compact else 28)
+        table.add_column("Hidden by", ratio=2, min_width=22)
+        table.add_column("Path", width=26 if compact else 40, no_wrap=True)
+
+        for row in shadow_rows:
+            skill_cell = Group(
+                Text(str(row.get("name", "")), style=f"bold {self.theme.PEACH_SOFT}"),
+                Text(
+                    f"{row.get('scope', '')} {self.deco.DOT_MEDIUM} {row.get('root', '')}",
+                    style=self.theme.TEXT_DIM,
+                ),
+            )
+            winner_cell = Group(
+                Text(
+                    f"{row.get('winner_scope', '')} {self.deco.DOT_MEDIUM} {row.get('winner_root', '')}",
+                    style=self.theme.CORAL_SOFT,
+                ),
+                Text(
+                    self._truncate_middle(row.get("winner_path", ""), 40 if compact else 56),
+                    style=self.theme.TEXT_DIM,
+                    overflow="ellipsis",
+                    no_wrap=True,
+                ),
+            )
+            path_cell = Text(
+                self._truncate_middle(row.get("path", ""), 40 if compact else 56),
+                style=self.theme.TEXT_DIM,
+                overflow="ellipsis",
+                no_wrap=True,
+            )
+            table.add_row(skill_cell, winner_cell, path_cell)
+        return table
+
     def _print_skills_status_view(
         self,
         summary: Dict[str, Any],
         rows: List[Dict[str, str]],
         error_rows: List[Dict[str, str]],
+        shadow_rows: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         """Print the non-interactive skill overview page."""
         self._show_command_panel(
@@ -560,6 +609,10 @@ class CommandHandler:
         if error_rows:
             self.console.print()
             self.console.print(self._build_invalid_skill_table(error_rows))
+
+        if shadow_rows:
+            self.console.print()
+            self.console.print(self._build_shadowed_skill_table(shadow_rows))
 
         self.console.print()
 
@@ -899,6 +952,7 @@ class CommandHandler:
         summary = skills_manager.get_status_summary(force_refresh=force_refresh)
         rows = skills_manager.list_display_rows(force_refresh=False)
         error_rows = skills_manager.list_error_rows(force_refresh=False)
+        shadow_rows = skills_manager.list_shadow_rows(force_refresh=False)
         snapshot = skills_manager.get_snapshot(force_refresh=False)
         records = list(getattr(snapshot, "records", ()) or [])
         if force_refresh and self.app.get('refresh_agent_prompt_guidance'):
@@ -907,11 +961,11 @@ class CommandHandler:
         try:
             import msvcrt
         except ImportError:
-            self._print_skills_status_view(summary, rows, error_rows)
+            self._print_skills_status_view(summary, rows, error_rows, shadow_rows)
             return True
 
         if not records:
-            self._print_skills_status_view(summary, rows, error_rows)
+            self._print_skills_status_view(summary, rows, error_rows, shadow_rows)
             return True
 
         search_query = str(initial_query or "").strip()
@@ -1040,6 +1094,9 @@ class CommandHandler:
                 time.sleep(0.025)
 
         self.console.print()
+        if shadow_rows:
+            self.console.print(self._build_shadowed_skill_table(shadow_rows))
+            self.console.print()
         self._print_skill_detail_page(selected_record)
         return True
 
@@ -1066,6 +1123,23 @@ class CommandHandler:
             table.add_row(command, description)
         return table
 
+    def _resolve_context_limit(self, config_manager: Any) -> int:
+        """Resolve the active model's context window, then the workspace default."""
+        max_tokens = 128000
+        try:
+            active_model = config_manager.get_active_model() if config_manager else None
+            config = config_manager.load() if config_manager else None
+            resolved = int(
+                getattr(active_model, "max_context_tokens", None)
+                or getattr(config, "max_context_tokens", 0)
+                or 0
+            )
+            if resolved > 0:
+                return resolved
+        except Exception:
+            report_suppressed_exception("resolve command model context limit")
+        return max_tokens
+
     def _get_context_usage_snapshot(self, agent: Any, config_manager: Any) -> Optional[Dict[str, Any]]:
         """Fetch current context usage statistics for the active conversation."""
         from ..session.workspace_stats import WorkspaceStatsManager
@@ -1076,17 +1150,7 @@ class CommandHandler:
         messages = list(getattr(agent, "messages", []) or [])
         messages_tokens = WorkspaceStatsManager.count_messages_tokens(messages)
         total_tokens = system_tokens + messages_tokens
-        max_tokens = 128000
-        try:
-            config = config_manager.load() if config_manager else None
-            active_model = getattr(config, "active_model", None)
-            max_tokens = int(
-                getattr(active_model, "max_context_tokens", None)
-                or getattr(config, "max_context_tokens", 128000)
-                or 128000
-            )
-        except Exception:
-            report_suppressed_exception("resolve command model context limit")
+        max_tokens = self._resolve_context_limit(config_manager)
         return {
             "system_tokens": system_tokens,
             "messages_tokens": messages_tokens,
@@ -3343,6 +3407,664 @@ class CommandHandler:
         self.console.print()
         return True
 
+    # ------------------------------------------------------------------
+    # RATS (Reverie Agent Tool Service, over the Reverie Tool Protocol)
+    # ------------------------------------------------------------------
+    # RATS is not MCP and deliberately does not reuse its vocabulary. A RATS
+    # service is published by a running engine as a descriptor file under that
+    # engine's own executable directory; this client discovers it, verifies the
+    # descriptor really came from the executable it names, and opens a session.
+    # Nothing here starts a service or reaches off the loopback interface.
+
+    def _get_rats_runtime(self, *, required: bool = True):
+        """The shared RATS runtime, or None with the reason already reported."""
+        ensure = self.app.get('ensure_rats_runtime')
+        runtime = ensure() if callable(ensure) else self.app.get('rats_runtime')
+        if runtime is None and required:
+            self._show_activity_event(
+                "RATS",
+                "The RATS runtime is not available in this session.",
+                status="error",
+                detail="Start Reverie normally (not in a reduced/headless harness) and try again.",
+            )
+        return runtime
+
+    def cmd_rats(self, args: str) -> bool:
+        """Inspect and manage RATS services and providers."""
+        raw = args.strip()
+        # Split once, so a verb with no argument still reaches its own handler
+        # and can name what is missing. Matching on ``"register "`` with a
+        # trailing space would send bare ``/rats register`` to the generic usage
+        # line, which does not say which argument was left out.
+        head, _, rest = raw.partition(" ")
+        verb = head.strip().lower()
+        rest = rest.strip()
+
+        if not verb or verb in ("status", "list", "show", "ui", "panel"):
+            return self._cmd_rats_status(force_refresh=not verb)
+        if verb in ("refresh", "detect", "scan", "reload"):
+            return self._cmd_rats_status(force_refresh=True, announce=True)
+        if verb == "path":
+            return self._cmd_rats_path()
+        if verb in ("providers", "provider"):
+            return self._cmd_rats_providers()
+        if verb in ("register", "add"):
+            return self._cmd_rats_register(rest)
+        if verb == "enable":
+            return self._cmd_rats_toggle(rest, enabled=True)
+        if verb == "disable":
+            return self._cmd_rats_toggle(rest, enabled=False)
+        if verb in ("remove-root", "forget"):
+            return self._cmd_rats_remove_root(rest)
+        if verb == "define":
+            return self._cmd_rats_define(rest)
+        if verb in ("undefine", "remove-provider"):
+            return self._cmd_rats_undefine(rest)
+        if verb in ("confirm", "verify"):
+            return self._cmd_rats_confirm(rest)
+        if verb == "tools":
+            return self._cmd_rats_tools(rest)
+        if verb == "describe":
+            return self._cmd_rats_describe(rest)
+        if verb in ("diagnostics", "log", "logs"):
+            return self._cmd_rats_diagnostics(rest)
+
+        self._show_activity_event(
+            "RATS",
+            "Usage: /rats [status|refresh|providers|register|enable|disable|remove-root|define|undefine|confirm|tools|describe|diagnostics|path]",
+            status="warning",
+            detail=(
+                "Examples: /rats register \"G:\\Reverie\\bin\\reverie.windows.editor.x86_64.exe\"  |  "
+                "/rats enable <exe> read run  |  /rats confirm rats-4545-abc  |  /rats define {\"providerId\": \"acme.toolhost\", ...}"
+            ),
+        )
+        return True
+
+    def _cmd_rats_status(self, *, force_refresh: bool = False, announce: bool = False) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        try:
+            state = runtime.refresh() if force_refresh else runtime.state()
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not read RATS state.", status="error", detail=str(error))
+            return True
+
+        if announce:
+            self._show_activity_event(
+                "RATS",
+                "Rescanned the discovery roots for RATS services.",
+                status="success",
+                detail=f"{state.get('scanDurationMs', 0)} ms  |  {state.get('rejectedDescriptorCount', 0)} descriptor(s) rejected",
+            )
+
+        self._show_command_panel(
+            "RATS Services",
+            subtitle="Reverie Tool Protocol services published by running engines on loopback.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(state.get("statePath", "")),
+        )
+
+        services = state.get("services") or []
+        if not services:
+            self._show_activity_event(
+                "RATS",
+                "No RATS services were discovered.",
+                status="info",
+                detail=(
+                    "Start a Reverie Engine build, then /rats register <exe> to add its discovery root. "
+                    f"Roots scanned: {len(state.get('discoveryRoots') or [])}."
+                ),
+            )
+            self._render_rats_roots(state)
+            return True
+
+        table = Table(
+            title=f"[bold {self.theme.BLUE_SOFT}]Discovered RATS Services[/bold {self.theme.BLUE_SOFT}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        table.add_column("Service", style=f"bold {self.theme.BLUE_SOFT}", min_width=14)
+        table.add_column("Provider", style=self.theme.TEXT_SECONDARY, min_width=12)
+        table.add_column("Link", style=self.theme.TEXT_SECONDARY, min_width=9)
+        table.add_column("Session", style=self.theme.TEXT_SECONDARY, min_width=7)
+        table.add_column("Tools", style=self.theme.TEXT_PRIMARY, justify="right", min_width=5)
+        table.add_column("ms", style=self.theme.TEXT_PRIMARY, justify="right", min_width=4)
+        table.add_column("Permissions", style=self.theme.TEXT_SECONDARY, min_width=12)
+        table.add_column("Notes", style=self.theme.TEXT_DIM)
+
+        for service in services:
+            connection = str(service.get("connection", "unknown"))
+            if connection == "connected":
+                link_style = self.theme.MINT_VIBRANT
+            elif connection == "available":
+                link_style = self.theme.AMBER_GLOW
+            else:
+                link_style = self.theme.TEXT_DIM
+            error = str(service.get("error", "") or "").strip()
+            notes = error or ("ready" if service.get("enabled") else "not enabled")
+            table.add_row(
+                str(service.get("serviceId", "")),
+                str(service.get("providerId", "")),
+                f"[{link_style}]{connection}[/{link_style}]",
+                "open" if service.get("sessionActive") else "-",
+                str(service.get("nativeToolCount", "") or len(service.get("tools") or [])),
+                str(service.get("probeLatencyMs", "") or "-"),
+                ", ".join(str(item) for item in (service.get("permissions") or [])) or "-",
+                self._truncate_middle(notes, 48),
+            )
+
+        self.console.print(table)
+        self._render_rats_roots(state)
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]RATS tools reach the model through the catalog tool, so only the ones you load spend tokens. "
+            f"/rats tools <serviceId> lists what a service offers; /rats confirm <serviceId> verifies one end to end.[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _render_rats_roots(self, state: Dict[str, Any]) -> None:
+        roots = [str(item) for item in (state.get("discoveryRoots") or [])]
+        if not roots:
+            return
+        table = Table(
+            title=f"[bold {self.theme.TEXT_SECONDARY}]Discovery Roots[/bold {self.theme.TEXT_SECONDARY}]",
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        table.add_column("#", style=self.theme.TEXT_DIM, justify="right", min_width=2)
+        table.add_column("Path", style=self.theme.TEXT_SECONDARY)
+        table.add_column("State", style=self.theme.TEXT_DIM, min_width=8)
+        configured = {str(item) for item in (state.get("configuredDiscoveryRoots") or [])}
+        for index, root in enumerate(roots, start=1):
+            origin = "stored" if root in configured else "environment"
+            table.add_row(str(index), self._truncate_middle(root, 84), origin)
+        self.console.print(table)
+
+    def _cmd_rats_path(self) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        self._show_activity_event(
+            "RATS",
+            "RATS configuration and diagnostics paths",
+            status="info",
+            detail=f"settings: {runtime.settings_path}\ndiagnostics: {runtime.diagnostics_path}",
+        )
+        return True
+
+    def _cmd_rats_providers(self) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        try:
+            state = runtime.state()
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not read RATS state.", status="error", detail=str(error))
+            return True
+
+        self._show_command_panel(
+            "RATS Providers",
+            subtitle="Built-in providers are compiled into this client; custom ones are declared in its settings file.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(state.get("statePath", "")),
+        )
+        table = Table(
+            box=box.ROUNDED,
+            border_style=self.theme.BORDER_SECONDARY,
+            expand=True,
+        )
+        table.add_column("Provider Id", style=f"bold {self.theme.BLUE_SOFT}", min_width=14)
+        table.add_column("Origin", style=self.theme.TEXT_SECONDARY, min_width=8)
+        table.add_column("Product", style=self.theme.TEXT_SECONDARY, min_width=14)
+        table.add_column("Kinds", style=self.theme.TEXT_DIM, min_width=8)
+        table.add_column("Permissions", style=self.theme.TEXT_SECONDARY)
+        table.add_column("Tool Tags", style=self.theme.TEXT_DIM)
+        for provider in state.get("supportedProviders") or []:
+            custom = bool(provider.get("custom"))
+            origin = "custom" if custom else "built-in"
+            origin_style = self.theme.AMBER_GLOW if custom else self.theme.MINT_VIBRANT
+            kinds = provider.get("serviceKinds") or ([provider.get("serviceKind")] if provider.get("serviceKind") else [])
+            table.add_row(
+                str(provider.get("providerId", "")),
+                f"[{origin_style}]{origin}[/{origin_style}]",
+                str(provider.get("product", "")),
+                ", ".join(str(item) for item in kinds) or "-",
+                ", ".join(str(item) for item in (provider.get("permissions") or [])) or "-",
+                ", ".join(str(item) for item in (provider.get("toolTags") or [])) or "-",
+            )
+        self.console.print(table)
+        self.console.print()
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Define your own with /rats define <json>, remove it with /rats undefine <providerId>. "
+            f"Up to {state.get('customProviderLimit', 0)} custom providers; schema {state.get('customProviderSchema', '')}.[/{self.theme.TEXT_DIM}]"
+        )
+        self.console.print(
+            f"[{self.theme.TEXT_DIM}]Required keys: providerId (dotted, lowercase), product (exactly as the descriptor reports it), "
+            f"serviceKinds, permissionClasses. Optional: label, toolTags, discoveryRoot (relative to the executable), "
+            f"executableIdentity (path|product_name), executableProductNames.[/{self.theme.TEXT_DIM}]"
+        )
+        return True
+
+    def _parse_rats_target(self, spec: str) -> tuple[str, str, List[str]]:
+        """Split ``[providerId] <executable> [permission...]`` from one argument string.
+
+        The provider id is optional because the overwhelmingly common case is the
+        engine, and requiring it for every call would be noise. It is recognised
+        by shape — a dotted token that is not a path — so a custom provider can
+        still be named explicitly.
+        """
+        tokens = shlex.split(spec, posix=False) if spec else []
+        tokens = [token.strip('"') for token in tokens if token.strip()]
+        if not tokens:
+            return "", "", []
+        provider_id = ""
+        if (
+            len(tokens) > 1
+            and "." in tokens[0]
+            and "/" not in tokens[0]
+            and "\\" not in tokens[0]
+            and not tokens[0].lower().endswith(".exe")
+        ):
+            provider_id = tokens.pop(0).lower()
+        executable = tokens.pop(0) if tokens else ""
+        return provider_id, executable, [token.lower() for token in tokens]
+
+    def _cmd_rats_register(self, spec: str) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        provider_id, executable, _permissions = self._parse_rats_target(spec)
+        if not executable:
+            self._show_activity_event(
+                "RATS",
+                "Name the executable to register.",
+                status="warning",
+                detail="Usage: /rats register [providerId] <path-to-executable>",
+            )
+            return True
+        try:
+            state = runtime.register_provider_executable(provider_id or "reverie.engine", executable)
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not register that executable.", status="error", detail=str(error))
+            return True
+        self._show_activity_event(
+            "RATS",
+            "Registered the executable's discovery root.",
+            status="success",
+            detail=f"{len(state.get('services') or [])} service(s) visible after rescan.",
+            meta=executable,
+        )
+        return self._cmd_rats_status()
+
+    def _cmd_rats_toggle(self, spec: str, *, enabled: bool) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        provider_id, executable, permissions = self._parse_rats_target(spec)
+        if not executable:
+            self._show_activity_event(
+                "RATS",
+                "Name the executable to enable or disable.",
+                status="warning",
+                detail="Usage: /rats enable [providerId] <path-to-executable> [permission...]",
+            )
+            return True
+        try:
+            runtime.set_provider_enabled(provider_id or "reverie.engine", executable, enabled, permissions)
+        except Exception as error:
+            self._show_activity_event(
+                "RATS",
+                f"Could not {'enable' if enabled else 'disable'} that executable.",
+                status="error",
+                detail=str(error),
+            )
+            return True
+        self._show_activity_event(
+            "RATS",
+            f"{'Enabled' if enabled else 'Disabled'} the RATS service for this executable.",
+            status="success",
+            detail=(
+                f"Granted: {', '.join(permissions)}" if enabled and permissions
+                else ("Granted: the provider's default classes" if enabled else "")
+            ),
+            meta=executable,
+        )
+        return self._cmd_rats_status()
+
+    def _cmd_rats_remove_root(self, spec: str) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        target = spec.strip().strip('"')
+        if not target:
+            self._show_activity_event(
+                "RATS", "Name the discovery root to remove.", status="warning", detail="Usage: /rats remove-root <path>"
+            )
+            return True
+        try:
+            runtime.remove_discovery_root(target)
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not remove that discovery root.", status="error", detail=str(error))
+            return True
+        self._show_activity_event("RATS", "Removed the discovery root.", status="success", meta=target)
+        return self._cmd_rats_status()
+
+    def _cmd_rats_define(self, spec: str) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        payload = spec.strip()
+        if not payload:
+            self._show_activity_event(
+                "RATS",
+                "Provide the provider definition as JSON.",
+                status="warning",
+                detail=(
+                    'Example: /rats define {"providerId": "acme.toolhost", "product": "Acme Tool Host", '
+                    '"serviceKinds": ["builtin"], "permissionClasses": ["read", "run"]}'
+                ),
+            )
+            return True
+        if payload.startswith("@"):
+            # A definition can outgrow one comfortable line, so a file is accepted.
+            try:
+                payload = Path(payload[1:].strip().strip('"')).expanduser().read_text(encoding="utf-8")
+            except OSError as error:
+                self._show_activity_event("RATS", "Could not read that definition file.", status="error", detail=str(error))
+                return True
+        try:
+            definition = json.loads(payload)
+        except json.JSONDecodeError as error:
+            self._show_activity_event("RATS", "That definition is not valid JSON.", status="error", detail=str(error))
+            return True
+        try:
+            state = runtime.define_custom_provider(definition)
+        except Exception as error:
+            self._show_activity_event("RATS", "That provider definition was refused.", status="error", detail=str(error))
+            return True
+        self._show_activity_event(
+            "RATS",
+            "Defined the custom RATS provider.",
+            status="success",
+            detail=f"{len(state.get('customProviders') or [])} custom provider(s) defined.",
+            meta=str(definition.get("providerId", "") if isinstance(definition, dict) else ""),
+        )
+        return self._cmd_rats_providers()
+
+    def _cmd_rats_undefine(self, spec: str) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        provider_id = spec.strip().strip('"').lower()
+        if not provider_id:
+            self._show_activity_event(
+                "RATS", "Name the provider id to remove.", status="warning", detail="Usage: /rats undefine <providerId>"
+            )
+            return True
+        try:
+            runtime.remove_custom_provider(provider_id)
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not remove that provider.", status="error", detail=str(error))
+            return True
+        self._show_activity_event(
+            "RATS",
+            "Removed the custom provider, its selections, and the roots only it needed.",
+            status="success",
+            meta=provider_id,
+        )
+        return self._cmd_rats_providers()
+
+    def _cmd_rats_tools(self, spec: str) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        try:
+            state = runtime.state()
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not read RATS state.", status="error", detail=str(error))
+            return True
+        wanted = spec.strip().strip('"')
+        services = [
+            service
+            for service in (state.get("services") or [])
+            if not wanted or str(service.get("serviceId", "")) == wanted
+        ]
+        if not services:
+            self._show_activity_event(
+                "RATS",
+                f"No RATS service matches {wanted}." if wanted else "No RATS services were discovered.",
+                status="info",
+                detail="Run /rats refresh, then /rats status to see the service ids.",
+            )
+            return True
+        for service in services:
+            tools = service.get("tools") or []
+            self._show_command_panel(
+                f"RATS Tools — {service.get('serviceId', '')}",
+                subtitle=f"{service.get('product', '')} via {service.get('providerId', '')}",
+                accent=self.theme.BLUE_SOFT,
+                meta=str(service.get("endpoint", "")),
+            )
+            if not tools:
+                self._show_activity_event(
+                    "RATS",
+                    "This service published no tool summaries.",
+                    status="info",
+                    detail="Enable it with /rats enable <exe> so a session can be opened, then refresh.",
+                )
+                continue
+            table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_SECONDARY, expand=True)
+            table.add_column("Tool", style=f"bold {self.theme.BLUE_SOFT}", min_width=16)
+            table.add_column("Category", style=self.theme.TEXT_DIM, min_width=8)
+            table.add_column("Permission", style=self.theme.TEXT_SECONDARY, min_width=10)
+            table.add_column("Loaded", style=self.theme.TEXT_DIM, min_width=6)
+            table.add_column("Summary", style=self.theme.TEXT_SECONDARY)
+            loaded = {str(item) for item in (service.get("loadedToolNames") or [])}
+            for tool in tools:
+                if not isinstance(tool, dict):
+                    table.add_row(str(tool), "-", "-", "-", "")
+                    continue
+                name = str(tool.get("name", ""))
+                table.add_row(
+                    name,
+                    str(tool.get("category", "") or "-"),
+                    str(tool.get("permission", "") or "-"),
+                    "full" if name in loaded else ("summary" if tool.get("schema") else "-"),
+                    self._truncate_middle(str(tool.get("summary", "") or ""), 66),
+                )
+            self.console.print(table)
+            self.console.print(
+                f"[{self.theme.TEXT_DIM}]Summary only costs a line per tool. "
+                f"/rats describe {service.get('serviceId', '')} <tool> fetches the full request schema and makes that tool "
+                f"callable — the same progressive disclosure the model gets through the catalog tool.[/{self.theme.TEXT_DIM}]"
+            )
+        return True
+
+    def _cmd_rats_describe(self, spec: str) -> bool:
+        """Fetch full tool definitions on demand — the token-saving half of RATS.
+
+        A service publishes one summary line per tool. Only the definitions named
+        here are pulled in full and added to the callable working set, so a large
+        catalog never has to be paid for up front.
+        """
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        tokens = [token.strip('"') for token in shlex.split(spec, posix=False)] if spec else []
+        tokens = [token for token in tokens if token]
+        if len(tokens) < 2:
+            self._show_activity_event(
+                "RATS",
+                "Name the service and at least one tool.",
+                status="warning",
+                detail="Usage: /rats describe <serviceId> <tool> [tool...]   (see /rats tools for the names)",
+            )
+            return True
+        service_id, names = tokens[0], tokens[1:]
+        try:
+            definitions = runtime.describe(service_id, names)
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not describe those tools.", status="error", detail=str(error))
+            return True
+        if not definitions:
+            self._show_activity_event(
+                "RATS",
+                "The service returned no definitions for those names.",
+                status="warning",
+                detail=f"Requested: {', '.join(names)}",
+            )
+            return True
+        self._show_command_panel(
+            f"RATS Tool Definitions — {service_id}",
+            subtitle="Loaded into the callable working set; the model can invoke these now.",
+            accent=self.theme.BLUE_SOFT,
+            meta=f"{len(definitions)} of {len(names)} requested",
+        )
+        for definition in definitions:
+            name = str(definition.get("name", ""))
+            self._show_activity_event(
+                "RATS",
+                name,
+                status="success",
+                detail=str(definition.get("description", "") or definition.get("summary", "") or ""),
+                meta=str(definition.get("permission", "") or ""),
+            )
+            schema = definition.get("request_schema")
+            if isinstance(schema, dict):
+                self.console.print(
+                    Syntax(
+                        json.dumps(schema, indent=2, ensure_ascii=False),
+                        "json",
+                        theme="ansi_dark",
+                        background_color="default",
+                        word_wrap=True,
+                    )
+                )
+        return True
+
+    def _cmd_rats_confirm(self, spec: str) -> bool:
+        """Verify one service end to end: identity, session, and a live catalog read."""
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        wanted = spec.strip().strip('"')
+        try:
+            state = runtime.refresh()
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not rescan RATS services.", status="error", detail=str(error))
+            return True
+        services = [
+            service
+            for service in (state.get("services") or [])
+            if not wanted or str(service.get("serviceId", "")) == wanted
+        ]
+        if not services:
+            self._show_activity_event(
+                "RATS",
+                f"No RATS service matches {wanted}." if wanted else "No RATS services were discovered.",
+                status="warning",
+                detail="Run /rats status to see the service ids that were found.",
+            )
+            return True
+        for service in services:
+            service_id = str(service.get("serviceId", ""))
+            checks: List[tuple[str, bool, str]] = [
+                ("descriptor verified", True, str(service.get("descriptorPath", ""))),
+                (
+                    "protocol agreed",
+                    str(service.get("protocol", "")) == str(state.get("protocol", "")),
+                    f"{service.get('protocol', '')} vs client {state.get('protocol', '')}",
+                ),
+                (
+                    "endpoint reachable",
+                    str(service.get("connection", "")) in {"available", "connected"},
+                    f"{service.get('endpoint', '')}  |  {service.get('probeLatencyMs', '-')} ms",
+                ),
+                ("enabled by you", bool(service.get("enabled")), "grant with /rats enable <exe>"),
+                ("session open", bool(service.get("sessionActive")), str(service.get("error", "") or "")),
+                (
+                    "catalog readable",
+                    bool(service.get("tools")),
+                    f"{len(service.get('tools') or [])} tool summaries, revision {service.get('catalogRevision', '')}",
+                ),
+            ]
+            passed = sum(1 for _label, ok, _detail in checks if ok)
+            self._show_command_panel(
+                f"RATS Confirmation — {service_id}",
+                subtitle=f"{service.get('product', '')} {service.get('productVersion', '')} via {service.get('providerId', '')}",
+                accent=self.theme.BLUE_SOFT,
+                meta=f"pid {service.get('pid', '')}  |  {service.get('executable', '')}",
+            )
+            table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_SECONDARY, expand=True)
+            table.add_column("Check", style=self.theme.TEXT_SECONDARY, min_width=20)
+            table.add_column("Result", style=self.theme.TEXT_PRIMARY, min_width=8)
+            table.add_column("Evidence", style=self.theme.TEXT_DIM)
+            for label, ok, detail in checks:
+                style = self.theme.MINT_VIBRANT if ok else self.theme.AMBER_GLOW
+                table.add_row(label, f"[{style}]{'pass' if ok else 'no'}[/{style}]", self._truncate_middle(detail, 68))
+            self.console.print(table)
+            self._show_activity_event(
+                "RATS",
+                f"{passed}/{len(checks)} checks passed for {service_id}.",
+                status="success" if passed == len(checks) else "warning",
+                detail=str(service.get("error", "") or ""),
+            )
+        return True
+
+    def _cmd_rats_diagnostics(self, spec: str) -> bool:
+        runtime = self._get_rats_runtime()
+        if runtime is None:
+            return True
+        try:
+            limit = max(1, min(200, int(spec))) if spec.strip() else 20
+        except ValueError:
+            limit = 20
+        try:
+            state = runtime.state()
+        except Exception as error:
+            self._show_activity_event("RATS", "Could not read RATS state.", status="error", detail=str(error))
+            return True
+        entries = list(state.get("diagnostics") or [])[-limit:]
+        self._show_command_panel(
+            "RATS Diagnostics",
+            subtitle="Discovery refusals, transport errors, and settings rejections, newest last.",
+            accent=self.theme.BLUE_SOFT,
+            meta=str(state.get("diagnosticsPath", "")),
+        )
+        if not entries:
+            self._show_activity_event("RATS", "No diagnostics have been recorded.", status="info")
+            return True
+        table = Table(box=box.ROUNDED, border_style=self.theme.BORDER_SECONDARY, expand=True)
+        table.add_column("When", style=self.theme.TEXT_DIM, min_width=20)
+        table.add_column("Level", style=self.theme.TEXT_SECONDARY, min_width=7)
+        table.add_column("Event", style=f"bold {self.theme.BLUE_SOFT}", min_width=22)
+        table.add_column("Reason", style=self.theme.TEXT_SECONDARY, min_width=18)
+        table.add_column("Detail", style=self.theme.TEXT_DIM)
+        for entry in entries:
+            level = str(entry.get("level", "info"))
+            level_style = self.theme.AMBER_GLOW if level in {"warning", "error"} else self.theme.TEXT_DIM
+            # Whatever the entry carried beyond the four columns above. The
+            # journal's optional keys grow with the protocol, so they are
+            # rendered by exclusion rather than by an allowlist that would
+            # silently drop the newest field.
+            detail = " ".join(
+                f"{key}={value}"
+                for key, value in entry.items()
+                if key not in {"timestampUtc", "level", "event", "reason"} and value not in (None, "", [], {})
+            )
+            table.add_row(
+                str(entry.get("timestampUtc", "")),
+                f"[{level_style}]{level}[/{level_style}]",
+                str(entry.get("event", "")),
+                str(entry.get("reason", "") or "-"),
+                self._truncate_middle(detail, 64),
+            )
+        self.console.print(table)
+        return True
+
     def cmd_mcp(self, args: str) -> bool:
         """Inspect and manage MCP servers."""
         raw = args.strip()
@@ -4190,6 +4912,303 @@ class CommandHandler:
 
         return True
 
+    #: Human labels for the prompt segments `describe_context_usage` reports.
+    _CONTEXT_SEGMENT_LABELS = {
+        "system_prompt": "system prompt",
+        "injected_context": "injected context",
+        "user": "user",
+        "assistant": "assistant",
+        "tool": "tool results",
+    }
+
+    def _token_usage_color(self, percentage: float) -> str:
+        """Colour a context percentage by how close it sits to the agent's thresholds."""
+        if percentage >= 82:
+            return self.theme.CORAL_SOFT
+        if percentage >= 70:
+            return self.theme.AMBER_GLOW
+        return self.theme.MINT_SOFT
+
+    def _token_meter(self, percentage: float, color: str, width: int = 14) -> str:
+        """Render a fixed-width fill bar for a context-window percentage."""
+        filled = min(width, max(0, int(round(percentage / 100.0 * width))))
+        return (
+            f"[bold {color}]{'█' * filled}[/bold {color}]"
+            f"[{self.theme.TEXT_MUTED}]{'░' * (width - filled)}[/{self.theme.TEXT_MUTED}]"
+        )
+
+    def _add_token_usage_rows(
+        self,
+        table: Any,
+        agent: Any,
+        config_manager: Any,
+        session_manager: Any = None,
+    ) -> None:
+        """Add the context-window and cumulative-token rows to the status table."""
+        usage = self._context_usage_for_status(agent, config_manager)
+        if usage:
+            self._add_context_window_rows(table, usage)
+        self._add_cumulative_token_rows(table, session_manager)
+
+    def _context_usage_for_status(self, agent: Any, config_manager: Any) -> Optional[Dict[str, Any]]:
+        """Ask the agent for its token budget, degrading to the shared counter."""
+        if agent is None:
+            return None
+        describe = getattr(agent, "describe_context_usage", None)
+        if callable(describe):
+            try:
+                usage = describe()
+                if isinstance(usage, dict) and usage.get("max_tokens") is not None:
+                    return usage
+            except Exception:
+                report_suppressed_exception("describe agent context usage")
+
+        # No agent breakdown available: fall back to the coarse snapshot so the
+        # window row still appears rather than vanishing from /status entirely.
+        snapshot = self._get_context_usage_snapshot(agent, config_manager)
+        if not snapshot:
+            return None
+        from ..session.workspace_stats import WorkspaceStatsManager
+
+        max_tokens = int(snapshot.get("max_tokens") or 0)
+        total_tokens = int(snapshot.get("total_tokens") or 0)
+        return {
+            "tokenizer": WorkspaceStatsManager.describe_tokenizer(),
+            "total_tokens": total_tokens,
+            "max_tokens": max_tokens,
+            "remaining_tokens": max(max_tokens - total_tokens, 0),
+            "percentage": float(snapshot.get("percentage") or 0.0),
+            "segments": [],
+            "payload_message_count": int(snapshot.get("message_count") or 0),
+            "history_message_count": int(snapshot.get("message_count") or 0),
+        }
+
+    def _add_context_window_rows(self, table: Any, usage: Dict[str, Any]) -> None:
+        """Render the live context-window budget for the active conversation."""
+        total = int(usage.get("total_tokens") or 0)
+        max_tokens = int(usage.get("max_tokens") or 0)
+        percentage = float(usage.get("percentage") or 0.0)
+        color = self._token_usage_color(percentage)
+        limit_text = f"{max_tokens:,}" if max_tokens else "unknown"
+        table.add_row(
+            f"{self.deco.SPARKLE} Context Usage",
+            f"{self._token_meter(percentage, color)} "
+            f"[bold {color}]{percentage:.1f}%[/bold {color}] "
+            f"[{self.theme.TEXT_DIM}]({total:,} / {limit_text} tokens)[/{self.theme.TEXT_DIM}]",
+        )
+        if max_tokens:
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Headroom",
+                f"[{self.theme.MINT_SOFT}]{int(usage.get('remaining_tokens') or 0):,}[/{self.theme.MINT_SOFT}]"
+                f"[{self.theme.TEXT_DIM}] tokens free[/{self.theme.TEXT_DIM}]",
+            )
+
+        tokenizer = usage.get("tokenizer") if isinstance(usage.get("tokenizer"), dict) else {}
+        if tokenizer:
+            exact = bool(tokenizer.get("exact"))
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Counted By",
+                f"[{self.theme.MINT_SOFT if exact else self.theme.AMBER_GLOW}]"
+                f"{escape(str(tokenizer.get('label') or 'unknown'))}"
+                f"[/{self.theme.MINT_SOFT if exact else self.theme.AMBER_GLOW}]"
+                f"[{self.theme.TEXT_DIM}] {self.deco.DOT_MEDIUM} "
+                f"{escape(str(tokenizer.get('detail') or ''))}[/{self.theme.TEXT_DIM}]",
+            )
+
+        self._add_context_threshold_row(table, usage, total, max_tokens)
+        self._add_context_segment_rows(table, usage)
+
+    def _add_context_threshold_row(
+        self,
+        table: Any,
+        usage: Dict[str, Any],
+        total: int,
+        max_tokens: int,
+    ) -> None:
+        """Show where the agent will compact and where it will rotate sessions."""
+        compaction = int(usage.get("compaction_tokens") or 0)
+        rotation = int(usage.get("rotation_tokens") or 0)
+        if not (max_tokens and (compaction or rotation)):
+            return
+
+        def gate(label: str, threshold: int) -> str:
+            if not threshold:
+                return ""
+            share = threshold / max_tokens * 100.0
+            if total >= threshold:
+                return (
+                    f"[{self.theme.CORAL_SOFT}]{label} reached[/{self.theme.CORAL_SOFT}]"
+                    f"[{self.theme.TEXT_DIM}] at {threshold:,} ({share:.0f}%)[/{self.theme.TEXT_DIM}]"
+                )
+            return (
+                f"[{self.theme.TEXT_SECONDARY}]{label}[/{self.theme.TEXT_SECONDARY}]"
+                f"[{self.theme.TEXT_DIM}] at {threshold:,} ({share:.0f}%),"
+                f" {threshold - total:,} to go[/{self.theme.TEXT_DIM}]"
+            )
+
+        parts = [text for text in (gate("auto-compact", compaction), gate("auto-rotate", rotation)) if text]
+        if parts:
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Safety Gates",
+                f" [{self.theme.TEXT_MUTED}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_MUTED}] ".join(parts),
+            )
+
+    def _add_context_segment_rows(self, table: Any, usage: Dict[str, Any]) -> None:
+        """Attribute the prompt's tokens to the parts that produced them."""
+        segments = usage.get("segments") if isinstance(usage.get("segments"), list) else []
+        if segments:
+            parts = []
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    continue
+                key = str(segment.get("key") or "")
+                label = self._CONTEXT_SEGMENT_LABELS.get(key, key.replace("_", " ") or "other")
+                parts.append(
+                    f"[{self.theme.TEXT_SECONDARY}]{escape(label)}[/{self.theme.TEXT_SECONDARY}]"
+                    f"[{self.theme.TEXT_DIM}] {int(segment.get('tokens') or 0):,}"
+                    f" ({float(segment.get('share') or 0.0):.0f}%)[/{self.theme.TEXT_DIM}]"
+                )
+            overhead = int(usage.get("overhead_tokens") or 0)
+            if overhead:
+                parts.append(
+                    f"[{self.theme.TEXT_SECONDARY}]envelope[/{self.theme.TEXT_SECONDARY}]"
+                    f"[{self.theme.TEXT_DIM}] {overhead:,}[/{self.theme.TEXT_DIM}]"
+                )
+            if parts:
+                table.add_row(
+                    f"{self.deco.DOT_MEDIUM} Prompt Makeup",
+                    f" [{self.theme.TEXT_MUTED}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_MUTED}] ".join(parts),
+                )
+
+        payload_count = int(usage.get("payload_message_count") or 0)
+        history_count = int(usage.get("history_message_count") or 0)
+        history_limit = int(usage.get("history_limit") or 0)
+        message_text = (
+            f"[{self.theme.TEXT_SECONDARY}]{payload_count:,}[/{self.theme.TEXT_SECONDARY}]"
+            f"[{self.theme.TEXT_DIM}] sent this turn[/{self.theme.TEXT_DIM}]"
+        )
+        if history_count > payload_count:
+            message_text += (
+                f"[{self.theme.TEXT_DIM}], {history_count:,} stored"
+                f"{f' (tail limit {history_limit:,})' if history_limit else ''}"
+                f"[/{self.theme.TEXT_DIM}]"
+            )
+        table.add_row(f"{self.deco.DOT_MEDIUM} Prompt Messages", message_text)
+        self._add_context_detail_rows(table, usage)
+
+    def _add_context_detail_rows(self, table: Any, usage: Dict[str, Any]) -> None:
+        """Surface the single heaviest message and the reasoning kept off-prompt."""
+        heaviest = usage.get("heaviest_message") if isinstance(usage.get("heaviest_message"), dict) else {}
+        tokens = int(heaviest.get("tokens") or 0)
+        if tokens > 0:
+            role = str(heaviest.get("role") or "message")
+            preview = str(heaviest.get("preview") or "").strip()
+            detail = (
+                f"[{self.theme.TEXT_SECONDARY}]{tokens:,}[/{self.theme.TEXT_SECONDARY}]"
+                f"[{self.theme.TEXT_DIM}] tokens {self.deco.DOT_MEDIUM} {escape(role)}"
+                f" #{int(heaviest.get('index') or 0)}[/{self.theme.TEXT_DIM}]"
+            )
+            if preview:
+                detail += f"\n[{self.theme.TEXT_MUTED}]{escape(preview)}[/{self.theme.TEXT_MUTED}]"
+            table.add_row(f"{self.deco.DOT_MEDIUM} Largest Message", detail)
+
+        reasoning = int(usage.get("reasoning_tokens") or 0)
+        if reasoning > 0:
+            table.add_row(
+                f"{self.deco.DOT_MEDIUM} Cached Reasoning",
+                f"[{self.theme.PURPLE_SOFT}]{reasoning:,}[/{self.theme.PURPLE_SOFT}]"
+                f"[{self.theme.TEXT_DIM}] tokens held in history"
+                f" (resent only when the provider requires it)[/{self.theme.TEXT_DIM}]",
+            )
+
+    def _add_cumulative_token_rows(self, table: Any, session_manager: Any = None) -> None:
+        """Report the tokens already spent, per session and across the workspace."""
+        stats_manager = self.app.get("workspace_stats_manager")
+        if stats_manager is None:
+            return
+        try:
+            dashboard = stats_manager.build_dashboard_data()
+        except Exception:
+            report_suppressed_exception("build workspace token dashboard")
+            return
+        if not isinstance(dashboard, dict):
+            return
+
+        session_id = ""
+        if session_manager is not None:
+            try:
+                session = session_manager.get_current_session()
+                session_id = str(getattr(session, "id", "") or "")
+            except Exception:
+                session_id = ""
+        session_row = next(
+            (
+                item
+                for item in (dashboard.get("session_usage") or [])
+                if isinstance(item, dict) and str(item.get("session_id") or "") == session_id
+            ),
+            None,
+        )
+        if session_row:
+            table.add_row(
+                f"{self.deco.SPARKLE} Session Tokens",
+                self._format_token_ledger(session_row),
+            )
+        table.add_row(
+            f"{self.deco.DOT_MEDIUM} Workspace Tokens",
+            self._format_token_ledger(dashboard),
+        )
+        self._add_model_token_row(table, dashboard)
+
+    def _format_token_ledger(self, row: Dict[str, Any]) -> str:
+        """Format an input/output/call ledger from either a session or a workspace row."""
+
+        def value(*keys: str) -> int:
+            for key in keys:
+                if row.get(key) is not None:
+                    try:
+                        return max(int(row.get(key) or 0), 0)
+                    except (TypeError, ValueError):
+                        continue
+            return 0
+
+        inbound = value("input_tokens", "total_input_tokens")
+        outbound = value("output_tokens", "total_output_tokens")
+        calls = value("calls", "total_calls")
+        return (
+            f"[{self.theme.BLUE_SOFT}]{inbound:,}[/{self.theme.BLUE_SOFT}]"
+            f"[{self.theme.TEXT_DIM}] in[/{self.theme.TEXT_DIM}]"
+            f" [{self.theme.TEXT_MUTED}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_MUTED}] "
+            f"[{self.theme.PURPLE_SOFT}]{outbound:,}[/{self.theme.PURPLE_SOFT}]"
+            f"[{self.theme.TEXT_DIM}] out[/{self.theme.TEXT_DIM}]"
+            f" [{self.theme.TEXT_MUTED}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_MUTED}] "
+            f"[bold {self.theme.MINT_SOFT}]{inbound + outbound:,}[/bold {self.theme.MINT_SOFT}]"
+            f"[{self.theme.TEXT_DIM}] total across {calls:,} call(s)[/{self.theme.TEXT_DIM}]"
+        )
+
+    def _add_model_token_row(self, table: Any, dashboard: Dict[str, Any]) -> None:
+        """Name the model that has consumed the most of this workspace's tokens."""
+        rows = [item for item in (dashboard.get("model_usage") or []) if isinstance(item, dict)]
+        if not rows:
+            return
+        # The dashboard orders by input tokens; "top" here means the largest total.
+        top = max(
+            rows,
+            key=lambda item: max(int(item.get("input_tokens") or 0), 0)
+            + max(int(item.get("output_tokens") or 0), 0),
+        )
+        label = str(top.get("model_display_name") or top.get("model") or "unknown")
+        inbound = max(int(top.get("input_tokens") or 0), 0)
+        outbound = max(int(top.get("output_tokens") or 0), 0)
+        detail = (
+            f"[{self.theme.TEXT_SECONDARY}]{escape(label)}[/{self.theme.TEXT_SECONDARY}]"
+            f"[{self.theme.TEXT_DIM}] {self.deco.DOT_MEDIUM} {inbound + outbound:,} tokens"
+            f" over {max(int(top.get('calls') or 0), 0):,} call(s)[/{self.theme.TEXT_DIM}]"
+        )
+        if len(rows) > 1:
+            detail += f"[{self.theme.TEXT_DIM}] {self.deco.DOT_MEDIUM} {len(rows)} models tracked[/{self.theme.TEXT_DIM}]"
+        table.add_row(f"{self.deco.DOT_MEDIUM} Top Model", detail)
+
     def cmd_status(self, args: str) -> bool:
         """Show current status with dreamy styling"""
         config_manager = self.app.get('config_manager')
@@ -4328,33 +5347,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Lazy load on first LSP query[/{self.theme.TEXT_DIM}]",
             )
 
-        # Token info
-        if agent:
-            tokens = agent.get_token_estimate()
-            # Default to 128k if config not found
-            max_tokens = 128000
-            if config_manager:
-                 model_config = config_manager.get_active_model()
-                 if model_config and model_config.max_context_tokens:
-                     max_tokens = model_config.max_context_tokens
-                 else:
-                     # Fallback to global config if available
-                     max_tokens = getattr(config, 'max_context_tokens', 128000) if config else 128000
-
-            percentage = (tokens / max_tokens) * 100
-            
-            # Color based on percentage
-            if percentage < 40:
-                pct_color = self.theme.MINT_SOFT
-            elif percentage < 70:
-                pct_color = self.theme.AMBER_GLOW
-            else:
-                pct_color = self.theme.CORAL_SOFT
-                
-            table.add_row(
-                f"{self.deco.SPARKLE} Context Usage",
-                f"{tokens:,} / {max_tokens:,} ([bold {pct_color}]{percentage:.1f}%[/bold {pct_color}])"
-            )
+        self._add_token_usage_rows(table, agent, config_manager, session_manager)
         
         # Context Engine stats
         if indexer:

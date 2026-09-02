@@ -4,7 +4,6 @@ export const CORE_RESPONSE_CONTRACT = {
   listTools: { type: "tools", required: ["tools"] },
   ratsState: { type: "rats.state", required: ["rats"] },
   ratsStateCached: { type: "rats.state", required: ["rats"] },
-  ratsCustomProviders: { type: "rats.custom_providers", required: ["providers"] },
   ratsDefineCustomProvider: { type: "rats.state", required: ["rats"] },
   ratsRemoveCustomProvider: { type: "rats.state", required: ["rats"] },
   ratsRegisterProvider: { type: "rats.state", required: ["rats"] },

@@ -28,7 +28,6 @@ NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
 NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
 NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
-NVIDIA_GLM_5_2_CONTEXT_TOKENS = 1_000_000
 NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
 NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS = 16_384
 NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
@@ -118,6 +117,16 @@ NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS = (
     _thinking_option("high", "High", "Full reasoning mode."),
     _thinking_option("low", "Low", "Low-effort reasoning with fewer reasoning tokens."),
     _thinking_option("none", "Non-think", "Disable reasoning tokens."),
+)
+NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS = (
+    _thinking_option("none", "Non-think", "Disable reasoning for faster direct replies."),
+    _thinking_option("high", "High", "High reasoning mode."),
+    _thinking_option("max", "Max", "Maximum reasoning effort."),
+)
+NVIDIA_REASONING_LOW_HIGH_MAX_OPTIONS = (
+    _thinking_option("low", "Low", "Use a shorter reasoning trace."),
+    _thinking_option("high", "High", "Use a detailed reasoning trace."),
+    _thinking_option("max", "Max", "Use the model's maximum reasoning effort."),
 )
 NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS = (
     _thinking_option("low", "Low", "Basic reasoning with lower latency."),
@@ -219,6 +228,7 @@ def _openai_model(
     default_thinking_choice: str = "",
     vision_modalities: Optional[List[str]] = None,
     default_max_tokens: Optional[int] = None,
+    preserve_reasoning_history: bool = False,
 ) -> Dict[str, Any]:
     profile_context_length = get_nvidia_profile_context_tokens(
         model_id,
@@ -238,6 +248,7 @@ def _openai_model(
         "default_max_tokens": int(default_max_tokens) if default_max_tokens else None,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
+        "preserve_reasoning_history": bool(preserve_reasoning_history),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
         "profile": str(model_id).strip().lower(),
     }
@@ -304,6 +315,44 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         max_output_tokens=8_192,
         default_max_tokens=8_192,
     ),
+    _openai_model(
+        "deepseek-ai/deepseek-v4-flash-0731",
+        "DeepSeek V4 Flash 0731",
+        "OpenAI SDK transport with 1M context and selectable none/high/max chat-template reasoning.",
+        thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
+        default_thinking_choice="high",
+        context_length=1_048_576,
+        max_output_tokens=16_384,
+        default_max_tokens=16_384,
+    ),
+    _openai_model(
+        "deepseek-ai/deepseek-v4-pro-0813",
+        "DeepSeek V4 Pro 0813",
+        "OpenAI SDK transport with 1M context and selectable none/high/max chat-template reasoning.",
+        thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
+        default_thinking_choice="none",
+        context_length=1_048_576,
+        max_output_tokens=16_384,
+        default_max_tokens=16_384,
+    ),
+    _openai_model(
+        "moonshotai/kimi-k3",
+        "Kimi K3",
+        "Multimodal OpenAI SDK transport with always-on low/high/max reasoning and preserved reasoning history.",
+        vision=True,
+        thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_REASONING_LOW_HIGH_MAX_OPTIONS),
+        default_thinking_choice="max",
+        context_length=1_048_576,
+        max_output_tokens=65_536,
+        default_max_tokens=16_384,
+        preserve_reasoning_history=True,
+    ),
     _request_model(
         "minimaxai/minimax-m3",
         "MiniMax M3",
@@ -317,16 +366,6 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=NVIDIA_MINIMAX_M3_CONTEXT_TOKENS,
         max_output_tokens=NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS,
         tool_calling=True,
-    ),
-    _openai_model(
-        "z-ai/glm-5.2",
-        "GLM-5.2",
-        "OpenAI SDK transport with fixed provider-side reasoning.",
-        thinking=True,
-        thinking_control="fixed",
-        context_length=NVIDIA_GLM_5_2_CONTEXT_TOKENS,
-        max_output_tokens=32_768,
-        default_max_tokens=16_384,
     ),
     _request_model(
         "stepfun-ai/step-3.7-flash",
@@ -353,9 +392,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
 _NVIDIA_MODEL_METADATA = {
     str(item["id"]).strip().lower(): dict(item) for item in _NVIDIA_MODEL_CATALOG
 }
-_NVIDIA_MODEL_ALIASES = {
-    "z-ai/glm5.2": "z-ai/glm-5.2",
-}
+_NVIDIA_MODEL_ALIASES: Dict[str, str] = {}
 _NVIDIA_API_HOSTS = ("integrate.api.nvidia.com",)
 
 
@@ -496,6 +533,12 @@ def nvidia_model_requires_system_message_first(model_id: Any) -> bool:
     if not metadata:
         return False
     return bool(metadata.get("system_message_first", True))
+
+
+def nvidia_model_requires_preserved_reasoning_history(model_id: Any) -> bool:
+    """Whether prior assistant reasoning must be replayed to this NVIDIA model."""
+    metadata = get_nvidia_model_metadata(model_id)
+    return bool(metadata and metadata.get("preserve_reasoning_history"))
 
 
 def nvidia_model_supports_thinking_toggle(model_id: Any) -> bool:

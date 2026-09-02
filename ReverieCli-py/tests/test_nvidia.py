@@ -20,6 +20,7 @@ from reverie.nvidia import (
     get_nvidia_thinking_options,
     normalize_nvidia_config,
     normalize_nvidia_reasoning_effort,
+    nvidia_model_requires_preserved_reasoning_history,
     resolve_nvidia_model_profile_name,
     resolve_nvidia_thinking_choice,
 )
@@ -117,9 +118,11 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "nvidia/nemotron-3.5-lightning-30b-a3b": 1048576,
         "nvidia/nemotron-3-super-120b-a12b": 1000000,
         "minimaxai/minimax-m3": 1000000,
-        "z-ai/glm-5.2": 1000000,
         "nvidia/nemotron-3-ultra-550b-a55b": 1000000,
         "poolside/laguna-xs-2.1": 262000,
+        "deepseek-ai/deepseek-v4-flash-0731": 1048576,
+        "deepseek-ai/deepseek-v4-pro-0813": 1048576,
+        "moonshotai/kimi-k3": 1048576,
         "stepfun-ai/step-3.7-flash": 256000,
         "openai/gpt-oss-120b": 128000,
     }
@@ -147,44 +150,129 @@ def test_nvidia_catalog_contains_laguna_xs():
     assert laguna["max_output_tokens"] == 8_192
 
 
-def test_nvidia_catalog_contains_glm_52():
-    metadata = get_nvidia_model_metadata("z-ai/glm-5.2")
-    alias_metadata = get_nvidia_model_metadata("z-ai/glm5.2")
+def test_nvidia_catalog_contains_deepseek_v4_flash_0731():
+    metadata = get_nvidia_model_metadata("deepseek-ai/deepseek-v4-flash-0731")
 
     assert metadata is not None
-    assert metadata["id"] == "z-ai/glm-5.2"
-    assert metadata["display_name"] == "GLM-5.2"
+    assert metadata["display_name"] == "DeepSeek V4 Flash 0731"
     assert metadata["transport"] == "openai-sdk"
-    assert metadata["thinking"] is True
-    assert metadata["thinking_control"] == "fixed"
-    assert metadata["context_length"] == 1000000
-    assert alias_metadata is not None
-    assert alias_metadata["id"] == "z-ai/glm-5.2"
+    assert metadata["context_length"] == 1_048_576
+    assert metadata["max_output_tokens"] == 16_384
+    assert metadata["thinking_control"] == "effort"
+    assert [item["id"] for item in metadata["thinking_options"]] == ["none", "high", "max"]
+    assert metadata["default_thinking_choice"] == "high"
 
 
-def test_nvidia_openai_options_for_glm_52_match_expected_defaults():
+def test_nvidia_openai_options_for_deepseek_v4_flash_0731_match_provider_example():
     options = build_nvidia_openai_options(
-        {"selected_model_id": "z-ai/glm-5.2"},
-        "z-ai/glm-5.2",
+        {"selected_model_id": "deepseek-ai/deepseek-v4-flash-0731"},
+        "deepseek-ai/deepseek-v4-flash-0731",
+    )
+    maximum = build_nvidia_openai_options(
+        {
+            "selected_model_id": "deepseek-ai/deepseek-v4-flash-0731",
+            "reasoning_effort": "max",
+            "max_tokens": 1_000_000,
+        },
+        "deepseek-ai/deepseek-v4-flash-0731",
+    )
+    non_thinking = build_nvidia_openai_options(
+        {
+            "selected_model_id": "deepseek-ai/deepseek-v4-flash-0731",
+            "reasoning_effort": "none",
+        },
+        "deepseek-ai/deepseek-v4-flash-0731",
     )
 
     assert options == {
         "temperature": 1.0,
-        "top_p": 1.0,
-        "max_tokens": 16384,
+        "top_p": 0.95,
+        "max_tokens": 16_384,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "thinking": True,
+                "reasoning_effort": "high",
+            },
+        },
+    }
+    assert maximum["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "max",
+        }
+    }
+    assert maximum["max_tokens"] == 16_384
+    assert non_thinking["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": False,
+        }
     }
 
 
-def test_nvidia_openai_options_for_glm_52_caps_requested_output_tokens():
-    options = build_nvidia_openai_options(
+def test_nvidia_catalog_and_options_for_deepseek_v4_pro_0813():
+    metadata = get_nvidia_model_metadata("deepseek-ai/deepseek-v4-pro-0813")
+    non_thinking = build_nvidia_openai_options(
+        {"selected_model_id": "deepseek-ai/deepseek-v4-pro-0813"},
+        "deepseek-ai/deepseek-v4-pro-0813",
+    )
+    maximum = build_nvidia_openai_options(
         {
-            "selected_model_id": "z-ai/glm-5.2",
-            "max_tokens": 65536,
+            "selected_model_id": "deepseek-ai/deepseek-v4-pro-0813",
+            "reasoning_effort": "max",
         },
-        "z-ai/glm-5.2",
+        "deepseek-ai/deepseek-v4-pro-0813",
     )
 
-    assert options["max_tokens"] == 32768
+    assert metadata is not None
+    assert metadata["context_length"] == 1_048_576
+    assert metadata["max_output_tokens"] == 16_384
+    assert metadata["default_thinking_choice"] == "none"
+    assert [item["id"] for item in metadata["thinking_options"]] == ["none", "high", "max"]
+    assert non_thinking == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": 16_384,
+        "extra_body": {"chat_template_kwargs": {"thinking": False}},
+    }
+    assert maximum["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "max",
+        }
+    }
+
+
+def test_nvidia_catalog_and_options_for_kimi_k3():
+    metadata = get_nvidia_model_metadata("moonshotai/kimi-k3")
+    defaults = build_nvidia_openai_options(
+        {"selected_model_id": "moonshotai/kimi-k3"},
+        "moonshotai/kimi-k3",
+    )
+    low = build_nvidia_openai_options(
+        {
+            "selected_model_id": "moonshotai/kimi-k3",
+            "reasoning_effort": "low",
+            "max_tokens": 65_536,
+        },
+        "moonshotai/kimi-k3",
+    )
+
+    assert metadata is not None
+    assert metadata["vision"] is True
+    assert metadata["vision_modalities"] == ["image"]
+    assert metadata["tool_calling"] is True
+    assert metadata["context_length"] == 1_048_576
+    assert metadata["max_output_tokens"] == 65_536
+    assert metadata["default_thinking_choice"] == "max"
+    assert [item["id"] for item in metadata["thinking_options"]] == ["low", "high", "max"]
+    assert nvidia_model_requires_preserved_reasoning_history("moonshotai/kimi-k3") is True
+    assert defaults == {
+        "temperature": 1.0,
+        "max_tokens": 16_384,
+        "extra_body": {"reasoning_effort": "max"},
+    }
+    assert low["max_tokens"] == 65_536
+    assert low["extra_body"] == {"reasoning_effort": "low"}
 
 
 def test_nvidia_openai_options_for_nemotron_3_ultra_match_provider_example():
@@ -213,6 +301,7 @@ def test_nvidia_catalog_excludes_removed_legacy_models():
     assert "minimaxai/minimax-m2.5" not in catalog_by_id
     assert "moonshotai/kimi-k2.5" not in catalog_by_id
     assert "moonshotai/kimi-k2-thinking" not in catalog_by_id
+    assert "z-ai/glm-5.2" not in catalog_by_id
 
 
 @pytest.mark.parametrize(
@@ -230,6 +319,8 @@ def test_nvidia_catalog_excludes_removed_legacy_models():
         "mistralai/mistral-large-3-675b-instruct-2512",
         "nvidia/nemotron-3.5-nano-30b-a3b",
         "moonshotai/kimi-k2.6",
+        "z-ai/glm-5.2",
+        "z-ai/glm5.2",
     ],
 )
 def test_nvidia_retired_model_config_migrates_to_current_default(retired_model_id: str):
@@ -331,6 +422,8 @@ def test_nvidia_catalog_contains_model_specific_thinking_options():
     assert [item["id"] for item in get_nvidia_thinking_options("meta/muse-glimmer-30b")] == ["none", "minimal", "low", "medium", "high", "max"]
     assert [item["id"] for item in get_nvidia_thinking_options("nvidia/nemotron-3.5-lightning-30b-a3b")] == ["true", "false"]
     assert [item["id"] for item in get_nvidia_thinking_options("nvidia/nemotron-3-super-120b-a12b")] == ["high", "low", "none"]
+    assert [item["id"] for item in get_nvidia_thinking_options("deepseek-ai/deepseek-v4-pro-0813")] == ["none", "high", "max"]
+    assert [item["id"] for item in get_nvidia_thinking_options("moonshotai/kimi-k3")] == ["low", "high", "max"]
     assert [item["id"] for item in get_nvidia_thinking_options("openai/gpt-oss-120b")] == ["low", "medium", "high"]
     assert resolve_nvidia_thinking_choice({"selected_model_id": "openai/gpt-oss-120b"}, "openai/gpt-oss-120b") == "medium"
 
@@ -374,9 +467,11 @@ def test_nvidia_openai_options_for_nemotron_and_gpt_oss_use_model_specific_effor
 
 
 def test_nvidia_model_specific_profiles_are_resolved_by_model_id():
+    assert resolve_nvidia_model_profile_name("deepseek-ai/deepseek-v4-flash-0731") == "deepseek_v4_flash_0731"
+    assert resolve_nvidia_model_profile_name("deepseek-ai/deepseek-v4-pro-0813") == "deepseek_v4_pro_0813"
+    assert resolve_nvidia_model_profile_name("moonshotai/kimi-k3") == "kimi_k3"
     assert resolve_nvidia_model_profile_name("meta/muse-glimmer-30b") == "muse_glimmer"
     assert resolve_nvidia_model_profile_name("nvidia/nemotron-3.5-lightning-30b-a3b") == "nemotron_35_lightning"
-    assert resolve_nvidia_model_profile_name("z-ai/glm-5.2") == "glm_5_2"
     assert resolve_nvidia_model_profile_name("nvidia/nemotron-3-ultra-550b-a55b") == "nemotron_3_ultra"
 
 

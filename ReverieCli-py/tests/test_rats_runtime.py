@@ -1733,12 +1733,15 @@ def test_legacy_enabled_engines_migrate_losslessly_and_idempotently() -> None:
         runtime = RatsRuntime(cli_root, provider_registry=TEST_PROVIDER_REGISTRY)
         first = runtime.refresh()
         persisted = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert persisted["schemaVersion"] == 3
+        assert persisted["schemaVersion"] == rats_module.RATS_SETTINGS_VERSION
         assert "enabledEngines" not in persisted
         # Schema 3 adds the map of classes each provider was last seen to
         # declare. Migrating from 2 leaves it empty: nothing has been learned
         # yet, so normalization still falls back to the provider spec.
         assert persisted["providerPermissionClasses"] == {}
+        # Schema 4 adds user-declared providers. A legacy file declared none, and
+        # migration must not invent one.
+        assert persisted["customProviders"] == []
         assert persisted["discoveryRoots"] == [str(discovery_root.resolve()), str((executable.parent / "ReverieLocal" / "RATS" / "Services").resolve())]
         assert persisted["enabledProviders"] == [
             {
@@ -1893,4 +1896,154 @@ def test_test_only_provider_registry_proves_selection_and_catalog_isolation() ->
         second_server.shutdown()
         second_server.server_close()
         second_thread.join(timeout=5)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# state(): a repeated read of one scan
+# ---------------------------------------------------------------------------
+#
+# ``refresh`` walks every discovery root and probes every descriptor it finds. A
+# client that renders a status view, then a provider view, then a tool list is
+# asking three questions about one scan, so ``state`` hands back the last one.
+# The risk that buys is staleness, and these tests pin the three places it could
+# bite: after a mutation, after new diagnostics, and through the returned dict.
+
+
+def _counting_refresh(runtime: RatsRuntime, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    scans: list[int] = []
+    original = runtime._refresh_lifecycle
+
+    def counted():
+        scans.append(1)
+        return original()
+
+    monkeypatch.setattr(runtime, "_refresh_lifecycle", counted)
+    return scans
+
+
+def test_state_scans_once_then_reuses_that_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _test_root("state-cache")
+    runtime = RatsRuntime(root, provider_registry=TEST_PROVIDER_REGISTRY)
+    try:
+        scans = _counting_refresh(runtime, monkeypatch)
+
+        first = runtime.state()
+        second = runtime.state()
+
+        assert len(scans) == 1
+        assert first["protocol"] == second["protocol"] == RATS_PROTOCOL
+        assert first["statePath"] == str(runtime.settings_path)
+    finally:
+        runtime.shutdown()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_refresh_replaces_what_state_reports(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _test_root("state-refresh")
+    runtime = RatsRuntime(root, provider_registry=TEST_PROVIDER_REGISTRY)
+    try:
+        runtime.state()
+        scans = _counting_refresh(runtime, monkeypatch)
+
+        refreshed = runtime.refresh()
+        after = runtime.state()
+
+        assert len(scans) == 1
+        assert after["updatedAt"] == refreshed["updatedAt"]
+    finally:
+        runtime.shutdown()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_mutation_is_visible_to_state_without_an_explicit_refresh() -> None:
+    """Every mutator ends in a scan, so the cache can never lag a settings write."""
+    root = _test_root("state-mutation")
+    runtime = RatsRuntime(root, provider_registry=TEST_PROVIDER_REGISTRY)
+    try:
+        assert runtime.state()["customProviders"] == []
+
+        runtime.define_custom_provider(
+            {
+                "providerId": "acme.toolhost",
+                "product": "Acme Tool Host",
+                "serviceKinds": ["builtin"],
+                "permissionClasses": ["read"],
+            }
+        )
+
+        state = runtime.state()
+        assert [record["providerId"] for record in state["customProviders"]] == ["acme.toolhost"]
+        assert any(
+            item["providerId"] == "acme.toolhost" and item["custom"] is True
+            for item in state["supportedProviders"]
+        )
+
+        runtime.remove_custom_provider("acme.toolhost")
+        assert runtime.state()["customProviders"] == []
+    finally:
+        runtime.shutdown()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_state_reports_diagnostics_recorded_after_the_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stale journal would be worse than no journal, so it is re-read every time."""
+    root = _test_root("state-diagnostics")
+    runtime = RatsRuntime(root, provider_registry=TEST_PROVIDER_REGISTRY)
+    try:
+        runtime.state()
+        scans = _counting_refresh(runtime, monkeypatch)
+        runtime._log_diagnostic("test.after_scan", reason="cache_probe")
+
+        events = [entry.get("event") for entry in runtime.state()["diagnostics"]]
+
+        assert scans == []
+        assert "test.after_scan" in events
+    finally:
+        runtime.shutdown()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_state_hands_out_an_independent_copy() -> None:
+    """A client that edits the dict it was given must not corrupt the next read."""
+    root = _test_root("state-copy")
+    runtime = RatsRuntime(root, provider_registry=TEST_PROVIDER_REGISTRY)
+    try:
+        first = runtime.state()
+        first["services"].append({"serviceId": "injected"})
+        first["supportedProviders"].clear()
+        first["protocol"] = "tampered"
+
+        second = runtime.state()
+
+        assert second["services"] == []
+        assert second["protocol"] == RATS_PROTOCOL
+        assert [item["providerId"] for item in second["supportedProviders"]] == ["reverie.engine"]
+    finally:
+        runtime.shutdown()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_mutators_result_is_independent_of_the_cache() -> None:
+    """Mutators return the scan dict; editing it must not poison ``state``."""
+    root = _test_root("state-mutator-copy")
+    runtime = RatsRuntime(root, provider_registry=TEST_PROVIDER_REGISTRY)
+    try:
+        returned = runtime.define_custom_provider(
+            {
+                "providerId": "acme.toolhost",
+                "product": "Acme Tool Host",
+                "serviceKinds": ["builtin"],
+                "permissionClasses": ["read"],
+            }
+        )
+        returned["customProviders"].clear()
+        returned["services"].append({"serviceId": "injected"})
+
+        state = runtime.state()
+
+        assert [record["providerId"] for record in state["customProviders"]] == ["acme.toolhost"]
+        assert state["services"] == []
+    finally:
+        runtime.shutdown()
         shutil.rmtree(root, ignore_errors=True)

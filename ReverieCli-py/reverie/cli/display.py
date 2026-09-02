@@ -1228,7 +1228,7 @@ class DisplayComponents:
     ) -> None:
         """Render the complete post-tool transcript block without collapsing."""
         accent = self._resolve_tool_color(tool_name) if success else self.theme.CORAL_VIBRANT
-        title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "computer_control" else tool_name
+        title_body = "Computer Controller" if str(tool_name or "").strip().lower() == "open_computer_use" else tool_name
         if agent_id and str(agent_id).strip().lower() != "main":
             title_body = f"{agent_id}  {self._safe_separator()}  {title_body}"
             accent = agent_color or accent

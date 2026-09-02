@@ -181,7 +181,7 @@ Skills are files on disk, not configuration keys. Reverie scans these roots in t
 | `<app_root>/.reverie/Skills` and `.reverie/skills` | Legacy application roots |
 | `.agents/skills/<name>/SKILL.md` | Repository, from the project root down to the current workspace |
 
-Two skills may share a name; both are listed by `/skills`, but a lookup by name resolves to the first in the order above, so a bundled skill shadows a repository one. Rename the repository skill rather than relying on shadowing.
+Two skills may share a name. A lookup by name resolves to the first in the order above, so a bundled skill shadows a repository one. The shadowed file is not silently ignored: `/skills` ends with a **Shadowed Skills** table naming the file and the skill that claimed its name, `/status` counts it in the skills summary, and the desktop skills pane flags the record. Because a name can only resolve to the winner, the shadowed copy is withheld from the model's skill list and from `skill_lookup` — advertising a description whose body can never be loaded is worse than omitting it. Rename or delete the shadowed directory; it stays inspectable by its full `SKILL.md` path in the meantime.
 
 A skill directory holds `SKILL.md` with YAML frontmatter (`name`, `description`), an optional `agents/openai.yaml`, and optional `references/*.md` that the body links to for progressive disclosure. `agents/openai.yaml` may set `interface.display_name`, `interface.short_description`, `interface.default_prompt`, and `policy.allow_implicit_invocation: false` to keep a skill out of automatic selection.
 
@@ -273,9 +273,11 @@ Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and
 
 Some NVIDIA models expose provider-side thinking controls. These are model-specific fixed choices, not prompt instructions:
 
-- Toggle models, such as Qwen and GLM, store the choice as `enable_thinking`.
-- Effort models, such as DeepSeek V4, Nemotron, Mistral Small, and GPT-OSS, store the choice as `reasoning_effort`.
-- Dedicated thinking models expose no extra toggle because the provider always emits reasoning.
+- Toggle models, such as Nemotron 3.5 Lightning, store the choice as `enable_thinking`.
+- Effort models, such as Kimi K3, DeepSeek V4, Muse Glimmer, Nemotron 3 Super, MiniMax M3, and GPT-OSS, store the choice as `reasoning_effort`.
+- Dedicated thinking models, such as Nemotron 3 Ultra and Step-3.7-Flash, expose no extra toggle because the provider always emits reasoning.
+
+Kimi K3 always reasons and accepts only `low`, `high`, or `max`. Reverie sends that value as NVIDIA's top-level `reasoning_effort` field and preserves prior assistant `reasoning_content` alongside tool calls for multi-turn requests.
 
 Use `/nvidia model` or `/nvidia model <model-id>` to select the model. When the selected model has configurable thinking, Reverie immediately opens a fixed choice selector for that model. Use `/nvidia thinking` to reopen the selector for the active NVIDIA model.
 

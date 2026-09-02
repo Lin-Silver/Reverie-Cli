@@ -21,6 +21,62 @@ import time
 from ..diagnostics import report_suppressed_exception
 
 
+# ``ctypes.windll.user32`` is a process-wide cache whose function objects are
+# shared with every other library in the interpreter, so assigning ``argtypes``
+# there rewrites the prototype uiautomation itself calls through: a struct that
+# does not match then raises ArgumentError inside unrelated keystrokes.  Private
+# handles keep this module's prototypes to this module, and declaring them once
+# at import keeps them off the per-call path.
+_ENUM_WINDOWS_PROC: Any = None
+try:
+    _USER32 = ctypes.WinDLL("user32", use_last_error=True)
+    _KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _SHELL32 = ctypes.WinDLL("shell32", use_last_error=True)
+except (AttributeError, OSError):  # pragma: no cover - the desktop tools are Windows-only
+    _USER32 = _KERNEL32 = _SHELL32 = None  # type: ignore[assignment]
+else:
+    _ENUM_WINDOWS_PROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    _USER32.EnumWindows.argtypes = [_ENUM_WINDOWS_PROC, wintypes.LPARAM]
+    _USER32.EnumWindows.restype = wintypes.BOOL
+    _USER32.IsWindowVisible.argtypes = [wintypes.HWND]
+    _USER32.IsWindowVisible.restype = wintypes.BOOL
+    _USER32.IsIconic.argtypes = [wintypes.HWND]
+    _USER32.IsIconic.restype = wintypes.BOOL
+    _USER32.IsWindow.argtypes = [wintypes.HWND]
+    _USER32.IsWindow.restype = wintypes.BOOL
+    _USER32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    _USER32.ShowWindow.restype = wintypes.BOOL
+    _USER32.GetForegroundWindow.restype = wintypes.HWND
+    _USER32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    _USER32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _USER32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    _USER32.GetWindowTextLengthW.restype = ctypes.c_int
+    _USER32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _USER32.GetWindowTextW.restype = ctypes.c_int
+    _USER32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    _USER32.GetWindowRect.restype = wintypes.BOOL
+    _KERNEL32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _KERNEL32.OpenProcess.restype = wintypes.HANDLE
+    _KERNEL32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    _KERNEL32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    _KERNEL32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _KERNEL32.CloseHandle.restype = wintypes.BOOL
+    _SHELL32.ShellExecuteW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+    ]
+    _SHELL32.ShellExecuteW.restype = ctypes.c_void_p
+
+
 class ComputerUseError(RuntimeError):
     """A user-facing desktop automation failure."""
 
@@ -84,6 +140,9 @@ class OpenComputerUseService:
     # reports "nothing changed".
     ACTION_SETTLE_SECONDS = 1.2
     LAUNCH_TIMEOUT_SECONDS = 12.0
+    # An edit control publishes its new value a moment after the last keystroke,
+    # so read-back waits this long before deciding the text did not land.
+    VALUE_SETTLE_SECONDS = 0.15
 
     # ShellExecuteW returns a value <= 32 to signal failure.
     _SHELL_EXECUTE_ERRORS = {
@@ -170,28 +229,16 @@ class OpenComputerUseService:
 
     def _process_name(self, process_id: int) -> str:
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        kernel32 = ctypes.windll.kernel32
-        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.QueryFullProcessImageNameW.argtypes = [
-            wintypes.HANDLE,
-            wintypes.DWORD,
-            wintypes.LPWSTR,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(process_id))
+        handle = _KERNEL32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(process_id))
         if not handle:
             return str(process_id)
         try:
             size = ctypes.c_ulong(32768)
             buffer = ctypes.create_unicode_buffer(size.value)
-            if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            if _KERNEL32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
                 return Path(buffer.value).stem
         finally:
-            kernel32.CloseHandle(handle)
+            _KERNEL32.CloseHandle(handle)
         return str(process_id)
 
     def _native_windows(self) -> List[Dict[str, Any]]:
@@ -202,43 +249,26 @@ class OpenComputerUseService:
         sufficient for app discovery and gives UIA a single known handle for
         the later, app-scoped observation.
         """
-        user32 = ctypes.windll.user32
-        enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-        user32.EnumWindows.argtypes = [enum_proc_type, wintypes.LPARAM]
-        user32.EnumWindows.restype = wintypes.BOOL
-        user32.IsWindowVisible.argtypes = [wintypes.HWND]
-        user32.IsWindowVisible.restype = wintypes.BOOL
-        user32.IsIconic.argtypes = [wintypes.HWND]
-        user32.IsIconic.restype = wintypes.BOOL
-        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
-        user32.GetWindowTextLengthW.restype = ctypes.c_int
-        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-        user32.GetWindowTextW.restype = ctypes.c_int
-        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-        user32.GetWindowRect.restype = wintypes.BOOL
-
         windows: List[Dict[str, Any]] = []
 
-        @enum_proc_type
+        @_ENUM_WINDOWS_PROC
         def visit(handle: int, _lparam: int) -> bool:
-            if not user32.IsWindowVisible(handle):
+            if not _USER32.IsWindowVisible(handle):
                 return True
             process_id = wintypes.DWORD()
-            user32.GetWindowThreadProcessId(handle, ctypes.byref(process_id))
+            _USER32.GetWindowThreadProcessId(handle, ctypes.byref(process_id))
             rect = wintypes.RECT()
-            if process_id.value <= 0 or not user32.GetWindowRect(handle, ctypes.byref(rect)):
+            if process_id.value <= 0 or not _USER32.GetWindowRect(handle, ctypes.byref(rect)):
                 return True
             width = int(rect.right - rect.left)
             height = int(rect.bottom - rect.top)
             if width <= 0 or height <= 0:
                 return True
-            length = max(0, int(user32.GetWindowTextLengthW(handle)))
+            length = max(0, int(_USER32.GetWindowTextLengthW(handle)))
             if length == 0:
                 return True
             buffer = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(handle, buffer, length + 1)
+            _USER32.GetWindowTextW(handle, buffer, length + 1)
             windows.append(
                 {
                     "name": self._process_name(int(process_id.value)),
@@ -251,12 +281,12 @@ class OpenComputerUseService:
                         "width": width,
                         "height": height,
                     },
-                    "status": "minimized" if user32.IsIconic(handle) else "running",
+                    "status": "minimized" if _USER32.IsIconic(handle) else "running",
                 }
             )
             return True
 
-        if not user32.EnumWindows(visit, 0):
+        if not _USER32.EnumWindows(visit, 0):
             raise ComputerUseError("Unable to enumerate desktop applications with Win32.")
         return windows
 
@@ -270,9 +300,7 @@ class OpenComputerUseService:
     def _foreground_window() -> int:
         """Return the handle of the window that currently owns input, or 0."""
         try:
-            user32 = ctypes.windll.user32
-            user32.GetForegroundWindow.restype = wintypes.HWND
-            return int(user32.GetForegroundWindow() or 0)
+            return int(_USER32.GetForegroundWindow() or 0)
         except Exception:
             report_suppressed_exception("read the foreground desktop window")
             return 0
@@ -280,10 +308,7 @@ class OpenComputerUseService:
     @staticmethod
     def _window_exists(handle: int) -> bool:
         try:
-            user32 = ctypes.windll.user32
-            user32.IsWindow.argtypes = [wintypes.HWND]
-            user32.IsWindow.restype = wintypes.BOOL
-            return bool(user32.IsWindow(int(handle)))
+            return bool(_USER32.IsWindow(int(handle)))
         except Exception:
             report_suppressed_exception("probe a desktop window handle")
             return True
@@ -292,15 +317,10 @@ class OpenComputerUseService:
     def _restore_window(handle: int) -> bool:
         """Un-minimize a window so it has real bounds again."""
         try:
-            user32 = ctypes.windll.user32
-            user32.IsIconic.argtypes = [wintypes.HWND]
-            user32.IsIconic.restype = wintypes.BOOL
-            if not user32.IsIconic(int(handle)):
+            if not _USER32.IsIconic(int(handle)):
                 return False
             SW_RESTORE = 9
-            user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-            user32.ShowWindow.restype = wintypes.BOOL
-            user32.ShowWindow(int(handle), SW_RESTORE)
+            _USER32.ShowWindow(int(handle), SW_RESTORE)
             time.sleep(0.35)
             return True
         except Exception:
@@ -601,12 +621,26 @@ class OpenComputerUseService:
             except Exception:
                 continue
 
-    def _resolve_element(self, app: str, index: str) -> Any:
+    def _observed_root(self, app: str) -> tuple[AppSnapshot, Any]:
+        """Bind an action to the window whose state the model actually read.
+
+        Resolving the app by name a second time re-ranks its windows at action
+        time, so an app with two windows can move the target between the
+        observation and the action based on it.  Reusing the observed handle
+        closes that gap; ``_snapshot`` has already proven the window still
+        exists.
+        """
         snapshot = self._snapshot(app)
+        handle = int(snapshot.window_handle or 0)
+        if not handle:
+            return snapshot, self._resolve_app(app)
+        return snapshot, self._control_from_handle(handle)
+
+    def _resolve_element(self, app: str, index: str) -> Any:
+        snapshot, root = self._observed_root(app)
         record = snapshot.elements.get(str(index))
         if record is None:
             raise ComputerUseError(f"Unknown element_index {index!r}; refresh get_app_state first")
-        root = self._resolve_app(app)
         fallback = None
         for control in self._all_controls(root):
             try:
@@ -712,11 +746,7 @@ class OpenComputerUseService:
 
     def _focus_report(self) -> str:
         """Describe the element that currently has keyboard focus."""
-        try:
-            control = self._ensure_automation().GetFocusedControl()
-        except Exception:
-            report_suppressed_exception("read the focused desktop element")
-            return ""
+        control = self._focused_control()
         if control is None:
             return ""
         role = self._safe_text(self._getattr(control, "LocalizedControlType", ""), full=True)
@@ -725,6 +755,43 @@ class OpenComputerUseService:
         label = " ".join(part for part in (role or "control", f'"{name}"' if name else "") if part)
         return f"Focus: {label}" + (f" Value: {value}" if value else "")
 
+    def _focused_control(self) -> Any:
+        try:
+            return self._ensure_automation().GetFocusedControl()
+        except Exception:
+            report_suppressed_exception("read the focused desktop element")
+            return None
+
+    def _raw_value(self, control: Any) -> Optional[str]:
+        """Read an element's value verbatim, or None when it exposes none.
+
+        ``_value`` trims and truncates for display, which is wrong for the
+        before/after comparisons that decide whether a keystroke landed.
+        """
+        if control is None:
+            return None
+        pattern = self._pattern(control, "ValuePattern")
+        if pattern is None:
+            return None
+        try:
+            return str(pattern.Value)
+        except Exception:
+            report_suppressed_exception("read a focused element value")
+            return None
+
+    @staticmethod
+    def _normalize_newlines(text: str) -> str:
+        return str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+    def _value_change_detail(self, control: Any, before: Optional[str]) -> str:
+        """Report a change the window diff cannot see: the focused value itself."""
+        if before is None:
+            return ""
+        after = self._raw_value(control)
+        if after is None or after == before:
+            return ""
+        return f"Focused value is now: {self._safe_text(after)}"
+
     @staticmethod
     def _report(headline: str, details: Iterable[str]) -> str:
         lines = [headline]
@@ -732,18 +799,8 @@ class OpenComputerUseService:
         return "\n".join(lines)
 
     def _shell_execute(self, target: str, arguments: str) -> int:
-        shell32 = ctypes.windll.shell32
-        shell32.ShellExecuteW.argtypes = [
-            wintypes.HWND,
-            wintypes.LPCWSTR,
-            wintypes.LPCWSTR,
-            wintypes.LPCWSTR,
-            wintypes.LPCWSTR,
-            ctypes.c_int,
-        ]
-        shell32.ShellExecuteW.restype = ctypes.c_void_p
         SW_SHOWNORMAL = 1
-        result = shell32.ShellExecuteW(
+        result = _SHELL32.ShellExecuteW(
             None, "open", target, arguments or None, None, SW_SHOWNORMAL
         )
         return int(result or 0)
@@ -1050,37 +1107,107 @@ class OpenComputerUseService:
         return "{" + mapped + "}"
 
     def press_key(self, app: str, key: str) -> str:
-        self._snapshot(app)
-        self._activate(self._resolve_app(app))
+        _snapshot, root = self._observed_root(app)
+        self._activate(root)
         parts = [part for part in re.split(r"[+]", str(key or "").strip()) if part]
         if not parts:
             raise ComputerUseError("key is required")
         modifiers = {"ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "shift": "Shift", "super": "Win", "win": "Win", "meta": "Win"}
         prefix = "".join("{" + modifiers[part.lower()] + "}" for part in parts[:-1] if part.lower() in modifiers)
         before = self._observe_world()
+        focused = self._focused_control()
+        before_value = self._raw_value(focused)
         self.auto.SendKeys(prefix + self._send_keys_token(parts[-1]), charMode=False)
         changes = self._await_world_change(before, timeout=self.ACTION_SETTLE_SECONDS)
         details = list(changes)
+        # A key that edits text changes nothing a window diff can see, so the
+        # focused value is checked too before reporting that nothing happened.
+        value_change = self._value_change_detail(focused, before_value)
+        if value_change:
+            details.append(value_change)
         focus = self._focus_report()
         if focus:
             details.append(focus)
-        if not changes:
+        if not changes and not value_change:
             details.append(
-                "No window change was observed; re-observe with get_app_state to confirm the key had an effect."
+                "No window or value change was observed; re-observe with get_app_state to confirm the key had an effect."
             )
         return self._report(f"Pressed {key!r} in {app}.", details)
 
+    # SendKeys reads "{" as the start of a key name, so a literal "{a}" is sent
+    # as the single key 'a' and "{braces}" raises TypeError deep inside
+    # SendUnicodeChar.  "{{}" and "{}}" are how uiautomation escapes the braces
+    # themselves.  Every other character, including "(", "+", "^" and "%", is
+    # already literal: "(" only groups keys while a hold key such as {Ctrl} is
+    # open, and escaped text never opens one.
+    _SEND_KEYS_ESCAPES = {"{": "{{}", "}": "{}}"}
+
+    @classmethod
+    def _escape_send_keys(cls, text: str) -> str:
+        return "".join(cls._SEND_KEYS_ESCAPES.get(char, char) for char in str(text))
+
     def type_text(self, app: str, text: str) -> str:
-        self._snapshot(app)
-        self._activate(self._resolve_app(app))
+        _snapshot, root = self._observed_root(app)
+        self._activate(root)
         payload = str(text)
+        if not payload:
+            raise ComputerUseError("text is required")
+        focused = self._focused_control()
+        before_value = self._raw_value(focused)
         before_focus = self._focus_report()
-        self.auto.SendKeys(payload, charMode=True)
+        self.auto.SendKeys(self._escape_send_keys(payload), charMode=True)
+        landed, details = self._typed_verdict(focused, before_value, payload)
         after_focus = self._focus_report()
-        details = [after_focus or before_focus]
-        if not after_focus:
+        details.append(after_focus or before_focus)
+        if not landed and not after_focus:
             details.append(
                 "No focused element was reported, so the text may not have landed anywhere. "
                 "Click or set focus on the target field, then re-observe with get_app_state."
             )
-        return self._report(f"Typed {len(payload)} character(s) into {app}.", details)
+        headline = (
+            f"Typed {len(payload)} character(s) into {app}."
+            if landed
+            else f"Sent {len(payload)} character(s) to {app}, unverified."
+        )
+        return self._report(headline, details)
+
+    def _typed_verdict(
+        self,
+        control: Any,
+        before: Optional[str],
+        payload: str,
+    ) -> tuple[bool, List[str]]:
+        """Compare the field against what was typed.
+
+        Keystrokes are delivered one Unicode event at a time, and Windows drops
+        or reorders them under load, so a field can end up holding text that is
+        not what was sent.  Reporting the character count alone made that
+        indistinguishable from success, which is how a mistyped URL silently
+        became the model's next assumption.
+        """
+        time.sleep(self.VALUE_SETTLE_SECONDS)
+        after = self._raw_value(control)
+        if before is None or after is None:
+            return False, [
+                "The focused element exposes no readable value, so the typed text could not be verified; "
+                "re-observe with get_app_state to check it."
+            ]
+        wanted = self._normalize_newlines(payload)
+        old = self._normalize_newlines(before)
+        new = self._normalize_newlines(after)
+        if new.count(wanted) > old.count(wanted):
+            return True, [] if new == old + wanted else [f"Value is now: {self._safe_text(after)}"]
+        remedy = (
+            " Retype it, or use set_value on the field's element_index to write the exact string in one step."
+        )
+        if new == old:
+            return False, ["The field did not change, so nothing was typed." + remedy]
+        if len(new) == len(old) + len(wanted):
+            return False, [
+                f"The field took {len(wanted)} character(s) but reads back as {self._safe_text(after)!r}, "
+                f"not the text that was sent. Some keystrokes were mistyped." + remedy
+            ]
+        return False, [
+            f"The field now reads {self._safe_text(after)!r}, which does not contain the text that was sent. "
+            "It may reformat, truncate, autocomplete, or reject input." + remedy
+        ]

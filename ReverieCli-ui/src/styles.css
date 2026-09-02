@@ -1635,6 +1635,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 .skill-chip-stale { border-color: var(--amber, #d99a3d); background: linear-gradient(135deg, #7c4a12, #b8791f); box-shadow: none; }
 .skill-card-pinned { border-color: #a855f7; background: color-mix(in srgb, #a855f7 8%, var(--panel)); }
 .status-pill.pinned { background: rgba(168,85,247,.16); color: #d8a5ff; }
+.skill-card-shadowed { border-color: var(--amber, #d99a3d); }
+.skill-card-shadowed .plugin-main > p, .skill-card-shadowed .plugin-stats { opacity: .62; }
+.status-pill.shadowed { background: rgba(217,154,61,.16); color: var(--amber, #d99a3d); }
 
 .context-engine-card { margin-top: 8px; overflow: hidden; border: 1px solid var(--accent-soft); border-radius: 11px; background: linear-gradient(145deg, var(--accent-bg), color-mix(in srgb, var(--panel) 92%, transparent)); }
 .context-engine-card > div:first-child { min-height: 50px; padding: 8px 9px; display: flex; align-items: center; gap: 9px; }

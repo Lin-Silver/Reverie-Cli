@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 import json
 import os
 import re
@@ -209,6 +209,25 @@ class SkillRecord:
 
 
 @dataclass(frozen=True)
+class SkillShadow:
+    """One skill whose name a higher-precedence root already claimed."""
+
+    lookup_key: str
+    winner: SkillRecord
+    hidden: SkillRecord
+
+    @property
+    def name(self) -> str:
+        return self.hidden.name
+
+    def message(self) -> str:
+        return (
+            f"name is already claimed by the {self.winner.scope_label} skill in "
+            f"{self.winner.root_label}; rename this one or delete it"
+        )
+
+
+@dataclass(frozen=True)
 class SkillsSnapshot:
     """Cached skill scan state."""
 
@@ -216,6 +235,7 @@ class SkillsSnapshot:
     scanned_at: float
     records: tuple[SkillRecord, ...]
     errors: tuple[SkillError, ...]
+    shadowed: tuple[SkillShadow, ...] = ()
 
     @property
     def skill_count(self) -> int:
@@ -225,8 +245,20 @@ class SkillsSnapshot:
     def error_count(self) -> int:
         return len(self.errors)
 
+    @property
+    def shadow_count(self) -> int:
+        return len(self.shadowed)
+
+    @property
+    def shadowed_paths(self) -> frozenset[str]:
+        """Resolved SKILL.md paths that cannot be reached by name."""
+        return frozenset(str(item.hidden.path_to_skill_md).lower() for item in self.shadowed)
+
     def summary_label(self) -> str:
-        return f"{self.skill_count} skills | {self.error_count} invalid"
+        label = f"{self.skill_count} skills | {self.error_count} invalid"
+        if self.shadowed:
+            label = f"{label} | {self.shadow_count} shadowed"
+        return label
 
     def names(self, limit: int = 4) -> str:
         names = [record.name for record in self.records]
@@ -336,6 +368,7 @@ class SkillsManager:
             scanned_at=time.time(),
             records=tuple(records),
             errors=tuple(errors),
+            shadowed=self._detect_shadowed_skills(records),
         )
 
         signature_payload = {
@@ -367,6 +400,27 @@ class SkillsManager:
             self._generation += 1
         self._snapshot = snapshot
         return snapshot
+
+    def _detect_shadowed_skills(self, records: Sequence[SkillRecord]) -> tuple[SkillShadow, ...]:
+        """Find skills that share a name with a higher-precedence skill.
+
+        A name resolves to the first record in precedence order, so a second
+        record with the same key can never be loaded by name or by `$mention`.
+        Left unreported, a repo skill that happens to share a bundled skill's
+        name looks installed and listed while being permanently unreachable.
+        """
+        winners: dict[str, SkillRecord] = {}
+        shadowed: list[SkillShadow] = []
+        for record in records:
+            key = record.lookup_key or _normalize_skill_key(record.name)
+            if not key:
+                continue
+            winner = winners.get(key)
+            if winner is None:
+                winners[key] = record
+                continue
+            shadowed.append(SkillShadow(lookup_key=key, winner=winner, hidden=record))
+        return tuple(shadowed)
 
     def _skill_visible_in_active_mode(self, record: SkillRecord) -> bool:
         """Apply package-owned mode gates to built-in skills."""
@@ -530,6 +584,7 @@ class SkillsManager:
             "summary_label": snapshot.summary_label(),
             "skill_count": snapshot.skill_count,
             "error_count": snapshot.error_count,
+            "shadow_count": snapshot.shadow_count,
             "skill_names": snapshot.names(),
         }
 
@@ -558,6 +613,23 @@ class SkillsManager:
                 "message": error.message,
             }
             for error in snapshot.errors
+        ]
+
+    def list_shadow_rows(self, *, force_refresh: bool = False) -> list[dict[str, str]]:
+        """Return unreachable same-name skills for inspection UIs."""
+        snapshot = self.get_snapshot(force_refresh=force_refresh)
+        return [
+            {
+                "name": item.hidden.name,
+                "scope": item.hidden.scope_label,
+                "root": item.hidden.root_label,
+                "path": str(item.hidden.path_to_skill_md),
+                "message": item.message(),
+                "winner_scope": item.winner.scope_label,
+                "winner_root": item.winner.root_label,
+                "winner_path": str(item.winner.path_to_skill_md),
+            }
+            for item in snapshot.shadowed
         ]
 
     def get_record(self, identifier: str, *, force_refresh: bool = False) -> Optional[SkillRecord]:
@@ -780,10 +852,15 @@ class SkillsManager:
         used = sum(len(line) + 1 for line in lines)
         omitted = 0
         pinned_keys = set(self.pinned_keys)
+        # A shadowed record is listed here under a name that resolves to the
+        # winner, so offering it would advertise a description the model can
+        # never load.  It stays in `/skills`, where a human can fix the clash.
+        hidden_paths = snapshot.shadowed_paths
         implicit_records = [
             record
             for record in snapshot.records
-            if record.allow_implicit_invocation or record.lookup_key in pinned_keys
+            if (record.allow_implicit_invocation or record.lookup_key in pinned_keys)
+            and str(record.path_to_skill_md).lower() not in hidden_paths
         ]
         for record in implicit_records:
             description = _trim_text(record.description, limit=1024)

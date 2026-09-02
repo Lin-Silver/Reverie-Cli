@@ -136,7 +136,20 @@ def test_desktop_live_refresh_passes_sensenova_config_to_provider(monkeypatch) -
     assert source["catalog_live"] is True
 
 
-def test_model_selection_updates_model_specific_reasoning() -> None:
+def test_model_selection_updates_model_specific_reasoning(monkeypatch) -> None:
+    from reverie import opencode as opencode_module
+
+    # Zen's live inventory decides which ids `apply_model_selection` accepts, so
+    # leaving the fetch on would tie this assertion to whatever that endpoint
+    # serves today. The built-in catalog is what the offline product falls back
+    # to, so pin that and let the test check the selection logic instead.
+    catalog = [dict(item) for item in opencode_module._OPENCODE_MODEL_CATALOG]
+
+    def offline_catalog(provider_config=None, *, fetch_live=False, force_refresh=False):
+        return [dict(item) for item in catalog]
+
+    monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", offline_catalog)
+
     config = Config()
     selected = apply_model_selection(config, "codex", "gpt-5.6-sol", "high")
     assert selected["id"] == "gpt-5.6-sol"

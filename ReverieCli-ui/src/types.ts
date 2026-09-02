@@ -472,6 +472,8 @@ export interface SkillRecord {
   plugin_id: string;
   allow_implicit_invocation: boolean;
   pinned: boolean;
+  /** Another root already claims this name, so a lookup can never reach this file. */
+  shadowed: boolean;
 }
 
 /** A pinned skill is mandatory for every turn until it is released. */
@@ -486,9 +488,12 @@ export interface PinnedSkillsState {
 export interface SkillsState {
   count: number;
   invalid_count: number;
+  /** Skills hidden by a same-name skill in a higher-precedence root. */
+  shadowed_count: number;
   records: SkillRecord[];
   pinned: PinnedSkillsState;
   errors: Record<string, unknown>[];
+  shadowed: Record<string, unknown>[];
 }
 
 export interface SkillDetail extends SkillRecord {

@@ -177,6 +177,7 @@ const desktopState: DesktopState = {
   skills: {
     count: 2,
     invalid_count: 0,
+    shadowed_count: 0,
     records: [
       {
         key: "photo-to-3d",
@@ -189,6 +190,7 @@ const desktopState: DesktopState = {
         plugin_id: "",
         allow_implicit_invocation: true,
         pinned: false,
+        shadowed: false,
       },
       {
         key: "reverie-engine",
@@ -201,10 +203,12 @@ const desktopState: DesktopState = {
         plugin_id: "",
         allow_implicit_invocation: true,
         pinned: false,
+        shadowed: false,
       },
     ],
     pinned: { max: 4, keys: [], names: [], unresolved: [] },
     errors: [],
+    shadowed: [],
   },
   commands: {
     sections: ["Workspace"],

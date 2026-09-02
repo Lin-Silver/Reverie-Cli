@@ -766,7 +766,7 @@ def test_the_client_is_driven_by_the_published_contract_not_its_own_constants() 
 
         # -- the learned class is persisted, so it survives the service going away
         settings = json.loads((root / "cli" / ".reverie" / "rats" / "settings.json").read_text(encoding="utf-8"))
-        assert settings["schemaVersion"] == 3
+        assert settings["schemaVersion"] == rats_module.RATS_SETTINGS_VERSION
         assert settings["providerPermissionClasses"]["reverie.engine"] == ["read", "run", "telemetry"]
         assert settings["enabledProviders"][0]["permissions"] == ["read", "run", "telemetry"]
         assert "telemetry" in state["supportedProviders"][0]["permissions"]

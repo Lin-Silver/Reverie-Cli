@@ -102,6 +102,7 @@ import type {
   SessionMessage,
   SessionState,
   SettingItem,
+  SkillRecord,
   SkillsState,
   SubagentRunLog,
   SubagentRunRecord,
@@ -1834,6 +1835,22 @@ function SkillsView({
     return skills.records.filter((record) =>
       record.name.toLowerCase().includes(needle) || record.description.toLowerCase().includes(needle));
   }, [query, skills.records]);
+  // A shadowed record only knows that it lost; the row carries who took the name.
+  const shadowOwners = useMemo(() => {
+    const owners = new Map<string, { scope: string; root: string }>();
+    for (const row of skills.shadowed ?? []) {
+      owners.set(String(row.path ?? ""), {
+        scope: String(row.winner_scope ?? ""),
+        root: String(row.winner_root ?? ""),
+      });
+    }
+    return owners;
+  }, [skills.shadowed]);
+  const shadowHint = (record: SkillRecord) => t("skill.shadowed.hint", {
+    name: record.name,
+    scope: shadowOwners.get(record.path)?.scope ?? "",
+    root: shadowOwners.get(record.path)?.root ?? "",
+  });
   return (
     <div className="page-scroll">
       <PageHeader
@@ -1846,6 +1863,11 @@ function SkillsView({
         <div><Sparkles size={16} /><span>{t("已发现技能")}</span><strong>{skills.count}</strong></div>
         <div><Pin size={16} /><span>{t("已固定")}</span><strong>{pinnedCount} / {skills.pinned.max}</strong></div>
         <div><AlertCircle size={16} /><span>{t("无效技能")}</span><strong>{skills.invalid_count}</strong></div>
+        {skills.shadowed_count > 0 && (
+          <div title={t("同名技能优先级更高，这些文件不会被加载。")}>
+            <AlertCircle size={16} /><span>{t("被覆盖")}</span><strong>{skills.shadowed_count}</strong>
+          </div>
+        )}
       </div>
       {pinnedCount > 0 && (
         <section className="page-section">
@@ -1876,13 +1898,19 @@ function SkillsView({
         </div>
         <div className="plugin-list">
           {visible.map((record) => (
-            <div className={`plugin-card ${record.pinned ? "skill-card-pinned" : ""}`} key={record.key || record.path}>
+            <div
+              className={`plugin-card ${record.pinned ? "skill-card-pinned" : ""} ${record.shadowed ? "skill-card-shadowed" : ""}`}
+              key={record.key || record.path}
+            >
               <div className="plugin-icon"><Sparkles size={18} /></div>
               <div className="plugin-main">
                 <div className="plugin-title">
                   <strong>{record.name}</strong>
                   <span className="status-pill">{record.scope}</span>
                   {record.pinned && <span className="status-pill pinned">{t("已固定")}</span>}
+                  {record.shadowed && (
+                    <span className="status-pill shadowed" title={shadowHint(record)}>{t("已被覆盖")}</span>
+                  )}
                   {!record.allow_implicit_invocation && <span className="status-pill">{t("仅显式调用")}</span>}
                 </div>
                 <p>{record.description}</p>
@@ -1892,7 +1920,15 @@ function SkillsView({
                 {record.pinned ? (
                   <button type="button" className="secondary-button danger-ghost" onClick={() => unpinSkill(record.name)}><X size={13} />{t("取消固定")}</button>
                 ) : (
-                  <button type="button" className="secondary-button" disabled={full} onClick={() => pinSkill(record.name)}><Pin size={13} />{t("固定")}</button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={full || record.shadowed}
+                    title={record.shadowed ? shadowHint(record) : undefined}
+                    onClick={() => pinSkill(record.name)}
+                  >
+                    <Pin size={13} />{t("固定")}
+                  </button>
                 )}
               </div>
             </div>

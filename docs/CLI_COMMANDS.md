@@ -7,7 +7,7 @@ This reference is aligned with `reverie/cli/help_catalog.py`, which is the sourc
 | Command | Description |
 | --- | --- |
 | `/help` | Open the interactive help browser, or show `/help <command>` / `/help all` |
-| `/status` | Show active model, provider source, session, and runtime health |
+| `/status` | Show active model, provider source, session, runtime health, and the full token budget: context-window usage with the counter that produced it, headroom, the auto-compact and auto-rotate gates, a per-segment prompt breakdown, the heaviest message, and cumulative session, workspace, and per-model token totals |
 | `/doctor` | Audit the current workspace harness across goals, context, tools, execution, memory, evaluation, and recovery, including a closure gate, recovery playbooks, and run-history trends |
 | `/total` | Show aggregate workspace usage, activity, regression, and runtime statistics |
 | `/clear` | Clear the terminal output without touching session state |
@@ -156,6 +156,8 @@ reverie --path C:\work\project setting workspace on
 | `/skill list` | Browse every detected skill and its pin state |
 
 Skills are discovered from repository `.agents/skills` roots between the project root and the current workspace, `~/.agents/skills`, bundled skills, plugin-owned skills, and the legacy `.reverie/Skills` / `.reverie/skills` locations. The model initially receives only each skill's name, description, and path, then reads a body on demand through `skill_lookup`. Write `$skill-name` in a prompt to request one explicitly.
+
+When two skills share a name, the higher-precedence root wins and `/skills` prints a **Shadowed Skills** table naming the loser and the skill that took its name. A shadowed skill is withheld from the model's list because that name can never resolve to it; rename or delete the directory. See [CONFIGURATION.md](CONFIGURATION.md) for the root order.
 
 Pinning removes model-side selection for that entry: the skill is promoted into a mandatory system-prompt block, marked `[PINNED]` in the metadata list and in `skill_lookup` output, and drawn as a coloured tag in the input prompt and the live footer. A pin applies even when the skill's `agents/openai.yaml` sets `policy.allow_implicit_invocation: false`, since an explicit pin is a user instruction. Up to 4 skills can be pinned at once. Pins are session state and are never written to the configuration file, so restarting Reverie clears them.
 

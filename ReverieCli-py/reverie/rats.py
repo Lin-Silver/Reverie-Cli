@@ -41,7 +41,10 @@ RATS_DISCOVERY_SCHEMA = "reverie.rats.discovery/1"
 # the permission classes a service published the last time it was reachable, so
 # a selection made against a service that has since gone offline is not silently
 # narrowed to whatever list this client was compiled with.
-RATS_SETTINGS_VERSION = 3
+# Bumped to 4 when ``customProviders`` was added: user-declared providers live in
+# the settings file, so a file written by a newer client carries provider
+# definitions an older one would drop on rewrite.
+RATS_SETTINGS_VERSION = 4
 RATS_STATE_VERSION = 2
 # Kept as the client's pre-contract default rather than its truth: a connected
 # service publishes its own permission classes and those win. See
@@ -581,6 +584,276 @@ RATS_SUPPORTED_PROVIDERS = RatsProviderRegistry(
 RATS_PROVIDER_REGISTRY = RATS_SUPPORTED_PROVIDERS
 
 
+# ---------------------------------------------------------------------------
+# User-defined RATS providers
+# ---------------------------------------------------------------------------
+# `RATS_SUPPORTED_PROVIDERS` stays compiled in and stays the official allowlist:
+# it is what lets this client claim a descriptor came from a build it recognises.
+# Someone running their own RTP service needs the same treatment without waiting
+# for a client release, so a second, declarative layer is read from the RATS
+# settings file and turned into real `RatsProviderSpec` values here.
+#
+# Every field of a definition is data. The callables a spec needs are built by
+# the factories below from already-validated fields, so a settings file can name
+# no code to run: the worst a malformed definition achieves is being refused.
+RATS_CUSTOM_PROVIDER_SCHEMA = "reverie.rats.custom-provider/1"
+# A provider id must be namespaced. It is the key a descriptor is matched
+# against, and an unqualified word is precisely what two unrelated vendors would
+# both reach for.
+_CUSTOM_PROVIDER_ID_RE = re.compile(r"^[a-z][a-z0-9]{1,31}(\.[a-z0-9][a-z0-9_-]{0,31}){1,3}$")
+_SERVICE_KIND_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+_TOOL_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+# One discovery-root path segment: no separators, no drive letter, and `.`/`..`
+# excluded by the leading character class.
+_ROOT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+_DEFAULT_CUSTOM_ROOT_SEGMENTS = ("ReverieLocal", "RATS", "Services")
+_MAX_CUSTOM_PROVIDERS = 16
+_MAX_SERVICE_KINDS = 8
+_MAX_TOOL_TAGS = 8
+_MAX_ROOT_SEGMENTS = 8
+_MAX_PRODUCT_NAMES = 8
+_MAX_PRODUCT_LENGTH = 128
+_MAX_LABEL_LENGTH = 64
+_MAX_EXECUTABLE_ERROR_LENGTH = 240
+# How a definition says "this file is my service". `path` accepts any existing
+# file, which is the only thing a cross-platform definition can check;
+# `product_name` additionally requires a Windows ProductName resource to match,
+# which is how the built-in provider proves identity.
+_EXECUTABLE_IDENTITY_PATH = "path"
+_EXECUTABLE_IDENTITY_PRODUCT_NAME = "product_name"
+_EXECUTABLE_IDENTITY_MODES = (_EXECUTABLE_IDENTITY_PATH, _EXECUTABLE_IDENTITY_PRODUCT_NAME)
+
+
+def _path_executable_validator(executable: Path) -> bool:
+    return executable.is_file()
+
+
+def _product_name_validator(product_names: Tuple[str, ...]) -> Callable[[Path], bool]:
+    """An executable validator that requires a matching Windows ProductName.
+
+    Off Windows there is no equivalent resource to read, so this degrades to the
+    existence check rather than refusing every executable — the same choice
+    ``_reverie_engine_executable`` already makes for the built-in provider.
+    """
+
+    def validate(executable: Path) -> bool:
+        if os.name != "nt":
+            return executable.is_file()
+        return any(name in product_names for name in _windows_product_names(executable))
+
+    return validate
+
+
+def _relative_root_resolver(segments: Tuple[str, ...]) -> Callable[[Path], Path]:
+    """A discovery-root resolver fixed to a relative path under the executable."""
+
+    def resolve(executable: Path) -> Path:
+        root = executable.parent
+        for segment in segments:
+            root = root / segment
+        return root
+
+    return resolve
+
+
+def _custom_root_segments(value: Any) -> Tuple[Tuple[str, ...], str]:
+    """Validate a declared discovery root into relative path segments.
+
+    A definition may say where under its executable's own directory the
+    descriptors live, and nothing else about that path. The root is the boundary
+    that makes a descriptor trustworthy at all — ``_parse_rats_descriptor``
+    refuses a descriptor that does not sit in the root its own executable
+    resolves to — so accepting an absolute path here would let a definition move
+    that boundary anywhere and take the trust with it.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return _DEFAULT_CUSTOM_ROOT_SEGMENTS, ""
+    if isinstance(value, str):
+        text = value.strip()
+        # A leading separator or a drive letter means the writer intended an
+        # absolute path. Splitting it into segments would silently reinterpret it
+        # as relative and then discover nothing, so it is refused instead.
+        if text.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", text) or text.startswith("~"):
+            return (), "invalid_discovery_root"
+        raw = [part for part in re.split(r"[\\/]+", text) if part]
+    elif isinstance(value, (list, tuple)):
+        raw = [_text(part) for part in value]
+    else:
+        return (), "invalid_discovery_root"
+    if not raw or len(raw) > _MAX_ROOT_SEGMENTS:
+        return (), "invalid_discovery_root"
+    for segment in raw:
+        if not _ROOT_SEGMENT_RE.fullmatch(segment) or segment in {".", ".."}:
+            return (), "invalid_discovery_root"
+    return tuple(raw), ""
+
+
+def normalize_rats_custom_provider(
+    value: Any,
+    reserved: Iterable[str] = (),
+) -> Tuple[Dict[str, Any], str]:
+    """Validate one declarative provider definition into a canonical record.
+
+    Returns the record and an empty reason, or an empty record and the reason it
+    was refused. Refusals are named rather than raised because the settings file
+    holds a list, and one unusable entry must not cost the others.
+    """
+    source = _record(value)
+    reserved_ids = {_text(item) for item in reserved}
+    provider_id = _text(source.get("providerId") or source.get("provider_id")).lower()
+    if not _CUSTOM_PROVIDER_ID_RE.fullmatch(provider_id):
+        return {}, "invalid_provider_id"
+    if provider_id in reserved_ids:
+        # Built-ins are not overridable. A definition that could shadow one would
+        # let the settings file decide what "Reverie Engine" means, which is the
+        # single fact this client has to hold on its own.
+        return {}, "reserved_provider_id"
+    product = _text(source.get("product"))
+    if not product or len(product) > _MAX_PRODUCT_LENGTH:
+        return {}, "invalid_product"
+    label = _text(source.get("label")) or product
+    if len(label) > _MAX_LABEL_LENGTH:
+        label = label[:_MAX_LABEL_LENGTH]
+    raw_kinds = source.get("serviceKinds") or source.get("service_kinds") or []
+    if isinstance(raw_kinds, str):
+        raw_kinds = [raw_kinds]
+    if not isinstance(raw_kinds, (list, tuple)):
+        return {}, "invalid_service_kinds"
+    kinds = [item for item in dict.fromkeys(_text(kind).lower() for kind in raw_kinds) if item]
+    if not kinds or len(kinds) > _MAX_SERVICE_KINDS:
+        return {}, "invalid_service_kinds"
+    if any(not _SERVICE_KIND_RE.fullmatch(kind) for kind in kinds):
+        return {}, "invalid_service_kinds"
+    classes = shaped_rats_permission_classes(
+        source.get("permissionClasses") or source.get("permission_classes")
+    )
+    if not classes:
+        return {}, "invalid_permission_classes"
+    raw_tags = source.get("toolTags") or source.get("tool_tags") or []
+    if isinstance(raw_tags, str):
+        raw_tags = [raw_tags]
+    if not isinstance(raw_tags, (list, tuple)):
+        return {}, "invalid_tool_tags"
+    tags = [item for item in dict.fromkeys(_text(tag).lower() for tag in raw_tags) if item]
+    if len(tags) > _MAX_TOOL_TAGS or any(not _TOOL_TAG_RE.fullmatch(tag) for tag in tags):
+        return {}, "invalid_tool_tags"
+    segments, reason = _custom_root_segments(
+        source.get("discoveryRoot") if "discoveryRoot" in source else source.get("discovery_root")
+    )
+    if reason:
+        return {}, reason
+    identity = _text(source.get("executableIdentity") or source.get("executable_identity")).lower()
+    identity = identity.replace("-", "_")
+    if identity == "productname":
+        identity = _EXECUTABLE_IDENTITY_PRODUCT_NAME
+    if not identity:
+        identity = _EXECUTABLE_IDENTITY_PATH
+    if identity not in _EXECUTABLE_IDENTITY_MODES:
+        return {}, "invalid_executable_identity"
+    raw_names = source.get("executableProductNames") or source.get("executable_product_names") or []
+    if isinstance(raw_names, str):
+        raw_names = [raw_names]
+    if not isinstance(raw_names, (list, tuple)):
+        return {}, "invalid_executable_product_names"
+    product_names = [
+        item
+        for item in dict.fromkeys(_text(name) for name in raw_names)
+        if item and len(item) <= _MAX_PRODUCT_LENGTH
+    ][:_MAX_PRODUCT_NAMES]
+    if identity == _EXECUTABLE_IDENTITY_PRODUCT_NAME and not product_names:
+        # The mode exists to check a resource; a mode with nothing to check
+        # against would silently behave as `path` while reading as stricter.
+        return {}, "missing_executable_product_names"
+    executable_error = _text(source.get("executableError") or source.get("executable_error"))
+    if not executable_error:
+        executable_error = f"Select an existing executable for {label}."
+    executable_error = executable_error[:_MAX_EXECUTABLE_ERROR_LENGTH]
+    return {
+        "schema": RATS_CUSTOM_PROVIDER_SCHEMA,
+        "providerId": provider_id,
+        "product": product,
+        "label": label,
+        "serviceKinds": kinds,
+        "permissionClasses": classes,
+        "toolTags": tags,
+        "discoveryRoot": list(segments),
+        "executableIdentity": identity,
+        "executableProductNames": product_names,
+        "executableError": executable_error,
+    }, ""
+
+
+def rats_custom_provider_spec(definition: Mapping[str, Any]) -> RatsProviderSpec:
+    """Build a provider spec from an already-normalized definition.
+
+    Only ever called with the output of ``normalize_rats_custom_provider``: the
+    bounds on every field are that function's job, and duplicating them here
+    would create a second place for them to disagree.
+    """
+    segments = tuple(_text(segment) for segment in definition.get("discoveryRoot", ()))
+    product_names = tuple(_text(name) for name in definition.get("executableProductNames", ()))
+    identity = _text(definition.get("executableIdentity")) or _EXECUTABLE_IDENTITY_PATH
+    validator = (
+        _product_name_validator(product_names)
+        if identity == _EXECUTABLE_IDENTITY_PRODUCT_NAME
+        else _path_executable_validator
+    )
+    return RatsProviderSpec(
+        provider_id=_text(definition.get("providerId")),
+        product=_text(definition.get("product")),
+        service_kinds=tuple(_text(kind) for kind in definition.get("serviceKinds", ())),
+        executable_validator=validator,
+        # The same "this pid is running this image" check the built-in provider
+        # uses. Its name records where it was written, not a provider it is
+        # limited to: it reads nothing but the pid and the path.
+        process_validator=_reverie_engine_process,
+        discovery_root_resolver=_relative_root_resolver(segments),
+        permission_classes=tuple(_text(item) for item in definition.get("permissionClasses", ())),
+        label=_text(definition.get("label")),
+        tool_tags=tuple(_text(tag) for tag in definition.get("toolTags", ())),
+        executable_error=_text(definition.get("executableError")),
+        # No wrapper mapping: a custom provider declares the executable that
+        # publishes its descriptors, and inventing a sibling name for it would be
+        # this client guessing about a layout it was told nothing about.
+        executable_normalizer=_identity_executable,
+    )
+
+
+# Refusal reasons are named so the settings reader can log them and a client can
+# branch on them; these are the sentences a person gets instead.
+_CUSTOM_PROVIDER_ERRORS = MappingProxyType(
+    {
+        "invalid_provider_id": (
+            "providerId must be a dotted lowercase id such as 'acme.toolhost' "
+            "(2-4 segments, letters/digits, '-' and '_' allowed after the first segment)."
+        ),
+        "reserved_provider_id": "That providerId belongs to a built-in RATS provider and cannot be redefined.",
+        "invalid_product": "product must be the exact product name the service reports in its descriptor.",
+        "invalid_service_kinds": (
+            "serviceKinds must list 1-8 lowercase kinds, matching what the service puts in its descriptor."
+        ),
+        "invalid_permission_classes": (
+            "permissionClasses must list at least one permission class name, lowercase, "
+            "matching what the service declares."
+        ),
+        "invalid_tool_tags": "toolTags must list up to 8 lowercase tags.",
+        "invalid_discovery_root": (
+            "discoveryRoot must be up to 8 plain path segments relative to the executable's own "
+            "directory: no absolute path, no drive letter, no '..'."
+        ),
+        "invalid_executable_identity": (
+            f"executableIdentity must be '{_EXECUTABLE_IDENTITY_PATH}' or "
+            f"'{_EXECUTABLE_IDENTITY_PRODUCT_NAME}'."
+        ),
+        "invalid_executable_product_names": "executableProductNames must be a list of product name strings.",
+        "missing_executable_product_names": (
+            f"executableIdentity '{_EXECUTABLE_IDENTITY_PRODUCT_NAME}' needs at least one entry in "
+            "executableProductNames to check against."
+        ),
+    }
+)
+
+
 def _safe_identifier(value: Any) -> str:
     normalized = _IDENTIFIER_RE.sub("_", _text(value).lower()).strip("_")
     return normalized or "tool"
@@ -791,11 +1064,48 @@ class RatsRuntime:
         # empty and is filled by discovery, so nothing here is a guess about a
         # service this process has not spoken to.
         self._declared_permission_classes: Dict[str, Tuple[str, ...]] = {}
+        # User-declared providers, as stored records and as compiled specs. Both
+        # are populated by ``_read_settings``; before the first read the runtime
+        # knows only its built-ins, which is the correct answer for a client that
+        # has not yet looked at its settings file.
+        self._custom_definitions: Dict[str, Dict[str, Any]] = {}
+        self._custom_providers: Dict[str, RatsProviderSpec] = {}
+        # The most recent state view, so a client that renders the same view
+        # twice does not walk every discovery root and probe every endpoint
+        # twice. Written only by ``_refresh_lifecycle``, under the lifecycle
+        # lock, so it always matches a scan that actually happened.
+        self._last_state: Optional[Dict[str, Any]] = None
         # Lock order: lifecycle -> session I/O -> state. Diagnostics is a leaf lock.
         # Never wait for lifecycle or session I/O while holding the state lock.
         self._lock = threading.RLock()
         self._lifecycle_lock = threading.RLock()
         self._diagnostics_lock = threading.Lock()
+
+    # -- provider registries -------------------------------------------------
+    # ``self.provider_registry`` stays the *base* registry: the compiled-in
+    # allowlist, or the additive fixture a test injected. ``self.registry`` is
+    # the effective view — base plus whatever the settings file declared — and is
+    # what discovery, validation and rendering must use.
+
+    @property
+    def registry(self) -> RatsProviderRegistry:
+        """The provider registry in effect: built-ins plus user definitions."""
+        with self._lock:
+            return self._effective_registry()
+
+    def _effective_registry(self) -> RatsProviderRegistry:
+        if not self._custom_providers:
+            return self.provider_registry
+        # Built-ins are merged last on purpose. A definition should never have
+        # reached storage with a reserved id, but if one did, the compiled-in spec
+        # still wins rather than being displaced by a file.
+        return RatsProviderRegistry({**self._custom_providers, **dict(self.provider_registry.items())})
+
+    def _reserved_provider_ids(self) -> Set[str]:
+        # The union, not just the injected base: a test fixture replaces
+        # ``reverie.engine`` in the base registry, but that id still means the
+        # built-in provider to anyone reading or writing the settings file.
+        return {*self.provider_registry, *RATS_SUPPORTED_PROVIDERS}
 
     @staticmethod
     def _validate_deadline(
@@ -933,11 +1243,25 @@ class RatsRuntime:
             source = {}
         raw_roots = source.get("discoveryRoots", [])
         roots = _unique_paths(raw_roots if isinstance(raw_roots, list) else [])
+        # Parsed first: both the permission-class map and the selections below are
+        # validated against a provider registry, and until the declarations are
+        # compiled that registry is missing every user-declared provider — which
+        # would quietly drop their stored classes and their selections.
+        custom_definitions = self._read_custom_providers(source)
+        with self._lock:
+            self._custom_definitions = {
+                definition["providerId"]: definition for definition in custom_definitions
+            }
+            self._custom_providers = {
+                definition["providerId"]: rats_custom_provider_spec(definition)
+                for definition in custom_definitions
+            }
+            registry = self._effective_registry()
         # The permission classes each provider was last seen to declare. Stored
         # so the state a client renders lists what a service actually offers
         # rather than what this build was compiled knowing about, and so a
         # selection survives a restart while its service is offline.
-        declared_classes = self._read_declared_permission_classes(source)
+        declared_classes = self._read_declared_permission_classes(source, registry)
         legacy_items = source.get("enabledEngines") if isinstance(source.get("enabledEngines"), list) else []
         current_items = source.get("enabledProviders") if isinstance(source.get("enabledProviders"), list) else []
         migrating_legacy = bool(legacy_items) and not current_items
@@ -951,7 +1275,7 @@ class RatsRuntime:
             provider_id = _text(record.get("providerId") or record.get("provider_id"))
             if migrating_legacy:
                 provider_id = "reverie.engine"
-            provider = self.provider_registry.get(provider_id)
+            provider = registry.get(provider_id)
             if provider is None:
                 self._log_diagnostic(
                     "settings.rejected",
@@ -985,6 +1309,7 @@ class RatsRuntime:
             "providerPermissionClasses": {
                 provider_id: list(classes) for provider_id, classes in sorted(declared_classes.items())
             },
+            "customProviders": custom_definitions,
         }
         if source and (
             source.get("schemaVersion") != RATS_SETTINGS_VERSION
@@ -993,6 +1318,7 @@ class RatsRuntime:
             or source.get("enabledProviders") != settings["enabledProviders"]
             or source.get("discoveryRoots") != settings["discoveryRoots"]
             or source.get("providerPermissionClasses") != settings["providerPermissionClasses"]
+            or source.get("customProviders") != settings["customProviders"]
         ):
             try:
                 self._write_settings(settings)
@@ -1000,19 +1326,67 @@ class RatsRuntime:
                 pass
         return settings
 
-    def _read_declared_permission_classes(self, source: Dict[str, Any]) -> Dict[str, Tuple[str, ...]]:
+    def _read_custom_providers(self, source: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Validate the stored ``customProviders`` list into canonical records.
+
+        Each entry is normalized independently and a refusal is logged with its
+        reason, so a file holding one unusable definition still yields every other
+        provider the user declared. Entries beyond ``_MAX_CUSTOM_PROVIDERS`` are
+        refused rather than truncated silently.
+        """
+        stored = source.get("customProviders")
+        if not isinstance(stored, list) or not stored:
+            return []
+        reserved = self._reserved_provider_ids()
+        definitions: Dict[str, Dict[str, Any]] = {}
+        for item in stored:
+            if len(definitions) >= _MAX_CUSTOM_PROVIDERS:
+                self._log_diagnostic(
+                    "settings.custom_provider_rejected",
+                    level="warning",
+                    reason="too_many_custom_providers",
+                    limit=_MAX_CUSTOM_PROVIDERS,
+                )
+                break
+            definition, reason = normalize_rats_custom_provider(item, reserved)
+            if reason:
+                self._log_diagnostic(
+                    "settings.custom_provider_rejected",
+                    level="warning",
+                    provider_id=_text(_record(item).get("providerId")),
+                    reason=reason,
+                )
+                continue
+            provider_id = definition["providerId"]
+            if provider_id in definitions:
+                self._log_diagnostic(
+                    "settings.custom_provider_rejected",
+                    level="warning",
+                    provider_id=provider_id,
+                    reason="duplicate_provider_id",
+                )
+                continue
+            definitions[provider_id] = definition
+        return [definitions[key] for key in sorted(definitions)]
+
+    def _read_declared_permission_classes(
+        self,
+        source: Dict[str, Any],
+        registry: Optional[RatsProviderRegistry] = None,
+    ) -> Dict[str, Tuple[str, ...]]:
         """Merge the stored permission classes with what live services declared.
 
         A schema-2 file has no stored map, which migrates to an empty one: with
         nothing learned yet, normalization falls back to the provider spec and
         behaves exactly as it did before this key existed.
         """
+        known = registry if registry is not None else self.registry
         stored = source.get("providerPermissionClasses")
         merged: Dict[str, Tuple[str, ...]] = {}
         if isinstance(stored, dict):
             for provider_id, value in stored.items():
                 key = _text(provider_id)
-                if not key or key not in self.provider_registry or not isinstance(value, list):
+                if not key or key not in known or not isinstance(value, list):
                     continue
                 classes = tuple(shaped_rats_permission_classes(value))
                 if classes:
@@ -1702,7 +2076,10 @@ class RatsRuntime:
                     reason="directory_not_found",
                     path=str(root),
                 )
-        descriptors = discover_rats_descriptors(roots, rejections, self.provider_registry)
+        # ``_read_settings`` has just compiled the user-declared providers, so the
+        # effective registry read here is the one this scan should validate
+        # against — built-ins plus whatever the settings file declared.
+        descriptors = discover_rats_descriptors(roots, rejections, self.registry)
         for rejection in rejections:
             self._log_diagnostic(
                 "discovery.rejected",
@@ -1754,7 +2131,12 @@ class RatsRuntime:
         )
         with self._diagnostics_lock:
             diagnostics = list(self._diagnostics[-160:])
-        return {
+        with self._lock:
+            custom_definitions = {
+                provider_id: copy.deepcopy(definition)
+                for provider_id, definition in self._custom_definitions.items()
+            }
+        state: Dict[str, Any] = {
             "protocol": RATS_PROTOCOL,
             "stateVersion": RATS_STATE_VERSION,
             "settingsVersion": RATS_SETTINGS_VERSION,
@@ -1777,6 +2159,7 @@ class RatsRuntime:
                     "providerId": provider_id,
                     "product": provider.product,
                     "serviceKind": provider.service_kind,
+                    "serviceKinds": list(provider.service_kinds),
                     "label": provider.label,
                     # Widened by what live services declared, so a client
                     # rendering permission choices offers the classes the
@@ -1784,23 +2167,61 @@ class RatsRuntime:
                     # build was compiled with.
                     "permissions": self._known_permission_classes(provider),
                     "toolTags": list(provider.tool_tags),
+                    # False for the compiled-in allowlist, true for a definition
+                    # read from the settings file. A client offering to remove a
+                    # provider needs to know which ones it can remove.
+                    "custom": provider_id in custom_definitions,
                 }
-                for provider_id, provider in sorted(self.provider_registry.items())
+                for provider_id, provider in sorted(self.registry.items())
             ],
+            "customProviders": [custom_definitions[key] for key in sorted(custom_definitions)],
+            "customProviderSchema": RATS_CUSTOM_PROVIDER_SCHEMA,
+            "customProviderLimit": _MAX_CUSTOM_PROVIDERS,
             "services": services,
             "scanDurationMs": scan_duration_ms,
             "rejectedDescriptorCount": len(rejections),
             "diagnostics": diagnostics,
             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
+        # Stored as a deep copy, so the caller owns the dict it is handed. Every
+        # mutator returns this value, so aliasing the cache here would let a
+        # client corrupt the next ``state`` read by editing its own result.
+        self._last_state = copy.deepcopy(state)
+        return state
 
     def refresh(self) -> Dict[str, Any]:
         with self._lifecycle_lock:
             return self._refresh_lifecycle()
 
+    def state(self) -> Dict[str, Any]:
+        """The current state view, scanning once if this runtime never has.
+
+        ``refresh`` is a filesystem walk plus one probe per descriptor. A client
+        that renders a status view, then a provider view, then a tool view is
+        asking three questions about the same scan, so the last one is handed
+        back instead of repeated. Diagnostics are re-read from the live buffer,
+        because entries accumulate from work done after the scan and a stale
+        journal would be actively misleading.
+        """
+        with self._lifecycle_lock:
+            if self._last_state is None:
+                self._refresh_lifecycle()
+            snapshot = copy.deepcopy(self._last_state or {})
+        with self._diagnostics_lock:
+            snapshot["diagnostics"] = list(self._diagnostics[-160:])
+        return snapshot
+
     def _provider(self, provider_id: str) -> RatsProviderSpec:
         normalized = _text(provider_id)
-        provider = self.provider_registry.get(normalized)
+        provider = self.registry.get(normalized)
+        if provider is None:
+            # A user-declared provider only exists in memory once the settings
+            # file has been read, and a caller may name one before this runtime
+            # has read it — a client that defines a provider and immediately
+            # registers an executable for it, for instance. Re-read once and
+            # retry, so the miss is answered by the file rather than by ordering.
+            self._read_settings()
+            provider = self.registry.get(normalized)
         if provider is None:
             raise ValueError(f"Unsupported RATS provider: {normalized or 'unknown'}")
         return provider
@@ -1882,6 +2303,106 @@ class RatsRuntime:
     # Compatibility alias: remove after packaged Desktop clients use ratsSetProviderEnabled.
     def set_engine_enabled(self, executable: Path | str, enabled: bool, permissions: Any) -> Dict[str, Any]:
         return self.set_provider_enabled("reverie.engine", executable, enabled, permissions)
+
+    def list_custom_providers(self) -> List[Dict[str, Any]]:
+        """The user-declared provider definitions currently in effect."""
+        with self._lifecycle_lock:
+            self._ensure_open()
+            self._read_settings()
+        with self._lock:
+            return [
+                copy.deepcopy(self._custom_definitions[key]) for key in sorted(self._custom_definitions)
+            ]
+
+    def define_custom_provider(self, definition: Any) -> Dict[str, Any]:
+        """Store one user-declared provider definition and rescan.
+
+        Raises ``ValueError`` naming the field at fault rather than logging and
+        continuing: unlike a stored list read at startup, this is one deliberate
+        request, and silently keeping an unusable definition would leave a client
+        showing a provider that can never match a descriptor.
+        """
+        with self._lifecycle_lock:
+            self._ensure_open()
+            settings = self._read_settings()
+            record, reason = normalize_rats_custom_provider(definition, self._reserved_provider_ids())
+            if reason:
+                raise ValueError(_CUSTOM_PROVIDER_ERRORS.get(reason, f"Invalid provider definition: {reason}"))
+            existing = [
+                item
+                for item in settings.get("customProviders", [])
+                if _text(_record(item).get("providerId")) != record["providerId"]
+            ]
+            if len(existing) >= _MAX_CUSTOM_PROVIDERS:
+                raise ValueError(
+                    f"At most {_MAX_CUSTOM_PROVIDERS} custom RATS providers can be defined; "
+                    "remove one before defining another."
+                )
+            settings["customProviders"] = sorted(
+                [*existing, record], key=lambda item: _text(item.get("providerId"))
+            )
+            self._write_settings(settings)
+            return self._refresh_lifecycle()
+
+    def remove_custom_provider(self, provider_id: str) -> Dict[str, Any]:
+        """Drop one user-declared provider and everything that depended on it.
+
+        A definition is what made its selections and its discovery root valid, so
+        removing it has to take them too. Leaving them behind would keep scanning
+        a directory for a provider this client can no longer recognise, and leave
+        a stored permission grant with nothing to grant it against.
+        """
+        with self._lifecycle_lock:
+            self._ensure_open()
+            normalized = _text(provider_id).lower()
+            if not normalized:
+                raise ValueError("Name the provider id to remove.")
+            if normalized in self._reserved_provider_ids():
+                raise ValueError(f"{normalized} is a built-in RATS provider and cannot be removed.")
+            settings = self._read_settings()
+            stored = [_record(item) for item in settings.get("customProviders", [])]
+            remaining = [item for item in stored if _text(item.get("providerId")) != normalized]
+            if len(remaining) == len(stored):
+                raise ValueError(f"No custom RATS provider is defined with id {normalized}.")
+            settings["customProviders"] = remaining
+            removed_selections = [
+                item
+                for item in settings["enabledProviders"]
+                if _text(item.get("providerId")) == normalized
+            ]
+            settings["enabledProviders"] = [
+                item
+                for item in settings["enabledProviders"]
+                if _text(item.get("providerId")) != normalized
+            ]
+            classes = settings.get("providerPermissionClasses")
+            if isinstance(classes, dict):
+                classes.pop(normalized, None)
+            # Keep only the roots a surviving selection still justifies, plus any
+            # root that no removed selection explains — those were added by hand or
+            # by ``register_provider_executable`` and are not this call's to drop.
+            # Empty values are dropped before keying: ``_path_key("")`` resolves to
+            # the working directory, which would match unrelated roots.
+            orphaned = {
+                _path_key(_text(item.get("discoveryRoot")))
+                for item in removed_selections
+                if _text(item.get("discoveryRoot"))
+            }
+            justified = {
+                _path_key(_text(item.get("discoveryRoot")))
+                for item in settings["enabledProviders"]
+                if _text(item.get("discoveryRoot"))
+            }
+            settings["discoveryRoots"] = [
+                item
+                for item in settings["discoveryRoots"]
+                if _path_key(item) in justified or _path_key(item) not in orphaned
+            ]
+            self._write_settings(settings)
+            with self._lock:
+                self._custom_definitions.pop(normalized, None)
+                self._custom_providers.pop(normalized, None)
+            return self._refresh_lifecycle()
 
     def describe(
         self,
@@ -2499,7 +3020,12 @@ class RatsRuntime:
                     synthetic_name = self._dynamic_name(session, tool_name, used)
                     used.add(synthetic_name)
                     permission = _text(source.get("permission"))
-                    provider = self.provider_registry.get(session.descriptor.provider_id)
+                    # Already holding the state lock, so the caches are read
+                    # directly rather than through ``self.registry``. Built-in
+                    # first, matching the effective registry's precedence.
+                    provider = self.provider_registry.get(
+                        session.descriptor.provider_id
+                    ) or self._custom_providers.get(session.descriptor.provider_id)
                     provider_tags = list(provider.tool_tags) if provider else []
                     source_tags = list(source.get("tags", [])) if isinstance(source.get("tags"), list) else []
                     tags = list(dict.fromkeys([*source_tags, "rats", "rtp", *provider_tags]))

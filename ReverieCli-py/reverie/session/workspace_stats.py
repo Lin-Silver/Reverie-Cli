@@ -309,6 +309,24 @@ class WorkspaceStatsManager:
         return cls._encoding
 
     @classmethod
+    def describe_tokenizer(cls) -> Dict[str, Any]:
+        """Name the counter behind every token figure so readouts can disclose precision."""
+        encoding = cls._get_encoding()
+        if encoding is not None:
+            return {
+                "name": "cl100k_base",
+                "label": "tiktoken cl100k_base",
+                "exact": True,
+                "detail": "BPE token counts; provider tokenizers may differ slightly",
+            }
+        return {
+            "name": "heuristic",
+            "label": "heuristic (~4 chars/token)",
+            "exact": False,
+            "detail": "install tiktoken for BPE-accurate counts",
+        }
+
+    @classmethod
     def count_text_tokens(cls, text: Any) -> int:
         raw_text = str(text or "")
         if not raw_text:
@@ -322,32 +340,42 @@ class WorkspaceStatsManager:
         return max(1, len(raw_text) // 4)
 
     @classmethod
+    def count_message_tokens(cls, message: Any) -> int:
+        """Cost of one chat message, envelope included.
+
+        ``count_messages_tokens`` is the sum of this over every message plus the
+        two-token reply primer, so a breakdown built from this method always
+        reconciles with the total the compaction thresholds are compared against.
+        """
+        if not isinstance(message, dict):
+            return 0
+        total = 4
+        total += cls._count_value_tokens(message.get("content"))
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tool_call in tool_calls:
+                if isinstance(tool_call, dict):
+                    total += cls._count_value_tokens(
+                        {
+                            key: value
+                            for key, value in tool_call.items()
+                            if key not in {"thought_signature", "gemini_thought_signature"}
+                        }
+                    )
+        tool_call_id = message.get("tool_call_id")
+        if tool_call_id:
+            total += cls.count_text_tokens(tool_call_id)
+        name = message.get("name")
+        if name:
+            total += cls.count_text_tokens(name)
+            total -= 1
+        return total
+
+    @classmethod
     def count_messages_tokens(cls, messages: List[Dict[str, Any]]) -> int:
         total = 0
         for message in messages or []:
-            if not isinstance(message, dict):
-                continue
-            total += 4
-            content = message.get("content")
-            total += cls._count_value_tokens(content)
-            tool_calls = message.get("tool_calls")
-            if isinstance(tool_calls, list):
-                for tool_call in tool_calls:
-                    if isinstance(tool_call, dict):
-                        total += cls._count_value_tokens(
-                            {
-                                key: value
-                                for key, value in tool_call.items()
-                                if key not in {"thought_signature", "gemini_thought_signature"}
-                            }
-                        )
-            tool_call_id = message.get("tool_call_id")
-            if tool_call_id:
-                total += cls.count_text_tokens(tool_call_id)
-            name = message.get("name")
-            if name:
-                total += cls.count_text_tokens(name)
-                total -= 1
+            total += cls.count_message_tokens(message)
         return total + 2
 
     @classmethod

@@ -6,8 +6,10 @@ import sys
 from typing import Any, Callable, Dict, Optional
 
 from . import (
-    glm_5_2,
+    deepseek_v4_flash_0731,
+    deepseek_v4_pro_0813,
     gpt_oss_120b,
+    kimi_k3,
     minimax,
     muse_glimmer,
     nemotron_3_super,
@@ -20,11 +22,13 @@ from . import (
 ProfileBuilder = Callable[[Dict[str, Any]], Dict[str, Any]]
 
 _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
+    "deepseek-ai/deepseek-v4-flash-0731": deepseek_v4_flash_0731.build_openai_options,
+    "deepseek-ai/deepseek-v4-pro-0813": deepseek_v4_pro_0813.build_openai_options,
+    "moonshotai/kimi-k3": kimi_k3.build_openai_options,
     "meta/muse-glimmer-30b": muse_glimmer.build_openai_options,
     "nvidia/nemotron-3.5-lightning-30b-a3b": nemotron_35_lightning.build_openai_options,
     "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,
     "nvidia/nemotron-3-ultra-550b-a55b": nemotron_3_ultra.build_openai_options,
-    "z-ai/glm-5.2": glm_5_2.build_openai_options,
     "openai/gpt-oss-120b": gpt_oss_120b.build_openai_options,
 }
 

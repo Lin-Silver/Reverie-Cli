@@ -231,7 +231,7 @@ class ReverieSdkBridge:
             interface._refresh_agent_prompt_guidance()
 
     @staticmethod
-    def _skill_record(record: Any, pinned_keys: Any = ()) -> Dict[str, Any]:
+    def _skill_record(record: Any, pinned_keys: Any = (), shadowed_paths: Any = ()) -> Dict[str, Any]:
         lookup_key = str(getattr(record, "lookup_key", "") or "")
         return {
             "key": lookup_key,
@@ -244,6 +244,7 @@ class ReverieSdkBridge:
             "plugin_id": getattr(record, "plugin_id", ""),
             "allow_implicit_invocation": bool(getattr(record, "allow_implicit_invocation", True)),
             "pinned": lookup_key in pinned_keys,
+            "shadowed": str(getattr(record, "display_path", "")).lower() in shadowed_paths,
         }
 
     def skills_payload(self, *, force_refresh: bool = False) -> Dict[str, Any]:
@@ -252,10 +253,14 @@ class ReverieSdkBridge:
         snapshot = manager.get_snapshot(force_refresh=force_refresh)
         state = manager.pinned_state(force_refresh=False)
         pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
+        shadowed_paths = frozenset(getattr(snapshot, "shadowed_paths", ()) or ())
         return {
             "count": len(snapshot.records),
             "invalid_count": len(snapshot.errors),
-            "records": [self._skill_record(record, pinned_keys) for record in snapshot.records],
+            "shadowed_count": len(getattr(snapshot, "shadowed", ()) or ()),
+            "records": [
+                self._skill_record(record, pinned_keys, shadowed_paths) for record in snapshot.records
+            ],
             "pinned": {
                 "max": int(state.get("max", 0) or 0),
                 "keys": sorted(pinned_keys),
@@ -263,6 +268,7 @@ class ReverieSdkBridge:
                 "unresolved": [str(name) for name in state.get("unresolved", [])],
             },
             "errors": _json_safe(manager.list_error_rows(force_refresh=False)),
+            "shadowed": _json_safe(manager.list_shadow_rows(force_refresh=False)),
         }
 
     def _refresh_pinned_skills(self) -> None:
@@ -1138,6 +1144,28 @@ class ReverieSdkBridge:
             }
         if action == "ratsState":
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(self.rats_runtime.refresh())}
+        if action == "ratsStateCached":
+            # The same view without a rescan, for a client repainting a panel it
+            # already populated. ``ratsState`` stays the one that walks the disk.
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(self.rats_runtime.state())}
+        if action == "ratsDefineCustomProvider":
+            definition = payload.get("definition")
+            if definition is None:
+                # Accept the definition inline as well, so a client does not have
+                # to nest a single object one level deeper than it reads it back.
+                definition = {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"action", "id", "requestId"}
+                }
+            state = self.rats_runtime.define_custom_provider(definition)
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
+        if action == "ratsRemoveCustomProvider":
+            provider_id = str(payload.get("providerId") or "").strip()
+            if not provider_id:
+                raise ValueError("A RATS provider id is required.")
+            state = self.rats_runtime.remove_custom_provider(provider_id)
+            return {"id": request_id, "type": "rats.state", "rats": _json_safe(state)}
         if action in {"ratsRegisterProvider", "ratsAddEngine"}:
             executable = str(payload.get("executable") or "").strip()
             if not executable:

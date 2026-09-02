@@ -53,7 +53,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Muse Glimmer 30B, Nemotron 3.5 Lightning, Nemotron 3 Super/Ultra, GLM-5.2, MiniMax M3, Step-3.7-Flash, GPT-OSS-120B, Laguna XS 2.1 |
+| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Kimi K3, DeepSeek V4 Pro/Flash, Muse Glimmer 30B, Nemotron 3.5 Lightning, Nemotron 3 Super/Ultra, MiniMax M3, Step-3.7-Flash, GPT-OSS-120B, Laguna XS 2.1 |
 | **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Step 3.7 Flash, GLM-5.2, DeepSeek V4 Pro, DeepSeek V4 Flash                                                                                                                            |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
 | **SenseNova**      | SenseTime SenseNova API with live model discovery and OpenAI-compatible transport                              | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.2, and SenseNova 6.8 Flash Lite                                                                                            |
@@ -202,7 +202,7 @@ Reverie-Cli/
 │   │   │   └── tool_executor.py← Tool execution
 │   │   ├── cli/
 │   │   │   └── interface.py   ← Terminal UI (Rich-based)
-│   │   ├── nvidia.py          ← NVIDIA provider integration (9 models)
+│   │   ├── nvidia.py          ← NVIDIA provider integration (11 models)
 │   │   ├── codex.py           ← Codex/ChatGPT provider integration
 │   │   ├── modelscope.py      ← ModelScope OpenAI Chat provider and capability catalog
 │   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
@@ -482,7 +482,7 @@ Desktop orchestration through an embedded Open Computer Use-compatible desktop r
 
 ### NVIDIA (Recommended for High-Throughput)
 
-NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 9 supported models. Key configurations:
+NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 11 supported models. Key configurations:
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
@@ -494,23 +494,25 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 9 supported
 | `nvidia/nemotron-3-ultra-550b-a55b`              | Nemotron 3 Ultra 550B           | openai-sdk | ❌           | fixed thinking                      | 1M      |
 | `nvidia/nemotron-3-super-120b-a12b`              | Nemotron 3 Super 120B           | openai-sdk | ❌           | effort (none/low/high)              | 1M      |
 | `poolside/laguna-xs-2.1`                         | Laguna XS 2.1                   | openai-sdk | ❌           | ❌                                  | 262K    |
+| `deepseek-ai/deepseek-v4-flash-0731`             | DeepSeek V4 Flash 0731          | openai-sdk | ❌           | effort (none/high/max)              | 1M      |
+| `deepseek-ai/deepseek-v4-pro-0813`               | DeepSeek V4 Pro 0813            | openai-sdk | ❌           | effort (none/high/max)              | 1M      |
+| `moonshotai/kimi-k3`                             | Kimi K3                         | openai-sdk | ✅           | effort (low/high/max; always on)    | 1M      |
 | `minimaxai/minimax-m3`                           | MiniMax M3                      | request    | ✅ (img+vid) | effort (none/high)                  | 1M      |
-| `z-ai/glm-5.2`                                   | GLM-5.2                         | openai-sdk | ❌           | fixed thinking                      | 1M      |
 | `stepfun-ai/step-3.7-flash`                      | Step-3.7-Flash                  | request    | ✅           | fixed thinking                      | 256K    |
 | `openai/gpt-oss-120b`                            | GPT-OSS-120B                    | openai-sdk | ❌           | effort (low/med/high)               | 128K    |
 
 **Transport types:**
 
 - `request` — Direct HTTP POST with model-specific defaults (for MiniMax M3 and Step-3.7-Flash)
-- `openai-sdk` — OpenAI-compatible SDK transport (for models like Muse Glimmer, Nemotron, GLM-5.2, and GPT-OSS-120B)
+- `openai-sdk` — OpenAI-compatible SDK transport (for models like Kimi K3, DeepSeek V4, Muse Glimmer, Nemotron, and GPT-OSS-120B)
 
 **Thinking control:**
 
 - `toggle` — Binary on/off (Nemotron 3.5 Lightning)
-- `effort` — Fixed per-model levels (Muse Glimmer, Nemotron 3 Super, GPT-OSS-120B, MiniMax M3)
-- `fixed` — Always-on provider reasoning (Nemotron 3 Ultra, GLM-5.2, and Step-3.7-Flash)
+- `effort` — Fixed per-model levels (Kimi K3, DeepSeek V4, Muse Glimmer, Nemotron 3 Super, GPT-OSS-120B, MiniMax M3)
+- `fixed` — Always-on provider reasoning (Nemotron 3 Ultra and Step-3.7-Flash)
 
-**Vision models:** Muse Glimmer, MiniMax M3, and Step-3.7-Flash support image and/or video input.
+**Vision models:** Kimi K3, Muse Glimmer, MiniMax M3, and Step-3.7-Flash support image and/or video input. Kimi K3 also replays the provider's `reasoning_content` in multi-turn and tool-call history, as required by its preserved-thinking protocol.
 
 ### ModelScope
 

@@ -63,6 +63,7 @@ from ..nvidia import (
     is_nvidia_api_url,
     is_nvidia_model,
     nvidia_model_allows_tools,
+    nvidia_model_requires_preserved_reasoning_history,
     nvidia_model_requires_system_message_first,
 )
 from ..aihubmix import build_aihubmix_openai_options
@@ -5260,11 +5261,15 @@ class ReverieAgent:
         memory_context = self._memory_context_package_message()
         if memory_context:
             messages.append(memory_context)
+        preserve_nvidia_reasoning = (
+            self._is_active_model_source("nvidia")
+            and nvidia_model_requires_preserved_reasoning_history(self.model)
+        )
         for message in self._select_prompt_history():
             if not isinstance(message, dict):
                 continue
             normalized = dict(message)
-            if not include_reasoning:
+            if not include_reasoning and not preserve_nvidia_reasoning:
                 normalized.pop("reasoning_content", None)
             messages.append(normalized)
         if (
@@ -7196,8 +7201,8 @@ class ReverieAgent:
 
         token_estimate = self.get_token_estimate()
         self._last_context_safety_signature = self._context_safety_signature()
-        compaction_threshold = max_tokens * 0.7
-        rotation_threshold = max_tokens * 0.82
+        compaction_threshold = max_tokens * self.CONTEXT_COMPACTION_RATIO
+        rotation_threshold = max_tokens * self.CONTEXT_ROTATION_RATIO
 
         if token_estimate >= compaction_threshold:
             token_estimate = self._handle_context_compaction(token_estimate, max_tokens, session_id=session_id)
@@ -7288,6 +7293,144 @@ class ReverieAgent:
         finally:
             self._auto_context_rotation_active = False
     
+    def _token_counter(self):
+        """Resolve the one token counter every readout in this process must share.
+
+        The workspace stats manager owns the counter, but it is optional in the
+        tool-executor context (subagents and bare embeddings run without it), so
+        fall back to the class itself rather than to a second, looser estimate.
+        """
+        manager = self.tool_executor.context.get("workspace_stats_manager")
+        if manager is not None and hasattr(manager, "count_messages_tokens"):
+            return manager
+        from ..session.workspace_stats import WorkspaceStatsManager
+
+        return WorkspaceStatsManager
+
+    def _count_request_tokens(self, request_messages: List[Dict[str, Any]]) -> int:
+        """Count the tokens one built request payload will occupy."""
+        counter = self._token_counter()
+        try:
+            return max(int(counter.count_messages_tokens(request_messages)), 0)
+        except Exception:
+            logger.debug("Token counter failed; falling back to character heuristic", exc_info=True)
+
+        total_chars = 0
+        for message in request_messages or []:
+            if not isinstance(message, dict):
+                total_chars += len(str(message))
+                continue
+            total_chars += len(_coerce_text_fragments(message.get("content")))
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                total_chars += len(str(tool_calls))
+        return total_chars // 4
+
+    def describe_context_usage(self) -> Dict[str, Any]:
+        """Break the live request payload into an auditable token budget.
+
+        Every figure below comes from one counter and one build of the payload the
+        next API call would send, so the total is exactly the number the
+        compaction and rotation thresholds are compared against.
+        """
+        counter = self._token_counter()
+        count_one = getattr(counter, "count_message_tokens", None)
+        if not callable(count_one):
+            from ..session.workspace_stats import WorkspaceStatsManager
+
+            count_one = WorkspaceStatsManager.count_message_tokens
+
+        request_messages = self._build_messages()
+        total_tokens = self._count_request_tokens(request_messages)
+        self._token_estimate_cache_key = self._token_estimate_signature()
+        self._token_estimate_cache_value = total_tokens
+        self._token_estimate_cache_time = time.monotonic()
+
+        buckets: Dict[str, Dict[str, int]] = {}
+        heaviest = {"role": "", "index": -1, "tokens": 0, "preview": ""}
+        for index, message in enumerate(request_messages):
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "") or "").strip().lower() or "unknown"
+            if index == 0 and role == "system":
+                key = "system_prompt"
+            elif role == "system":
+                key = "injected_context"
+            else:
+                key = role
+            try:
+                tokens = max(int(count_one(message)), 0)
+            except Exception:
+                tokens = 0
+            bucket = buckets.setdefault(key, {"tokens": 0, "messages": 0})
+            bucket["tokens"] += tokens
+            bucket["messages"] += 1
+            if tokens > int(heaviest["tokens"]):
+                preview = " ".join(_coerce_text_fragments(message.get("content")).split())
+                heaviest = {
+                    "role": role,
+                    "index": index,
+                    "tokens": tokens,
+                    "preview": preview[:117] + "..." if len(preview) > 120 else preview,
+                }
+
+        return self._context_usage_report(request_messages, total_tokens, buckets, heaviest)
+
+    #: Fractions of the context window at which the agent compacts, then rotates.
+    CONTEXT_COMPACTION_RATIO = 0.7
+    CONTEXT_ROTATION_RATIO = 0.82
+
+    def _context_usage_report(
+        self,
+        request_messages: List[Dict[str, Any]],
+        total_tokens: int,
+        buckets: Dict[str, Dict[str, int]],
+        heaviest: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Assemble the /status context-usage payload from a counted payload."""
+        from ..session.workspace_stats import WorkspaceStatsManager
+
+        max_tokens = max(int(self._resolve_max_context_tokens() or 0), 0)
+        percentage = (total_tokens / max_tokens * 100.0) if max_tokens else 0.0
+        history = self.messages if isinstance(self.messages, list) else []
+        reasoning_tokens = 0
+        for message in history:
+            if not isinstance(message, dict):
+                continue
+            reasoning = _coerce_text_fragments(message.get("reasoning_content"))
+            if reasoning:
+                reasoning_tokens += WorkspaceStatsManager.count_text_tokens(reasoning)
+
+        segment_order = ("system_prompt", "injected_context", "user", "assistant", "tool")
+        segments = [
+            {
+                "key": key,
+                "tokens": buckets[key]["tokens"],
+                "messages": buckets[key]["messages"],
+                "share": (buckets[key]["tokens"] / total_tokens * 100.0) if total_tokens else 0.0,
+            }
+            for key in list(segment_order) + sorted(set(buckets) - set(segment_order))
+            if key in buckets
+        ]
+        counted = sum(item["tokens"] for item in segments)
+
+        return {
+            "tokenizer": WorkspaceStatsManager.describe_tokenizer(),
+            "total_tokens": total_tokens,
+            "max_tokens": max_tokens,
+            "remaining_tokens": max(max_tokens - total_tokens, 0) if max_tokens else 0,
+            "percentage": percentage,
+            "overhead_tokens": max(total_tokens - counted, 0),
+            "segments": segments,
+            "heaviest_message": heaviest,
+            "reasoning_tokens": reasoning_tokens,
+            "payload_message_count": len(request_messages),
+            "history_message_count": len(history),
+            "history_limit": int(getattr(self, "_prompt_history_limit", 0) or 0),
+            "compaction_tokens": int(max_tokens * self.CONTEXT_COMPACTION_RATIO) if max_tokens else 0,
+            "rotation_tokens": int(max_tokens * self.CONTEXT_ROTATION_RATIO) if max_tokens else 0,
+        }
+
     def get_token_estimate(self) -> int:
         """Estimate tokens in current conversation"""
         cache_key = self._token_estimate_signature()
@@ -7299,54 +7442,8 @@ class ReverieAgent:
             return self._token_estimate_cache_value
 
         request_messages = self._build_messages()
-        workspace_stats_manager = self.tool_executor.context.get("workspace_stats_manager")
-        if workspace_stats_manager and hasattr(workspace_stats_manager, "count_messages_tokens"):
-            try:
-                estimate = max(int(workspace_stats_manager.count_messages_tokens(request_messages)), 0)
-                self._token_estimate_cache_key = cache_key
-                self._token_estimate_cache_value = estimate
-                self._token_estimate_cache_time = cache_now
-                return estimate
-            except Exception:
-                logger.debug("Workspace token counter failed; falling back to heuristic estimate", exc_info=True)
-
-        total_chars = 0
-        for msg in request_messages:
-            content = _coerce_text_fragments(msg.get("content"))
-            if content:
-                total_chars += len(content)
-            tool_calls = msg.get("tool_calls")
-            if isinstance(tool_calls, list) and tool_calls:
-                try:
-                    total_chars += len(
-                        json.dumps(
-                            [
-                                {
-                                    key: value
-                                    for key, value in tool_call.items()
-                                    if key not in {"thought_signature", "gemini_thought_signature"}
-                                }
-                                for tool_call in tool_calls
-                                if isinstance(tool_call, dict)
-                            ],
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        )
-                    )
-                except Exception:
-                    total_chars += len(str(tool_calls))
-            tool_call_id = str(msg.get("tool_call_id", "") or "").strip()
-            if tool_call_id:
-                total_chars += len(tool_call_id)
-            name = str(msg.get("name", "") or "").strip()
-            if name:
-                total_chars += len(name)
-
-        estimate = total_chars // 4
+        estimate = self._count_request_tokens(request_messages)
         self._token_estimate_cache_key = cache_key
         self._token_estimate_cache_value = estimate
         self._token_estimate_cache_time = cache_now
         return estimate
-        
-        # Rough estimate: 1 token ≈ 4 characters
-        return total_chars // 4

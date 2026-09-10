@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from pathlib import Path
 import re
 
 from ..skills_manager import SkillRecord
@@ -44,6 +45,8 @@ class SkillLookupTool(BaseTool):
 
 Use this tool when a skill seems relevant. Inspect its full SKILL.md body before
 acting; if the body is returned in chunks, request every remaining chunk.
+Use read_resource with a skill-relative resource_path to read bundled references
+and scripts without granting access outside that skill package.
 """
 
     parameters = {
@@ -51,16 +54,20 @@ acting; if the body is returned in chunks, request every remaining chunk.
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["list", "search", "inspect"],
-                "description": "Whether to list skills, search by keywords, or inspect one skill body",
+                "enum": ["list", "search", "inspect", "read_resource"],
+                "description": "List skills, search by keywords, inspect a skill body, or read a packaged text resource",
             },
             "query": {
                 "type": "string",
                 "description": "For search: keywords to match against skill names, descriptions, and body text",
             },
+            "resource_path": {
+                "type": "string",
+                "description": "For read_resource: relative text file path inside the selected skill package",
+            },
             "skill_name": {
                 "type": "string",
-                "description": "For inspect: exact skill name, directory name, or SKILL.md path",
+                "description": "For inspect/read_resource: exact skill name, directory name, or SKILL.md path",
             },
             "max_results": {
                 "type": "integer",
@@ -69,12 +76,12 @@ acting; if the body is returned in chunks, request every remaining chunk.
             },
             "max_body_chars": {
                 "type": "integer",
-                "description": "For inspect: maximum number of skill-body characters in this chunk (default: 12000)",
+                "description": "For inspect/read_resource: maximum number of text characters in this chunk (default: 12000)",
                 "default": 12000,
             },
             "body_offset": {
                 "type": "integer",
-                "description": "For inspect: zero-based character offset for the next Skill body chunk",
+                "description": "For inspect/read_resource: zero-based character offset for the next text chunk",
                 "default": 0,
             },
             "force_refresh": {
@@ -110,6 +117,12 @@ acting; if the body is returned in chunks, request every remaining chunk.
             score += 120
         elif normalized_query in name:
             score += 80
+
+        # Literal phrases also match languages outside the Latin token index.
+        if normalized_query in description:
+            score += 40
+        if normalized_query in body:
+            score += 8
 
         overlap = query_tokens & skill_tokens
         score += len(overlap) * 18
@@ -182,10 +195,13 @@ acting; if the body is returned in chunks, request every remaining chunk.
                 if str(record.path_to_skill_md).lower() not in hidden_paths
             ]
         pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
+        mode_notice = manager.get_mode_notice()
 
         if operation == "list":
             visible = records[:max_results]
             lines = [f"Discovered skills: {len(records)} valid, {len(snapshot.errors)} invalid"]
+            if mode_notice:
+                lines.append(mode_notice)
             if pinned_keys:
                 lines.append("Pinned skills are mandatory for every turn until the user unpins them.")
             if not visible:
@@ -217,6 +233,8 @@ acting; if the body is returned in chunks, request every remaining chunk.
             visible = matches[:max_results]
 
             lines = [f"Skill search for '{query}': {len(matches)} matches"]
+            if mode_notice:
+                lines.append(mode_notice)
             if not visible:
                 lines.append("- No matching skills found.")
             else:
@@ -233,6 +251,35 @@ acting; if the body is returned in chunks, request every remaining chunk.
                     "items": self._list_rows(matches, max_results, pinned_keys),
                 },
             )
+
+        if operation == "read_resource":
+            record = manager.get_record(str(kwargs.get("skill_name") or ""), force_refresh=False)
+            if record is None or record.source_uri:
+                return ToolResult.fail("A local discovered skill is required for read_resource.")
+            try:
+                relative = Path(str(kwargs.get("resource_path") or ""))
+                root = record.skill_dir.resolve()
+                target = (root / relative).resolve()
+                if relative.is_absolute() or not target.is_relative_to(root) or not target.is_file():
+                    return ToolResult.fail("resource_path must identify a file inside the selected skill package.")
+                with target.open("rb") as stream:
+                    raw = stream.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024 or b"\x00" in raw:
+                    return ToolResult.fail("Skill resource is binary or exceeds the 2 MiB text limit.")
+                body = raw.decode("utf-8-sig")
+            except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+                return ToolResult.fail(f"Cannot read skill resource: {exc}")
+            chunk = body[body_offset:body_offset + max_body_chars]
+            next_offset = body_offset + len(chunk)
+            complete = next_offset >= len(body)
+            output = f"Skill resource: {record.name}/{relative.as_posix()}\n\n{chunk}"
+            if not complete:
+                output += f"\n[more resource text remains; read_resource again with body_offset={next_offset}]"
+            return ToolResult.ok(output, data={
+                "name": record.name, "path": str(target), "body": chunk,
+                "body_offset": body_offset, "next_body_offset": None if complete else next_offset,
+                "complete": complete,
+            })
 
         if operation == "inspect":
             skill_name = str(kwargs.get("skill_name", "") or "").strip()
@@ -261,6 +308,8 @@ acting; if the body is returned in chunks, request every remaining chunk.
             ]
             if is_pinned:
                 lines.append("Pinned: the user requires this skill on every turn until it is unpinned.")
+            if mode_notice:
+                lines.append(mode_notice)
             lines.extend(
                 [
                     "",

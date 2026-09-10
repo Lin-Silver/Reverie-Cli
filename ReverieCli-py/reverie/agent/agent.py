@@ -4477,8 +4477,19 @@ class ReverieAgent:
 
         if state.tool_calls:
             history_tool_calls = _compact_tool_calls_for_history(state.tool_calls, mode=self.mode)
+            # Some providers emit a provisional natural-language reply in the
+            # same response as a pure deep_think call. That reply is not a
+            # completed answer: the tool explicitly hands control back for the
+            # next response. Keeping it in history makes the GUI render it and
+            # the actual final answer as two assistant messages.
+            thought_only = all(
+                is_think_tool((call.get("function") or {}).get("name"))
+                for call in state.tool_calls
+                if isinstance(call, dict)
+            )
+            history_content = "" if thought_only else clean_content
             assistant_message = _build_assistant_history_message(
-                clean_content or None,
+                history_content or None,
                 tool_calls=history_tool_calls,
                 reasoning_content=state.collected_thinking,
             )
@@ -4486,13 +4497,13 @@ class ReverieAgent:
             messages.append(assistant_message)
             self._record_model_usage(
                 request_messages=request_messages,
-                assistant_text=clean_content,
+                assistant_text=history_content,
                 reasoning_text=state.collected_thinking,
                 tool_calls=history_tool_calls,
                 usage=usage,
                 session_id=session_id,
             )
-            return "tool_calls", clean_content
+            return "tool_calls", history_content
 
         if clean_content:
             self.messages.append(
@@ -4704,6 +4715,26 @@ class ReverieAgent:
 
         self._check_tool_side_effects(tool_name, args)
 
+        from ..desktop_changes import read_edit_snapshot
+        edit_path = None
+        old_edit_content = None
+        edit_operation = None
+        canonical_name = getattr(tool, "name", tool_name)
+        if canonical_name == "str_replace_editor":
+            command = str(args.get("command") or "")
+            if command in {"str_replace", "insert", "create"}:
+                edit_operation = "create" if command == "create" else "modify"
+        elif canonical_name in {"create_file", "delete_file"}:
+            edit_operation = "create" if canonical_name == "create_file" else "delete"
+        if self.operation_history and edit_operation and args.get("path") and tool:
+            try:
+                edit_path = tool.resolve_workspace_path(args["path"], purpose="preview file edit")
+                if edit_operation == "create" and edit_path.exists():
+                    edit_operation = "modify"
+                old_edit_content = read_edit_snapshot(edit_path)
+            except Exception:
+                logger.debug("File edit snapshot unavailable", exc_info=True)
+
         if self.rollback_manager:
             try:
                 self.rollback_manager.create_pre_tool_checkpoint(
@@ -4744,28 +4775,15 @@ class ReverieAgent:
                     error=result.error,
                     parent_id=parent_id,
                 )
-                if result.success:
-                    edit_operation = None
-                    if tool_name == "str_replace_editor":
-                        command = str(args.get("command") or "").strip()
-                        if command in {"str_replace", "insert"}:
-                            edit_operation = "modify"
-                        elif command == "create":
-                            edit_operation = "create"
-                    elif tool_name == "create_file":
-                        edit_operation = "create"
-                    elif tool_name == "delete_file":
-                        edit_operation = "delete"
-
-                    raw_path = args.get("path") if isinstance(args, dict) else None
-                    if edit_operation and raw_path:
-                        self.operation_history.add_file_operation(
-                            file_path=str(raw_path),
-                            operation=edit_operation,
-                            old_content=None,
-                            new_content=None,
-                            parent_id=tool_operation.id,
-                        )
+                if result.success and edit_operation and edit_path is not None:
+                    self.operation_history.add_file_operation(
+                        file_path=str(edit_path),
+                        operation=edit_operation,
+                        old_content=old_edit_content,
+                        new_content=read_edit_snapshot(edit_path),
+                        parent_id=tool_operation.id,
+                        session_id=session_id,
+                    )
             except Exception:
                 logger.debug("Operation history tool logging failed", exc_info=True)
 

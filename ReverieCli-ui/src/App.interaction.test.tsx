@@ -239,6 +239,7 @@ function installDesktopApi(options: {
   settingItems?: DesktopState["settings"]["items"];
   gatePrompt?: boolean;
   gateSession?: boolean;
+  initialSession?: SessionState;
 } = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
@@ -431,9 +432,18 @@ function installDesktopApi(options: {
     return legacy;
   };
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
+    if (action === "getFileChanges") return { type: "file.changes", session_id: payload.sessionId, changes: [] };
     if (action === "initialize") {
       const state = options.initialState ?? { ...desktopState, models: models(), settings: settings() };
       return { type: "state", state };
+    }
+    if (action === "createSession") {
+      const session = { ...baseSession, id: "session-new", name: "New session", messages: [] };
+      return {
+        type: "session.created",
+        session,
+        sessions: { ...desktopState.sessions, current_session_id: session.id, items: [...desktopState.sessions.items, { id: session.id, name: session.name, created_at: session.created_at, updated_at: session.updated_at, message_count: 0 }] },
+      };
     }
     if (action === "addCustomProvider") {
       const input = payload.provider as { name: string; base_url: string; api_key: string; format: string };
@@ -503,7 +513,7 @@ function installDesktopApi(options: {
         ? searchSession
         : promptFinished
           ? { ...baseSession, messages: [{ role: "user", content: "Inspect the cache" }, { role: "assistant", content: "Cache inspection complete" }] }
-          : baseSession;
+          : options.initialSession ?? baseSession;
       return { type: "session", session, sessions: desktopState.sessions };
     }
     if (action === "searchSessions") {
@@ -792,6 +802,41 @@ afterEach(() => {
 });
 
 describe("desktop GUI interactions", () => {
+  it("keeps errors visible for twelve seconds and allows early dismissal", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "技能" }));
+    const refresh = screen.getByRole("button", { name: "重新扫描" });
+    vi.useFakeTimers();
+    const triggerError = async () => {
+      request.mockRejectedValueOnce(new Error("Unable to refresh skills.\nCheck the resource path."));
+      await act(async () => { fireEvent.click(refresh); });
+    };
+    await triggerError();
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Check the resource path.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(11_999); });
+    expect(screen.getByRole("alert")).toBe(alert);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByRole("alert")).toBeNull();
+    await triggerError();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each(["writer", "computer-controller"])("keeps skills browsable with mode guidance in %s", async (mode) => {
+    installDesktopApi({ initialState: { ...desktopState, skills: { ...desktopState.skills, mode } } });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "技能" }));
+    const note = await screen.findByRole("note");
+    expect(note.textContent).toContain("Reverie");
+    expect(note.textContent).toContain("固定状态会保留");
+    expect(screen.getByText("photo-to-3d")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "筛选技能" })).toBeTruthy();
+  });
+
   it("opens an accessible command dialog, traps focus, and restores focus on Escape", async () => {
     installDesktopApi();
     const user = userEvent.setup();
@@ -823,6 +868,20 @@ describe("desktop GUI interactions", () => {
 
     await user.keyboard("{Control>}b{/Control}");
     expect(shell?.classList.contains("sidebar-collapsed")).toBe(false);
+  });
+
+  it("creates a new chat from the active project's overflow menu", async () => {
+    const { request } = installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "user", content: "Existing work" }] } });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await user.click(screen.getByRole("button", { name: "管理项目 workspace" }));
+    const newChatButtons = screen.getAllByRole("button", { name: "新对话" });
+    await user.click(newChatButtons[newChatButtons.length - 1]);
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {}));
+    expect((await screen.findAllByText("New session")).length).toBeGreaterThan(0);
   });
 
   it("searches session content and opens the selected session", async () => {
@@ -950,6 +1009,7 @@ describe("desktop GUI interactions", () => {
     render(<App />);
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
 
+    await user.click(screen.getByRole("button", { name: "上下文" }));
     expect(await screen.findByTitle("压缩上下文")).toBeTruthy();
     await user.type(composer, "/compact preserve provider failures{Enter}");
 
@@ -969,6 +1029,7 @@ describe("desktop GUI interactions", () => {
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
     await user.type(composer, "unfinished draft");
 
+    await user.click(screen.getByRole("button", { name: "上下文" }));
     await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", {
@@ -1054,6 +1115,7 @@ describe("desktop GUI interactions", () => {
 
     expect(await screen.findByRole("button", { name: /Computer/ })).toBeTruthy();
     expect(container.querySelector(".model-trigger")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "上下文" }));
     expect(screen.getByText("Muse Glimmer 30B")).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "模型来源" })).toBeNull();
   });
@@ -2029,6 +2091,11 @@ describe("desktop GUI interactions", () => {
 
     await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
     expect(container.querySelector(".inspector")?.hasAttribute("aria-hidden")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "收起右侧栏" }));
+    await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(false));
+    await user.keyboard("{Control>}{Shift>}b{/Shift}{/Control}");
+    await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
   });
 
   it("renders a streaming Thinking Tool call as reasoning instead of a silent activity row", async () => {
@@ -2068,6 +2135,30 @@ describe("desktop GUI interactions", () => {
 
     releasePrompt();
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
+  });
+
+  it("hides provisional prose stored beside a thinking-only tool call", async () => {
+    const provisional = "This provisional answer must not appear as a second reply.";
+    installDesktopApi({
+      initialSession: {
+        ...baseSession,
+        messages: [
+          { role: "user", content: "hello" },
+          {
+            role: "assistant",
+            content: provisional,
+            reasoning_content: "I should think before replying.",
+            tool_calls: [{ id: "think-1", type: "function", function: { name: "deep_think", arguments: '{"thought":"check first"}' } }],
+          },
+          { role: "assistant", content: "The one final reply." },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("The one final reply.")).toBeTruthy();
+    expect(screen.queryByText(provisional)).toBeNull();
   });
 
   it("keeps the experimental badge in English, matching the core's own setting copy", async () => {

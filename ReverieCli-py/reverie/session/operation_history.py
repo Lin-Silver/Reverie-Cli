@@ -38,6 +38,7 @@ class FileOperation:
     old_content: Optional[str] = None
     new_content: Optional[str] = None
     line_changes: Optional[Dict[str, Any]] = None
+    session_id: str = ""
     
     def to_dict(self) -> dict:
         return {
@@ -45,7 +46,8 @@ class FileOperation:
             'operation': self.operation,
             'old_content': self.old_content,
             'new_content': self.new_content,
-            'line_changes': self.line_changes
+            'line_changes': self.line_changes,
+            'session_id': self.session_id,
         }
     
     @classmethod
@@ -55,7 +57,8 @@ class FileOperation:
             operation=data['operation'],
             old_content=data.get('old_content'),
             new_content=data.get('new_content'),
-            line_changes=data.get('line_changes')
+            line_changes=data.get('line_changes'),
+            session_id=str(data.get('session_id') or ''),
         )
 
 
@@ -234,7 +237,8 @@ class OperationHistory:
         operation: str,
         old_content: Optional[str],
         new_content: Optional[str],
-        parent_id: Optional[str] = None
+        parent_id: Optional[str] = None,
+        session_id: str = "",
     ) -> Operation:
         """
         Add a file operation to the history.
@@ -253,7 +257,8 @@ class OperationHistory:
             file_path=file_path,
             operation=operation,
             old_content=old_content,
-            new_content=new_content
+            new_content=new_content,
+            session_id=session_id,
         )
         
         operation = Operation(

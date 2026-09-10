@@ -78,6 +78,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { FileChanges } from "./FileChanges";
 import type {
   CommandRecord,
   ConfigField,
@@ -542,6 +543,7 @@ function Sidebar({
   activeSessionId,
   openSession,
   newSession,
+  newProjectSession,
   sessionBusy,
   selectWorkspace,
   switchWorkspace,
@@ -560,6 +562,7 @@ function Sidebar({
   activeSessionId: string;
   openSession: (id: string) => void;
   newSession: () => void;
+  newProjectSession: (projectRoot: string) => void;
   sessionBusy: boolean;
   selectWorkspace: () => void;
   switchWorkspace: (projectRoot: string) => void;
@@ -733,6 +736,9 @@ function Sidebar({
                 </button>
                 {projectMenuRoot === projectRoot && (
                   <div className="project-menu" onPointerDown={(event) => event.stopPropagation()}>
+                    <button type="button" disabled={sessionBusy} onClick={() => { setProjectMenuRoot(""); newProjectSession(projectRoot); }}>
+                      <Plus size={14} /><span>{t("新对话")}</span>
+                    </button>
                     <button type="button" onClick={() => { setProjectMenuRoot(""); void window.reverie.reveal(projectRoot); }}>
                       <FolderOpen size={14} /><span>{t("显示项目目录")}</span>
                     </button>
@@ -1241,14 +1247,19 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
   const calls = toolCallRecords(message);
   const visibleReasoning = preferences.showReasoning && Boolean(reasoning);
   const visibleCalls = preferences.showToolCalls && calls.length > 0;
-  if (message.role === "system" || (!text && !visibleReasoning && !visibleCalls)) return null;
+  // Older sessions can contain a model's provisional prose alongside a pure
+  // deep_think call. It is not the final answer (the call asks the model to
+  // continue), so rendering it makes one turn look like two replies.
+  const provisionalThinking = message.role === "assistant" && calls.length > 0 && calls.every((call) => isThinkTool(call.name));
+  const visibleText = provisionalThinking ? "" : text;
+  if (message.role === "system" || (!visibleText && !visibleReasoning && !visibleCalls)) return null;
   if (message.role === "tool") {
     return preferences.showToolResults
       ? <HistoryToolResult message={message} text={text} defaultExpanded={preferences.expandToolResults} />
       : null;
   }
   const user = message.role === "user";
-  const technicalOnly = message.role === "assistant" && !text && (visibleReasoning || visibleCalls);
+  const technicalOnly = message.role === "assistant" && !visibleText && (visibleReasoning || visibleCalls);
   return (
     <article className={`message ${message.role} ${technicalOnly ? "technical-only" : ""}`}>
       {!technicalOnly && <div className="message-heading">
@@ -1258,7 +1269,7 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
       <div className="message-body">
         {visibleReasoning && <HistoryReasoning text={reasoning} defaultExpanded={preferences.expandReasoning} />}
         {visibleCalls && <ToolCallList message={message} />}
-        {text && (message.role === "assistant" ? <Markdown>{text}</Markdown> : <div className="user-text">{text}</div>)}
+        {visibleText && (message.role === "assistant" ? <Markdown>{visibleText}</Markdown> : <div className="user-text">{visibleText}</div>)}
       </div>
     </article>
   );
@@ -1859,6 +1870,9 @@ function SkillsView({
         description={t("固定一个技能后，Reverie 每一轮都必须先读取它的 SKILL.md 并遵循其中的流程，直到你取消固定。固定只作用于当前会话，不会写入配置文件。")}
         action={<button type="button" className="secondary-button" onClick={refresh}><RefreshCw size={14} />{t("重新扫描")}</button>}
       />
+      {(skills.mode === "writer" || skills.mode === "computer-controller") && (
+        <p role="note" className="muted">{t(skills.mode === "writer" ? "skill.mode.writer" : "skill.mode.computer")}</p>
+      )}
       <div className="metric-grid">
         <div><Sparkles size={16} /><span>{t("已发现技能")}</span><strong>{skills.count}</strong></div>
         <div><Pin size={16} /><span>{t("已固定")}</span><strong>{pinnedCount} / {skills.pinned.max}</strong></div>
@@ -2685,6 +2699,9 @@ function Inspector({
   compactContext,
   compactDisabled,
   hidden,
+  sessionId,
+  running,
+  close,
 }: {
   state: DesktopState;
   liveTurn: LiveTurn | null;
@@ -2692,9 +2709,12 @@ function Inspector({
   compactContext: () => void;
   compactDisabled: boolean;
   hidden: boolean;
+  sessionId: string;
+  running: boolean;
+  close: () => void;
 }) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"context" | "activity">("context");
+  const [tab, setTab] = useState<"changes" | "context" | "activity">("changes");
   const permission = state.settings.items.find((item) => item.key === "permission_level")?.value;
   const events = liveTurn?.events ?? [];
   const contextEngine = state.workspace.context_engine;
@@ -2707,8 +2727,10 @@ function Inspector({
     // Stays in the tree while collapsed so the slide-out can play, but is taken
     // out of the accessibility tree and the tab order while it is off screen.
     <aside className="inspector" aria-hidden={hidden || undefined} inert={hidden || undefined}>
-      <div className="inspector-tabs"><button type="button" className={tab === "context" ? "active" : ""} onClick={() => setTab("context")}>{t("上下文")}</button><button type="button" className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>{t("活动")} {events.length > 0 && <span>{events.length}</span>}</button></div>
-      {tab === "context" ? (
+      <div className="inspector-tabs"><button type="button" className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>{t("改动")}</button><button type="button" className={tab === "context" ? "active" : ""} onClick={() => setTab("context")}>{t("上下文")}</button><button type="button" className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>{t("活动")} {events.length > 0 && <span>{events.length}</span>}</button><button type="button" className="inspector-close" aria-label={t("收起右侧栏")} title={t("收起右侧栏")} onClick={close}><PanelRightClose size={16} /></button></div>
+      {tab === "changes" ? (
+        !hidden && <FileChanges sessionId={sessionId} running={running} revision={state.recovery} />
+      ) : tab === "context" ? (
         <div className="inspector-content">
           <section><div className="inspector-heading"><span>{t("工作区")}</span><div className="inspector-actions"><button type="button" onClick={compactContext} disabled={compactDisabled} aria-label={t("压缩上下文")} title={t("压缩上下文")}><Archive size={13} /></button><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>Context Engine</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
           <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{expandModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
@@ -4197,8 +4219,9 @@ function ApprovalModal({ approval, resolve }: { approval: Record<string, unknown
   );
 }
 
-function Toasts({ items }: { items: Toast[] }) {
-  return <div className="toast-stack">{items.map((toast) => <div className={`toast ${toast.kind}`} key={toast.id}>{toast.kind === "success" ? <CheckCircle2 size={15} /> : toast.kind === "error" ? <AlertCircle size={15} /> : <Info size={15} />}<span>{toast.message}</span></div>)}</div>;
+function Toasts({ items, onDismiss }: { items: Toast[]; onDismiss: (id: number) => void }) {
+  const { t } = useI18n();
+  return <div className="toast-stack">{items.map((toast) => <div className={`toast ${toast.kind}`} role={toast.kind === "error" ? "alert" : "status"} key={toast.id}>{toast.kind === "success" ? <CheckCircle2 size={15} /> : toast.kind === "error" ? <AlertCircle size={20} /> : <Info size={15} />}<span>{toast.message}</span>{toast.kind === "error" && <button className="icon-button toast-dismiss" aria-label={t("关闭")} onClick={() => onDismiss(toast.id)}><X size={16} /></button>}</div>)}</div>;
 }
 
 export default function App() {
@@ -4324,7 +4347,9 @@ export default function App() {
       setTheme(normalizeTheme(appearance.theme));
       setSystemDark(appearance.resolved === "dark");
     });
+    const preferenceSequence = uiPreferenceRequestSequence.current;
     void window.reverie.uiPreferences().then((preferences) => {
+      if (preferenceSequence !== uiPreferenceRequestSequence.current) return;
       setUiPreferences(normalizeUiPreferences(preferences));
     });
     return () => {
@@ -4336,7 +4361,7 @@ export default function App() {
   const toast = useCallback((message: string, kind: Toast["kind"] = "info") => {
     const id = ++toastId.current;
     setToasts((items) => [...items, { id, kind, message }]);
-    window.setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), 3600);
+    window.setTimeout(() => setToasts((items) => items.filter((item) => item.id !== id)), kind === "error" ? 12000 : 3600);
   }, []);
 
   const changeTheme = useCallback((nextTheme: ThemePreference) => {
@@ -4520,7 +4545,11 @@ export default function App() {
       if (modifier && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen(true); }
       if (modifier && event.key.toLowerCase() === "n") { event.preventDefault(); void createSession(); }
       if (modifier && event.key.toLowerCase() === "f") { event.preventDefault(); setSessionSearchOpen(true); }
-      if (modifier && event.key.toLowerCase() === "b") { event.preventDefault(); toggleSidebar(); }
+      if (modifier && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        if (event.shiftKey) updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen });
+        else toggleSidebar();
+      }
       if (event.key === "Escape") {
         setModelPickerOpen(false);
         setCommandOpen(false);
@@ -4581,9 +4610,9 @@ export default function App() {
     }
   }, [prompt, running, session, toast]);
 
-  const createSession = useCallback(async () => {
+  const createSession = useCallback(async (force = false) => {
     if (running || sessionBusy) return;
-    if (session && sessionIsEmpty(session)) {
+    if (!force && session && sessionIsEmpty(session)) {
       setView("chat");
       return;
     }
@@ -5311,25 +5340,37 @@ export default function App() {
     }
   }, [initialize, prompt, running, session, sessionBusy, toast]);
 
-  const switchWorkspace = useCallback(async (projectRoot: string) => {
-    if (running || sessionBusy || projectRoot.toLowerCase() === state?.workspace.project_root.toLowerCase()) return;
+  const switchWorkspace = useCallback(async (projectRoot: string): Promise<boolean> => {
+    if (running || sessionBusy || projectRoot.toLowerCase() === state?.workspace.project_root.toLowerCase()) return false;
     try {
       if (session) drafts.current[session.id] = prompt;
       setSessionBusy(true);
       const selectedRoot = await window.reverie.switchWorkspace(projectRoot);
-      if (!selectedRoot) return;
+      if (!selectedRoot) return false;
       sessionRequestSequence.current += 1;
       drafts.current = {};
       setPrompt("");
       setAttachments([]);
       setMentionOpen(false);
       await initialize(selectedRoot);
+      return true;
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), "error");
+      return false;
     } finally {
       setSessionBusy(false);
     }
   }, [initialize, prompt, running, session, sessionBusy, state?.workspace.project_root, toast]);
+
+  const createSessionForProject = useCallback(async (projectRoot: string) => {
+    if (running || sessionBusy) return;
+    const activeRoot = state?.workspace.project_root ?? "";
+    if (activeRoot && activeRoot.toLowerCase() === projectRoot.toLowerCase()) {
+      await createSession(true);
+      return;
+    }
+    if (await switchWorkspace(projectRoot)) await createSession(true);
+  }, [createSession, running, sessionBusy, state?.workspace.project_root, switchWorkspace]);
 
   const deleteProject = useCallback((target: { root: string; name: string; active: boolean }) => {
     if (running || sessionBusy) return;
@@ -5410,14 +5451,14 @@ export default function App() {
       className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${uiPreferences.inspectorOpen ? "with-inspector" : ""} ${paneResizing ? "pane-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
     >
-      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
+      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className="main-area">
         <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
       </main>
       {/* Always mounted so the pane can transition out instead of vanishing; the
           `with-inspector` class alone decides whether it is on screen. */}
-      <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} hidden={!uiPreferences.inspectorOpen} />
+      <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} hidden={!uiPreferences.inspectorOpen} sessionId={session?.id ?? ""} running={running} close={() => updateUiPreferences({ inspectorOpen: false })} />
       {/* Handles live on the shell, not inside the panes: both panes clip their
           overflow, so a child handle could not straddle the seam it drags. */}
       <PaneResizer
@@ -5467,7 +5508,7 @@ export default function App() {
       )}
       {approval && <ApprovalModal approval={approval} resolve={(decision, message) => void resolveApproval(decision, message)} />}
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.label} danger={confirmation.danger} close={() => setConfirmation(null)} confirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} />}
-      <Toasts items={toasts} />
+      <Toasts items={toasts} onDismiss={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
     </div>
     </I18nProvider>
   );

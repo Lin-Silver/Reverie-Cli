@@ -554,6 +554,8 @@ class CommandHandler:
         )
 
         self.console.print(self._build_skill_overview_panels(summary, rows, error_rows))
+        if summary.get("mode_notice"):
+            self.console.print(Text(summary["mode_notice"], style=self.theme.TEXT_SECONDARY))
         self.console.print()
 
         compact = self._is_compact(124)
@@ -900,7 +902,12 @@ class CommandHandler:
         width = self._console_width()
         detail_panel = self._build_skill_browser_detail_panel(selected_record, compact=width < 138)
         footer_panel = self._build_skill_browser_footer_panel(len(filtered_records), search_query, is_searching)
-        return Group(summary_panel, list_panel, detail_panel, footer_panel)
+        manager = self.app.get("skills_manager")
+        notice = manager.get_mode_notice() if manager is not None else ""
+        panels = [summary_panel, list_panel, detail_panel, footer_panel]
+        if notice:
+            panels.insert(1, Text(notice, style=self.theme.TEXT_SECONDARY))
+        return Group(*panels)
 
     def _print_skill_detail_page(self, record: Any) -> None:
         """Print one selected skill page into the transcript."""
@@ -922,6 +929,9 @@ class CommandHandler:
             ]
         )
         self.console.print(overview)
+        manager = self.app.get("skills_manager")
+        if manager is not None and manager.get_mode_notice():
+            self.console.print(Text(manager.get_mode_notice(), style=self.theme.TEXT_SECONDARY))
         self.console.print()
 
         body_preview = str(getattr(record, "body", "") or "").strip() or "(empty skill body)"

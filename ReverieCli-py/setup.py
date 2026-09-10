@@ -7,6 +7,9 @@ Install with: pip install -e .
 from setuptools import setup, find_packages
 from pathlib import Path
 
+package_root = Path(__file__).parent / "reverie"
+builtin_root = package_root / "builtin_skills"
+
 # Read canonical package version without importing the package.
 about = {}
 exec((Path(__file__).parent / "reverie" / "version.py").read_text(encoding="utf-8"), about)
@@ -31,13 +34,24 @@ setup(
     include_package_data=True,
     package_data={
         "reverie": [
-            "builtin_skills/*/SKILL.md",
-            "builtin_skills/*/agents/*.yaml",
-            "builtin_skills/*/references/*.md",
+            *[
+                path.relative_to(package_root).as_posix()
+                for path in builtin_root.rglob("*")
+                if path.is_file()
+                and not {"reports", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}.intersection(path.relative_to(builtin_root).parts)
+                and path.suffix not in {".pyc", ".pyo"}
+            ],
             "engine/vendor/live2d/*.js",
             "computer_use/*.md",
         ],
         "reverie.agent": ["tool_manifest.json"],
+    },
+    exclude_package_data={
+        "reverie": [
+            "builtin_skills/**/reports/*", "builtin_skills/**/__pycache__/*",
+            "builtin_skills/**/.pytest_cache/*", "builtin_skills/**/.mypy_cache/*",
+            "builtin_skills/**/.ruff_cache/*", "builtin_skills/**/*.pyc", "builtin_skills/**/*.pyo",
+        ],
     },
     python_requires=">=3.10",
     install_requires=[

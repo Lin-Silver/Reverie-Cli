@@ -2,6 +2,7 @@ import type { CoreActionName } from "../electron/core-actions";
 import type {
   CustomProviderRecord,
   DesktopState,
+  FileChange,
   ModelSourcesState,
   PluginsState,
   PromptResult,
@@ -73,6 +74,7 @@ interface CoreRequestMap {
   searchSessions: { payload: { query: string }; response: Envelope<"session.search", { query: string; results: SessionSearchResult[] }> };
   initialize: { payload: { projectRoot: string }; response: Envelope<"state", { state: DesktopState }> };
   getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState }> };
+  getFileChanges: { payload: { sessionId: string }; response: Envelope<"file.changes", { session_id: string; changes: FileChange[] }> };
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
   getSubagents: { payload: EmptyPayload; response: Envelope<"subagents", { subagents: SubagentsState }> };
   getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };

@@ -11,7 +11,7 @@ Adapted from the img2threejs project (Apache-2.0; see [attribution.md](reference
 
 ## Before the first pass
 
-1. Confirm the reference image path(s) and actually look at them through your vision input. With no image there is no ground truth — call `ask_clarification` rather than inventing a subject.
+1. Confirm the reference image path(s) and actually look at them through your vision input. With no image there is no ground truth — call `userInput` with `question` and `reason` to request the missing reference.
 2. Classify the subject as **object** (product, prop, vehicle, furniture, building, terrain) or **character** (human, humanoid, creature, anything with a face or a skeleton). A character inserts the extra track in [character-track.md](references/character-track.md) after pass 3.
 3. Fix the workspace layout and write it down. Default: the factory under `src/models/<subject>/`, the review harness and pass state under `.reverie/photo-to-3d/<subject>/`.
 4. Create `state.json` before any geometry. Its contract is in [render-review.md](references/render-review.md); it is the only record of which passes are locked, so a later pass must never quietly rewrite an earlier pass's numbers.

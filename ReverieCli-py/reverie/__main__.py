@@ -397,10 +397,15 @@ def main(argv: list[str] | None = None):
         import platform
 
         machine = platform.machine().strip().lower()
+        if not machine and sys.platform == "win32":
+            import sysconfig
+
+            machine = sysconfig.get_platform().lower().removeprefix("win-")
         arch = {
             "amd64": "x64",
             "x86_64": "x64",
             "aarch64": "arm64",
+            "win32": "ia32",
         }.get(machine, machine)
         print(json.dumps({
             "schema": "reverie.kernel.v1",

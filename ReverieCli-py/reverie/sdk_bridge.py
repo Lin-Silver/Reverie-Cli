@@ -255,6 +255,7 @@ class ReverieSdkBridge:
         pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
         shadowed_paths = frozenset(getattr(snapshot, "shadowed_paths", ()) or ())
         return {
+            "mode": manager.active_mode,
             "count": len(snapshot.records),
             "invalid_count": len(snapshot.errors),
             "shadowed_count": len(getattr(snapshot, "shadowed", ()) or ()),
@@ -991,6 +992,13 @@ class ReverieSdkBridge:
                 "type": "workspace.indexed",
                 "result": _json_safe(vars(result)),
                 "workspace": self.workspace_payload(),
+            }
+        if action == "getFileChanges":
+            from .desktop_changes import file_changes_payload
+            session_id = str(payload.get("sessionId") or "")
+            return {
+                "id": request_id, "type": "file.changes", "session_id": session_id,
+                "changes": file_changes_payload(self.ensure_interface().operation_history, session_id),
             }
         if action == "getRecovery":
             return {"id": request_id, "type": "recovery", "recovery": self.recovery_payload()}

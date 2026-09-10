@@ -523,12 +523,7 @@ class SkillsManager:
 
     def _load_skill(self, skill_md: Path, root: SkillRoot) -> tuple[Optional[SkillRecord], Optional[SkillError]]:
         try:
-            raw_text = skill_md.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            try:
-                raw_text = skill_md.read_text(encoding="utf-8-sig")
-            except Exception as exc:
-                return None, SkillError(skill_md, root, f"failed to read SKILL.md: {exc}")
+            raw_text = skill_md.read_text(encoding="utf-8-sig")
         except Exception as exc:
             return None, SkillError(skill_md, root, f"failed to read SKILL.md: {exc}")
 
@@ -575,6 +570,24 @@ class SkillsManager:
         )
         return record, None
 
+    def get_mode_notice(self) -> str:
+        """Explain mode limitations without hiding installed skill packages."""
+        if self.active_mode == "writer":
+            return (
+                "In Writer, skill_lookup is unavailable. Skills remain browsable and pinned. "
+                "Before inspecting or using a requested skill, switch to Reverie with "
+                "switch_mode(operation='switch', mode='reverie') or /mode reverie, then inspect it. "
+                "Keep pins until the user releases them."
+            )
+        if self.active_mode == "computer-controller":
+            return (
+                "In Computer Controller, skill_lookup can read instructions, but the built-in "
+                "browser-controler, photo-to-3d and reverse-skill workflows require workspace "
+                "tools from Reverie, Atlas or Gamer. Before executing those workflows, use "
+                "switch_mode(operation='switch', mode='reverie') or /mode reverie."
+            )
+        return ""
+
     def get_status_summary(self, *, force_refresh: bool = False) -> dict[str, Any]:
         """Return a compact summary for status views and command panels."""
         snapshot = self.get_snapshot(force_refresh=force_refresh)
@@ -586,6 +599,7 @@ class SkillsManager:
             "error_count": snapshot.error_count,
             "shadow_count": snapshot.shadow_count,
             "skill_names": snapshot.names(),
+            "mode_notice": self.get_mode_notice(),
         }
 
     def list_display_rows(self, *, force_refresh: bool = False) -> list[dict[str, str]]:
@@ -707,8 +721,14 @@ class SkillsManager:
 
         blocks = [
             "[SKILL REQUEST]",
-            "The user explicitly requested the following Skill(s). Call skill_lookup(operation='inspect') for each before taking task actions.",
+            (
+                "The user explicitly requested the following Skill(s). Switch out of Writer before inspecting them."
+                if self.active_mode == "writer" else
+                "The user explicitly requested the following Skill(s). Call skill_lookup(operation='inspect') for each before taking task actions."
+            ),
         ]
+        if self.get_mode_notice():
+            blocks.append(self.get_mode_notice())
         for record in normalized_records:
             blocks.extend(
                 [
@@ -812,8 +832,13 @@ class SkillsManager:
             return ""
 
         lines = ["### Pinned skills (mandatory)"]
+        if self.get_mode_notice():
+            lines.append(self.get_mode_notice())
         if records:
             lines.append(
+                "The user pinned these skills. Switch out of Writer before inspecting them; "
+                "read every returned body chunk and follow their workflows on every turn until unpinned."
+                if self.active_mode == "writer" else
                 "The user pinned these skills. Call `skill_lookup(operation=\"inspect\")` on each one "
                 "before taking any task action in this turn, read every returned body chunk, and follow "
                 "its workflow. A pinned skill applies to every turn until the user unpins it."
@@ -842,9 +867,15 @@ class SkillsManager:
         lines = [
             "## Skills",
             "A skill is a reusable workflow stored in a `SKILL.md` file. The list below contains only name, description, and path.",
-            "If the user names a skill or the task clearly matches its description, call `skill_lookup` with `operation=inspect` before acting. Read every returned body chunk before using that skill.",
+            (
+                "If a requested skill is relevant in Writer, switch to a mode with skill_lookup before inspecting it."
+                if self.active_mode == "writer" else
+                "If the user names a skill or the task clearly matches its description, call `skill_lookup` with `operation=inspect` before acting. Read every returned body chunk before using that skill."
+            ),
             "Use `$skill-name` for an explicit request. Do not load a skill body merely because its description shares generic words with the task.",
         ]
+        if self.get_mode_notice():
+            lines.append(self.get_mode_notice())
         pinned_block = self.describe_pinned_for_prompt(force_refresh=False)
         if pinned_block:
             lines.append(pinned_block)

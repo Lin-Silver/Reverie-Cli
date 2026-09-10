@@ -2177,7 +2177,7 @@ class BrowserControlerTool(BaseTool):
         path.write_bytes(base64.b64decode(encoded))
         return ToolResult.ok(
             f"Saved DevTools screenshot: {path}" + (" (full-page capture fell back to viewport capture)." if fallback_error else ""),
-            data={"image_path": str(path), "format": fmt, "target": target, "full_page": full_page, "fallback_error": fallback_error},
+            data={"image_path": str(path), "format": fmt, "target": target, "full_page": bool(full_page and not fallback_error), "fallback_error": fallback_error},
         )
 
     def _devtools_click(self, *, selector: str, port: int, target_id: str = "", url_contains: str = "", timeout: float = 5.0) -> ToolResult:
@@ -3128,8 +3128,15 @@ class BrowserControlerTool(BaseTool):
     def _cdp_base_url(port: int) -> str:
         return f"http://{CDP_HOST}:{BrowserControlerTool._normalize_cdp_port(port)}"
 
+    @staticmethod
+    def _cdp_http_request(method: str, url: str, *, timeout: float):
+        # The managed DevTools endpoint is loopback-only, even on proxied hosts.
+        with requests.Session() as session:
+            session.trust_env = False
+            return session.request(method, url, timeout=max(0.5, float(timeout or 5.0)))
+
     def _cdp_version(self, port: int, *, timeout: float = 5.0) -> Dict[str, Any]:
-        response = requests.get(f"{self._cdp_base_url(port)}/json/version", timeout=max(0.5, float(timeout or 5.0)))
+        response = self._cdp_http_request("GET", f"{self._cdp_base_url(port)}/json/version", timeout=timeout)
         response.raise_for_status()
         return response.json()
 
@@ -3138,7 +3145,7 @@ class BrowserControlerTool(BaseTool):
             raise RuntimeError(
                 f"Refusing to attach to DevTools Protocol port {port}; it is not a recorded isolated Browser Controler session."
             )
-        response = requests.get(f"{self._cdp_base_url(port)}/json/list", timeout=max(0.5, float(timeout or 5.0)))
+        response = self._cdp_http_request("GET", f"{self._cdp_base_url(port)}/json/list", timeout=timeout)
         response.raise_for_status()
         targets = response.json()
         if not isinstance(targets, list):
@@ -3152,11 +3159,11 @@ class BrowserControlerTool(BaseTool):
             )
         endpoint = f"{self._cdp_base_url(port)}/json/new?{quote(str(url or 'about:blank'), safe=':/?&=%#')}"
         try:
-            response = requests.put(endpoint, timeout=max(0.5, float(timeout or 5.0)))
+            response = self._cdp_http_request("PUT", endpoint, timeout=timeout)
             response.raise_for_status()
             result = response.json()
         except Exception:
-            response = requests.get(endpoint, timeout=max(0.5, float(timeout or 5.0)))
+            response = self._cdp_http_request("GET", endpoint, timeout=timeout)
             response.raise_for_status()
             result = response.json()
         if not isinstance(result, dict):

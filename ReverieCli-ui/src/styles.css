@@ -277,7 +277,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed !important; }
 .quick-grid span { margin-top: 5px; color: var(--muted); font-size: var(--font-small); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 .composer-shell { position: relative; width: min(860px, calc(100% - 48px)); margin: 0 auto; padding: 0 0 18px; }
-.composer-shell::before { content: ""; position: absolute; z-index: -1; left: -80px; right: -80px; bottom: 0; height: 150px; background: linear-gradient(transparent, var(--bg) 45%); }
+.composer-shell::before { content: ""; position: absolute; z-index: -1; left: -80px; right: -80px; bottom: 0; height: 150px; background: transparent; }
 .composer { border: 1px solid #323844; border-radius: 12px; background: #141820; box-shadow: 0 8px 30px rgba(0,0,0,.25), inset 0 1px rgba(255,255,255,.025); overflow: hidden; }
 .composer:focus-within { border-color: #4b5260; box-shadow: 0 8px 30px rgba(0,0,0,.3), 0 0 0 1px rgba(173,143,225,.08); }
 .composer textarea { width: 100%; min-height: 52px; max-height: 220px; resize: none; display: block; padding: 15px 15px 8px; border: 0; outline: 0; background: transparent; color: var(--text); line-height: 1.5; font-size: var(--font-ui); }
@@ -301,11 +301,30 @@ button:disabled { opacity: 0.45; cursor: not-allowed !important; }
 .inspector-tabs button { height: 34px; padding: 0 9px; border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--dim); font-size: var(--font-small); cursor: pointer; }
 .inspector-tabs button.active { color: var(--text-2); border-color: var(--text-2); }
 .inspector-tabs span { margin-left: 4px; border-radius: 8px; padding: 1px 4px; background: #2c323d; font-size: var(--font-caption); }
+.inspector-tabs .inspector-close { margin-left: auto; flex: 0 0 30px; padding: 0; display: grid; place-items: center; -webkit-app-region: no-drag; }
+.changes-note { color: var(--muted); font-size: var(--font-caption); line-height: 1.6; overflow-wrap: anywhere; }
+.changes-error { color: var(--red); overflow-wrap: anywhere; font-size: var(--font-small); }
+.file-change { margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.file-change summary { display: flex; align-items: center; gap: 7px; padding: 10px 8px; cursor: pointer; font-size: var(--font-small); }
+.file-change summary > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.file-change summary small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: var(--font-caption); }
+.file-change summary em { font-style: normal; font-size: var(--font-caption); color: var(--muted); flex-shrink: 0; }
+.file-change summary code { white-space: nowrap; font-size: 11px; }
+.file-change b { color: var(--green); font-weight: 500; }
+.file-change i { color: var(--red); font-style: normal; }
+.change-diff { margin: 0; padding: 8px 0; overflow: auto; max-height: 460px; border-top: 1px solid var(--border); font-size: 11px; line-height: 1.65; tab-size: 4; }
+.change-diff span { display: block; min-width: max-content; padding: 0 8px; white-space: pre; }
+.change-diff .added { background: color-mix(in srgb, var(--green) 10%, transparent); color: var(--green); }
+.change-diff .removed { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
+.change-diff .hunk { color: var(--accent); background: var(--accent-bg); }
 .inspector-content { min-height: 0; overflow-y: auto; padding: 14px 13px; }
 .inspector-content section { padding: 0 0 17px; margin: 0 0 15px; border-bottom: 1px solid var(--border-soft); }
 .inspector-content section:last-child { border: 0; }
 .inspector-heading { height: 27px; display: flex; align-items: flex-start; justify-content: space-between; color: var(--dim); font-size: var(--font-caption); font-weight: 650; text-transform: uppercase; letter-spacing: .08em; }
 .inspector-heading button { border: 0; background: transparent; color: var(--dim); cursor: pointer; }
+.file-change-total { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; text-transform: none; letter-spacing: 0; font-family: var(--font-mono); font-size: var(--font-caption); }
+.file-change-total b { color: var(--green); font-weight: 650; }
+.file-change-total i { color: var(--red); font-style: normal; font-weight: 650; }
 .inspector-actions { display: flex; align-items: center; gap: 4px; }
 .context-card { display: flex; align-items: center; gap: 8px; padding: 9px; margin-bottom: 5px; border-radius: 8px; background: #11151b; border: 1px solid #1d222b; color: var(--blue); }
 .context-card div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -645,7 +664,7 @@ button, input, textarea, select { transition: color .14s ease, background-color 
 .quick-grid span { margin-top: 6px; font-size: var(--font-small); }
 
 .composer-shell { width: min(920px, calc(100% - 64px)); padding-bottom: 22px; }
-.composer-shell::before { left: -100px; right: -100px; height: 180px; background: linear-gradient(transparent, var(--bg) 48%); }
+.composer-shell::before { left: -100px; right: -100px; height: 180px; background: transparent; }
 .composer { border-color: var(--border-strong); border-radius: 17px; background: var(--panel-2); box-shadow: 0 14px 42px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.035); }
 .composer:focus-within { border-color: var(--accent-2); box-shadow: 0 16px 46px rgba(0,0,0,.23), 0 0 0 3px var(--accent-bg); }
 .composer textarea { min-height: 58px; padding: 17px 17px 8px; font-size: var(--font-body); }
@@ -657,8 +676,9 @@ button, input, textarea, select { transition: color .14s ease, background-color 
 .stop-button { height: 32px; border-color: var(--border-strong); border-radius: 9px; background: var(--panel-3); font-size: var(--font-small); }
 .mention-picker { background: var(--panel-2); border-color: var(--border-strong); border-radius: 12px; }
 
-.inspector { grid-template-rows: 54px minmax(0,1fr); background: var(--inspector-bg); border-color: var(--border-soft); }
-.inspector-tabs { height: 54px; border-color: var(--border-soft); }
+.inspector { grid-template-rows: 92px minmax(0,1fr); background: var(--inspector-bg); border-color: var(--border-soft); }
+/* Keep inspector controls below the native Windows caption buttons. */
+.inspector-tabs { height: 92px; padding-top: 46px; border-color: var(--border-soft); }
 .inspector-tabs button { height: 38px; font-size: var(--font-small); }
 .inspector-content { padding: 17px 15px; }
 .inspector-heading { font-size: var(--font-small); }
@@ -723,6 +743,10 @@ kbd { border-color: var(--border-strong); border-bottom-color: var(--border); ba
 .command-search, .command-footer, .form-modal-header, .form-modal-footer { border-color: var(--border); }
 .approval-modal pre { background: var(--code-bg); border-color: var(--border); }
 .toast { min-height: 46px; border-color: var(--border-strong); border-radius: 10px; background: var(--panel-2); box-shadow: var(--shadow-soft); font-size: var(--font-small); }
+.toast.error { width: min(520px, calc(100vw - 36px)); min-width: 0; max-width: none; min-height: 72px; padding: 16px; align-items: flex-start; gap: 12px; color: var(--text); font-size: max(15px, var(--font-ui)); line-height: 1.55; pointer-events: auto; }
+.toast.error > svg { flex-shrink: 0; margin-top: 2px; }
+.toast.error > span { flex: 1; min-width: 0; max-height: 40vh; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
+.toast-dismiss { flex-shrink: 0; }
 
 :root[data-theme="light"] .brand-mark,
 :root[data-theme="light"] .empty-mark { box-shadow: 0 10px 30px rgba(90,68,151,.12), inset 0 1px rgba(255,255,255,.8); }
@@ -1679,7 +1703,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
   backdrop-filter: blur(24px) saturate(1.12);
 }
 .has-workspace-background .transcript { background: color-mix(in srgb, var(--bg) 12%, transparent); }
-.has-workspace-background .composer-shell::before { background: linear-gradient(transparent, color-mix(in srgb, var(--bg) 52%, transparent) 58%, color-mix(in srgb, var(--bg) 64%, transparent)); }
+.has-workspace-background .composer-shell::before { background: transparent; }
 .has-workspace-background .composer {
   background: color-mix(in srgb, var(--panel-2) 82%, transparent);
   border-color: color-mix(in srgb, var(--border-strong) 86%, transparent);
@@ -1711,15 +1735,45 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 :root[data-theme="light"].has-workspace-background .topbar { background: rgba(255,255,255,.72); }
 :root[data-theme="light"].has-workspace-background .conversation-top { background: rgba(255,255,255,.64); }
 
+/* Keep the light theme readable over a workspace photo.  The dark theme can
+   use transparent glass without losing contrast; white glass needs a stronger
+   veil and more opaque content surfaces so the image does not wash out text. */
+:root[data-theme="light"].has-workspace-background .app-shell::before { opacity: .62; }
+:root[data-theme="light"].has-workspace-background .app-shell::after {
+  opacity: 1;
+  background: rgba(255,255,255,.45);
+}
+:root[data-theme="light"].has-workspace-background .sidebar,
+:root[data-theme="light"].has-workspace-background .inspector { background: rgba(247,248,251,.86); }
+:root[data-theme="light"].has-workspace-background .topbar,
+:root[data-theme="light"].has-workspace-background .conversation-top { background: rgba(255,255,255,.84); }
+:root[data-theme="light"].has-workspace-background .transcript,
+:root[data-theme="light"].has-workspace-background .chat-view { background: rgba(246,247,249,.5); }
+:root[data-theme="light"].has-workspace-background .composer {
+  background: rgba(255,255,255,.94);
+  border-color: var(--border-strong);
+}
+:root[data-theme="light"].has-workspace-background .message.user .message-body,
+:root[data-theme="light"].has-workspace-background .reasoning-block,
+:root[data-theme="light"].has-workspace-background .tool-message {
+  background: rgba(255,255,255,.94);
+}
+:root[data-theme="light"] .message-body { color: var(--text-2); }
+:root[data-theme="light"] .markdown h1,
+:root[data-theme="light"] .markdown h2,
+:root[data-theme="light"] .markdown h3,
+:root[data-theme="light"] .markdown h4 { color: var(--text); }
+:root[data-theme="light"] .markdown code { color: var(--accent-2); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
 @media (max-width: 1250px) {
-  .app-shell.with-inspector { grid-template-columns: 230px minmax(0,1fr) 265px; }
-  .app-shell { grid-template-columns: 230px minmax(0,1fr) 0; }
+  .app-shell.with-inspector { grid-template-columns: var(--sidebar-width, 268px) minmax(0,1fr) var(--inspector-width, 316px); }
+  .app-shell { grid-template-columns: var(--sidebar-width, 268px) minmax(0,1fr) 0; }
   .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0,1fr) 0; }
-  .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr) 265px; }
+  .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr) var(--inspector-width, 316px); }
   .message-column { width: calc(100% - 38px); }
   .topbar { padding-left: 8px; }
   .model-trigger small { display: none; }
@@ -1741,7 +1795,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
   /* No room for the inspector here, and the drag ceiling is capped so a width
      chosen on a wide window cannot swallow the conversation on a narrow one. */
   .app-shell.with-inspector { grid-template-columns: min(var(--sidebar-width, 220px), 240px) minmax(0,1fr); }
-  .inspector { display: none; }
+  .app-shell > .inspector { position: absolute; z-index: 130; right: 0; top: 54px; bottom: 0; width: min(var(--inspector-width, 316px), calc(100% - 48px)); box-shadow: var(--shadow); }
+  .inspector { grid-template-rows: 54px minmax(0,1fr); }
+  .inspector-tabs { height: 54px; padding-top: 0; }
   .app-shell { grid-template-columns: min(var(--sidebar-width, 220px), 240px) minmax(0,1fr); }
   .app-shell.sidebar-collapsed,
   .app-shell.sidebar-collapsed.with-inspector { grid-template-columns: 0 minmax(0,1fr); }

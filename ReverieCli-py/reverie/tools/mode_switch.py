@@ -293,6 +293,9 @@ class ModeSwitchTool(BaseTool):
             )
 
         agent.update_mode(normalized_mode)
+        skills_manager = self.context.get("skills_manager")
+        if skills_manager is not None:
+            skills_manager.set_active_mode(normalized_mode)
 
         if config_manager:
             config = config_manager.load()

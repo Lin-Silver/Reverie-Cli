@@ -481,7 +481,9 @@ def _live_capability_contract(endpoint: str):
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    # Match the runtime's direct transport to the locally discovered Engine.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=5.0) as response:
         body = json.loads(response.read().decode("utf-8"))
     assert body.get("ok") is True, body
     return parse_capabilities(body.get("result") or {}, protocol=RATS_PROTOCOL)

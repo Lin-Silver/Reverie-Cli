@@ -29,6 +29,20 @@ def test_kernel_info_contract(capsys) -> None:
     assert payload["arch"]
 
 
+@pytest.mark.parametrize("build_platform, expected", [("win-amd64", "x64"), ("win-arm64", "arm64"), ("win32", "ia32")])
+def test_kernel_info_uses_build_arch_when_windows_machine_is_empty(monkeypatch, capsys, build_platform, expected):
+    import platform
+    import sys
+    import sysconfig
+    from reverie.__main__ import main
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(platform, "machine", lambda: "")
+    monkeypatch.setattr(sysconfig, "get_platform", lambda: build_platform)
+    assert main(["--kernel-info"]) == 0
+    assert json.loads(capsys.readouterr().out)["arch"] == expected
+
+
 def _source(payload: dict, source_id: str) -> dict:
     return next(item for item in payload["sources"] if item["id"] == source_id)
 

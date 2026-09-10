@@ -21,10 +21,15 @@ def add_data_if_exists(source_path: Path, target_dir: str) -> None:
         datas.append((str(source_path), target_dir))
 
 
-def add_tree_if_exists(source_path: Path, target_dir: str) -> None:
+def add_tree_if_exists(source_path: Path, target_dir: str, *, exclude_skill_artifacts: bool = False) -> None:
     if not source_path.exists() or not source_path.is_dir():
         return
     for path in source_path.rglob("*"):
+        if exclude_skill_artifacts and (
+            {"reports", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}.intersection(path.relative_to(source_path).parts)
+            or path.suffix in {".pyc", ".pyo"}
+        ):
+            continue
         if path.is_file():
             relative_parent = path.parent.relative_to(source_path)
             datas.append((str(path), str(Path(target_dir) / relative_parent)))
@@ -88,7 +93,7 @@ if build_mode != 'ui-onedir':
     add_data_if_exists(packed_resource_src / "ffmpeg.zip", "reverie_resources")
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
-add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills")
+add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills", exclude_skill_artifacts=True)
 add_data_if_exists(repo_root / "reverie" / "computer_use" / "ATTRIBUTION.md", "reverie/computer_use")
 
 for package_name in ('rich', 'bs4', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):

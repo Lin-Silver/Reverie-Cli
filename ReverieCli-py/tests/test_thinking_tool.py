@@ -7,6 +7,7 @@ the flag. Each one is exercised here against real objects.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest import mock
 import sys
@@ -14,7 +15,7 @@ import sys
 import pytest
 from rich.console import Console
 
-from reverie.agent.agent import ReverieAgent, decode_stream_event, encode_stream_event
+from reverie.agent.agent import ReverieAgent, _StreamingTurnState, decode_stream_event, encode_stream_event
 from reverie.agent.system_prompt import build_system_prompt
 from reverie.agent.tool_executor import ToolExecutor
 from reverie.cli.commands import CommandHandler
@@ -87,6 +88,39 @@ def test_deep_think_records_the_reasoning_and_hands_control_back() -> None:
     assert result.data["characters"] == len(THOUGHT)
     # The acknowledgement pushes the model to act rather than think again.
     assert "read config.py" in result.output
+
+
+def test_deep_think_does_not_persist_a_provisional_assistant_reply() -> None:
+    """A pure thinking call must leave room for exactly one final answer."""
+    host = SimpleNamespace(
+        mode="reverie",
+        messages=[],
+        _promote_writer_json_tool_call=lambda state: None,
+        _promote_writer_direct_prose_commit=lambda state: None,
+        _writer_retry_instruction_for_invalid_commit_tool_call=lambda calls: None,
+        _writer_retry_instruction_for_short_direct_prose=lambda text: None,
+        _record_model_usage=lambda **kwargs: None,
+    )
+    state = _StreamingTurnState(
+        collected_content="This provisional reply must not become a second transcript message.",
+        collected_thinking="I should think before replying.",
+    )
+    state.tool_calls = [{
+        "id": "thought-1",
+        "type": "function",
+        "function": {"name": "deep_think", "arguments": '{"thought":"check first"}'},
+    }]
+
+    relay_messages: list[dict] = []
+    outcome, content = ReverieAgent._commit_stream_state(
+        host, state=state, request_messages=relay_messages, messages=relay_messages, session_id="test",
+    )
+
+    assert outcome == "tool_calls"
+    assert content == ""
+    assert len(host.messages) == 1
+    assert not host.messages[0].get("content")
+    assert host.messages[0]["tool_calls"][0]["function"]["name"] == "deep_think"
 
 
 def test_deep_think_rejects_an_empty_thought() -> None:

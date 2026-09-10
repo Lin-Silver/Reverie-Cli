@@ -486,6 +486,7 @@ export interface PinnedSkillsState {
 }
 
 export interface SkillsState {
+  mode?: string;
   count: number;
   invalid_count: number;
   /** Skills hidden by a same-name skill in a higher-precedence root. */
@@ -533,6 +534,17 @@ export interface OperationRecord {
   description: string;
   file_operation?: { file_path?: string; operation?: string } | null;
   tool_call?: { tool_name?: string; success?: boolean } | null;
+}
+
+export interface FileChange {
+  path: string;
+  operation: string;
+  timestamp: string;
+  diff: string;
+  additions: number;
+  deletions: number;
+  unavailable: boolean;
+  truncated: boolean;
 }
 
 export interface RecoveryState {

@@ -43,6 +43,74 @@ def test_kernel_info_uses_build_arch_when_windows_machine_is_empty(monkeypatch, 
     assert json.loads(capsys.readouterr().out)["arch"] == expected
 
 
+def test_sdk_bridge_deferred_initialize_skips_heavy_desktop_payloads(tmp_path: Path) -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    calls = []
+    interface = SimpleNamespace(
+        _prime_context_engine_background=lambda: calls.append("prime")
+    )
+    bridge = ReverieSdkBridge.__new__(ReverieSdkBridge)
+    bridge.project_root = tmp_path
+    bridge.ensure_interface = lambda project_root=None: interface
+    bridge.desktop_bootstrap_payload = lambda: calls.append("bootstrap") or {"kind": "bootstrap"}
+    bridge.desktop_state_payload = lambda: pytest.fail("full desktop payload must be deferred")
+
+    response = bridge.dispatch(
+        {
+            "id": "initialize-fast",
+            "action": "initialize",
+            "payload": {"projectRoot": str(tmp_path), "deferPayloads": True},
+        }
+    )
+
+    assert response == {
+        "id": "initialize-fast",
+        "type": "state",
+        "state": {"kind": "bootstrap"},
+        "deferred": True,
+    }
+    assert calls == ["prime", "bootstrap"]
+
+
+def test_desktop_bootstrap_payload_keeps_a_complete_safe_state_shape() -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    workspace = {
+        "project_root": "C:/workspace",
+        "project_name": "workspace",
+        "project_data_dir": "C:/core/projects/workspace",
+        "config_path": "C:/core/.reverie/config.json",
+        "mode": "reverie",
+        "active_source": "codex",
+        "active_model": {"id": "gpt", "display_name": "GPT", "provider": "codex"},
+        "index_ready": False,
+        "context_engine": {},
+    }
+    interface = SimpleNamespace(
+        config_manager=SimpleNamespace(is_workspace_mode=lambda: False),
+        skills_manager=SimpleNamespace(max_pinned_skills=4),
+    )
+    bridge = ReverieSdkBridge.__new__(ReverieSdkBridge)
+    bridge.ensure_interface = lambda: interface
+    bridge.workspace_payload = lambda: workspace
+    bridge.sessions_payload = lambda: {"current_session_id": "", "items": []}
+
+    state = bridge.desktop_bootstrap_payload()
+
+    assert state["workspace"] == workspace
+    assert state["models"] == {
+        "active_source": "codex",
+        "active_model": workspace["active_model"],
+        "sources": [],
+    }
+    assert state["settings"]["items"] == []
+    assert state["plugins"]["records"] == []
+    assert state["skills"]["pinned"]["max"] == 4
+    assert state["commands"]["items"] == []
+    assert state["recovery"]["operations"] == []
+
+
 def _source(payload: dict, source_id: str) -> dict:
     return next(item for item in payload["sources"] if item["id"] == source_id)
 

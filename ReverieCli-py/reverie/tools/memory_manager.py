@@ -21,7 +21,7 @@ class MemoryManagerTool(BaseTool):
 
     description = """Manage Reverie's project-isolated persistent MemoryItems.
 
-Use remember for explicit durable instructions, facts, decisions, goals, commitments, preferences, relationships, context, events, learnings, observations, artifacts, or errors. Never store credentials or transient chatter. Corrections create a new version; conflicts are surfaced rather than silently overwritten."""
+Use remember for explicit durable instructions, facts, decisions, goals, commitments, preferences, relationships, context, events, learnings, observations, artifacts, or errors. Do not use it for greetings, acknowledgements, thanks, or other transient chatter. Never store credentials. Corrections create a new version; conflicts are surfaced rather than silently overwritten."""
 
     parameters = {
         "type": "object",

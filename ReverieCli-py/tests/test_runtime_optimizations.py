@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 import threading
 import time
@@ -31,6 +32,26 @@ from reverie.tools.command_exec import CommandExecTool
 from reverie.tools.task_manager import TaskManagerTool, cleanup_completed_task_artifacts
 from reverie.tools.web_search import WebFetchTool, WebSearchTool
 from reverie.config import Config, ModelConfig
+
+
+def test_desktop_interface_import_stays_clear_of_terminal_agent_and_engine_stacks() -> None:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import reverie.cli.interface; "
+                "blocked=('reverie.cli.commands','reverie.agent.agent','reverie.engine.app'); "
+                "print(','.join(name for name in blocked if name in sys.modules))"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parents[1],
+    )
+
+    assert probe.stdout.strip() == ""
 
 
 class _FakeStreamingResponse:

@@ -100,6 +100,61 @@ def _standard_config() -> SimpleNamespace:
     )
 
 
+def _tool_schema(name: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": name,
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+def test_transient_greeting_does_not_expose_memory_tools(tmp_path):
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    agent.messages = [{"role": "user", "content": "hello"}]
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": [
+        _tool_schema("memory_manager"),
+        _tool_schema("memory_retrieval"),
+        _tool_schema("read_file"),
+    ]
+
+    visible = agent.get_visible_tool_schemas()
+
+    assert [item["function"]["name"] for item in visible] == ["read_file"]
+
+
+def test_explicit_memory_request_keeps_memory_tools_available(tmp_path):
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+    )
+    agent.messages = [{"role": "user", "content": "请记住：发布前必须运行 pytest -q"}]
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": [
+        _tool_schema("memory_manager"),
+        _tool_schema("memory_retrieval"),
+    ]
+
+    visible = agent.get_visible_tool_schemas()
+
+    assert {item["function"]["name"] for item in visible} == {
+        "memory_manager",
+        "memory_retrieval",
+    }
+
+
 def _seed_writer_project(
     tmp_path: Path,
     novel_id: str,

@@ -8,6 +8,8 @@ Handles:
 - Real-time status bar with themed styling
 """
 
+from __future__ import annotations
+
 import time
 import sys
 import os
@@ -35,8 +37,6 @@ from rich.markup import escape
 from rich import box
 
 from .display import DisplayComponents
-from .commands import CommandHandler
-from .input_handler import InputHandler
 from .markdown_formatter import MarkdownFormatter, format_markdown
 from .theme import THEME, DECO, DREAM, apply_theme
 from ..inline_images import (
@@ -57,24 +57,20 @@ from ..config import (
     normalize_thinking_output_style,
     normalize_tool_output_style,
 )
-from ..harness import build_harness_prompt_guidance, build_prompt_harness_report, persist_prompt_harness_run
 from ..atlas import build_atlas_additional_rules, normalize_atlas_mode_config
 from ..mcp import MCPConfigManager, MCPRuntime
 from ..rats import RatsRuntime
-from ..engine.modeling import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
+from ..engine_constants import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 from ..rules_manager import RulesManager
 from ..skills_manager import SkillsManager
 from ..session import SessionManager
-from ..agent import (
-    ReverieAgent,
+from ..stream_protocol import (
     HIDDEN_STREAM_TOKEN,
     STREAM_EVENT_MARKER,
     THINKING_START_MARKER,
     THINKING_END_MARKER,
-    build_system_prompt,
     decode_stream_event,
 )
-from ..agent.subagents import SubagentManager
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration, IndexConfig
 from ..context_engine import LSPManager
 from ..memory import MemoryOS
@@ -119,6 +115,13 @@ _TASK_STATE_BY_MARKER = {
     "-": "CANCELLED",
 }
 _TASK_COUNTER_FIELDS = ("NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED")
+
+
+def build_harness_prompt_guidance(*args: Any, **kwargs: Any) -> str:
+    """Compatibility wrapper that keeps the prompt harness lazily imported."""
+    from ..harness import build_harness_prompt_guidance as build_guidance
+
+    return build_guidance(*args, **kwargs)
 
 
 def _task_artifact_paths(project_root: Path) -> tuple[Path, Path]:
@@ -1004,7 +1007,7 @@ class ReverieInterface:
         self.git_integration: Optional[GitIntegration] = None
         self.lsp_manager: Optional[LSPManager] = None
         self.agent: Optional[ReverieAgent] = None
-        self.subagent_manager = SubagentManager(self)
+        self._subagent_manager = None
 
         self.total_active_time = 0.0
         self.current_task_start: Optional[float] = None
@@ -1070,6 +1073,15 @@ class ReverieInterface:
                 report_suppressed_exception("initialize RATS runtime")
                 return None
             return self.rats_runtime
+
+    @property
+    def subagent_manager(self):
+        """Build subagent orchestration only when its UI or tools request it."""
+        if getattr(self, "_subagent_manager", None) is None:
+            from ..agent.subagents import SubagentManager
+
+            self._subagent_manager = SubagentManager(self)
+        return self._subagent_manager
 
     def close(self) -> None:
         """Release workspace-scoped background services before switching projects."""
@@ -1500,6 +1512,11 @@ class ReverieInterface:
     def run(self) -> None:
         """Main entry point"""
         try:
+            # Desktop/headless startup never needs the terminal command browser.
+            # Keep its large tool catalog out of the import path until the TUI
+            # actually starts.
+            from .commands import CommandHandler
+
             self._startup_timing_active = True
             self._startup_started_monotonic = time.perf_counter()
             self._activity_last_monotonic = self._startup_started_monotonic
@@ -3033,6 +3050,8 @@ class ReverieInterface:
 
     def main_loop(self) -> None:
         """Main interaction loop"""
+        from .input_handler import InputHandler
+
         self.input_handler = InputHandler(
             self.console,
             attachment_selector=self._select_workspace_mention_for_prompt,
@@ -3835,7 +3854,7 @@ class ReverieInterface:
         config = self._load_active_runtime_config()
         self.agent.config = config
         self.agent.additional_rules = self._build_additional_rules_with_tti(config)
-        self.agent.system_prompt = build_system_prompt(
+        self.agent.system_prompt = self._build_system_prompt(
             model_name=self.agent.model_display_name,
             additional_rules=self.agent.additional_rules,
             mode=self.agent.mode,
@@ -4040,6 +4059,8 @@ class ReverieInterface:
         persist_config_changes: bool = True,
         defer_runtime_enrichment: bool = False,
     ) -> None:
+        from ..agent import ReverieAgent
+
         config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
         self.mcp_runtime.set_project_root(self.project_root)
         self.mcp_runtime.set_active_mode(config.mode)
@@ -4250,7 +4271,7 @@ class ReverieInterface:
             self.agent.additional_rules = "\n\n".join(
                 part for part in [self.agent.additional_rules, _build_batch_prompt_rules()] if str(part).strip()
             )
-            self.agent.system_prompt = build_system_prompt(
+            self.agent.system_prompt = self._build_system_prompt(
                 model_name=self.agent.model_display_name,
                 additional_rules=self.agent.additional_rules,
                 mode=self.agent.mode,
@@ -4457,6 +4478,8 @@ class ReverieInterface:
                 activity_events=list(self._captured_activity_events),
                 ui_events=ui_events,
             )
+            from ..harness import build_prompt_harness_report, persist_prompt_harness_run
+
             result.harness_report = build_prompt_harness_report(
                 self.project_root,
                 project_data_dir=self.project_data_dir,
@@ -4540,7 +4563,7 @@ class ReverieInterface:
             )
 
         harness_guidance = (
-            build_harness_prompt_guidance(
+            self._build_harness_prompt_guidance(
                 self.project_root,
                 project_data_dir=self.project_data_dir,
                 mode=normalized_mode,
@@ -4590,6 +4613,18 @@ class ReverieInterface:
         if base_rules:
             return f"{base_rules}\n\n{merged_text}"
         return merged_text
+
+    @staticmethod
+    def _build_harness_prompt_guidance(*args: Any, **kwargs: Any) -> str:
+        """Load the prompt harness only when an agent prompt needs it."""
+        return build_harness_prompt_guidance(*args, **kwargs)
+
+    @staticmethod
+    def _build_system_prompt(*args: Any, **kwargs: Any) -> str:
+        """Load the full Agent prompt builder only for an active model turn."""
+        from ..agent import build_system_prompt
+
+        return build_system_prompt(*args, **kwargs)
 
     def _sync_workspace_memory_message(self, session) -> None:
         """Inject a fresh workspace-memory note into the active session."""

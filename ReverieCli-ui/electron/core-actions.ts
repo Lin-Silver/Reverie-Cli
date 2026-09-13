@@ -20,6 +20,7 @@ export const CORE_RESPONSE_CONTRACT = {
   ratsTaskLogs: { type: "rats.task.logs", required: ["result", "task_id"] },
   searchSessions: { type: "session.search", required: ["results"] },
   initialize: { type: "state", required: ["state"] },
+  getState: { type: "state", required: ["state"] },
   getSession: { type: "session", required: ["session", "sessions"] },
   getFileChanges: { type: "file.changes", required: ["session_id", "changes"] },
   getContextStatus: { type: "context.status", required: ["context_engine"] },

@@ -6,7 +6,17 @@ from pathlib import Path
 from PIL import Image
 
 
-ICO_SIZES = ((256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16))
+ICO_SIZES = (
+    (256, 256),
+    (128, 128),
+    (64, 64),
+    (48, 48),
+    (40, 40),
+    (32, 32),
+    (24, 24),
+    (20, 20),
+    (16, 16),
+)
 
 
 def generate_icon(source: Path, output: Path) -> None:

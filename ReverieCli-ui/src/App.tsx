@@ -170,7 +170,7 @@ type Toast = { id: number; kind: "success" | "error" | "info"; message: string }
 
 type ComposerAttachment = { name: string; relativePath: string; size: number };
 
-const REVERIE_MARK_URL = new URL("reverie-mark-2.5.png", document.baseURI).href;
+const REVERIE_MARK_URL = new URL("reverie-mark.png", document.baseURI).href;
 
 const MODES = [
   ["reverie", "Reverie", Code2],
@@ -816,7 +816,7 @@ function Sidebar({
           </div>
           <MoreHorizontal size={15} />
         </button>
-        <button type="button" className={view === "settings" ? "footer-settings active" : "footer-settings"} onClick={() => setView("settings")}>
+        <button type="button" className={view === "settings" ? "footer-settings active" : "footer-settings"} onClick={() => setView(view === "settings" ? "chat" : "settings")}>
           <Settings size={16} /> {t("设置")}
         </button>
       </div>
@@ -4444,25 +4444,54 @@ export default function App() {
       if (requestSequence !== initializeSequence.current) return;
       setDesktopPaths(paths);
       setUiPreferences(normalizeUiPreferences(preferences));
-      const response = await window.reverie.request("initialize", { projectRoot: projectRoot ?? paths.projectRoot });
+      const response = await window.reverie.request("initialize", {
+        projectRoot: projectRoot ?? paths.projectRoot,
+        deferPayloads: true,
+      });
       if (requestSequence !== initializeSequence.current) return;
       let nextState = response.state;
       let nextSession: SessionState | null = null;
+      // Paint the workspace shell from the compact bootstrap response before
+      // loading a transcript or the large provider/tool catalogs.
+      setState(nextState);
+      setSession(null);
       const currentId = nextState.sessions.current_session_id || nextState.sessions.items[0]?.id;
       if (currentId) {
         const sessionResponse = await window.reverie.request("getSession", { sessionId: currentId });
         if (requestSequence !== initializeSequence.current) return;
         nextSession = sessionResponse.session;
         nextState = { ...nextState, sessions: sessionResponse.sessions };
+        setState(nextState);
+        setSession(nextSession);
+      }
+      if (response.deferred === true) {
+        try {
+          const hydrated = await window.reverie.request("getState", {});
+          if (requestSequence !== initializeSequence.current) return;
+          nextState = hydrated.state;
+        } catch (error) {
+          if (requestSequence !== initializeSequence.current) return;
+          toast(error instanceof Error ? error.message : String(error), "error");
+        }
       }
       setState(nextState);
       setSession(nextSession);
     } catch (error) {
       if (requestSequence === initializeSequence.current) setBootError(error instanceof Error ? error.message : String(error));
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => { void initialize(); }, [initialize]);
+
+  const retryInitialization = useCallback(async () => {
+    // A timed-out initialize can still be running inside the serialized core
+    // bridge. Restart it before retrying so the next request is not queued
+    // behind the stale one.
+    if (/timed out: initialize\b/.test(bootError)) {
+      await window.reverie.cancel().catch(() => undefined);
+    }
+    await initialize();
+  }, [bootError, initialize]);
 
   useEffect(() => {
     const contextEngine = state?.workspace.context_engine;
@@ -5441,7 +5470,7 @@ export default function App() {
     return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
   }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
 
-  if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void initialize()} /></I18nProvider>;
+  if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
 
   return (

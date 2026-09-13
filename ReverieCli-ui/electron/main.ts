@@ -16,6 +16,7 @@ import {
 import { resolveKernelSelection, TRUSTED_KERNELS_FILENAME } from "./kernel-resolver";
 import { parseDesktopLaunchOptions, resolveDesktopStartupMode } from "./launch-options";
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
+import { coreRequestTimeoutMs } from "./core-timeouts";
 import {
   activateWorkspaceInPlace,
   isWorkspaceDirectory,
@@ -348,15 +349,7 @@ class CoreBridge {
     const child = this.child;
     if (!child || child.killed) throw new Error("Reverie core is not running.");
     const id = `desktop-${Date.now()}-${++this.sequence}`;
-    const timeoutMs = action === "runPrompt" || action === "indexWorkspace"
-      ? 0
-      : action === "compactContext"
-        ? 180_000
-        : action === "refreshModelSources"
-          ? 120_000
-          : action === "getSession"
-            ? 15_000
-            : 60_000;
+    const timeoutMs = coreRequestTimeoutMs(action);
     return new Promise<JsonRecord>((resolve, reject) => {
       const timer = timeoutMs > 0
         ? setTimeout(() => {

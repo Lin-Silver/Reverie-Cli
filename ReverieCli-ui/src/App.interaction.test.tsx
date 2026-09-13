@@ -435,6 +435,10 @@ function installDesktopApi(options: {
     if (action === "getFileChanges") return { type: "file.changes", session_id: payload.sessionId, changes: [] };
     if (action === "initialize") {
       const state = options.initialState ?? { ...desktopState, models: models(), settings: settings() };
+      return { type: "state", state, deferred: payload.deferPayloads === true };
+    }
+    if (action === "getState") {
+      const state = options.initialState ?? { ...desktopState, models: models(), settings: settings() };
       return { type: "state", state };
     }
     if (action === "createSession") {
@@ -802,6 +806,18 @@ afterEach(() => {
 });
 
 describe("desktop GUI interactions", () => {
+  it("paints from a compact bootstrap before hydrating the complete desktop state", async () => {
+    const { request } = installDesktopApi();
+    render(<App />);
+
+    await screen.findByRole("button", { name: "命令面板" });
+    expect(request).toHaveBeenCalledWith("initialize", {
+      projectRoot: "C:/workspace",
+      deferPayloads: true,
+    });
+    expect(request).toHaveBeenCalledWith("getState", {});
+  });
+
   it("keeps errors visible for twelve seconds and allows early dismissal", async () => {
     const { request } = installDesktopApi();
     const user = userEvent.setup();
@@ -2180,5 +2196,18 @@ describe("desktop GUI interactions", () => {
     const badge = await screen.findByText("Experimental");
     expect(badge.className).toBe("setting-badge");
     expect(screen.queryByText("实验性")).toBeNull();
+  });
+
+  it("returns to chat when the active footer settings button is clicked again", async () => {
+    installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+    expect(await screen.findByText("通用设置")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await waitFor(() => expect(screen.queryByText("通用设置")).toBeNull());
+    expect(screen.getByRole("button", { name: "对话" })).toBeTruthy();
   });
 });

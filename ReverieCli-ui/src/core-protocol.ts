@@ -72,7 +72,8 @@ interface CoreRequestMap {
   ratsTaskCancel: { payload: { providerId?: string; serviceId: string; taskId: string; deadlineMs?: number }; response: Envelope<"rats.task.cancelled", { service_id: string; task_id: string; result: Record<string, unknown> }> };
   ratsTaskLogs: { payload: { providerId?: string; serviceId: string; taskId: string; cursor?: number; limit?: number; deadlineMs?: number }; response: Envelope<"rats.task.logs", { service_id: string; task_id: string; result: Record<string, unknown> }> };
   searchSessions: { payload: { query: string }; response: Envelope<"session.search", { query: string; results: SessionSearchResult[] }> };
-  initialize: { payload: { projectRoot: string }; response: Envelope<"state", { state: DesktopState }> };
+  initialize: { payload: { projectRoot: string; deferPayloads?: boolean }; response: Envelope<"state", { state: DesktopState; deferred?: boolean }> };
+  getState: { payload: EmptyPayload; response: Envelope<"state", { state: DesktopState }> };
   getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState }> };
   getFileChanges: { payload: { sessionId: string }; response: Envelope<"file.changes", { session_id: string; changes: FileChange[] }> };
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };

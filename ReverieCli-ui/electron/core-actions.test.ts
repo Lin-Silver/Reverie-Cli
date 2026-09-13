@@ -9,6 +9,7 @@ import {
 describe("core protocol runtime boundary", () => {
   it("accepts declared actions and object payloads", () => {
     expect(assertCoreAction("initialize")).toBe("initialize");
+    expect(assertCoreAction("getState")).toBe("getState");
     expect(normalizeCorePayload({ projectRoot: "C:/workspace" })).toEqual({ projectRoot: "C:/workspace" });
   });
 

@@ -533,7 +533,7 @@
     },
     "memory_manager": {
       "purpose": "List, inspect, correct, delete, or consolidate structured MemoryItems.",
-      "use_when": "A memory needs explanation, correction, deletion, or manual consolidation from the event store.",
+      "use_when": "A durable memory needs to be created, explained, corrected, deleted, or manually consolidated; do not use it for transient chatter.",
       "parameters": {
         "action": "list, get, correct, delete, or consolidate.",
         "memory_id": "Target MemoryItem id.",

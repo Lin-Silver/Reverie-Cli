@@ -534,6 +534,57 @@ class ReverieSdkBridge:
             "recovery": self.recovery_payload(),
         }
 
+    def desktop_bootstrap_payload(self) -> Dict[str, Any]:
+        """Return the small state required to paint the desktop immediately.
+
+        Provider catalogs, settings metadata, plugins, skills, commands, and
+        recovery history are useful after the shell is visible, but they are
+        expensive to discover and serialize. The desktop follows this response
+        with ``getState`` to hydrate those deferred sections.
+        """
+        from .version import CORE_INTERFACE_VERSION, RELEASE_STATUS, __version__
+
+        interface = self.ensure_interface()
+        workspace = self.workspace_payload()
+        return {
+            "protocol_version": 1,
+            "core": {
+                "version": __version__,
+                "interface_version": CORE_INTERFACE_VERSION,
+                "release_status": RELEASE_STATUS,
+            },
+            "workspace": workspace,
+            "models": {
+                "active_source": workspace["active_source"],
+                "active_model": workspace["active_model"],
+                "sources": [],
+            },
+            "settings": {
+                "items": [],
+                "config_path": workspace["config_path"],
+                "workspace_mode": bool(interface.config_manager.is_workspace_mode()),
+            },
+            "sessions": self.sessions_payload(),
+            "plugins": {"summary": {}, "records": []},
+            "skills": {
+                "mode": workspace["mode"],
+                "count": 0,
+                "invalid_count": 0,
+                "shadowed_count": 0,
+                "records": [],
+                "pinned": {
+                    "max": int(interface.skills_manager.max_pinned_skills),
+                    "keys": [],
+                    "names": [],
+                    "unresolved": [],
+                },
+                "errors": [],
+                "shadowed": [],
+            },
+            "commands": {"sections": [], "items": []},
+            "recovery": {"summary": {}, "checkpoints": [], "operations": []},
+        }
+
     def dispatch(self, message: Dict[str, Any]) -> Dict[str, Any]:
         action = str(message.get("action") or "").strip()
         payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
@@ -549,10 +600,12 @@ class ReverieSdkBridge:
         if action == "initialize":
             interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
             interface._prime_context_engine_background()
+            defer_payloads = bool(payload.get("deferPayloads", False))
             return {
                 "id": request_id,
                 "type": "state",
-                "state": self.desktop_state_payload(),
+                "state": self.desktop_bootstrap_payload() if defer_payloads else self.desktop_state_payload(),
+                "deferred": defer_payloads,
             }
         if action == "getState":
             return {

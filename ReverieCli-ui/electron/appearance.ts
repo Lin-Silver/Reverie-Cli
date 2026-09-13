@@ -10,6 +10,6 @@ export function windowAppearance(dark: boolean): {
   symbolColor: string;
 } {
   return dark
-    ? { backgroundColor: "#0b0d12", overlayColor: "#0e1117", symbolColor: "#aeb4bf" }
-    : { backgroundColor: "#f6f7f9", overlayColor: "#eef0f4", symbolColor: "#5f6671" };
+    ? { backgroundColor: "#0b0d12", overlayColor: "#0b0d12", symbolColor: "#aeb4bf" }
+    : { backgroundColor: "#f6f7f9", overlayColor: "#f6f7f9", symbolColor: "#5f6671" };
 }

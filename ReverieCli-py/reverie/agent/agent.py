@@ -38,6 +38,14 @@ from ..modes import normalize_mode
 from ..config import model_source_display_name, normalize_model_provider
 from ..request_identity import apply_reverie_client_identity
 from ..thinking_tool import is_think_tool
+from ..stream_protocol import (
+    HIDDEN_STREAM_TOKEN,
+    STREAM_EVENT_MARKER,
+    THINKING_END_MARKER,
+    THINKING_START_MARKER,
+    decode_stream_event,
+    encode_stream_event,
+)
 from ..prompt_cache import (
     anthropic_stream_with_prompt_cache_fallback,
     apply_anthropic_prompt_cache,
@@ -86,12 +94,6 @@ from ..webgemini import (
     normalize_webgemini_config,
 )
 
-# Special marker for thinking content (used in streaming)
-# This allows the interface to identify and style thinking content differently
-THINKING_START_MARKER = "[[THINKING_START]]"
-THINKING_END_MARKER = "[[THINKING_END]]"
-STREAM_EVENT_MARKER = "[[REVERIE_EVENT]]"
-HIDDEN_STREAM_TOKEN = "//END//"
 THINKING_OPEN_TAG_LITERAL = "<think>"
 THINKING_CLOSE_TAG_LITERAL = "</think>"
 
@@ -100,6 +102,65 @@ THINKING_CLOSE_TAG_LITERAL = "</think>"
 # twice in the saved transcript. Only replays of prompts at least this long are
 # stripped: below it, a coincidental match is more likely than a real echo.
 REASONING_ECHO_GUARD_MIN_CHARS = 12
+
+# Memory tools are useful for durable project context, but a greeting or other
+# one-off acknowledgement should never pay for a tool-result follow-up turn.
+_MEMORY_TOOL_NAMES = frozenset({"memory_manager", "memory_retrieval"})
+_CASUAL_TURN_PHRASES = frozenset(
+    {
+        "hi",
+        "hello",
+        "hey",
+        "yo",
+        "greetings",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "thanks",
+        "thank you",
+        "thx",
+        "ok",
+        "okay",
+        "你好",
+        "您好",
+        "嗨",
+        "哈喽",
+        "早上好",
+        "下午好",
+        "晚上好",
+        "谢谢",
+        "多谢",
+        "好的",
+        "收到",
+        "再见",
+        "拜拜",
+    }
+)
+_MEMORY_INTENT_MARKERS = (
+    "memory_manager",
+    "memory retrieval",
+    "memory",
+    "remember",
+    "recall",
+    "forget",
+    "记忆",
+    "记住",
+    "回忆",
+    "遗忘",
+    "偏好",
+    "持久",
+    "长期",
+)
+
+
+def _should_hide_memory_tools_for_prompt(prompt: Any) -> bool:
+    """Keep memory tools out of transient conversational turns."""
+    normalized = re.sub(r"[\W_]+", " ", str(prompt or "").casefold(), flags=re.UNICODE).strip()
+    if not normalized or len(normalized) > 48:
+        return False
+    if any(marker in normalized for marker in _MEMORY_INTENT_MARKERS):
+        return False
+    return normalized in _CASUAL_TURN_PHRASES
 
 # Configure logging for debugging
 logger = logging.getLogger(__name__)
@@ -120,26 +181,6 @@ def _wait_for_nvidia_rate_limit() -> None:
             time.sleep(NVIDIA_MIN_REQUEST_INTERVAL_SECONDS - elapsed)
             now = time.monotonic()
         _NVIDIA_LAST_REQUEST_AT = now
-
-
-def encode_stream_event(event_type: str, **payload: Any) -> str:
-    """Serialize a structured UI event into a safe stream chunk."""
-    body = {"event": str(event_type).strip().lower()}
-    body.update(payload)
-    return f"{STREAM_EVENT_MARKER}{json.dumps(body, ensure_ascii=False)}"
-
-
-def decode_stream_event(chunk: str) -> Optional[Dict[str, Any]]:
-    """Decode a structured UI event from a stream chunk."""
-    if not isinstance(chunk, str) or not chunk.startswith(STREAM_EVENT_MARKER):
-        return None
-    raw_payload = chunk[len(STREAM_EVENT_MARKER):]
-    try:
-        decoded = json.loads(raw_payload)
-    except Exception:
-        logger.debug("Failed to decode stream event payload", exc_info=True)
-        return None
-    return decoded if isinstance(decoded, dict) else None
 
 
 def _get_object_value(value: Any, key: str, default: Any = None) -> Any:
@@ -2785,6 +2826,16 @@ class ReverieAgent:
         schemas = tool_executor.get_tool_schemas(mode=effective_mode)
         if not schemas:
             return []
+
+        latest_prompt_reader = getattr(self, "_latest_user_prompt_text", None)
+        latest_prompt = latest_prompt_reader() if callable(latest_prompt_reader) else ""
+        if _should_hide_memory_tools_for_prompt(latest_prompt):
+            schemas = [
+                schema
+                for schema in schemas
+                if str(((schema or {}).get("function") or {}).get("name") or "").strip()
+                not in _MEMORY_TOOL_NAMES
+            ]
 
         if (
             self._is_active_model_source("nvidia")

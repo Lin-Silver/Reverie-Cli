@@ -17,10 +17,9 @@ import urllib.request
 import yaml
 
 from ..diagnostics import report_suppressed_exception
+from ..engine_constants import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 
 
-ASHFOX_DEFAULT_ENDPOINT = "http://127.0.0.1:8787/mcp"
-ASHFOX_MCP_SERVER_NAME = "ashfox"
 SOURCE_MODEL_EXTENSIONS = (".bbmodel", ".blend", ".fbx", ".dae", ".obj", ".gltf", ".glb")
 RUNTIME_MODEL_EXTENSIONS = (".glb", ".gltf", ".fbx", ".obj", ".dae")
 PREVIEW_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")

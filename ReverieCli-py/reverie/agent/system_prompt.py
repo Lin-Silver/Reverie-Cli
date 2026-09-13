@@ -143,6 +143,7 @@ def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, 
 - Proactively call `memory_retrieval(action="recall", query="...")` before continuation work, decisions that may already exist, user-preference-sensitive actions, or retrying a previously failed workflow. Do not wait for the user to say "remember".
 - Use `memory_retrieval(action="answer", query="...")` when the request asks what was previously decided, attempted, learned, or preferred and an evidence-grounded synthesis is useful.
 - Call `memory_manager(action="remember", ...)` when the user states a durable instruction, fact, decision, goal, commitment, preference, relationship, or correction, and after a verified workflow produces a reusable learning. Choose a stable `topic` when later updates may conflict.
+- Do not call `memory_retrieval` or `memory_manager` for greetings, acknowledgements, thanks, or other transient chatter; answer those directly in one response.
 - Never store credentials, secrets, raw transient chatter, guesses presented as facts, or large file contents. Include honest confidence and provenance; use `supersedes` for explicit replacements instead of silently overwriting memory.
 - Inspect `memory_manager(action="conflicts")` when recalled records disagree. Prefer the newest verified version while preserving its provenance and evidence chain.
 """.strip())

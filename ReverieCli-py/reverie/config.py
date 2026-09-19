@@ -20,6 +20,7 @@ import logging
 
 from .diagnostics import report_suppressed_exception
 from .security_utils import write_json_secure
+from .proxy import normalize_proxy_url
 from .security_policy import (
     default_security_config,
     normalize_permission_level,
@@ -890,6 +891,7 @@ class Config:
     api_initial_backoff: float = 1.0
     api_timeout: int = 60
     api_enable_debug_logging: bool = False
+    api_proxy: str = ""
     
     # Text-to-image settings
     text_to_image: Dict[str, Any] = field(default_factory=default_text_to_image_config)
@@ -1104,6 +1106,7 @@ class Config:
             'api_initial_backoff': self.api_initial_backoff,
             'api_timeout': self.api_timeout,
             'api_enable_debug_logging': self.api_enable_debug_logging,
+            'api_proxy': normalize_proxy_url(self.api_proxy),
             'text_to_image': text_to_image,
             'text_to_video': text_to_video,
             'codex': codex,
@@ -1223,6 +1226,7 @@ class Config:
             api_initial_backoff=data.get('api_initial_backoff', 1.0),
             api_timeout=data.get('api_timeout', 60),
             api_enable_debug_logging=data.get('api_enable_debug_logging', False),
+            api_proxy=normalize_proxy_url(data.get('api_proxy', '')),
             text_to_image=text_to_image,
             text_to_video=text_to_video,
             codex=codex,
@@ -1796,7 +1800,7 @@ class ConfigManager:
             needs_update = True
         
         # Check if API settings fields are missing
-        api_fields = ['api_max_retries', 'api_initial_backoff', 'api_timeout', 'api_enable_debug_logging']
+        api_fields = ['api_max_retries', 'api_initial_backoff', 'api_timeout', 'api_enable_debug_logging', 'api_proxy']
         for field in api_fields:
             if field not in data:
                 needs_update = True

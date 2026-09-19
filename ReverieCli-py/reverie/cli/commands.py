@@ -14503,6 +14503,8 @@ class CommandHandler:
             return self._cmd_setting_bool("stream_responses", "Stream Responses", value)
         if action in ("timeout", "api-timeout"):
             return self._cmd_setting_int("api_timeout", "API Timeout", value, min_value=10, max_value=3600)
+        if action in ("proxy", "api-proxy"):
+            return self._cmd_setting_proxy(value)
         if action in ("retries", "api-retries"):
             config_manager = self.app.get('config_manager')
             if not config_manager:
@@ -14518,7 +14520,7 @@ class CommandHandler:
 
         self.console.print(
             f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} "
-            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|tool-output|thinking|thinking-tool|stream|timeout|retries|debug|workspace|rules]"
+            f"Usage: /setting [status|ui|mode|model|theme|auto-index|status-line|tool-output|thinking|thinking-tool|stream|timeout|proxy|retries|debug|workspace|rules]"
             f"[/{self.theme.AMBER_GLOW}]"
         )
         return True
@@ -15446,6 +15448,30 @@ class CommandHandler:
             return True
         setattr(config, attr, parsed)
         return self._setting_save_and_reinit(config, f"{label} set to {parsed}.", reinit=False)
+
+    def _cmd_setting_proxy(self, value: str) -> bool:
+        """Set or clear the explicit HTTP(S) proxy used by model APIs."""
+        config_manager = self.app.get('config_manager')
+        if not config_manager:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]")
+            return True
+        config = config_manager.load()
+        raw = str(value or "").strip()
+        if not raw:
+            raw = Prompt.ask("API Proxy (blank for direct/default)", default="").strip()
+        rules_manager = self.app.get('rules_manager')
+        success, message, _needs_reinit = apply_setting_value(
+            config,
+            config_manager,
+            rules_manager,
+            "api_proxy",
+            raw,
+            self.app.get("runtime_plugin_manager"),
+        )
+        if not success:
+            self.console.print(f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {escape(message)}[/{self.theme.CORAL_SOFT}]")
+            return True
+        return self._setting_save_and_reinit(config, message)
 
     def _apply_workspace_mode_setting(self, enabled: bool):
         """Apply workspace/global config mode and return success with a user-facing message."""

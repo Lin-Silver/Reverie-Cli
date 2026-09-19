@@ -6,6 +6,7 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from .config import normalize_thinking_output_style, normalize_tool_output_style
 from .modes import describe_retired_mode, is_known_mode, list_modes, normalize_mode
+from .proxy import normalize_proxy_url
 from .security_policy import (
     PERMISSION_LEVELS,
     PERMISSION_MODES,
@@ -69,6 +70,7 @@ _SETTING_SECTIONS: Dict[str, str] = {
     "api_timeout": "Network",
     "api_max_retries": "Network",
     "api_enable_debug_logging": "Network",
+    "api_proxy": "Network",
     "permission_level": "Security",
     "permission_mode": "Security",
     "review_approve_risk_at": "Security",
@@ -220,6 +222,14 @@ def get_setting_items(
             "step": 10,
             "description": "Default API timeout in seconds for model requests.",
             "command": "/setting timeout <seconds>",
+        },
+        {
+            "name": "API Proxy",
+            "key": "api_proxy",
+            "kind": "url",
+            "optional": True,
+            "description": "Use an explicit HTTP or HTTPS proxy for model API requests. Leave empty to use the default network settings.",
+            "command": "/setting proxy <url|clear>",
         },
         {
             "name": "API Retries",
@@ -453,6 +463,14 @@ def apply_setting_value(
             return False, f"{item.get('name', normalized_key)} must be between {minimum} and {maximum}.", False
         setattr(config, normalized_key, parsed_int)
         return True, f"{item.get('name', normalized_key)} set to {parsed_int}.", False
+    if kind in {"text", "url"}:
+        if normalized_key == "api_proxy":
+            parsed_text = normalize_proxy_url(value)
+        else:
+            parsed_text = str(value or "").strip()
+        setattr(config, normalized_key, parsed_text)
+        message_value = parsed_text or "(direct/default)"
+        return True, f"{item.get('name', normalized_key)} set to {message_value}.", normalized_key == "api_proxy"
     if kind == "choice":
         if normalized_key == "permission_level":
             level = normalize_permission_level(value)

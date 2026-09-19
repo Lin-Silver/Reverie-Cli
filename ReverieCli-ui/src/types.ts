@@ -591,6 +591,33 @@ export interface LiveTurn {
   startedAt?: number;
 }
 
+/** One category of the next request's token budget (system prompt, history, etc.). */
+export interface ContextUsageSegment {
+  key: string;
+  tokens: number;
+  messages: number;
+  share: number;
+}
+
+/** Live context-window accounting for the active session, from the agent's own
+ *  next-request payload. Mirrors ReverieAgent.describe_context_usage(). */
+export interface ContextUsage {
+  tokenizer: { name: string; label: string; exact: boolean; detail: string };
+  total_tokens: number;
+  max_tokens: number;
+  remaining_tokens: number;
+  percentage: number;
+  overhead_tokens: number;
+  segments: ContextUsageSegment[];
+  heaviest_message?: { role: string; index: number; tokens: number; preview: string };
+  reasoning_tokens: number;
+  payload_message_count: number;
+  history_message_count: number;
+  history_limit: number;
+  compaction_tokens: number;
+  rotation_tokens: number;
+}
+
 export interface DesktopPaths {
   projectRoot: string;
   kernelPath: string;

@@ -957,9 +957,18 @@ class StreamingFooter:
 class ReverieInterface:
     """Main interactive interface for Reverie Cli with Dreamscape theme"""
     
-    def __init__(self, project_root: Path, *, headless: bool = False, debug: Optional[bool] = None):
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        headless: bool = False,
+        debug: Optional[bool] = None,
+        runtime_surface: str = "terminal",
+    ):
         self.project_root = project_root
         self.headless = bool(headless)
+        normalized_surface = str(runtime_surface or "").strip().lower().replace("_", "-")
+        self.runtime_surface = "desktop" if normalized_surface in {"desktop", "electron", "gui"} else "terminal"
         if debug is not None:
             set_debug_mode(debug)
         self._context_worker_limit: Optional[int] = None
@@ -4125,6 +4134,7 @@ class ReverieInterface:
             "endpoint": getattr(model, 'endpoint', ''),
             "custom_headers": getattr(model, 'custom_headers', {}),
             "config": config,
+            "runtime_surface": self.runtime_surface,
         }
 
         reused_agent = False
@@ -4619,11 +4629,11 @@ class ReverieInterface:
         """Load the prompt harness only when an agent prompt needs it."""
         return build_harness_prompt_guidance(*args, **kwargs)
 
-    @staticmethod
-    def _build_system_prompt(*args: Any, **kwargs: Any) -> str:
+    def _build_system_prompt(self, *args: Any, **kwargs: Any) -> str:
         """Load the full Agent prompt builder only for an active model turn."""
         from ..agent import build_system_prompt
 
+        kwargs.setdefault("runtime_surface", self.runtime_surface)
         return build_system_prompt(*args, **kwargs)
 
     def _sync_workspace_memory_message(self, session) -> None:

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from . import sensenova_u1_fast
+from . import sensenova_u1_5_lite, sensenova_u1_fast
 
 
-_PROFILES = {sensenova_u1_fast.MODEL_ID: sensenova_u1_fast}
+_PROFILES = {
+    sensenova_u1_fast.MODEL_ID: sensenova_u1_fast,
+    sensenova_u1_5_lite.MODEL_ID: sensenova_u1_5_lite,
+}
 
 
 def get_sensenova_tti_model_catalog() -> List[Dict[str, Any]]:
@@ -27,4 +30,3 @@ def resolve_sensenova_tti_model(model_id_or_name: Any) -> Optional[Dict[str, Any
         if wanted in {str(item["id"]).lower(), str(item["display_name"]).lower()}:
             return item
     return None
-

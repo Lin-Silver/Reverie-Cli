@@ -524,6 +524,22 @@ def test_every_setting_item_carries_a_section(tmp_path: Path) -> None:
     assert setting_section_for("not-a-real-key") == "Session"
 
 
+def test_api_proxy_setting_is_editable_and_round_trips(tmp_path: Path) -> None:
+    manager = _config_manager(tmp_path)
+    config = manager.load()
+    item = next(item for item in get_setting_items(config, manager, None) if item["key"] == "api_proxy")
+
+    assert item["kind"] == "url"
+    assert item["section"] == "Network"
+
+    ok, _message, reinit = apply_setting_value(config, manager, None, "api_proxy", "127.0.0.1:7890")
+    assert ok and reinit is True
+    assert config.api_proxy == "http://127.0.0.1:7890"
+
+    manager.save(config)
+    assert manager.load().api_proxy == "http://127.0.0.1:7890"
+
+
 def test_toggling_the_thinking_tool_asks_for_an_agent_rebuild(tmp_path: Path) -> None:
     manager = _config_manager(tmp_path)
     config = manager.load()

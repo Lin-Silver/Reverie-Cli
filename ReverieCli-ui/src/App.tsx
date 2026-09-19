@@ -82,6 +82,7 @@ import { FileChanges } from "./FileChanges";
 import type {
   CommandRecord,
   ConfigField,
+  ContextUsage,
   CustomProviderFormat,
   CustomProviderModel,
   CustomProviderRecord,
@@ -164,6 +165,13 @@ import {
   settingsModelSources,
 } from "./model-sources";
 import { SessionCache } from "./session-cache";
+import {
+  NEW_SESSION_DRAFT_ID,
+  clearDraft,
+  clearProjectDrafts,
+  loadProjectDrafts,
+  saveDraft,
+} from "./drafts";
 import type { ApprovalDecision } from "./core-protocol";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
@@ -620,6 +628,8 @@ function Sidebar({
         type="button"
         className={`session-item ${session.id === activeSessionId ? "active" : ""}`}
         onClick={() => openSession(session.id)}
+        onDoubleClick={() => openSession(session.id)}
+        title={session.name}
       >
         <span className="session-title">{session.name}</span>
         <span className="session-meta">{t("session.count", { count: session.message_count, time: formatTime(session.updated_at, language) })}</span>
@@ -928,8 +938,8 @@ function ModelPicker({
                   <strong>{model.display_name}</strong>
                   <span>{t(model.description || model.id)}</span>
                   <small>
-                    {model.transport || "custom"} · {formatTokens(model.context_length)} context
-                    {model.reasoning.control !== "none" ? ` · ${model.reasoning.control}` : ""}
+                    {t(model.transport || "custom")} · {formatTokens(model.context_length)} {t("上下文")}
+                    {model.reasoning.control !== "none" ? ` · ${t(model.reasoning.control)}` : ""}
                   </small>
                 </div>
                 {source.active && source.selected_model_id === model.id && <Check size={16} />}
@@ -1275,6 +1285,33 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
   );
 });
 
+// The turn error is the humanized detail (e.g. the OpenCode free-tier guidance
+// with its `/opencode key ...` suggestion) -- it can span several lines, so it
+// lives in the message body under the output as a readable block, not a
+// one-line flash. The transient toast is only the headline; this is the detail.
+function InlineError({ detail }: { detail: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(() => {
+    void navigator.clipboard?.writeText(detail).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    }).catch(() => {});
+  }, [detail]);
+  return (
+    <div className="inline-error" role="alert">
+      <div className="inline-error-head">
+        <AlertCircle size={15} />
+        <strong>{t("本轮出错")}</strong>
+        <button type="button" className="inline-error-copy" onClick={copy} aria-label={t("复制")}>
+          {copied ? <><Check size={12} /> {t("已复制")}</> : <><Copy size={12} /> {t("复制")}</>}
+        </button>
+      </div>
+      <pre className="inline-error-body">{detail}</pre>
+    </div>
+  );
+}
+
 function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: boolean; preferences: UiPreferences }) {
   const { t } = useI18n();
   const [clock, setClock] = useState(() => Date.now());
@@ -1308,7 +1345,7 @@ function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: 
             </details>
           )}
           {turn.assistantText ? <Markdown>{turn.assistantText}</Markdown> : running ? <div className="typing"><span /><span /><span /></div> : null}
-          {turn.error && <div className="inline-error"><AlertCircle size={14} />{turn.error}</div>}
+          {turn.error && <InlineError detail={turn.error} />}
         </div>
       </article>
     </>
@@ -1370,6 +1407,109 @@ function MentionPicker({
   );
 }
 
+// One colour per context segment. The lavender accent leads (system prompt),
+// then cooler-to-warmer hues for injected context, the conversation roles, and
+// a muted grey for the un-bucketed request overhead.
+const CONTEXT_SEGMENT_COLORS: Record<string, string> = {
+  system_prompt: "#c7b5ff",
+  injected_context: "#7fb0ff",
+  user: "#7fd6ad",
+  assistant: "#f0c274",
+  tool: "#e59aa0",
+  overhead: "#606a79",
+};
+
+// A small ring in the composer showing how full the context window is, split by
+// category. The filled sweep is total/max; each coloured arc is one segment's
+// share of the window. Hover reveals the exact token split.
+function ContextRing({ usage }: { usage: ContextUsage | null }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  if (!usage || !usage.max_tokens) return null;
+
+  const size = 26;
+  const stroke = 3.5;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const pct = Math.max(0, Math.min(usage.percentage, 100));
+  const state = pct >= 82 ? "danger" : pct >= 70 ? "warn" : "ok";
+
+  const withOverhead = usage.overhead_tokens > 0
+    ? [...usage.segments, { key: "overhead", tokens: usage.overhead_tokens, messages: 0, share: (usage.overhead_tokens / usage.total_tokens) * 100 }]
+    : usage.segments;
+  let cumulative = 0;
+  const arcs = withOverhead
+    .filter((seg) => seg.tokens > 0)
+    .map((seg) => {
+      const fraction = usage.max_tokens ? seg.tokens / usage.max_tokens : 0;
+      const arc = {
+        key: seg.key,
+        color: CONTEXT_SEGMENT_COLORS[seg.key] ?? CONTEXT_SEGMENT_COLORS.overhead,
+        dash: Math.max(0, fraction * circumference),
+        offset: -cumulative * circumference,
+        tokens: seg.tokens,
+      };
+      cumulative += fraction;
+      return arc;
+    });
+
+  const segmentLabel = (key: string) => t(`context.segment.${key}`);
+
+  return (
+    <div className="context-ring" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        className={`context-ring-button context-ring-${state}`}
+        aria-label={t("context.usage.aria", { percent: Math.round(pct) })}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+            <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--context-ring-track)" strokeWidth={stroke} />
+            {arcs.map((arc) => (
+              <circle
+                key={arc.key}
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                fill="none"
+                stroke={arc.color}
+                strokeWidth={stroke}
+                strokeDasharray={`${arc.dash} ${circumference}`}
+                strokeDashoffset={arc.offset}
+                strokeLinecap="butt"
+              />
+            ))}
+          </g>
+        </svg>
+        <span className="context-ring-pct">{Math.round(pct)}</span>
+      </button>
+      {open && (
+        <div className="context-ring-popover" role="tooltip">
+          <div className="context-ring-head">
+            <strong>{t("context.usage.title")}</strong>
+            <span>{formatTokens(usage.total_tokens)} / {formatTokens(usage.max_tokens)} · {Math.round(pct)}%</span>
+          </div>
+          <ul className="context-ring-list">
+            {withOverhead.filter((seg) => seg.tokens > 0).map((seg) => (
+              <li key={seg.key}>
+                <span className="context-ring-swatch" style={{ background: CONTEXT_SEGMENT_COLORS[seg.key] ?? CONTEXT_SEGMENT_COLORS.overhead }} />
+                <span className="context-ring-name">{segmentLabel(seg.key)}</span>
+                <span className="context-ring-tokens">{seg.tokens.toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="context-ring-foot">
+            <span>{t("context.usage.remaining", { tokens: formatTokens(usage.remaining_tokens) })}</span>
+            {!usage.tokenizer.exact && <span className="context-ring-approx">{t("context.usage.approx")}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Composer({
   value,
   setValue,
@@ -1388,6 +1528,7 @@ function Composer({
   unresolvedSkills,
   unpinSkill,
   modelName,
+  contextUsage,
   disabled = false,
 }: {
   value: string;
@@ -1407,6 +1548,7 @@ function Composer({
   unresolvedSkills: string[];
   unpinSkill: (name: string) => void;
   modelName: string;
+  contextUsage: ContextUsage | null;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
@@ -1419,8 +1561,12 @@ function Composer({
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      // Enter sends even mid-stream: a send while a turn is running interrupts it
+      // and enqueues the typed text as the next task (sendPrompt handles the
+      // interrupt). Only a hard `disabled` (session switching) blocks it.
+      if (disabled) return;
       event.preventDefault();
-      if (!running && !disabled && value.trim()) send();
+      if (value.trim()) send();
     }
   };
 
@@ -1465,7 +1611,7 @@ function Composer({
           onKeyDown={keyDown}
           placeholder={t("composer.placeholder", { model: modelName || "Reverie" })}
           rows={1}
-          disabled={running || disabled}
+          disabled={disabled}
         />
         <div className="composer-toolbar">
           <div>
@@ -1473,12 +1619,10 @@ function Composer({
             <IconButton label={t("选择任意文件作为附件")} onClick={selectAttachment} disabled={disabled}><Paperclip size={16} /></IconButton>
           </div>
           <div className="composer-hint">
-            {!running && <span>{t("Enter 发送 · Shift Enter 换行")}</span>}
-            {running ? (
-              <button type="button" className="stop-button" onClick={cancel}><Square size={12} fill="currentColor" /> {t("停止")}</button>
-            ) : (
-              <button type="button" className="send-button" aria-label={t("发送")} onClick={send} disabled={disabled || !value.trim()}><Send size={15} /></button>
-            )}
+            <span>{running ? t("composer.interruptHint") : t("Enter 发送 · Shift Enter 换行")}</span>
+            <ContextRing usage={contextUsage} />
+            {running && <button type="button" className="stop-button" onClick={cancel}><Square size={12} fill="currentColor" /> {t("停止")}</button>}
+            <button type="button" className="send-button" aria-label={running ? t("打断并发送") : t("发送")} onClick={send} disabled={disabled || !value.trim()}><Send size={15} /></button>
           </div>
         </div>
       </div>
@@ -1597,6 +1741,9 @@ function ChatView({
   deleteSession,
   preferences,
   updatePreferences,
+  approval,
+  resolveApproval,
+  contextUsage,
 }: {
   session: SessionState | null;
   liveTurn: LiveTurn | null;
@@ -1624,6 +1771,9 @@ function ChatView({
   deleteSession: () => void;
   preferences: UiPreferences;
   updatePreferences: (patch: Partial<UiPreferences>) => void;
+  approval: Record<string, unknown> | null;
+  resolveApproval: (decision: ApprovalDecision, message?: string) => void;
+  contextUsage: ContextUsage | null;
 }) {
   const { t } = useI18n();
   const transcript = useRef<HTMLDivElement>(null);
@@ -1664,6 +1814,7 @@ function ChatView({
           </div>
         )}
       </div>
+      {approval && <ApprovalPanel approval={approval} resolve={resolveApproval} />}
       <Composer
         value={prompt}
         setValue={setPrompt}
@@ -1682,6 +1833,7 @@ function ChatView({
         unresolvedSkills={unresolvedSkills}
         unpinSkill={unpinSkill}
         modelName={modelName}
+        contextUsage={contextUsage}
         disabled={sessionBusy}
       />
     </div>
@@ -1809,7 +1961,7 @@ function PluginsView({
             <div className="plugin-main">
               <div className="plugin-title"><strong>{plugin.name}</strong><span className={`status-pill ${plugin.status}`}>{t(plugin.status_label || plugin.status)}</span></div>
               <p>{plugin.family} · v{plugin.version || "—"}</p>
-              <div className="plugin-stats"><span>{plugin.tool_count} tools</span><span>{plugin.command_count} commands</span><span>{plugin.skill_count} skills</span></div>
+              <div className="plugin-stats"><span>{plugin.tool_count} {t("工具")}</span><span>{plugin.command_count} {t("命令")}</span><span>{plugin.skill_count} {t("技能")}</span></div>
             </div>
             <div className="plugin-toggles">
               <label><span>{t("信任执行")}</span><Toggle checked={plugin.trusted} onChange={(value) => updatePlugin("setPluginTrust", plugin, value)} /></label>
@@ -2011,10 +2163,39 @@ function SettingControl({ item, update }: { item: SettingItem; update: (key: str
   if (item.kind === "int") {
     return <input type="number" value={Number(item.value ?? 0)} min={item.min} max={item.max} step={item.step ?? 1} onChange={(event) => update(item.key, Number(event.target.value))} />;
   }
+  if (item.kind === "text" || item.kind === "url") {
+    return <TextSettingControl item={item} update={update} />;
+  }
   if (item.kind === "rules") {
     return <RulesEditor item={item} update={update} />;
   }
   return <span className="setting-readonly">{String(item.value ?? "—")}</span>;
+}
+
+function TextSettingControl({ item, update }: { item: SettingItem; update: (key: string, value: unknown) => void }) {
+  const { t } = useI18n();
+  const savedValue = String(item.value ?? "");
+  const [value, setValue] = useState(savedValue);
+  useEffect(() => setValue(savedValue), [savedValue]);
+  const changed = value !== savedValue;
+  return (
+    <div className="setting-text-control">
+      <input
+        type={item.kind === "url" ? "url" : "text"}
+        value={value}
+        aria-label={t(item.name)}
+        placeholder={item.key === "api_proxy" ? "http://127.0.0.1:7890" : ""}
+        onChange={(event) => setValue(event.target.value)}
+      />
+      {changed && (
+        <div>
+          <span>{t("有未保存的更改")}</span>
+          <button type="button" className="secondary-button" onClick={() => setValue(savedValue)}>{t("撤销")}</button>
+          <button type="button" className="primary-button" onClick={() => update(item.key, value)}>{t("保存")}</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RulesEditor({ item, update }: { item: SettingItem; update: (key: string, value: unknown) => void }) {
@@ -2035,12 +2216,32 @@ function RulesEditor({ item, update }: { item: SettingItem; update: (key: string
   );
 }
 
-function ProviderFieldControl({ field, value, configured, update }: { field: ConfigField; value: unknown; configured: boolean; update: (key: string, value: unknown) => void }) {
+/** Fetch one raw stored secret from the core on explicit demand (viewing/editing). */
+type RevealSecret = (params: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }) => Promise<string>;
+
+function ProviderFieldControl({ field, value, configured, update, reveal }: { field: ConfigField; value: unknown; configured: boolean; update: (key: string, value: unknown) => void; reveal?: () => Promise<string> }) {
   const { t } = useI18n();
   const [visible, setVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
   if (field.kind === "bool") return <Toggle checked={Boolean(value)} onChange={(checked) => update(field.key, checked)} />;
   if (field.kind === "choice") return <select value={String(value ?? "")} onChange={(event) => update(field.key, event.target.value)}>{(field.choices ?? []).map((choice) => <option key={choice} value={choice}>{choice}</option>)}</select>;
   const type = field.kind === "secret" && !visible ? "password" : field.kind === "int" || field.kind === "float" ? "number" : "text";
+  const hasValue = String(value ?? "").length > 0;
+  // Eye toggles visibility; for a configured secret with nothing yet loaded, it
+  // first pulls the stored key into the field so it can be viewed and edited.
+  const onEye = async () => {
+    if (field.kind === "secret" && configured && !hasValue && reveal && !busy) {
+      setBusy(true);
+      try {
+        const secret = await reveal();
+        update(field.key, secret);
+        setVisible(true);
+      } catch { /* leave the field empty; the user can still type a new key */ }
+      finally { setBusy(false); }
+      return;
+    }
+    setVisible((shown) => !shown);
+  };
   return (
     <div className="field-input-wrap">
       <input
@@ -2049,10 +2250,10 @@ function ProviderFieldControl({ field, value, configured, update }: { field: Con
         min={field.min}
         max={field.max}
         step={field.kind === "float" ? "0.1" : undefined}
-        placeholder={field.kind === "secret" && configured ? t("已配置；留空保持不变") : field.optional ? t("可选") : ""}
+        placeholder={field.kind === "secret" && configured ? t("已配置；点击眼睛查看，清空并保存即可移除") : field.optional ? t("可选") : ""}
         onChange={(event) => update(field.key, type === "number" ? Number(event.target.value) : event.target.value)}
       />
-      {field.kind === "secret" && <button type="button" onClick={() => setVisible((shown) => !shown)}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
+      {field.kind === "secret" && <button type="button" aria-label={t("查看/隐藏密钥")} onClick={() => void onEye()} disabled={busy}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
     </div>
   );
 }
@@ -2107,6 +2308,13 @@ function CustomProviderPanel({ source, controls }: { source: ModelSource; contro
   const { t } = useI18n();
   const providers = source.custom_providers ?? [];
   const probeKeys = providers.map((provider) => `custom:${provider.id}`);
+  const [collapsedProviders, setCollapsedProviders] = useState<Record<string, boolean>>({});
+  const toggleProvider = (provider: CustomProviderRecord) => {
+    setCollapsedProviders((current) => {
+      const collapsed = current[provider.id] ?? (providers.length > 1 && !provider.active);
+      return { ...current, [provider.id]: !collapsed };
+    });
+  };
   return (
     <div className="provider-content">
       <div className="section-heading">
@@ -2132,15 +2340,29 @@ function CustomProviderPanel({ source, controls }: { source: ModelSource; contro
       )}
       {providers.map((provider) => {
         const probe = controls.probes[`custom:${provider.id}`];
+        const collapsed = collapsedProviders[provider.id] ?? (providers.length > 1 && !provider.active);
+        const detailsId = `custom-provider-details-${provider.id}`;
         return (
-          <article className={`custom-provider-card ${provider.active ? "active" : ""} ${provider.enabled ? "" : "disabled"}`} key={provider.id}>
+          <article className={`custom-provider-card ${provider.active ? "active" : ""} ${provider.enabled ? "" : "disabled"} ${collapsed ? "collapsed" : ""}`} key={provider.id}>
             <header>
-              <div className="custom-provider-title">
-                <strong>{provider.name}</strong>
-                {provider.active && <span className="provider-flag">{t("使用中")}</span>}
-                {!provider.enabled && <span className="provider-flag muted">{t("已停用")}</span>}
-                <ProbeBadge probe={probe} />
-              </div>
+              <button
+                type="button"
+                className="custom-provider-summary"
+                aria-expanded={!collapsed}
+                aria-controls={detailsId}
+                aria-label={`${t(collapsed ? "展开模型列表" : "收起模型列表")}: ${provider.name}`}
+                title={`${t(collapsed ? "展开模型列表" : "收起模型列表")}: ${provider.name}`}
+                onClick={() => toggleProvider(provider)}
+              >
+                {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+                <span className="custom-provider-title">
+                  <strong>{provider.name}</strong>
+                  <small className="custom-provider-model-count">{provider.models.length}</small>
+                  {provider.active && <span className="provider-flag">{t("使用中")}</span>}
+                  {!provider.enabled && <span className="provider-flag muted">{t("已停用")}</span>}
+                  <ProbeBadge probe={probe} />
+                </span>
+              </button>
               <div className="custom-provider-actions">
                 <IconButton label={t("测试")} onClick={() => controls.probe([`custom:${provider.id}`])} disabled={controls.probing}><Zap size={14} /></IconButton>
                 <IconButton label={t("刷新目录")} onClick={() => controls.refresh(provider)}><RefreshCw size={14} /></IconButton>
@@ -2149,52 +2371,56 @@ function CustomProviderPanel({ source, controls }: { source: ModelSource; contro
                 <IconButton label={t("删除")} onClick={() => controls.remove(provider)}><Trash2 size={14} /></IconButton>
               </div>
             </header>
-            <dl className="custom-provider-meta">
-              <div><dt>Base URL</dt><dd>{provider.base_url}</dd></div>
-              <div><dt>{t("请求格式")}</dt><dd>{provider.format_label}</dd></div>
-              <div>
-                <dt>API Key</dt>
-                <dd>
-                  {provider.api_key_configured
-                    ? `${provider.api_key_masked}${provider.api_key_source === "env" ? ` · ${t("来自环境变量")}` : ""}`
-                    : t("未配置")}
-                </dd>
-              </div>
-              <div className="custom-provider-thinking">
-                <dt>{t("思考模式")}</dt>
-                <dd>
-                  <Toggle label={t("思考模式")} checked={provider.thinking} onChange={(checked) => controls.setThinking(provider, checked)} />
-                  <span>{provider.thinking ? t("已开启（默认）") : t("已关闭")}</span>
-                </dd>
-              </div>
-            </dl>
-            {probe && probe.status !== "online" && probe.detail && <p className="custom-provider-note">{probe.detail}</p>}
-            {provider.sync_error && <p className="custom-provider-note">{provider.sync_error}</p>}
-            <div className="settings-model-grid">
-              {provider.models.map((model) => (
-                <div className={`settings-model-card ${provider.active && provider.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
-                  <button type="button" className="model-card-main" onClick={() => controls.selectModel(provider, model)}>
-                    <div><strong>{model.display_name}</strong><span>{model.id}</span></div>
-                    {provider.active && provider.selected_model_id === model.id ? <CheckCircle2 size={16} /> : <Circle size={14} />}
-                  </button>
-                  <div className="tag-row">
-                    <button type="button" className="tag-button" onClick={() => controls.editContextLimit(provider, model)}>
-                      {model.context_limit
-                        ? `${formatTokens(model.context_limit)} ctx`
-                        : t("设置上下文")}
-                    </button>
-                    {model.vision && <span>vision</span>}
+            {!collapsed && (
+              <div id={detailsId} className="custom-provider-details">
+                <dl className="custom-provider-meta">
+                  <div><dt>{t("基础 URL")}</dt><dd>{provider.base_url}</dd></div>
+                  <div><dt>{t("请求格式")}</dt><dd>{t(provider.format_label)}</dd></div>
+                  <div>
+                    <dt>{t("API 密钥")}</dt>
+                    <dd>
+                      {provider.api_key_configured
+                        ? `${provider.api_key_masked}${provider.api_key_source === "env" ? ` · ${t("来自环境变量")}` : ""}`
+                        : t("未配置")}
+                    </dd>
                   </div>
+                  <div className="custom-provider-thinking">
+                    <dt>{t("思考模式")}</dt>
+                    <dd>
+                      <Toggle label={t("思考模式")} checked={provider.thinking} onChange={(checked) => controls.setThinking(provider, checked)} />
+                      <span>{provider.thinking ? t("已开启（默认）") : t("已关闭")}</span>
+                    </dd>
+                  </div>
+                </dl>
+                {probe && probe.status !== "online" && probe.detail && <p className="custom-provider-note">{probe.detail}</p>}
+                {provider.sync_error && <p className="custom-provider-note">{provider.sync_error}</p>}
+                <div className="settings-model-grid">
+                  {provider.models.map((model) => (
+                    <div className={`settings-model-card ${provider.active && provider.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
+                      <button type="button" className="model-card-main" onClick={() => controls.selectModel(provider, model)}>
+                        <div><strong>{model.display_name}</strong><span title={model.id}>{model.id}</span></div>
+                        {provider.active && provider.selected_model_id === model.id ? <CheckCircle2 size={16} /> : <Circle size={14} />}
+                      </button>
+                      <div className="tag-row">
+                        <button type="button" className="tag-button" onClick={() => controls.editContextLimit(provider, model)}>
+                          {model.context_limit
+                            ? `${formatTokens(model.context_limit)} ${t("上下文")}`
+                            : t("设置上下文")}
+                        </button>
+                        {model.vision && <span>{t("视觉")}</span>}
+                      </div>
+                    </div>
+                  ))}
+                  {provider.models.length === 0 && (
+                    <div className="empty-panel compact">
+                      <Database size={22} />
+                      <strong>{t("目录还是空的")}</strong>
+                      <span>{t("点击刷新目录，从该 Provider 的 /models 接口重新获取。")}</span>
+                    </div>
+                  )}
                 </div>
-              ))}
-              {provider.models.length === 0 && (
-                <div className="empty-panel compact">
-                  <Database size={22} />
-                  <strong>{t("目录还是空的")}</strong>
-                  <span>{t("点击刷新目录，从该 Provider 的 /models 接口重新获取。")}</span>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </article>
         );
       })}
@@ -2207,26 +2433,48 @@ function CustomProviderModal({
   formats,
   close,
   save,
+  reveal,
 }: {
   provider: CustomProviderRecord | null;
   formats: CustomProviderFormat[];
   close: () => void;
-  save: (values: { name: string; base_url: string; api_key: string; format: string }) => void;
+  save: (values: { name: string; base_url: string; api_key: string; format: string }, clearApiKey: boolean) => void;
+  reveal?: () => Promise<string>;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLFormElement>(null);
   useDialogFocus(dialogRef, close);
   const editing = Boolean(provider);
+  const configured = Boolean(provider?.api_key_configured);
   const [values, setValues] = useState({
     name: provider?.name ?? "",
     base_url: provider?.base_url ?? "",
     api_key: "",
     format: provider?.format ?? formats[0]?.id ?? "openai-chat",
   });
+  const [visible, setVisible] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
   // An existing provider already has a stored key, so only a new one must supply it.
   const valid = Boolean(values.name.trim() && values.base_url.trim() && (editing || values.api_key.trim()));
+  // The stored key was pulled into the field and then emptied: an explicit clear.
+  const clearApiKey = editing && configured && revealed && values.api_key.trim() === "";
   const activeFormat = formats.find((item) => item.id === values.format);
+  const onEye = async () => {
+    if (configured && !revealed && reveal && !busy) {
+      setBusy(true);
+      try {
+        const secret = await reveal();
+        update("api_key", secret);
+        setRevealed(true);
+        setVisible(true);
+      } catch { /* leave blank; a new key can still be typed */ }
+      finally { setBusy(false); }
+      return;
+    }
+    setVisible((shown) => !shown);
+  };
   return (
     <div className="modal-backdrop" onMouseDown={close}>
       <form
@@ -2237,7 +2485,7 @@ function CustomProviderModal({
         aria-labelledby="custom-provider-title"
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={(event) => { event.preventDefault(); if (valid) save(values); }}
+        onSubmit={(event) => { event.preventDefault(); if (valid) save(values, clearApiKey); }}
       >
         <div className="form-modal-header">
           <div>
@@ -2247,31 +2495,34 @@ function CustomProviderModal({
           <IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton>
         </div>
         <div className="form-grid single">
-          <label>
+        <label>
             <span>{t("Provider 名称")}</span>
             <input autoFocus value={values.name} onChange={(event) => update("name", event.target.value)} placeholder={t("例如 xkiro")} />
           </label>
           <label>
-            <span>Base URL</span>
+            <span>{t("基础 URL")}</span>
             <input value={values.base_url} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.xkiro.com/v1" />
           </label>
           <label>
-            <span>API Key</span>
-            <input
-              type="password"
-              value={values.api_key}
-              onChange={(event) => update("api_key", event.target.value)}
-              placeholder={editing ? t("已配置；留空保持不变") : ""}
-            />
+            <span>{t("API 密钥")}</span>
+            <div className="field-input-wrap">
+              <input
+                type={visible ? "text" : "password"}
+                value={values.api_key}
+                onChange={(event) => update("api_key", event.target.value)}
+                placeholder={editing && configured ? t("已配置；点击眼睛查看，清空并保存即可移除") : ""}
+              />
+              {editing && configured && <button type="button" aria-label={t("查看/隐藏密钥")} onClick={() => void onEye()} disabled={busy}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
+            </div>
           </label>
           <label>
             <span>{t("API 请求格式")}</span>
             <select value={values.format} onChange={(event) => update("format", event.target.value)}>
-              {formats.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              {formats.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
             </select>
           </label>
         </div>
-        {activeFormat && <p className="form-modal-hint">{activeFormat.description}</p>}
+        {activeFormat && <p className="form-modal-hint">{t(activeFormat.description)}</p>}
         <div className="form-modal-footer">
           <button type="button" className="secondary-button" onClick={close}>{t("取消")}</button>
           <button type="submit" className="primary-button" disabled={!valid}>{editing ? t("保存") : t("添加 Provider")}</button>
@@ -2366,6 +2617,7 @@ function ProviderSettings({
   state,
   selectModel,
   saveProvider,
+  revealSecret,
   addStandard,
   editStandard,
   deleteStandard,
@@ -2373,7 +2625,8 @@ function ProviderSettings({
 }: {
   state: DesktopState;
   selectModel: (source: ModelSource, model: ModelRecord) => void;
-  saveProvider: (source: ModelSource, patch: Record<string, unknown>) => void;
+  saveProvider: (source: ModelSource, patch: Record<string, unknown>, clearFields?: string[]) => void;
+  revealSecret: RevealSecret;
   addStandard: () => void;
   editStandard: (index: number, model: ModelRecord) => void;
   deleteStandard: (index: number) => void;
@@ -2393,7 +2646,9 @@ function ProviderSettings({
     ? t("管理任意 OpenAI、Anthropic、Responses 或请求兼容模型。")
     : source.id === "agnes" && source.modalities
       ? t("provider.liveCatalog", { llm: source.modalities.llm, tti: source.modalities.tti, ttv: source.modalities.ttv, catalog: t(source.modalities.live ? "官方实时目录" : "内置回退目录") })
-      : t("provider.modelCount", { count: source.models.length });
+      : source.id === "opencode"
+        ? t(source.catalog_live ? "provider.opencodeLive" : "provider.opencodeBuiltin", { count: source.models.length })
+        : t("provider.modelCount", { count: source.models.length });
   return (
     <div className="provider-settings">
       <div className="provider-tabs">
@@ -2411,11 +2666,11 @@ function ProviderSettings({
           {source.models.map((model) => (
             <div className={`settings-model-card ${source.active && source.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
               <button type="button" className="model-card-main" onClick={() => selectModel(source, model)}>
-                <div><strong>{model.display_name}</strong><span>{model.id}</span></div>
+                <div><strong>{model.display_name}</strong><span title={model.id}>{model.id}</span></div>
                 {source.active && source.selected_model_id === model.id ? <CheckCircle2 size={16} /> : <Circle size={14} />}
               </button>
               <p>{t(model.description)}</p>
-              <div className="tag-row"><span>{formatTokens(model.context_length)} ctx</span>{model.vision && <span>vision</span>}{model.tool_calling && <span>tools</span>}{model.reasoning.control !== "none" && <span>{model.reasoning.control}</span>}</div>
+              <div className="tag-row"><span>{formatTokens(model.context_length)} {t("上下文")}</span>{model.vision && <span>{t("视觉")}</span>}{model.tool_calling && <span>{t("工具")}</span>}{model.reasoning.control !== "none" && <span>{t(model.reasoning.control)}</span>}</div>
               {source.id === "standard" && (
                 <div className="model-card-actions">
                   <button type="button" className="edit-model" onClick={() => editStandard(Number(model.id), model)} aria-label={t("编辑标准模型")} title={t("编辑标准模型")}><Pencil size={13} /></button>
@@ -2435,10 +2690,18 @@ function ProviderSettings({
         </div>
         {source.config_fields.length > 0 && (
           <div className="provider-config">
-            <div className="section-heading"><div><h2>{t("连接配置")}</h2><p>{t("密钥仅写入 Reverie 内核配置，不会回传到界面。")}</p></div><button type="button" className="primary-button small" onClick={() => saveProvider(source, patch)} disabled={!Object.keys(patch).length}>{t("保存")}</button></div>
+            <div className="section-heading"><div><h2>{t("连接配置")}</h2><p>{t("点击眼睛可查看已保存的密钥；清空并保存即可移除。")}</p></div><button type="button" className="primary-button small" onClick={() => {
+              // A configured secret explicitly emptied in the patch is a clear
+              // request; the backend skips blank secrets otherwise, so translate
+              // it into an explicit clearFields entry.
+              const clearFields = source.config_fields
+                .filter((field) => field.kind === "secret" && Boolean(source.config?.configured_secrets[field.key]) && field.key in patch && String(patch[field.key] ?? "") === "")
+                .map((field) => field.key);
+              saveProvider(source, patch, clearFields);
+            }} disabled={!Object.keys(patch).length}>{t("保存")}</button></div>
             <div className="form-grid">
               {source.config_fields.map((field) => (
-                <label key={field.key}><span>{t(field.label)}{field.optional && <small>{t("可选")}</small>}</span><ProviderFieldControl field={field} value={valueFor(field)} configured={Boolean(source.config?.configured_secrets[field.key])} update={(key, value) => setPatch((current) => ({ ...current, [key]: value }))} /></label>
+                <label key={field.key}><span>{t(field.label)}{field.optional && <small>{t("可选")}</small>}</span><ProviderFieldControl field={field} value={valueFor(field)} configured={Boolean(source.config?.configured_secrets[field.key])} update={(key, value) => setPatch((current) => ({ ...current, [key]: value }))} reveal={field.kind === "secret" ? () => revealSecret({ kind: "provider", source: source.id, field: field.key }) : undefined} /></label>
               ))}
             </div>
           </div>
@@ -2454,6 +2717,7 @@ function SettingsView({
   updateSetting,
   selectModel,
   saveProvider,
+  revealSecret,
   addStandard,
   editStandard,
   deleteStandard,
@@ -2470,7 +2734,8 @@ function SettingsView({
   state: DesktopState;
   updateSetting: (key: string, value: unknown) => void;
   selectModel: (source: ModelSource, model: ModelRecord) => void;
-  saveProvider: (source: ModelSource, patch: Record<string, unknown>) => void;
+  saveProvider: (source: ModelSource, patch: Record<string, unknown>, clearFields?: string[]) => void;
+  revealSecret: RevealSecret;
   addStandard: () => void;
   editStandard: (index: number, model: ModelRecord) => void;
   deleteStandard: (index: number) => void;
@@ -2494,7 +2759,7 @@ function SettingsView({
   return (
     <div className="settings-page">
       <div className="settings-nav">
-        <div><h1>{t("设置")}</h1><p>Reverie Desktop</p></div>
+        <div><h1>{t("设置")}</h1><p>{t("Reverie 桌面端")}</p></div>
         <button type="button" className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><SlidersHorizontal size={15} />{t("通用")}</button>
         <button type="button" className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={15} />{t("外观")}</button>
         <button type="button" className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}><MessageSquare size={15} />{t("对话显示")}</button>
@@ -2531,10 +2796,8 @@ function SettingsView({
                 return (
                   <div className={`setting-row ${item.kind === "rules" ? "stacked" : ""}`} key={item.key}>
                     <div>
-                      {/* The core supplies setting names in English and `translate`
-                          only maps Chinese to English, so a translated badge is the
-                          one Chinese word in an otherwise English row. */}
-                      <strong>{t(item.name)}{item.experimental && <span className="setting-badge">Experimental</span>}</strong>
+                      {/* Core setting metadata is translated in both directions. */}
+                      <strong>{t(item.name)}{item.experimental && <span className="setting-badge">{t("实验性")}</span>}</strong>
                       <p>{t(item.description)}</p>
                       {hint && <p className="setting-hint">{t(hint)}</p>}
                     </div>
@@ -2677,13 +2940,13 @@ function SettingsView({
         {tab === "models" && (
           <>
             <PageHeader icon={<Brain size={20} />} title={t("模型与提供商")} description={t("选择模型、配置凭据，并检查模型级思考与多模态能力。")} />
-            <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} addStandard={addStandard} editStandard={editStandard} deleteStandard={deleteStandard} customProviders={customProviders} />
+            <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={addStandard} editStandard={editStandard} deleteStandard={deleteStandard} customProviders={customProviders} />
           </>
         )}
         {tab === "about" && (
           <>
             <PageHeader icon={<Info size={20} />} title={t("关于 Reverie")} description={t("Electron 仅承载界面；所有 AI、工具和会话逻辑都由嵌入的 Reverie CLI exe 执行。")} />
-            <div className="about-card"><div className="about-mark"><img src={REVERIE_MARK_URL} alt="Reverie" /></div><div><h2>Reverie {state.core.version}</h2><p>Core Interface {state.core.interface_version} · {state.core.release_status}</p></div></div>
+            <div className="about-card"><div className="about-mark"><img src={REVERIE_MARK_URL} alt="Reverie" /></div><div><h2>Reverie {state.core.version}</h2><p>{t("核心接口")} {state.core.interface_version} · {state.core.release_status}</p></div></div>
             <div className="path-list"><button type="button" onClick={() => void window.reverie.reveal(state.workspace.config_path)}><span>{t("配置文件")}</span><code>{state.workspace.config_path}</code><FolderOpen size={14} /></button><button type="button" onClick={() => void window.reverie.reveal(state.workspace.project_data_dir)}><span>{t("工作区数据")}</span><code>{state.workspace.project_data_dir}</code><FolderOpen size={14} /></button>{paths && <button type="button" onClick={() => void window.reverie.reveal(paths.kernelPath)}><span>{t("CLI 内核")}</span><code>{paths.kernelPath}</code><FolderOpen size={14} /></button>}</div>
           </>
         )}
@@ -2732,8 +2995,8 @@ function Inspector({
         !hidden && <FileChanges sessionId={sessionId} running={running} revision={state.recovery} />
       ) : tab === "context" ? (
         <div className="inspector-content">
-          <section><div className="inspector-heading"><span>{t("工作区")}</span><div className="inspector-actions"><button type="button" onClick={compactContext} disabled={compactDisabled} aria-label={t("压缩上下文")} title={t("压缩上下文")}><Archive size={13} /></button><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>Context Engine</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
-          <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>Source</span><strong>{expandModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
+          <section><div className="inspector-heading"><span>{t("工作区")}</span><div className="inspector-actions"><button type="button" onClick={compactContext} disabled={compactDisabled} aria-label={t("压缩上下文")} title={t("压缩上下文")}><Archive size={13} /></button><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>{t("上下文引擎")}</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
+          <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>{t("来源")}</span><strong>{expandModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("恢复")}</span></div><div className="context-line"><span>{t("检查点")}</span><strong>{state.recovery.checkpoints.length}</strong></div><div className="context-line"><span>{t("操作")}</span><strong>{String(state.recovery.summary.total_operations ?? state.recovery.operations.length)}</strong></div></section>
           <section><div className="inspector-heading"><span>{t("快捷提示")}</span></div><div className="hint-card"><AtSign size={14} /><span><kbd>@</kbd> {t("会用 Context Engine 推荐当前任务最相关的文件。")}</span></div><div className="hint-card"><Paperclip size={14} /><span>{t("回形针可选择任意文件，并安全复制到工作区附件区。")}</span></div><div className="hint-card"><Command size={14} /><span><kbd>Ctrl K</kbd> {t("打开完整命令目录。")}</span></div></section>
         </div>
@@ -2844,36 +3107,57 @@ function StandardModelModal({
   target,
   close,
   save,
+  reveal,
 }: {
   target: { index: number; model: ModelRecord } | null;
   close: () => void;
-  save: (model: Record<string, unknown>) => void;
+  save: (model: Record<string, unknown>, clearApiKey: boolean) => void;
+  reveal?: () => Promise<string>;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLFormElement>(null);
   useDialogFocus(dialogRef, close);
   const editing = target !== null;
   const [model, setModel] = useState<Record<string, unknown>>(() => standardModelDraft(target?.model));
+  const [visible, setVisible] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const update = (key: string, value: unknown) => setModel((current) => ({ ...current, [key]: value }));
   const valid = Boolean(model.model && model.model_display_name && model.base_url);
   const keyStored = Boolean(target?.model.api_key_configured);
+  // The stored key was pulled into the field and then emptied: an explicit clear.
+  const clearApiKey = editing && keyStored && revealed && String(model.api_key ?? "").trim() === "";
+  const onEye = async () => {
+    if (keyStored && !revealed && reveal && !busy) {
+      setBusy(true);
+      try {
+        const secret = await reveal();
+        update("api_key", secret);
+        setRevealed(true);
+        setVisible(true);
+      } catch { /* leave blank; a new key can still be typed */ }
+      finally { setBusy(false); }
+      return;
+    }
+    setVisible((shown) => !shown);
+  };
   const headerCount = Object.keys((model.custom_headers ?? {}) as Record<string, string>).length;
   // A stored transport the picker never offered (codex, webgemini) must stay
   // selectable, otherwise editing anything else would silently rewrite it.
   const providerId = String(model.provider ?? "openai-chat");
   const providerOptions: Array<[string, string]> = [
-    ["openai-chat", "OpenAI Chat Completions"],
-    ["openai-responses", "OpenAI Responses"],
-    ["anthropic", "Anthropic"],
-    ["request", "Generic Request"],
-    ["curl", "cURL"],
+     ["openai-chat", "OpenAI Chat Completions"],
+     ["openai-responses", "OpenAI Responses"],
+     ["anthropic", "Anthropic"],
+     ["request", "Generic Request"],
+     ["curl", "cURL"],
   ];
   if (!providerOptions.some(([id]) => id === providerId)) providerOptions.push([providerId, providerId]);
   return (
     <div className="modal-backdrop" onMouseDown={close}>
-      <form ref={dialogRef} className="form-modal" role="dialog" aria-modal="true" aria-labelledby="standard-model-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(model); }}>
+      <form ref={dialogRef} className="form-modal" role="dialog" aria-modal="true" aria-labelledby="standard-model-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(model, clearApiKey); }}>
         <div className="form-modal-header"><div><h2 id="standard-model-title">{editing ? t("编辑标准模型") : t("添加标准模型")}</h2><p>{t("该模型会同时出现在 TUI、命令行和 GUI 中。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
-        <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>Provider</span><select value={providerId} onChange={(event) => update("provider", event.target.value)}>{providerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label><span>Base URL</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>{t("请求路径")}<small>{t("可选")}</small></span><input value={String(model.endpoint ?? "")} onChange={(event) => update("endpoint", event.target.value)} placeholder="/chat/completions" /></label><label><span>API Key{keyStored && <small>{t("留空表示保留现有密钥")}</small>}</span><input type="password" value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} placeholder={keyStored ? "••••••••" : ""} /></label><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
+         <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>{t("提供者")}</span><select value={providerId} onChange={(event) => update("provider", event.target.value)}>{providerOptions.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}</select></label><label><span>{t("基础 URL")}</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>{t("请求路径")}<small>{t("可选")}</small></span><input value={String(model.endpoint ?? "")} onChange={(event) => update("endpoint", event.target.value)} placeholder="/chat/completions" /></label><label><span>{t("API 密钥")}{keyStored && <small>{t("点击眼睛查看，清空并保存即可移除")}</small>}</span><div className="field-input-wrap"><input type={visible ? "text" : "password"} value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} placeholder={keyStored ? "••••••••" : ""} />{keyStored && <button type="button" aria-label={t("查看/隐藏密钥")} onClick={() => void onEye()} disabled={busy}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}</div></label><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
         {editing && headerCount > 0 && <p className="form-modal-note">{t("standardModel.headersKept", { count: headerCount })}</p>}
         <div className="form-modal-footer"><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{editing ? t("保存") : t("添加模型")}</button></div>
       </form>
@@ -4173,7 +4457,12 @@ function RtpTasksView({ preferences, updatePreferences }: {
   );
 }
 
-function ApprovalModal({ approval, resolve }: { approval: Record<string, unknown>; resolve: (decision: ApprovalDecision, message?: string) => void }) {
+// Sits directly above the composer (not a centred modal) so the pending call and
+// the input the user might answer it with share one field of view. Three
+// actions: 拒绝 (deny), 我想额外说点 (message = deny this call + send text to the
+// model), 同意 (allow). 同意 is two-tier: the primary button allows just this
+// call (once) and a small adjacent entry allows the tool for the whole session.
+function ApprovalPanel({ approval, resolve }: { approval: Record<string, unknown>; resolve: (decision: ApprovalDecision, message?: string) => void }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [message, setMessage] = useState("");
@@ -4184,37 +4473,38 @@ function ApprovalModal({ approval, resolve }: { approval: Record<string, unknown
   const reviewer = String(approval.review_source ?? "").trim();
   const riskLabel = risk ? risk : "";
   const riskClass = riskLabel ? `risk-badge risk-${riskLabel}` : "risk-badge";
+  const panelClass = riskLabel ? `approval-panel risk-edge-${riskLabel}` : "approval-panel";
   return (
-    <div className="modal-backdrop">
-      <div ref={dialogRef} className="approval-modal" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-message" tabIndex={-1}>
-        <div className="approval-header">
-          <div className="confirm-icon"><ShieldCheck size={20} /></div>
-          <div>
-            <h2 id="approval-title">{t("工具请求更高权限")}</h2>
-            <p>{t(String(approval.permission_mode === "strict" ? "Strict 模式：每次工具调用都需要你的批准。" : "Reverie 内核暂停执行，等待你的决定。"))}</p>
+    <div ref={dialogRef} className={panelClass} role="alertdialog" aria-labelledby="approval-title" aria-describedby="approval-message" tabIndex={-1}>
+      <div className="approval-header">
+        <div className="confirm-icon"><ShieldCheck size={18} /></div>
+        <div>
+          <h2 id="approval-title">{t("工具请求更高权限")}</h2>
+          <p>{t(String(approval.permission_mode === "strict" ? "Strict 模式：每次工具调用都需要你的批准。" : "Reverie 内核暂停执行，等待你的决定。"))}</p>
+        </div>
+      </div>
+      <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong>{riskLabel && <span className={riskClass}>{riskLabel}</span>}</div>
+      <p id="approval-message" className="approval-message">{t(String(approval.message ?? "此工具超出当前权限级别。"))}</p>
+      {concerns.length > 0 && <div className="approval-concerns">{concerns.map((tag) => <span key={tag} className="concern-tag">{tag}</span>)}</div>}
+      {reviewer && reviewer !== "policy" && <div className="approval-reviewer"><Sparkles size={12} />{t("审查")}: {reviewer}</div>}
+      {showReply ? (
+        <div className="approval-reply">
+          <textarea autoFocus rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder={t("写给 Reverie，例如：先解释清楚再执行……（将拒绝本次调用）")} />
+          <div className="approval-actions">
+            <button type="button" className="secondary-button" onClick={() => setShowReply(false)}>{t("返回")}</button>
+            <button type="button" className="primary-button" disabled={!message.trim()} onClick={() => resolve("message", message.trim())}>{t("发送并拒绝本次")}</button>
           </div>
         </div>
-        <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong>{riskLabel && <span className={riskClass}>{riskLabel}</span>}</div>
-        <p id="approval-message" className="approval-message">{t(String(approval.message ?? "此工具超出当前权限级别。"))}</p>
-        {concerns.length > 0 && <div className="approval-concerns">{concerns.map((tag) => <span key={tag} className="concern-tag">{tag}</span>)}</div>}
-        {reviewer && reviewer !== "policy" && <div className="approval-reviewer"><Sparkles size={12} />{t("审查")}: {reviewer}</div>}
-        {showReply ? (
-          <div className="approval-reply">
-            <textarea autoFocus rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder={t("给模型写一条消息，例如：先解释清楚再执行……")} />
-            <div className="approval-actions">
-              <button type="button" className="secondary-button" onClick={() => setShowReply(false)}>{t("返回")}</button>
-              <button type="button" className="primary-button" disabled={!message.trim()} onClick={() => resolve("message", message.trim())}>{t("发送给模型")}</button>
-            </div>
+      ) : (
+        <div className="approval-actions">
+          <button type="button" className="danger-button" onClick={() => resolve("deny")}>{t("拒绝")}</button>
+          <button type="button" className="secondary-button" onClick={() => setShowReply(true)}>{t("我想额外说点")}</button>
+          <div className="approval-allow">
+            <button type="button" className="primary-button" onClick={() => resolve("once")}>{t("同意")}</button>
+            <button type="button" className="approval-allow-session" onClick={() => resolve("session")}>{t("本会话允许")}</button>
           </div>
-        ) : (
-          <div className="approval-actions">
-            <button type="button" className="danger-button" onClick={() => resolve("deny")}>{t("拒绝")}</button>
-            <button type="button" className="secondary-button" onClick={() => setShowReply(true)}>{t("个性化回复")}</button>
-            <button type="button" className="secondary-button" onClick={() => resolve("once")}>{t("仅本次允许")}</button>
-            <button type="button" className="primary-button" onClick={() => resolve("session")}>{t("本会话允许")}</button>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4268,6 +4558,7 @@ export default function App() {
   const [providerProbing, setProviderProbing] = useState(false);
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; name: string } | null>(null);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [mentionItems, setMentionItems] = useState<Array<Record<string, unknown>>>([]);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionLoading, setMentionLoading] = useState(false);
@@ -4296,6 +4587,20 @@ export default function App() {
   useEffect(() => {
     if (session) sessionCache.current.set(session);
   }, [session]);
+
+  // Auto-save the composer for the active conversation on every keystroke. The
+  // in-memory `drafts` map is the fast path for same-session switches; the
+  // localStorage mirror is what survives a crash or restart. Writing on each
+  // change (no debounce) is deliberate: a debounced tail could be lost to a
+  // hard kill, which is exactly the case this must not drop. Text typed before
+  // a conversation exists parks under a placeholder id until the first send
+  // mints the real session.
+  const projectRoot = state?.workspace.project_root ?? "";
+  useEffect(() => {
+    const draftId = session?.id ?? NEW_SESSION_DRAFT_ID;
+    drafts.current[draftId] = prompt;
+    if (projectRoot) saveDraft(projectRoot, draftId, prompt);
+  }, [prompt, session?.id, projectRoot]);
 
   const toggleSidebar = useCallback(() => {
     if (compactViewport) {
@@ -4451,6 +4756,12 @@ export default function App() {
       if (requestSequence !== initializeSequence.current) return;
       let nextState = response.state;
       let nextSession: SessionState | null = null;
+      // Restore this project's saved composer drafts before painting a session,
+      // so the persistence effect and the prompt restore below both read the
+      // text that survived the last quit. Drafts are keyed per project, so a
+      // fresh hydrate replaces whatever the previous workspace left in memory.
+      const resolvedRoot = nextState.workspace.project_root;
+      drafts.current = loadProjectDrafts(resolvedRoot);
       // Paint the workspace shell from the compact bootstrap response before
       // loading a transcript or the large provider/tool catalogs.
       setState(nextState);
@@ -4464,6 +4775,9 @@ export default function App() {
         setState(nextState);
         setSession(nextSession);
       }
+      // Re-open the composer exactly where it was left for the restored session
+      // (or the pre-session placeholder when the workspace has none yet).
+      setPrompt(drafts.current[nextSession?.id ?? NEW_SESSION_DRAFT_ID] ?? "");
       if (response.deferred === true) {
         try {
           const hydrated = await window.reverie.request("getState", {});
@@ -4534,7 +4848,17 @@ export default function App() {
       const event = asRecord(message.event);
       const type = String(event.type ?? "");
       if (!acceptLiveEvents.current) return;
-      if (type === "approval.request") setApproval(event);
+      if (type === "approval.request") {
+        setApproval(event);
+        // Raise a background-only OS toast in Reverie's name so a user who has
+        // tabbed away still learns the kernel is paused waiting on them. When the
+        // window is focused, main.ts drops it -- the in-app panel is enough.
+        const toolName = String(event.tool ?? "tool");
+        void window.reverie.notify({
+          title: t("Reverie 需要你的批准"),
+          body: t("approval.notify.body", { tool: toolName }),
+        }).catch(() => {});
+      }
 
       const batch = pendingLiveBatch.current;
       if (type === "assistant.delta") batch.assistantText += String(event.text ?? "");
@@ -4566,7 +4890,7 @@ export default function App() {
       unsubscribe();
       resetLiveBatch();
     };
-  }, [flushLiveBatch, resetLiveBatch]);
+  }, [flushLiveBatch, resetLiveBatch, t]);
 
   useEffect(() => {
     const shortcuts = (event: globalThis.KeyboardEvent) => {
@@ -4595,8 +4919,29 @@ export default function App() {
     return () => window.removeEventListener("keydown", shortcuts);
   });
 
+  // Pull the live context-window breakdown for the composer ring. Fired when the
+  // conversation actually changes -- after a turn, on session open, after a
+  // compact -- never mid-stream, since the backend reads the agent's live state.
+  const refreshContextUsage = useCallback(async (sessionId?: string) => {
+    try {
+      const response = await window.reverie.request("getContextUsage", sessionId ? { sessionId } : {});
+      setContextUsage(response.usage ?? null);
+    } catch {
+      setContextUsage(null);
+    }
+  }, []);
+
   const openSession = useCallback(async (id: string) => {
-    if (running || id === session?.id) return;
+    // Re-selecting the conversation already in view is just a jump back to its
+    // chat content, so honour it even mid-run: without this, clicking (or
+    // double-clicking) the active conversation while parked on Settings or any
+    // other view did nothing. Switching to a different session still waits for
+    // the current turn, whose live output belongs to the session on screen.
+    if (id === session?.id) {
+      setView("chat");
+      return;
+    }
+    if (running) return;
     if (session) drafts.current[session.id] = prompt;
     const requestSequence = ++sessionRequestSequence.current;
     // A transcript already read in this window cannot have changed unless this
@@ -4625,6 +4970,7 @@ export default function App() {
       setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setView("chat");
       setLiveTurn(null);
+      void refreshContextUsage(nextSession.id);
       // The draft was already restored for the optimistic paint; re-applying it
       // here would discard anything typed while the request was in flight.
       if (!cached) {
@@ -4637,7 +4983,7 @@ export default function App() {
     } finally {
       if (requestSequence === sessionRequestSequence.current) setSessionBusy(false);
     }
-  }, [prompt, running, session, toast]);
+  }, [prompt, refreshContextUsage, running, session, toast]);
 
   const createSession = useCallback(async (force = false) => {
     if (running || sessionBusy) return;
@@ -4749,9 +5095,108 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
+  // Runs one turn end to end. Split out of sendPrompt so a mid-stream interrupt
+  // can reuse the exact same path after cancelling the in-flight turn. Assumes
+  // the composer control commands (/skill, /compact) have already been handled
+  // and the prompt slot cleared by the caller.
+  const runPromptText = useCallback(async (text: string) => {
+    const activeState = state;
+    if (!activeState) return;
+    setRunning(true);
+    resetLiveBatch();
+    acceptLiveEvents.current = true;
+    setLiveTurn({ userText: text, assistantText: "", reasoningText: "", events: [], error: "", startedAt: Date.now() });
+    try {
+      let activeSession = session;
+      if (!activeSession) {
+        const created = await window.reverie.request("createSession", {});
+        activeSession = created.session;
+        setSession(activeSession);
+        setState((current) => current ? { ...current, sessions: created.sessions } : current);
+      }
+      // The prompt has been sent, so this conversation's draft is spent. Clear
+      // both the saved slot and the pre-session placeholder that a brand-new
+      // conversation was drafted under, so neither lingers to be restored.
+      drafts.current[activeSession.id] = "";
+      delete drafts.current[NEW_SESSION_DRAFT_ID];
+      if (projectRoot) {
+        clearDraft(projectRoot, activeSession.id);
+        clearDraft(projectRoot, NEW_SESSION_DRAFT_ID);
+      }
+      const response = await window.reverie.request("runPrompt", {
+        prompt: text,
+        sessionId: activeSession.id,
+        mode: activeState.workspace.mode,
+        stream: true,
+      });
+      const result = response.result;
+      acceptLiveEvents.current = false;
+      // The final result is authoritative and already contains every emitted
+      // delta, so discard an unpainted tail before replacing the live text.
+      resetLiveBatch();
+      setLiveTurn((current) => current ? {
+        ...current,
+        assistantText: result.output_text || current.assistantText,
+        reasoningText: result.thinking_text || current.reasoningText,
+        error: result.error,
+      } : current);
+      setState((current) => current ? {
+        ...current,
+        sessions: response.sessions,
+        recovery: response.recovery,
+      } : current);
+      const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id });
+      setSession(refreshed.session);
+      setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
+      setAttachments([]);
+      void refreshContextUsage(result.session_id || activeSession.id);
+      if (!result.success) {
+        // The in-body error block carries the full humanized detail (e.g. the
+        // 403 guidance) under the model output, and main.ts raises a native OS
+        // toast when the window is in the background. That covers both the
+        // focused and unfocused cases, so no in-app toast is needed here.
+        const detail = result.error || t("请求失败");
+        void window.reverie.notify({ title: t("Reverie 遇到错误"), body: detail }).catch(() => {});
+      } else {
+        setLiveTurn(null);
+      }
+    } catch (error) {
+      acceptLiveEvents.current = false;
+      const message = error instanceof Error ? error.message : String(error);
+      // A cancel is an intentional interrupt, not a failure -- interruptAndSend
+      // clears the turn itself, so don't paint it as an error or notify.
+      if (message.includes("cancel")) {
+        setLiveTurn((current) => current ? { ...current, error: "" } : current);
+      } else {
+        setLiveTurn((current) => current ? { ...current, error: message } : current);
+        void window.reverie.notify({ title: t("Reverie 遇到错误"), body: message }).catch(() => {});
+      }
+    } finally {
+      setRunning(false);
+    }
+  }, [projectRoot, refreshContextUsage, resetLiveBatch, session, state, t]);
+
+  // Hard interrupt: cancel() kills and respawns the kernel, which reloads the
+  // persisted session history, so the new prompt runs as a fresh turn against
+  // the reloaded context. The in-flight turn's un-persisted partial output is
+  // lost -- that is the inherent cost of a hard interrupt, and is acceptable.
+  const interruptAndSend = useCallback(async (text: string) => {
+    acceptLiveEvents.current = false;
+    setApproval(null);
+    try {
+      await window.reverie.cancel();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("cancel")) toast(message, "error");
+    }
+    resetLiveBatch();
+    setLiveTurn(null);
+    await runPromptText(text);
+  }, [resetLiveBatch, runPromptText, toast]);
+
   const sendPrompt = useCallback(async () => {
     const text = prompt.trim();
-    if (!text || running || sessionBusy || !state) return;
+    if (!text || sessionBusy || !state) return;
     // `/skill …` is a composer control, not a turn: Enter converts the typed text
     // into a pinned-skill chip instead of sending anything to the model.
     const skillMatch = /^\/skill(?:s)?(?:\s+([\s\S]*))?$/i.exec(text);
@@ -4779,6 +5224,9 @@ export default function App() {
     }
     const compactMatch = /^\/compact(?:\s+([\s\S]*))?$/i.exec(text);
     if (compactMatch) {
+      // /compact talks to the core; running it mid-turn would collide with the
+      // in-flight request, so ignore it while a turn is streaming.
+      if (running) return;
       setPrompt("");
       setMentionItems([]);
       setMentionOpen(false);
@@ -4788,56 +5236,14 @@ export default function App() {
     setPrompt("");
     setMentionItems([]);
     setMentionOpen(false);
-    setRunning(true);
-    resetLiveBatch();
-    acceptLiveEvents.current = true;
-    setLiveTurn({ userText: text, assistantText: "", reasoningText: "", events: [], error: "", startedAt: Date.now() });
-    try {
-      let activeSession = session;
-      if (!activeSession) {
-        const created = await window.reverie.request("createSession", {});
-        activeSession = created.session;
-        setSession(activeSession);
-        setState((current) => current ? { ...current, sessions: created.sessions } : current);
-      }
-      drafts.current[activeSession.id] = "";
-      const response = await window.reverie.request("runPrompt", {
-        prompt: text,
-        sessionId: activeSession.id,
-        mode: state.workspace.mode,
-        stream: true,
-      });
-      const result = response.result;
-      acceptLiveEvents.current = false;
-      // The final result is authoritative and already contains every emitted
-      // delta, so discard an unpainted tail before replacing the live text.
-      resetLiveBatch();
-      setLiveTurn((current) => current ? {
-        ...current,
-        assistantText: result.output_text || current.assistantText,
-        reasoningText: result.thinking_text || current.reasoningText,
-        error: result.error,
-      } : current);
-      setState((current) => current ? {
-        ...current,
-        sessions: response.sessions,
-        recovery: response.recovery,
-      } : current);
-      const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id });
-      setSession(refreshed.session);
-      setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
-      setLiveTurn(null);
-      setAttachments([]);
-      if (!result.success) toast(result.error || t("请求失败"), "error");
-    } catch (error) {
-      acceptLiveEvents.current = false;
-      const message = error instanceof Error ? error.message : String(error);
-      setLiveTurn((current) => current ? { ...current, error: message } : current);
-      if (!message.includes("cancel")) toast(message, "error");
-    } finally {
-      setRunning(false);
+    // A plain-text send while a turn is streaming interrupts it and enqueues the
+    // typed text as the next task -- Enter/send doubles as "stop and add this".
+    if (running) {
+      await interruptAndSend(text);
+      return;
     }
-  }, [clearPinnedSkills, compactContext, pinSkill, prompt, resetLiveBatch, running, session, sessionBusy, state, t, toast, unpinSkill]);
+    await runPromptText(text);
+  }, [clearPinnedSkills, compactContext, interruptAndSend, pinSkill, prompt, running, runPromptText, sessionBusy, state, unpinSkill]);
 
   const cancelPrompt = useCallback(async () => {
     const retryText = liveTurn?.userText ?? "";
@@ -4951,6 +5357,7 @@ export default function App() {
         try {
           const response = await window.reverie.request("deleteSession", { sessionId: target.id, confirmed: true });
           delete drafts.current[target.id];
+          if (projectRoot) clearDraft(projectRoot, target.id);
           sessionCache.current.delete(target.id);
           const nextSession = response.session ?? null;
           setSession(nextSession);
@@ -4998,6 +5405,7 @@ export default function App() {
             : targetIds;
           deletedIds.forEach((sessionId) => {
             delete drafts.current[sessionId];
+            clearDraft(projectRoot, sessionId);
             sessionCache.current.delete(sessionId);
           });
           const nextSession = response.session ?? null;
@@ -5078,21 +5486,41 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
-  const saveProvider = useCallback(async (source: ModelSource, patch: Record<string, unknown>) => {
+  const revealSecret = useCallback<RevealSecret>(async (params) => {
+    const response = await window.reverie.request("revealProviderSecret", {
+      kind: params.kind,
+      ...(params.field ? { field: params.field } : {}),
+      ...(params.source ? { source: params.source } : {}),
+      ...(typeof params.index === "number" ? { index: params.index } : {}),
+      ...(params.providerId ? { providerId: params.providerId } : {}),
+    });
+    return String(response.value ?? "");
+  }, []);
+
+  const saveProvider = useCallback(async (source: ModelSource, patch: Record<string, unknown>, clearFields: string[] = []) => {
     try {
-      const response = await window.reverie.request("setProviderConfig", { source: source.id, patch });
+      const response = await window.reverie.request("setProviderConfig", {
+        source: source.id,
+        patch,
+        ...(clearFields.length ? { clearFields } : {}),
+      });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       toast(t("provider.saved", { name: source.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
-  const saveStandard = useCallback(async (model: Record<string, unknown>) => {
+  const saveStandard = useCallback(async (model: Record<string, unknown>, clearApiKey = false) => {
     // One handler for both directions: the modal only knows the draft, and the
-    // core preserves an omitted API key on update, so a blank key stays intact.
+    // core preserves an omitted API key on update, so a blank key stays intact
+    // unless the user explicitly cleared a revealed key (clearFields).
     const target = standardModelForm?.target ?? null;
     try {
       const response = target
-        ? await window.reverie.request("updateStandardModel", { index: target.index, model })
+        ? await window.reverie.request("updateStandardModel", {
+            index: target.index,
+            model,
+            ...(clearApiKey ? { clearFields: ["api_key"] } : {}),
+          })
         : await window.reverie.request("addStandardModel", { model });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setStandardModelForm(null);
@@ -5104,11 +5532,15 @@ export default function App() {
     setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
   }, [t, toast]);
 
-  const saveCustomProvider = useCallback(async (values: { name: string; base_url: string; api_key: string; format: string }) => {
+  const saveCustomProvider = useCallback(async (values: { name: string; base_url: string; api_key: string; format: string }, clearApiKey = false) => {
     const editing = providerModal?.provider ?? null;
     try {
       const response = editing
-        ? await window.reverie.request("updateCustomProvider", { providerId: editing.id, patch: values })
+        ? await window.reverie.request("updateCustomProvider", {
+            providerId: editing.id,
+            patch: values,
+            ...(clearApiKey ? { clearFields: ["api_key"] } : {}),
+          })
         : await window.reverie.request("addCustomProvider", { provider: values });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setProviderModal(null);
@@ -5413,6 +5845,9 @@ export default function App() {
         try {
           const result = await window.reverie.deleteWorkspace(target.root);
           if (!result) return;
+          // The project's records are gone, so drop its saved composer drafts
+          // too instead of leaving orphaned keys behind in localStorage.
+          clearProjectDrafts(target.root);
           setUiPreferences(normalizeUiPreferences(result.preferences));
           if (target.active) {
             sessionRequestSequence.current += 1;
@@ -5466,9 +5901,9 @@ export default function App() {
     if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
-    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
-    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
-  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession]);
+    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
+    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
+  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
@@ -5518,13 +5953,14 @@ export default function App() {
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}
-      {standardModelForm && <StandardModelModal target={standardModelForm.target} close={() => setStandardModelForm(null)} save={(model) => void saveStandard(model)} />}
+      {standardModelForm && <StandardModelModal target={standardModelForm.target} close={() => setStandardModelForm(null)} save={(model, clearApiKey) => void saveStandard(model, clearApiKey)} reveal={standardModelForm.target ? () => revealSecret({ kind: "standard", index: standardModelForm.target!.index }) : undefined} />}
       {providerModal && (
         <CustomProviderModal
           provider={providerModal.provider}
           formats={state.models.sources.find((item) => item.id === "custom")?.custom_provider_formats ?? []}
           close={() => setProviderModal(null)}
-          save={(values) => void saveCustomProvider(values)}
+          save={(values, clearApiKey) => void saveCustomProvider(values, clearApiKey)}
+          reveal={providerModal.provider ? () => revealSecret({ kind: "custom", providerId: providerModal.provider!.id }) : undefined}
         />
       )}
       {contextLimitModal && (
@@ -5535,7 +5971,6 @@ export default function App() {
           save={(limit) => void saveCustomProviderContextLimit(contextLimitModal.provider, contextLimitModal.model, limit)}
         />
       )}
-      {approval && <ApprovalModal approval={approval} resolve={(decision, message) => void resolveApproval(decision, message)} />}
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.label} danger={confirmation.danger} close={() => setConfirmation(null)} confirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} />}
       <Toasts items={toasts} onDismiss={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
     </div>

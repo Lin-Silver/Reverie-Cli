@@ -8,6 +8,7 @@ type JsonRecord = Record<string, unknown>;
 interface ReverieDesktopApi {
   request<Action extends CoreAction>(action: Action, payload: CorePayload<Action>): Promise<CoreResponse<Action>>;
   cancel(): Promise<void>;
+  notify(payload: { title: string; body: string }): Promise<void>;
   onEvent(listener: (message: JsonRecord) => void): () => void;
   selectWorkspace(): Promise<string | null>;
   switchWorkspace(projectRoot: string): Promise<string | null>;

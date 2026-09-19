@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("reverie", {
   request: (action: CoreActionName, payload: JsonRecord = {}) =>
     ipcRenderer.invoke("core:request", action, payload) as Promise<JsonRecord>,
   cancel: () => ipcRenderer.invoke("core:cancel") as Promise<void>,
+  notify: (payload: { title: string; body: string }) =>
+    ipcRenderer.invoke("desktop:notify", payload) as Promise<void>,
   onEvent: (listener: EventListener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, message: JsonRecord) => listener(message);
     ipcRenderer.on("core:event", wrapped);

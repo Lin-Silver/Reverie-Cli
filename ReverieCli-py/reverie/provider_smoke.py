@@ -27,6 +27,7 @@ from .aihubmix import (
 from .request_identity import apply_reverie_client_identity
 from .opencode import (
     build_opencode_openai_options,
+    build_opencode_request_headers_from_config,
     build_opencode_runtime_model_data,
     normalize_opencode_config,
     resolve_opencode_request_url,
@@ -286,16 +287,25 @@ def smoke_opencode(config: Config, timeout_seconds: int = 45, model_id: str = ""
         return _skipped(provider, model, "disabled")
 
     smoke_cfg = {**cfg, "max_tokens": 16}
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "Reply with OK."}],
-        "stream": True,
-    }
-    payload.update(build_opencode_openai_options(smoke_cfg, model))
-    extra_body = payload.pop("extra_body", None)
-    if isinstance(extra_body, dict):
-        payload.update(extra_body)
-    payload["max_tokens"] = min(16, int(payload.get("max_tokens") or 16))
+    options = build_opencode_openai_options(smoke_cfg, model)
+    extra_body = options.pop("extra_body", None)
+    if str(runtime.get("provider") or "").strip().lower() == "openai-responses":
+        payload = {
+            "model": model,
+            "input": "Reply with OK.",
+            "stream": True,
+            "max_output_tokens": 16,
+        }
+    else:
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+            "stream": True,
+            "max_tokens": 16,
+        }
+        payload.update({key: value for key, value in options.items() if key != "max_tokens"})
+        if isinstance(extra_body, dict):
+            payload.update(extra_body)
 
     headers = {
         "Content-Type": "application/json",
@@ -303,11 +313,37 @@ def smoke_opencode(config: Config, timeout_seconds: int = 45, model_id: str = ""
     }
     if str(runtime.get("api_key") or "").strip():
         headers["Authorization"] = f"Bearer {runtime['api_key']}"
+    headers.update(build_opencode_request_headers_from_config(cfg, session_id=f"provider-smoke:{model}"))
 
     headers = apply_reverie_client_identity(headers)
     start = time.perf_counter()
     response = None
     try:
+        if str(runtime.get("provider") or "").strip().lower() == "anthropic":
+            from anthropic import Anthropic
+
+            client = Anthropic(
+                base_url=runtime["base_url"],
+                api_key=runtime["api_key"],
+                timeout=timeout_seconds,
+                max_retries=0,
+                default_headers=apply_reverie_client_identity(),
+            )
+            response = client.messages.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply with OK."}],
+                max_tokens=16,
+                extra_headers=build_opencode_request_headers_from_config(cfg, session_id=f"provider-smoke:{model}"),
+            )
+            text_parts = [
+                str(getattr(block, "text", "") or "")
+                for block in (getattr(response, "content", None) or [])
+                if str(getattr(block, "type", "") or "") == "text"
+            ]
+            if not "".join(text_parts).strip():
+                raise RuntimeError("OpenCode returned no Anthropic text content")
+            return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
+
         response = _requests_post_stream(
             resolve_opencode_request_url(runtime["base_url"], runtime.get("endpoint", "")),
             headers,
@@ -319,7 +355,7 @@ def smoke_opencode(config: Config, timeout_seconds: int = 45, model_id: str = ""
     except Exception as exc:
         return _result_from_error(provider, model, start, exc)
     finally:
-        if response is not None:
+        if response is not None and hasattr(response, "close"):
             response.close()
 
 

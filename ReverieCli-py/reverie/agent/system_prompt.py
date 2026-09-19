@@ -79,6 +79,7 @@ def build_system_prompt(
     additional_rules: str = "",
     mode: str = "reverie",
     config: object = None,
+    runtime_surface: str = "terminal",
 ) -> str:
     """
     Build the complete system prompt for Reverie.
@@ -93,7 +94,13 @@ def build_system_prompt(
     current_date = datetime.now().strftime("%Y-%m-%d")
 
     normalized_mode = normalize_mode(mode)
-    additional_rules = _append_shared_prompt_guidance(additional_rules, normalized_mode, config=config)
+    normalized_surface = normalize_runtime_surface(runtime_surface)
+    additional_rules = _append_shared_prompt_guidance(
+        additional_rules,
+        normalized_mode,
+        config=config,
+        runtime_surface=normalized_surface,
+    )
 
     if normalized_mode == "writer":
         return build_writer_prompt(model_name, additional_rules, current_date)
@@ -104,12 +111,47 @@ def build_system_prompt(
     elif normalized_mode == "computer-controller":
         return build_computer_controller_prompt(model_name, additional_rules, current_date)
 
-    return build_reverie_prompt(model_name, additional_rules, current_date)
+    return build_reverie_prompt(
+        model_name,
+        additional_rules,
+        current_date,
+        runtime_surface=normalized_surface,
+    )
 
 
-def _append_shared_prompt_guidance(additional_rules: str, normalized_mode: str, config: object = None) -> str:
+def normalize_runtime_surface(value: object) -> str:
+    """Normalize the user-facing host without conflating headless CLI with GUI."""
+    normalized = str(value or "").strip().lower().replace("_", "-")
+    return "desktop" if normalized in {"desktop", "electron", "gui"} else "terminal"
+
+
+def _runtime_interface_guidance(runtime_surface: str) -> str:
+    if runtime_surface == "desktop":
+        return """
+## Runtime Interface
+- You are responding inside the Reverie Desktop graphical application, not a terminal session.
+- Reverie Desktop embeds the Reverie CLI core as its backend. Describe the CLI as the backend, never as the interface the user is currently looking at.
+- Refer to visible GUI controls, pages, dialogs, and notifications when explaining normal interaction. Mention terminal commands only when the user asks for them or the task genuinely requires a terminal workflow.
+- If asked what you are, say that you are Reverie running in Reverie Desktop and that the configured model powers the response.
+- Do not infer or invent the configured model's vendor, developer, licensing, or hosting details from its name alone.
+""".strip()
+    return """
+## Runtime Interface
+- You are responding inside the Reverie terminal/CLI interface.
+- Refer to terminal commands and terminal-visible output when explaining interaction.
+- If asked what you are, say that you are Reverie running in Reverie CLI and that the configured model powers the response.
+- Do not infer or invent the configured model's vendor, developer, licensing, or hosting details from its name alone.
+""".strip()
+
+
+def _append_shared_prompt_guidance(
+    additional_rules: str,
+    normalized_mode: str,
+    config: object = None,
+    runtime_surface: str = "terminal",
+) -> str:
     """Inject shared system-level guidance for every Reverie mode."""
-    shared_sections = [PROJECT_CODING_GUARDRAILS]
+    shared_sections = [_runtime_interface_guidance(runtime_surface), PROJECT_CODING_GUARDRAILS]
 
     shared_sections.append(f"""
 ## Goal-Driven Task Ledger
@@ -896,17 +938,32 @@ Reverie exposes its active tool surface through the JSON-backed tool manifest be
 {additional_rules}'''
 
 
-def build_reverie_prompt(model_name: str, additional_rules: str, current_date: str) -> str:
-    """Primary Reverie prompt optimized for low-latency terminal engineering work."""
+def build_reverie_prompt(
+    model_name: str,
+    additional_rules: str,
+    current_date: str,
+    *,
+    runtime_surface: str = "terminal",
+) -> str:
+    """Primary Reverie prompt adapted to its terminal or desktop host."""
     tool_descriptions = get_tool_descriptions_for_mode("reverie")
 
-    return f'''You are operating as and within the Reverie CLI, a terminal-based agentic coding assistant. It wraps AI models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+    if runtime_surface == "desktop":
+        identity = """You are operating as and within Reverie Desktop, a graphical agentic coding assistant. It embeds the Reverie CLI core to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
-You are Reverie, running in Reverie CLI.
+You are Reverie, running in the Reverie Desktop GUI."""
+        project_description = """Reverie is open-sourced. Within this context, Reverie refers to the open-source agentic coding interface, and the CLI is the embedded backend rather than the current user-facing surface. Use the GUI's visible controls for ordinary interaction; `reverie --help` documents the underlying CLI when command-line detail is specifically useful."""
+    else:
+        identity = """You are operating as and within the Reverie CLI, a terminal-based agentic coding assistant. It wraps AI models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+
+You are Reverie, running in Reverie CLI."""
+        project_description = """The Reverie CLI is open-sourced. Within this context, Reverie refers to the open-source agentic coding interface. More details on your functionality are available at `reverie --help`."""
+
+    return f'''{identity}
 You are powered by {model_name}.
 Current date: {current_date}.
 
-The Reverie CLI is open-sourced. Within this context, Reverie refers to the open-source agentic coding interface. More details on your functionality are available at `reverie --help`.
+{project_description}
 
 You can receive user prompts, project context, and files; stream responses; call tools for code edits, commands, web research, and verification; work inside a sandboxed, git-backed workspace; and maintain session continuity through Reverie's Context Engine.
 

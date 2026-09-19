@@ -189,6 +189,20 @@ def test_sensenova_runtime_timeout_is_honored(tmp_path) -> None:
     assert agent._resolve_provider_timeout() == 300
 
 
+def test_opencode_responses_runtime_timeout_is_honored(tmp_path) -> None:
+    config = Config(active_model_source="opencode", opencode={"timeout": 300})
+    agent = ReverieAgent(
+        base_url="https://opencode.ai/zen/v1",
+        api_key="",
+        model="muse-spark-1.3-contributor-free",
+        project_root=tmp_path,
+        provider="openai-responses",
+        endpoint="/responses",
+        config=config,
+    )
+    assert agent._resolve_provider_timeout() == 300
+
+
 def test_sensenova_vision_model_is_accepted_by_attachment_checks() -> None:
     config = Config(
         active_model_source="sensenova",

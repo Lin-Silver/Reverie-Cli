@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from hashlib import sha256
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import requests
+
+from .proxy import normalize_proxy_url, requests_proxy_dict
+from .version import __version__
 
 
 OPENCODE_DEFAULT_API_URL = "https://opencode.ai/zen/v1"
@@ -18,9 +24,16 @@ OPENCODE_DEFAULT_MODEL_DISPLAY_NAME = "DeepSeek V4 Flash Free"
 OPENCODE_API_KEY_HINT_URL = "https://opencode.ai/zen"
 OPENCODE_DEFAULT_CONTEXT_TOKENS = 200_000
 OPENCODE_DEFAULT_MAX_TOKENS = 16_384
+OPENCODE_MUSE_SPARK_CONTEXT_TOKENS = 1_000_000
+OPENCODE_MUSE_SPARK_MAX_OUTPUT_TOKENS = 65_536
 OPENCODE_DEFAULT_TEMPERATURE = 0.7
 OPENCODE_DEFAULT_TOP_P = 1.0
 OPENCODE_MODEL_CACHE_TTL_SECONDS = 300
+OPENCODE_LIVE_MODEL_DESCRIPTION = "OpenCode Zen model returned by the live API catalog."
+OPENCODE_CLIENT_NAME = "reverie-cli"
+OPENCODE_USER_AGENT = f"Reverie-Cli/{__version__}"
+_OPENCODE_RESPONSES_MODEL_PREFIXES = ("gpt-", "grok-", "muse-spark-")
+_OPENCODE_ANTHROPIC_MODEL_PREFIXES = ("claude-", "qwen")
 
 _REASONING_LABELS = {
     "none": ("Non-think", "Disable reasoning for a faster direct response."),
@@ -56,12 +69,15 @@ def _opencode_model(
     thinking_options: Optional[List[Dict[str, str]]] = None,
     default_thinking_choice: str = "",
     free: bool = True,
+    transport: str = "openai-chat",
+    endpoint: str = "/chat/completions",
 ) -> Dict[str, Any]:
     return {
         "id": str(model_id or "").strip(),
         "display_name": str(display_name or model_id or "").strip(),
         "description": str(description or "").strip(),
-        "transport": "openai-chat",
+        "transport": str(transport or "openai-chat"),
+        "endpoint": str(endpoint or "/chat/completions"),
         "context_length": int(context_length or OPENCODE_DEFAULT_CONTEXT_TOKENS),
         "max_output_tokens": int(max_output_tokens or OPENCODE_DEFAULT_MAX_TOKENS),
         "vision": bool(vision),
@@ -103,6 +119,44 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         vision_modalities=["image", "audio", "video"],
     ),
     _opencode_model(
+        "muse-spark-1.3",
+        "Muse Spark 1.3",
+        "OpenCode Zen Muse Spark 1.3 model served through the Responses API.",
+        context_length=OPENCODE_MUSE_SPARK_CONTEXT_TOKENS,
+        max_output_tokens=OPENCODE_MUSE_SPARK_MAX_OUTPUT_TOKENS,
+        free=False,
+        transport="openai-responses",
+        endpoint="/responses",
+    ),
+    _opencode_model(
+        "muse-spark-1.3-contributor-free",
+        "Muse Spark 1.3 Contributor Free",
+        "OpenCode Zen contributor-free Muse Spark 1.3 model served through the Responses API.",
+        context_length=OPENCODE_MUSE_SPARK_CONTEXT_TOKENS,
+        max_output_tokens=OPENCODE_MUSE_SPARK_MAX_OUTPUT_TOKENS,
+        transport="openai-responses",
+        endpoint="/responses",
+    ),
+    _opencode_model(
+        "muse-spark-1.2",
+        "Muse Spark 1.2",
+        "OpenCode Zen Muse Spark 1.2 model served through the Responses API.",
+        context_length=OPENCODE_MUSE_SPARK_CONTEXT_TOKENS,
+        max_output_tokens=OPENCODE_MUSE_SPARK_MAX_OUTPUT_TOKENS,
+        free=False,
+        transport="openai-responses",
+        endpoint="/responses",
+    ),
+    _opencode_model(
+        "muse-spark-1.2-contributor-free",
+        "Muse Spark 1.2 Contributor Free",
+        "OpenCode Zen contributor-free Muse Spark 1.2 model served through the Responses API.",
+        context_length=OPENCODE_MUSE_SPARK_CONTEXT_TOKENS,
+        max_output_tokens=OPENCODE_MUSE_SPARK_MAX_OUTPUT_TOKENS,
+        transport="openai-responses",
+        endpoint="/responses",
+    ),
+    _opencode_model(
         "hy3-free",
         "Hy3 Free",
         "OpenCode Zen free Hy3 reasoning model.",
@@ -120,9 +174,9 @@ _OPENCODE_MODEL_CATALOG: List[Dict[str, Any]] = [
         max_output_tokens=128_000,
     ),
     _opencode_model(
-        "ling-3.0-tiny-free",
-        "Ling 3.0 Tiny Free",
-        "OpenCode Zen free compact Ling 3.0 reasoning model.",
+        "ling-3.0-flash-fin-free",
+        "Ling 3.0 Flash Fin Free",
+        "OpenCode Zen free Ling 3.0 Flash Fin reasoning model.",
         context_length=262_144,
         max_output_tokens=32_768,
     ),
@@ -266,6 +320,13 @@ def default_opencode_config() -> Dict[str, Any]:
         "selected_model_display_name": OPENCODE_DEFAULT_MODEL_DISPLAY_NAME,
         "api_url": OPENCODE_DEFAULT_API_URL,
         "endpoint": OPENCODE_DEFAULT_ENDPOINT,
+        # Client identity sent to the gateway. Empty means Reverie's own
+        # identity; set these to mimic another client (e.g. `opencode` and
+        # `opencode/0.x.y`) when a reverse proxy in front of the free models
+        # only forwards requests that look like the official client.
+        "client_name": "",
+        "user_agent": "",
+        "use_builtin_model_catalog": False,
         "max_context_tokens": OPENCODE_DEFAULT_CONTEXT_TOKENS,
         "timeout": 60,
         "max_tokens": OPENCODE_DEFAULT_MAX_TOKENS,
@@ -276,7 +337,7 @@ def default_opencode_config() -> Dict[str, Any]:
 
 
 def _opencode_models_url(api_url: Any) -> str:
-    return f"{resolve_opencode_sdk_base_url(api_url).rstrip('/')}/models"
+    return _append_opencode_path(resolve_opencode_sdk_base_url(api_url), "models")
 
 
 def fetch_opencode_model_catalog(
@@ -284,15 +345,17 @@ def fetch_opencode_model_catalog(
     *,
     timeout: int = 5,
     force_refresh: bool = False,
+    proxy: Any = "",
 ) -> List[Dict[str, Any]]:
-    """Fetch models exposed by Zen and keep only models this source can call correctly."""
+    """Fetch every model id exposed by the live OpenCode catalog."""
     cfg = default_opencode_config()
     if isinstance(opencode_config, dict):
         cfg.update(opencode_config)
     api_key = resolve_opencode_api_key(cfg)
     models_url = _opencode_models_url(cfg.get("api_url"))
     auth_hash = sha256(api_key.encode("utf-8")).hexdigest() if api_key else "anonymous"
-    cache_key = f"{models_url}:{auth_hash}"
+    configured_proxy = normalize_proxy_url(proxy)
+    cache_key = f"{models_url}:{auth_hash}:{configured_proxy}"
     now = time.monotonic()
     if (
         not force_refresh
@@ -304,20 +367,28 @@ def fetch_opencode_model_catalog(
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    response = requests.get(models_url, headers=headers, timeout=max(1, int(timeout or 5)))
+    request_kwargs: Dict[str, Any] = {
+        "headers": headers,
+        "timeout": max(1, int(timeout or 5)),
+    }
+    if configured_proxy:
+        request_kwargs["proxies"] = requests_proxy_dict(configured_proxy)
+    response = requests.get(models_url, **request_kwargs)
     response.raise_for_status()
     payload = response.json()
     raw_models = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else []
-    live_ids = {
-        str(item.get("id") or item.get("model") or "").strip().lower()
-        for item in raw_models
-        if isinstance(item, dict)
-    }
-    models = [
-        {**dict(item), "catalog_source": "api"}
-        for item in _OPENCODE_MODEL_CATALOG
-        if str(item["id"]).lower() in live_ids and (api_key or bool(item.get("free")))
-    ]
+    models: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for raw_model in raw_models if isinstance(raw_models, list) else []:
+        if isinstance(raw_model, dict):
+            model_id = str(raw_model.get("id") or raw_model.get("model") or "").strip()
+        else:
+            model_id = str(raw_model or "").strip()
+        normalized_id = model_id.lower()
+        if not normalized_id or normalized_id in seen_ids:
+            continue
+        seen_ids.add(normalized_id)
+        models.append(_live_opencode_model(model_id, raw_model if isinstance(raw_model, dict) else None))
     _OPENCODE_MODEL_CACHE.update(
         key=cache_key,
         expires_at=now + OPENCODE_MODEL_CACHE_TTL_SECONDS,
@@ -331,14 +402,15 @@ def get_opencode_model_catalog(
     *,
     fetch_live: bool = False,
     force_refresh: bool = False,
+    proxy: Any = "",
 ) -> List[Dict[str, Any]]:
-    """Return anonymous free models or API-key models supported by this source."""
+    """Return the live catalog or the dedicated built-in catalog when selected."""
     cfg = default_opencode_config()
     if isinstance(opencode_config, dict):
         cfg.update(opencode_config)
-    if fetch_live:
+    if fetch_live and not bool(cfg.get("use_builtin_model_catalog", False)):
         try:
-            live_models = fetch_opencode_model_catalog(cfg, force_refresh=force_refresh)
+            live_models = fetch_opencode_model_catalog(cfg, force_refresh=force_refresh, proxy=proxy)
             if live_models:
                 return live_models
         except (requests.RequestException, ValueError, TypeError):
@@ -356,6 +428,58 @@ def get_opencode_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
     return dict(found) if found else None
 
 
+def _infer_live_opencode_transport(model_id: str) -> tuple[str, str]:
+    """Infer the documented Zen endpoint for models absent from the snapshot."""
+    normalized_id = str(model_id or "").strip().lower()
+    if normalized_id.startswith(_OPENCODE_RESPONSES_MODEL_PREFIXES):
+        return "openai-responses", "/responses"
+    if normalized_id.startswith(_OPENCODE_ANTHROPIC_MODEL_PREFIXES):
+        return "anthropic", "/messages"
+    return "openai-chat", OPENCODE_DEFAULT_ENDPOINT
+
+
+def _live_opencode_model(model_id: Any, raw_model: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Decorate one live id without dropping models absent from the built-in metadata."""
+    normalized_id = str(model_id or "").strip()
+    known = get_opencode_model_metadata(normalized_id)
+    if known:
+        model = dict(known)
+        model.update(dict(raw_model or {}))
+        # The live endpoint does not publish transport details. Keep the
+        # source-of-truth mapping for known special endpoints such as Muse.
+        model["id"] = normalized_id
+        model["display_name"] = str(known.get("display_name") or normalized_id)
+        model["transport"] = str(known.get("transport") or "openai-chat")
+        model["endpoint"] = str(known.get("endpoint") or OPENCODE_DEFAULT_ENDPOINT)
+    else:
+        raw = dict(raw_model or {})
+        inferred_transport, inferred_endpoint = _infer_live_opencode_transport(normalized_id)
+        transport = str(raw.get("transport") or inferred_transport).strip()
+        if transport not in {"openai-chat", "openai-responses", "anthropic"}:
+            transport = inferred_transport
+        endpoint = str(raw.get("endpoint") or "").strip()
+        if not endpoint:
+            endpoint = inferred_endpoint
+        model = _opencode_model(
+            normalized_id,
+            str(raw.get("display_name") or raw.get("name") or normalized_id).strip(),
+            OPENCODE_LIVE_MODEL_DESCRIPTION,
+            thinking=False,
+            thinking_control="none",
+            free=bool(raw.get("free", False)),
+            transport=transport,
+            endpoint=endpoint,
+        )
+        model.update(raw)
+        model["id"] = normalized_id
+        model["display_name"] = str(model.get("display_name") or normalized_id).strip()
+        model["description"] = str(model.get("description") or OPENCODE_LIVE_MODEL_DESCRIPTION).strip()
+        model["transport"] = transport
+        model["endpoint"] = endpoint
+    model["catalog_source"] = "api"
+    return model
+
+
 def resolve_opencode_selected_model(opencode_config: Any, model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Resolve selected OpenCode model metadata from config or override."""
     cfg = default_opencode_config()
@@ -367,6 +491,8 @@ def resolve_opencode_selected_model(opencode_config: Any, model_id: Optional[str
     matched = next((dict(item) for item in catalog if str(item.get("id") or "").lower() == wanted), None)
     if matched:
         return matched
+    if wanted and not bool(cfg.get("use_builtin_model_catalog", False)) and wanted not in _OPENCODE_MODEL_METADATA:
+        return _live_opencode_model(wanted)
     default_model = next(
         (dict(item) for item in catalog if str(item.get("id") or "").lower() == OPENCODE_DEFAULT_MODEL_ID),
         None,
@@ -374,27 +500,48 @@ def resolve_opencode_selected_model(opencode_config: Any, model_id: Optional[str
     return default_model or (dict(catalog[0]) if catalog else None)
 
 
+def _append_opencode_path(base_url: str, extra: str) -> str:
+    """Append a path segment to a base URL, keeping any query string at the end.
+
+    A reverse proxy often carries auth in the query (`?key=...`), so the extra
+    path must land on the URL's path component -- naive string concatenation
+    produces `...?key=abc/chat/completions`, which no gateway can route.
+    """
+    parts = urlsplit(base_url)
+    path = parts.path.rstrip("/")
+    tail = str(extra or "").strip().strip("/")
+    if tail:
+        path = f"{path}/{tail}" if path else f"/{tail}"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+
+
 def resolve_opencode_sdk_base_url(api_url: Any) -> str:
-    """Resolve an OpenAI-compatible `/v1` base URL for OpenCode Zen."""
+    """Resolve an OpenAI-compatible `/v1` base URL for OpenCode Zen.
+
+    Only the path is normalized; the scheme, host, and any query string (proxy
+    auth) are preserved, so a reverse-proxy URL survives the round trip.
+    """
     base = str(api_url or "").strip()
     if not base:
         return OPENCODE_DEFAULT_API_URL
     if not base.startswith(("http://", "https://")):
         base = f"https://{base}"
-    base = base.rstrip("/")
-    lower_base = base.lower()
+    parts = urlsplit(base)
+    path = parts.path.rstrip("/")
+    lower_path = path.lower()
     for suffix in (
         "/chat/completions",
         "/v1/chat/completions",
         "/models",
         "/v1/models",
     ):
-        if lower_base.endswith(suffix):
-            base = base[: -len(suffix)]
-            lower_base = base.lower()
-    if lower_base.endswith("/v1"):
-        return base
-    return f"{base}/v1"
+        if lower_path.endswith(suffix):
+            path = path[: -len(suffix)]
+            lower_path = path.lower()
+            break
+    if not lower_path.endswith("/v1"):
+        path = f"{path}/v1"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
 
 
 def resolve_opencode_request_url(api_url: Any, endpoint: Any = "") -> str:
@@ -402,10 +549,76 @@ def resolve_opencode_request_url(api_url: Any, endpoint: Any = "") -> str:
     candidate_endpoint = str(endpoint or "").strip() or OPENCODE_DEFAULT_ENDPOINT
     if candidate_endpoint.startswith(("http://", "https://")):
         return candidate_endpoint
-    base = resolve_opencode_sdk_base_url(api_url).rstrip("/")
-    if candidate_endpoint.startswith("/"):
-        return f"{base}{candidate_endpoint}"
-    return f"{base}/{candidate_endpoint}"
+    return _append_opencode_path(resolve_opencode_sdk_base_url(api_url), candidate_endpoint)
+
+
+def resolve_opencode_session_id(session_id: Any = "") -> str:
+    """Return the provider-shaped session id required by OpenCode Zen."""
+    candidate = str(session_id or "").strip()
+    if re.fullmatch(r"ses_[0-9a-f]{64}", candidate, flags=re.IGNORECASE):
+        return candidate
+    return f"ses_{sha256((candidate or 'default').encode('utf-8')).hexdigest()}"
+
+
+def resolve_opencode_client_identity(opencode_config: Any) -> Dict[str, str]:
+    """Resolve the client name and User-Agent to present to the gateway.
+
+    Empty config values fall back to Reverie's own identity. Setting them lets a
+    non-OpenCode client borrow the official client's identity so a reverse proxy
+    that only forwards recognised clients still reaches the free models.
+    """
+    client_name = OPENCODE_CLIENT_NAME
+    user_agent = OPENCODE_USER_AGENT
+    if isinstance(opencode_config, dict):
+        configured_client = str(opencode_config.get("client_name", "") or "").strip()
+        configured_agent = str(opencode_config.get("user_agent", "") or "").strip()
+        if configured_client:
+            client_name = configured_client
+        if configured_agent:
+            user_agent = configured_agent
+    return {"client_name": client_name, "user_agent": user_agent}
+
+
+def build_opencode_request_headers(
+    session_id: Any = "",
+    *,
+    request_id: Any = "",
+    project_id: Any = "",
+    client: str = OPENCODE_CLIENT_NAME,
+    user_agent: str = "",
+) -> Dict[str, str]:
+    """Build transparent request metadata expected by OpenCode Zen."""
+    normalized_request_id = str(request_id or "").strip()
+    if not re.fullmatch(r"msg_[0-9a-f]{32,64}", normalized_request_id, flags=re.IGNORECASE):
+        normalized_request_id = f"msg_{uuid4().hex}"
+    headers = {
+        "x-opencode-session": resolve_opencode_session_id(session_id),
+        "x-opencode-request": normalized_request_id,
+        "x-opencode-client": str(client or OPENCODE_CLIENT_NAME).strip() or OPENCODE_CLIENT_NAME,
+        "User-Agent": str(user_agent or "").strip() or OPENCODE_USER_AGENT,
+    }
+    normalized_project_id = str(project_id or "").strip()
+    if normalized_project_id:
+        headers["x-opencode-project"] = normalized_project_id
+    return headers
+
+
+def build_opencode_request_headers_from_config(
+    opencode_config: Any,
+    session_id: Any = "",
+    *,
+    request_id: Any = "",
+    project_id: Any = "",
+) -> Dict[str, str]:
+    """Build request headers honouring the configured client identity overrides."""
+    identity = resolve_opencode_client_identity(opencode_config)
+    return build_opencode_request_headers(
+        session_id,
+        request_id=request_id,
+        project_id=project_id,
+        client=identity["client_name"],
+        user_agent=identity["user_agent"],
+    )
 
 
 def resolve_opencode_api_key(opencode_config: Any) -> str:
@@ -434,8 +647,11 @@ def normalize_opencode_config(raw_opencode: Any) -> Dict[str, Any]:
 
     cfg["enabled"] = bool(cfg.get("enabled", True))
     cfg["api_key"] = str(cfg.get("api_key", "") or "").strip()
+    cfg["client_name"] = str(cfg.get("client_name", "") or "").strip()
+    cfg["user_agent"] = str(cfg.get("user_agent", "") or "").strip()
+    cfg["use_builtin_model_catalog"] = bool(cfg.get("use_builtin_model_catalog", False))
     cfg["api_url"] = resolve_opencode_sdk_base_url(cfg.get("api_url", OPENCODE_DEFAULT_API_URL))
-    cfg["endpoint"] = OPENCODE_DEFAULT_ENDPOINT
+    cfg["endpoint"] = str(cfg.get("endpoint") or OPENCODE_DEFAULT_ENDPOINT).strip() or OPENCODE_DEFAULT_ENDPOINT
     cfg["selected_model_id"] = (
         str(cfg.get("selected_model_id", OPENCODE_DEFAULT_MODEL_ID) or "").strip()
         or OPENCODE_DEFAULT_MODEL_ID
@@ -471,6 +687,7 @@ def normalize_opencode_config(raw_opencode: Any) -> Dict[str, Any]:
     if matched:
         cfg["selected_model_id"] = str(matched["id"])
         cfg["selected_model_display_name"] = str(matched["display_name"])
+        cfg["endpoint"] = str(matched.get("endpoint") or OPENCODE_DEFAULT_ENDPOINT)
         context_length = matched.get("context_length")
         if context_length:
             cfg["max_context_tokens"] = int(context_length)
@@ -546,10 +763,10 @@ def build_opencode_runtime_model_data(opencode_config: Any, model_id: Optional[s
         "base_url": resolve_opencode_sdk_base_url(cfg.get("api_url", OPENCODE_DEFAULT_API_URL)),
         "api_key": resolve_opencode_api_key(cfg),
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", OPENCODE_DEFAULT_CONTEXT_TOKENS)),
-        "provider": "openai-chat",
+        "provider": str(selected.get("transport") or "openai-chat"),
         "supports_vision": bool(selected.get("vision", False)),
         "thinking_mode": resolve_opencode_thinking_choice(cfg, selected["id"]),
-        "endpoint": str(cfg.get("endpoint", OPENCODE_DEFAULT_ENDPOINT) or OPENCODE_DEFAULT_ENDPOINT),
+        "endpoint": str(selected.get("endpoint") or cfg.get("endpoint", OPENCODE_DEFAULT_ENDPOINT) or OPENCODE_DEFAULT_ENDPOINT),
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
         "vision_modalities": list(selected.get("vision_modalities") or (["image"] if selected.get("vision") else [])),

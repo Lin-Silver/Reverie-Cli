@@ -22,7 +22,7 @@ import threading
 from rich.markup import escape as rich_escape
 
 from .permission_review import describe_call
-from .system_prompt import build_system_prompt
+from .system_prompt import build_system_prompt, normalize_runtime_surface
 from .tool_executor import ToolExecutor
 from ..security_policy import (
     normalize_permission_level,
@@ -37,6 +37,7 @@ from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
 from ..config import model_source_display_name, normalize_model_provider
 from ..request_identity import apply_reverie_client_identity
+from ..proxy import normalize_proxy_url, requests_proxy_dict, resolve_proxy_url
 from ..thinking_tool import is_think_tool
 from ..stream_protocol import (
     HIDDEN_STREAM_TOKEN,
@@ -76,7 +77,10 @@ from ..nvidia import (
 )
 from ..aihubmix import build_aihubmix_openai_options
 from ..agnes import build_agnes_openai_options
-from ..opencode import build_opencode_openai_options
+from ..opencode import (
+    build_opencode_openai_options,
+    build_opencode_request_headers_from_config,
+)
 from ..sensenova import build_sensenova_openai_options
 from ..modelscope import build_modelscope_openai_options
 from ..custom_providers import (
@@ -1759,6 +1763,7 @@ def make_api_request_with_retry(
     stream: bool = False,
     timeout: int = 60,
     on_retry: Optional[Callable[[float, int, int, BaseException], None]] = None,
+    proxies: Optional[Dict[str, str]] = None,
 ) -> Any:
     """
     Make an API request with fixed retry delays.
@@ -1810,13 +1815,18 @@ def make_api_request_with_retry(
                 request_headers.setdefault("Connection", "keep-alive")
                 request_headers.setdefault("Cache-Control", "no-cache")
 
-            response = requests.post(
-                url,
-                headers=request_headers,
-                json=sanitized_payload,
-                stream=stream,
-                timeout=request_timeout
-            )
+            def post_request(request_payload: Dict[str, Any]) -> Any:
+                request_kwargs: Dict[str, Any] = {
+                    "headers": request_headers,
+                    "json": request_payload,
+                    "stream": stream,
+                    "timeout": request_timeout,
+                }
+                if proxies:
+                    request_kwargs["proxies"] = proxies
+                return requests.post(url, **request_kwargs)
+
+            response = post_request(sanitized_payload)
             
             # Check for HTTP errors
             response.raise_for_status()
@@ -1834,13 +1844,7 @@ def make_api_request_with_retry(
                 compatibility_payload = without_prompt_cache(sanitized_payload)
                 logger.warning("Provider rejected prompt-cache hints; retrying once without them")
                 try:
-                    fallback_response = requests.post(
-                        url,
-                        headers=request_headers,
-                        json=compatibility_payload,
-                        stream=stream,
-                        timeout=request_timeout,
-                    )
+                    fallback_response = post_request(compatibility_payload)
                     fallback_response.raise_for_status()
                     return fallback_response
                 except requests.exceptions.RequestException as fallback_error:
@@ -1862,13 +1866,7 @@ def make_api_request_with_retry(
                     provider_name = "NVIDIA" if is_nvidia_api_url(url) else "Provider"
                     logger.warning("%s returned 400; retrying once without OpenAI tool-calling fields", provider_name)
                     try:
-                        fallback_response = requests.post(
-                            url,
-                            headers=request_headers,
-                            json=compatibility_payload,
-                            stream=stream,
-                            timeout=request_timeout,
-                        )
+                        fallback_response = post_request(compatibility_payload)
                         fallback_response.raise_for_status()
                         logger.debug("%s tool-free compatibility fallback succeeded", provider_name)
                         return fallback_response
@@ -1884,13 +1882,7 @@ def make_api_request_with_retry(
                             compact_payload = _compact_payload_for_plain_chat(sanitized_payload)
                             if compact_payload != compatibility_payload:
                                 logger.warning("%s retrying once with compact plain-chat payload", provider_name)
-                                compact_response = requests.post(
-                                    url,
-                                    headers=request_headers,
-                                    json=compact_payload,
-                                    stream=stream,
-                                    timeout=request_timeout,
-                                )
+                                compact_response = post_request(compact_payload)
                                 compact_response.raise_for_status()
                                 logger.debug("%s compact plain-chat fallback succeeded", provider_name)
                                 return compact_response
@@ -1990,6 +1982,7 @@ def _invoke_system_curl(
     payload: Dict[str, Any],
     stream: bool,
     timeout: int,
+    proxy: Optional[str] = None,
 ) -> _CurlResponse:
     """POST JSON through the system curl executable without shell interpolation."""
     import shutil
@@ -2013,6 +2006,8 @@ def _invoke_system_curl(
     ]
     if stream:
         command.append("--no-buffer")
+    if proxy:
+        command.extend(["--proxy", str(proxy)])
     for name, value in headers.items():
         command.extend(["--header", f"{name}: {value}"])
     command.extend(["--data-binary", json.dumps(payload, ensure_ascii=False, separators=(",", ":"))])
@@ -2071,6 +2066,7 @@ class ReverieAgent:
         operation_history=None,
         rollback_manager=None,
         config=None,
+        runtime_surface: str = "terminal",
         agent_id: str = "main",
         agent_color: str = "",
         parent_agent_id: str = "",
@@ -2088,6 +2084,7 @@ class ReverieAgent:
         self.task_stage = "PLANNING"
         self.provider = normalize_model_provider(provider)
         self.config = config
+        self.runtime_surface = normalize_runtime_surface(runtime_surface)
         self.thinking_mode = thinking_mode
         self.endpoint = str(endpoint or "").strip()
         self.custom_headers: Dict[str, str] = {}
@@ -2159,6 +2156,7 @@ class ReverieAgent:
             additional_rules=additional_rules,
             mode=self.mode,
             config=self.config,
+            runtime_surface=self.runtime_surface,
         )
 
     def set_task_stage(self, stage: str) -> None:
@@ -2184,6 +2182,7 @@ class ReverieAgent:
             additional_rules=self.additional_rules,
             mode=self.mode,
             config=self.config,
+            runtime_surface=self.runtime_surface,
         )
 
     def reconfigure_runtime(
@@ -2200,6 +2199,7 @@ class ReverieAgent:
         endpoint: str = "",
         custom_headers: Optional[Dict[str, str]] = None,
         config=None,
+        runtime_surface: Optional[str] = None,
     ) -> None:
         """Refresh provider/model settings in place to speed up model switches."""
         self.base_url = base_url
@@ -2211,6 +2211,8 @@ class ReverieAgent:
         self.task_stage = "PLANNING"
         self.provider = normalize_model_provider(provider)
         self.config = config
+        if runtime_surface is not None:
+            self.runtime_surface = normalize_runtime_surface(runtime_surface)
         self.thinking_mode = thinking_mode
         self.endpoint = str(endpoint or "").strip()
         self.custom_headers = {}
@@ -2252,6 +2254,7 @@ class ReverieAgent:
             additional_rules=self.additional_rules,
             mode=self.mode,
             config=self.config,
+            runtime_surface=self.runtime_surface,
         )
     
     @staticmethod
@@ -2264,16 +2267,10 @@ class ReverieAgent:
         return url_str
 
     def _build_proxied_http_client(self) -> Any:
-        import os
         import httpx
-        proxy_val = (
-            os.environ.get("ALL_PROXY")
-            or os.environ.get("all_proxy")
-            or os.environ.get("HTTPS_PROXY")
-            or os.environ.get("https_proxy")
-            or os.environ.get("HTTP_PROXY")
-            or os.environ.get("http_proxy")
-        )
+        config = getattr(self, "config", None)
+        configured_proxy = getattr(config, "api_proxy", "") if config is not None else ""
+        proxy_val = resolve_proxy_url(configured_proxy)
         if proxy_val:
             proxy_val = self._fix_proxy_url(proxy_val)
             try:
@@ -2331,7 +2328,12 @@ class ReverieAgent:
                     client_kwargs["auth_token"] = self.api_key
                 else:
                     client_kwargs["api_key"] = self.api_key
-                client_kwargs["default_headers"] = apply_reverie_client_identity(self.custom_headers)
+                # OpenCode's Claude/Qwen models expect the official client's
+                # identity, so Reverie's own header is suppressed for that source.
+                client_kwargs["default_headers"] = apply_reverie_client_identity(
+                    self.custom_headers,
+                    include_identity=not self._is_active_model_source("opencode"),
+                )
                 try:
                     self._client = anthropic.Anthropic(**client_kwargs)
                 except TypeError:
@@ -2367,6 +2369,7 @@ class ReverieAgent:
             self.api_key,
             self._resolve_provider_timeout(),
             tuple(sorted((self.custom_headers or {}).items())),
+            normalize_proxy_url(getattr(getattr(self, "config", None), "api_proxy", "")),
         )
 
     def _ensure_client(self) -> Any:
@@ -2387,6 +2390,9 @@ class ReverieAgent:
         """
         if self.provider != "openai-chat":
             return False
+
+        if self._is_active_model_source("opencode"):
+            return True
 
         if (
             self._is_active_model_source("sensenova")
@@ -2557,7 +2563,12 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self._is_active_model_source("opencode") and self.provider in ("openai-chat", "request"):
+        if self._is_active_model_source("opencode") and self.provider in (
+            "openai-chat",
+            "openai-responses",
+            "anthropic",
+            "request",
+        ):
             try:
                 cfg = getattr(config, "opencode", {})
                 if isinstance(cfg, dict):
@@ -2593,7 +2604,7 @@ class ReverieAgent:
 
         return timeout_value
 
-    def _build_request_headers(self, stream: bool) -> Dict[str, str]:
+    def _build_request_headers(self, stream: bool, session_id: str = "default") -> Dict[str, str]:
         """Build HTTP headers for the request provider."""
         headers = {
             "Content-Type": "application/json",
@@ -2602,14 +2613,20 @@ class ReverieAgent:
             headers["Authorization"] = f"Bearer {self.api_key}"
         if self.custom_headers:
             headers.update(self.custom_headers)
+        is_opencode = self._is_active_model_source("opencode")
+        if is_opencode:
+            headers.update(build_opencode_request_headers_from_config(
+                getattr(self.config, "opencode", {}), session_id=session_id))
         if "Accept" not in headers:
             headers["Accept"] = "text/event-stream" if stream else "application/json"
-        return apply_reverie_client_identity(headers)
+        # OpenCode requests must look like the official client, so Reverie's own
+        # identity header is suppressed for that source only.
+        return apply_reverie_client_identity(headers, include_identity=not is_opencode)
 
-    def _make_direct_request(self, payload: Dict[str, Any], *, stream: bool) -> Any:
+    def _make_direct_request(self, payload: Dict[str, Any], *, stream: bool, session_id: str = "default") -> Any:
         """Execute a basic JSON POST through requests or the system curl binary."""
         effective_timeout = self._resolve_provider_timeout()
-        headers = self._build_request_headers(stream=stream)
+        headers = self._build_request_headers(stream=stream, session_id=session_id)
         if self.provider == "curl":
             url = self._resolve_curl_url()
             if not url:
@@ -2620,16 +2637,20 @@ class ReverieAgent:
                 payload=payload,
                 stream=stream,
                 timeout=effective_timeout,
+                proxy=normalize_proxy_url(getattr(getattr(self, "config", None), "api_proxy", "")) or None,
             )
 
+        configured_proxy = normalize_proxy_url(getattr(getattr(self, "config", None), "api_proxy", ""))
+        request_url = self._resolve_openai_request_url() if self.provider == "openai-responses" else self.base_url
         return make_api_request_with_retry(
-            url=self.base_url,
+            url=request_url,
             headers=headers,
             payload=payload,
             max_retries=self.api_max_retries,
             initial_backoff=self.api_initial_backoff,
             stream=stream,
             timeout=effective_timeout,
+            proxies=requests_proxy_dict(configured_proxy) if configured_proxy else None,
             on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
                 provider_label=self._request_provider_label(),
                 model=payload.get("model", self.model),
@@ -2650,6 +2671,9 @@ class ReverieAgent:
             )
 
         if self._openai_request_fallback_active:
+            extra_body = prepared.pop("extra_body", None)
+            if isinstance(extra_body, dict):
+                prepared.update(extra_body)
             return apply_openai_prompt_cache(
                 prepared,
                 namespace="agent-chat",
@@ -3960,6 +3984,43 @@ class ReverieAgent:
             meta=f"first event in {elapsed_ms}ms",
         )
 
+    def _humanize_turn_error(self, error: BaseException) -> Optional[str]:
+        """Rewrite known, self-inflicted gateway errors into actionable guidance.
+
+        The OpenCode Zen free tier is gated server-side: an anonymous request to
+        a ``-free`` model (or ``big-pickle``/muse-spark via ``/responses``) comes
+        back ``403 FreeTierError: "...can only be used from within OpenCode"``.
+        No client change bypasses it, so surfacing the raw HTTP traceback only
+        confuses the user. Detect that exact case and explain the real fix: a
+        valid Zen API key (or a reverse proxy that injects one).
+        """
+        text = str(error or "")
+        lowered = text.lower()
+        is_free_tier_gate = (
+            "free tier can only be used from within opencode" in lowered
+            or "freetiererror" in lowered
+        )
+        if is_free_tier_gate and self._is_active_model_source("opencode"):
+            has_key = bool(str(self.api_key or "").strip())
+            if has_key:
+                # A key was sent but the gateway still refused it as free-tier
+                # (e.g. the key lacks free-model access). Point at the account.
+                return (
+                    "OpenCode rejected this free model even with your configured API key "
+                    "(HTTP 403 free-tier gate). The key may not have access to free models "
+                    "or the model is contributor-only. Pick a paid model your key can use, "
+                    "or check your plan at https://opencode.ai/docs/zen."
+                )
+            return (
+                "OpenCode's free tier is gated server-side and can only be used from within "
+                "OpenCode itself — anonymous requests are refused with HTTP 403, and no client "
+                "setting bypasses it. To use OpenCode models from Reverie, set a real OpenCode "
+                "Zen API key with /opencode key <your-key> (or point the source at a reverse "
+                "proxy that injects one via /opencode url ...). Get a key at "
+                "https://opencode.ai/docs/zen."
+            )
+        return None
+
     def _model_stream_failed_event(self, error: BaseException) -> Optional[str]:
         """Close the pending model-request activity with its real failure."""
         activity = getattr(self, "_pending_model_activity", None)
@@ -3967,7 +4028,7 @@ class ReverieAgent:
             return None
         self._pending_model_activity = None
         provider_label = str(activity.get("provider_label") or "Model API")
-        error_text = str(error or "Model stream failed").strip()
+        error_text = self._humanize_turn_error(error) or str(error or "Model stream failed").strip()
         if len(error_text) > 300:
             error_text = f"{error_text[:297]}..."
         return encode_stream_event(
@@ -4920,6 +4981,7 @@ class ReverieAgent:
             )
 
             effective_timeout = self._resolve_provider_timeout()
+            configured_proxy = normalize_proxy_url(getattr(getattr(self, "config", None), "api_proxy", ""))
             try:
                 response = make_api_request_with_retry(
                     url=request_url,
@@ -4929,6 +4991,7 @@ class ReverieAgent:
                     initial_backoff=self.api_initial_backoff,
                     stream=True,
                     timeout=effective_timeout,
+                    proxies=requests_proxy_dict(configured_proxy) if configured_proxy else None,
                     on_retry=lambda delay, attempt, max_attempts, error: self._emit_api_retry_event(
                         provider_label=provider_name,
                         model=payload.get("model", self.model),
@@ -5449,7 +5512,8 @@ class ReverieAgent:
                     response = f"{response}\n{notice}" if response else notice
                 yield response
         except Exception as e:
-            error_msg = f"Error processing message: {str(e)}"
+            humanized = self._humanize_turn_error(e)
+            error_msg = f"Error processing message: {humanized or str(e)}"
             self._record_memory_event(
                 "error",
                 {
@@ -5525,7 +5589,22 @@ class ReverieAgent:
                 tool_name = str((tool_choice.get("function", {}) or {}).get("name", "") or "").strip()
                 if tool_name:
                     payload["tool_choice"] = {"type": "function", "name": tool_name}
-        if self._is_active_model_source("custom"):
+        if self._is_active_model_source("opencode"):
+            # Muse Spark is exposed by Zen through Responses rather than chat
+            # completions.  The Responses field is the equivalent of the
+            # OpenAI-compatible `max_tokens` option used by chat models.
+            try:
+                options = build_opencode_openai_options(
+                    getattr(self.config, "opencode", {}),
+                    self.model,
+                )
+            except Exception:
+                logger.debug("Could not build OpenCode Responses options", exc_info=True)
+                options = {}
+            max_output_tokens = options.get("max_tokens")
+            if max_output_tokens:
+                payload["max_output_tokens"] = max_output_tokens
+        elif self._is_active_model_source("custom"):
             # `build_codex_request_payload` reasons for Codex's own account; a
             # custom provider gets its own resolved depth instead.
             try:
@@ -5555,6 +5634,7 @@ class ReverieAgent:
         self,
         response: Any,
         payload: Dict[str, Any],
+        session_id: str = "default",
     ) -> Any:
         """Read a direct response, retrying a rejected cache hint once."""
         try:
@@ -5564,7 +5644,11 @@ class ReverieAgent:
                 raise
             self._close_stream_response(response)
             logger.warning("Provider rejected prompt-cache hints; retrying once without them")
-            fallback = self._make_direct_request(without_prompt_cache(payload), stream=False)
+            fallback = self._make_direct_request(
+                without_prompt_cache(payload),
+                stream=False,
+                session_id=session_id,
+            )
             return fallback.json()
 
     def _iter_openai_responses_sdk_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
@@ -5606,6 +5690,7 @@ class ReverieAgent:
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         empty_turn_count = 0
+        direct_http = use_curl or self._is_active_model_source("opencode")
 
         while True:
             self._check_and_compress_context(session_id=session_id)
@@ -5614,14 +5699,14 @@ class ReverieAgent:
             payload = self._build_openai_responses_payload(stream=True)
             effective_timeout = self._resolve_provider_timeout()
             yield self._model_request_stream_event(
-                provider_label=self._responses_provider_label(use_curl=use_curl),
+                provider_label=self._responses_provider_label(use_curl=direct_http),
                 model=self.model,
                 stream=True,
                 timeout=effective_timeout,
             )
 
-            if use_curl:
-                response = self._make_direct_request(payload, stream=True)
+            if direct_http:
+                response = self._make_direct_request(payload, stream=True, session_id=session_id)
                 events = self._iter_curl_responses_events(response)
             else:
                 response = self._create_openai_response(payload)
@@ -5633,14 +5718,18 @@ class ReverieAgent:
                     yield from self._apply_stream_event(state, event)
             except Exception as exc:
                 if (
-                    use_curl
+                    direct_http
                     and not _stream_state_has_partial_output(state)
                     and has_prompt_cache_hints(payload)
                     and is_prompt_cache_rejection(exc)
                 ):
                     self._close_stream_response(response)
                     logger.warning("Provider rejected prompt-cache hints; retrying stream once without them")
-                    response = self._make_direct_request(without_prompt_cache(payload), stream=True)
+                    response = self._make_direct_request(
+                        without_prompt_cache(payload),
+                        stream=True,
+                        session_id=session_id,
+                    )
                     for event in self._iter_curl_responses_events(response):
                         yield from self._apply_stream_event(state, event)
                 else:
@@ -5912,7 +6001,7 @@ class ReverieAgent:
                 timeout=effective_timeout,
             )
             try:
-                response = self._make_direct_request(payload, stream=True)
+                response = self._make_direct_request(payload, stream=True, session_id=session_id)
             except (requests.RequestException, RuntimeError) as e:
                 logger.error(f"Streaming API request failed: {e}")
                 raise
@@ -5931,7 +6020,11 @@ class ReverieAgent:
                 ):
                     self._close_stream_response(response)
                     logger.warning("Provider rejected prompt-cache hints; retrying stream once without them")
-                    response = self._make_direct_request(without_prompt_cache(payload), stream=True)
+                    response = self._make_direct_request(
+                        without_prompt_cache(payload),
+                        stream=True,
+                        session_id=session_id,
+                    )
                     for event in self._iter_request_stream_events(response, provider_label):
                         yield from self._apply_stream_event(state, event)
                 elif _should_recover_partial_stream_error(state, exc):
@@ -6022,6 +6115,9 @@ class ReverieAgent:
                     kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
             kwargs = self._apply_custom_provider_anthropic_options(kwargs)
+            if self._is_active_model_source("opencode"):
+                kwargs["extra_headers"] = build_opencode_request_headers_from_config(
+                    getattr(self.config, "opencode", {}), session_id=session_id)
             kwargs = apply_anthropic_prompt_cache(kwargs)
             
             # Make request
@@ -6183,14 +6279,19 @@ class ReverieAgent:
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         empty_turn_count = 0
+        direct_http = use_curl or self._is_active_model_source("opencode")
         while True:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
             messages = self._build_messages(resolve_local_images=True)
             payload = self._build_openai_responses_payload(stream=False)
-            if use_curl:
-                response = self._make_direct_request(payload, stream=False)
-                result = self._response_json_with_prompt_cache_fallback(response, payload)
+            if direct_http:
+                response = self._make_direct_request(payload, stream=False, session_id=session_id)
+                result = self._response_json_with_prompt_cache_fallback(
+                    response,
+                    payload,
+                    session_id=session_id,
+                )
             else:
                 result = self._create_openai_response(payload)
             state, usage = self._responses_result_state(result)
@@ -6553,12 +6654,16 @@ class ReverieAgent:
             # Long request-provider responses may need the provider timeout.
             effective_timeout = self._resolve_provider_timeout()
             try:
-                response = self._make_direct_request(payload, stream=False)
+                response = self._make_direct_request(payload, stream=False, session_id=session_id)
             except (requests.RequestException, RuntimeError) as e:
                 logger.error(f"API request failed: {e}")
                 raise
             
-            response_data = self._response_json_with_prompt_cache_fallback(response, payload)
+            response_data = self._response_json_with_prompt_cache_fallback(
+                response,
+                payload,
+                session_id=session_id,
+            )
             provider_label = self._request_provider_label()
             _raise_for_wrapped_api_error(response_data, provider_label=provider_label)
             normalized_response = _unwrap_openai_compatible_payload(response_data) or response_data
@@ -6754,6 +6859,9 @@ class ReverieAgent:
                     kwargs["tool_choice"] = tool_choice
             kwargs = self._apply_sensenova_anthropic_options(kwargs)
             kwargs = self._apply_custom_provider_anthropic_options(kwargs)
+            if self._is_active_model_source("opencode"):
+                kwargs["extra_headers"] = build_opencode_request_headers_from_config(
+                    getattr(self.config, "opencode", {}), session_id=session_id)
             kwargs = apply_anthropic_prompt_cache(kwargs)
             
             # Make request

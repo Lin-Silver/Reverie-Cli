@@ -658,9 +658,10 @@ def test_sensenova_http_fallback_streaming_preserves_openai_payload_options(tmp_
     agent.messages = [{"role": "user", "content": "Write the next novel chapter."}]
     agent.get_visible_tool_schemas = lambda mode=None: []
 
-    def fake_make_direct_request(payload, *, stream):
+    def fake_make_direct_request(payload, *, stream, session_id="default"):
         captured["payload"] = dict(payload)
         captured["stream"] = stream
+        captured["session_id"] = session_id
         return FakeResponse()
 
     agent._make_direct_request = fake_make_direct_request
@@ -680,12 +681,10 @@ def test_sensenova_http_fallback_streaming_preserves_openai_payload_options(tmp_
     assert captured["payload"]["top_p"] == 0.8
     assert captured["payload"]["presence_penalty"] == 1.5
     assert captured["payload"]["max_tokens"] == 6144
-    assert captured["payload"]["extra_body"] == {
-        "reasoning_effort": "none",
-        "top_k": 20,
-        "min_p": 0.0,
-        "repetition_penalty": 1.0,
-    }
+    assert captured["payload"]["reasoning_effort"] == "none"
+    assert captured["payload"]["top_k"] == 20
+    assert captured["payload"]["min_p"] == 0.0
+    assert captured["payload"]["repetition_penalty"] == 1.0
     assert not captured["payload"].get("tools")
     assert any(chunk == "ok" for chunk in chunks)
 

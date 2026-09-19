@@ -586,6 +586,9 @@ def test_web_search_defaults_to_link_discovery_without_fetch(monkeypatch) -> Non
             }
         ],
     )
+    # The parallel pipeline fans out to every engine, so all three must be
+    # stubbed or Bing/Brave would make a real network call in the test.
+    monkeypatch.setattr(tool, "_search_bing", lambda *args, **kwargs: [])
     monkeypatch.setattr(tool, "_search_brave", lambda *args, **kwargs: [])
 
     def fail_fetch(*args, **kwargs):
@@ -599,6 +602,10 @@ def test_web_search_defaults_to_link_discovery_without_fetch(monkeypatch) -> Non
     assert result.data["settings"]["fetch_content"] is False
     assert "https://docs.modrinth.com/api/" in result.output
     assert "Fetch Status" not in result.output
+    # A single-engine hit still carries an evidence score and its engine list.
+    top = result.data["results"][0]
+    assert top["evidence"]["engines"] == ["ddg"]
+    assert 0.0 < top["evidence_score"] <= 1.0
 
 
 def test_web_fetch_reads_selected_urls(monkeypatch) -> None:
@@ -695,6 +702,168 @@ def test_web_search_treats_direct_url_as_candidate() -> None:
     assert result.success is True
     assert result.data["engine"] == "direct_url"
     assert result.data["results"][0]["href"] == "https://example.com/docs"
+
+
+def _stub_engine(hits):
+    """Return a search-engine stub yielding fixed (title, href, body, rank) rows."""
+
+    def _engine(*args, **kwargs):
+        return [dict(hit) for hit in hits]
+
+    return _engine
+
+
+def test_web_search_fuses_engines_and_rewards_consensus(monkeypatch) -> None:
+    tool = WebSearchTool()
+    tool._available = True
+
+    # Paris is returned by two engines (consensus); Lyon by one only. Even
+    # though DDG ranks Lyon #1, the two-engine agreement on Paris must win.
+    ddg_hits = [
+        {"title": "Lyon", "href": "https://example.com/lyon", "body": "capital france text", "rank": 1},
+        {"title": "Paris capital of France", "href": "https://example.com/paris", "body": "paris is the capital of france", "rank": 2},
+    ]
+    bing_hits = [
+        {"title": "Paris capital of France", "href": "https://example.com/paris", "body": "paris is the capital of france", "rank": 1},
+    ]
+    monkeypatch.setattr(tool, "_search_ddg", _stub_engine(ddg_hits))
+    monkeypatch.setattr(tool, "_search_bing", _stub_engine(bing_hits))
+    monkeypatch.setattr(tool, "_search_brave", _stub_engine([]))
+
+    result = tool.execute(query="what is the capital of France", max_results=5)
+
+    assert result.success is True
+    top = result.data["results"][0]
+    assert top["href"] == "https://example.com/paris"
+    assert sorted(top["evidence"]["engines"]) == ["bing", "ddg"]
+    assert top["evidence"]["consensus"] == 1.0
+    # The one-engine result ranks below and reports lower consensus.
+    lyon = next(r for r in result.data["results"] if r["href"] == "https://example.com/lyon")
+    assert lyon["evidence"]["consensus"] == 0.5
+    assert top["evidence_score"] >= lyon["evidence_score"]
+    assert result.data["engine"] == "ddg+bing"
+
+
+def test_fuse_flags_weak_low_evidence_result() -> None:
+    tool = WebSearchTool()
+
+    # Strong hit: agreed on by all three engines at rank 1 (high fusion + full
+    # consensus + full lexical overlap). Straggler: one engine, deep rank, no
+    # query-term overlap -> low fusion, low consensus, zero lexical -> weak.
+    results_by_engine = {
+        "ddg": [
+            {"title": "Quantum entanglement primer", "href": "https://example.com/qe", "body": "quantum entanglement explained", "rank": 1},
+            {"title": "Unrelated cooking blog", "href": "https://example.com/food", "body": "best pasta recipes", "rank": 30},
+        ],
+        "bing": [{"title": "Quantum entanglement primer", "href": "https://example.com/qe", "body": "quantum entanglement explained", "rank": 1}],
+        "brave": [{"title": "Quantum entanglement primer", "href": "https://example.com/qe", "body": "quantum entanglement explained", "rank": 1}],
+    }
+    fused = tool._fuse_results(results_by_engine, {"quantum", "entanglement"}, 5)
+
+    strong = next(r for r in fused if r["href"] == "https://example.com/qe")
+    weak = next(r for r in fused if r["href"] == "https://example.com/food")
+    assert strong["weak"] is False
+    assert weak["weak"] is True
+    assert weak["evidence_score"] < WebSearchTool.WEAK_EVIDENCE_THRESHOLD
+    # The confident hit sorts ahead of the weak straggler.
+    assert fused.index(strong) < fused.index(weak)
+
+
+def test_web_search_multi_query_fans_out_and_refuses(monkeypatch) -> None:
+    tool = WebSearchTool()
+    tool._available = True
+
+    calls = []
+
+    def fake_search_one(query, *args, **kwargs):
+        calls.append(query)
+        if query == "python asyncio":
+            hits = [{"title": "asyncio docs", "href": "https://docs.python.org/3/library/asyncio.html", "body": "asyncio event loop", "rank": 1, "evidence_score": 0.8, "evidence": {"fusion": 1.0, "lexical": 0.5, "consensus": 0.5, "engines": ["ddg"]}, "engines": ["ddg"], "weak": False}]
+        else:
+            hits = [{"title": "asyncio docs", "href": "https://docs.python.org/3/library/asyncio.html", "body": "asyncio event loop", "rank": 1, "evidence_score": 0.7, "evidence": {"fusion": 1.0, "lexical": 0.4, "consensus": 0.5, "engines": ["bing"]}, "engines": ["bing"], "weak": False}]
+        return {"results": hits, "engine": "ddg", "attempts": [{"provider": "ddg", "count": 1, "status": "ok"}], "cached": False}
+
+    monkeypatch.setattr(tool, "_search_one_query", fake_search_one)
+
+    result = tool.execute(query=["python asyncio", "python event loop"], max_results=5)
+
+    assert result.success is True
+    assert calls == ["python asyncio", "python event loop"]
+    assert result.data["engine"] == "multi-query"
+    assert result.data["queries"] == ["python asyncio", "python event loop"]
+    # The URL both queries surfaced is fused into a single ranked entry.
+    hrefs = [r["href"] for r in result.data["results"]]
+    assert hrefs.count("https://docs.python.org/3/library/asyncio.html") == 1
+
+
+def test_bing_redirect_urls_are_unwrapped() -> None:
+    tool = WebSearchTool()
+    # bing.com/ck/a wraps the real URL as urlsafe-base64 in the `u=a1...` param.
+    import base64
+
+    target = "https://en.wikipedia.org/wiki/Paris"
+    token = "a1" + base64.urlsafe_b64encode(target.encode("utf-8")).decode("ascii").rstrip("=")
+    wrapped = f"https://www.bing.com/ck/a?!&&p=deadbeef&u={token}"
+
+    assert tool._unwrap_bing_url(wrapped) == target
+    # A plain (non-redirect) URL passes through untouched.
+    assert tool._unwrap_bing_url("https://example.com/page") == "https://example.com/page"
+    # A malformed token falls back to the original href rather than raising.
+    assert tool._unwrap_bing_url("https://www.bing.com/ck/a?u=a1@@@notbase64").startswith("https://www.bing.com/ck/a")
+
+
+def test_content_quality_classification() -> None:
+    tool = WebSearchTool()
+    assert tool._classify_content_quality("x" * 1500, None) == "ok"
+    assert tool._classify_content_quality("short stub", None) == "thin"
+    assert tool._classify_content_quality("x" * 600, None) == "ok"
+
+    class _FakeMain:
+        def find_all(self, _name):
+            return ["<script>" + "y" * 3000 + "</script>"]
+
+    # Tiny visible text but heavy script markup -> unrendered SPA shell.
+    assert tool._classify_content_quality("hi", _FakeMain()) == "spa_shell"
+
+
+def test_excerpt_pins_to_query_match_with_offsets() -> None:
+    tool = WebSearchTool()
+    content = "Intro sentence. The capital of France is Paris, a major city. More trailing text."
+    excerpt = tool._build_excerpt(content, {"paris"}, max_len=40)
+
+    assert "paris" in excerpt["text"].lower()
+    assert content[excerpt["start"]:excerpt["end"]] == excerpt["text"]
+    # No match falls back to the head of the content.
+    head = tool._build_excerpt(content, {"zzznomatch"}, max_len=40)
+    assert head["start"] == 0
+
+
+def test_web_fetch_reports_published_date_and_quality(monkeypatch) -> None:
+    tool = WebFetchTool()
+    tool._available = True
+
+    html = """
+    <html>
+      <head>
+        <title>Release Notes</title>
+        <meta property="article:published_time" content="2026-03-14T09:00:00Z">
+      </head>
+      <body>
+        <main>%s</main>
+      </body>
+    </html>
+    """ % ("Version 2.0 ships today with a rewritten search pipeline. " * 40)
+
+    monkeypatch.setattr(tool, "_request_with_retry", lambda *args, **kwargs: _FakeHTTPResponse(html))
+
+    result = tool.execute(url="https://example.com/notes", query="search pipeline", max_content_chars=6000)
+
+    assert result.success is True
+    fetched = result.data["results"][0]
+    assert fetched["published_at"] == "2026-03-14T09:00:00Z"
+    assert fetched["content_quality"] == "ok"
+    assert fetched["excerpt"]["text"]
+    assert "Published:" in result.output
 
 
 def test_vision_upload_is_not_registered_as_builtin_tool(tmp_path: Path) -> None:

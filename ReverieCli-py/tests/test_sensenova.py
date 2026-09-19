@@ -39,8 +39,16 @@ def test_sensenova_deepseek_v4_flash_catalog_contract():
 
 def test_sensenova_catalog_only_exposes_flash_lite_for_vision():
     catalog = {item["id"]: item for item in get_sensenova_model_catalog()}
-    assert set(catalog) == {"deepseek-v4-flash", "glm-5.2", "sensenova-6.8-flash-lite"}
-    assert [item["id"] for item in catalog.values() if item["vision"]] == ["sensenova-6.8-flash-lite"]
+    assert set(catalog) == {
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "glm-5.2",
+        "kimi-k3",
+        "sensenova-6.8-flash-lite",
+    }
+    assert [item["id"] for item in catalog.values() if item["vision"]] == [
+        "sensenova-6.8-flash-lite",
+    ]
 
 
 def test_sensenova_live_catalog_uses_official_models_endpoint_and_filters_non_chat_models(monkeypatch):
@@ -112,7 +120,10 @@ def test_sensenova_live_catalog_uses_official_models_endpoint_and_filters_non_ch
         "authorization": "Bearer sense-test",
         "timeout": 3,
     }
-    assert [item["id"] for item in catalog] == ["sensenova-6.8-flash-lite", "future-chat-model"]
+    assert [item["id"] for item in catalog] == [
+        "sensenova-6.8-flash-lite",
+        "future-chat-model",
+    ]
     assert catalog[0]["vision"] is True
     assert catalog[0]["tool_calling"] is True
     assert catalog[0]["context_length"] == 262_144
@@ -120,7 +131,7 @@ def test_sensenova_live_catalog_uses_official_models_endpoint_and_filters_non_ch
     assert catalog[1]["max_output_tokens"] == 7_890
 
 
-def test_sensenova_live_catalog_failure_falls_back_and_legacy_flash_lite_migrates(monkeypatch):
+def test_sensenova_live_catalog_failure_falls_back_and_migrates_retired_flash_lite(monkeypatch):
     monkeypatch.setattr(
         sensenova_module.requests,
         "get",
@@ -133,13 +144,15 @@ def test_sensenova_live_catalog_failure_falls_back_and_legacy_flash_lite_migrate
     )
     assert {item["id"] for item in catalog} == {
         "deepseek-v4-flash",
+        "deepseek-v4-pro",
         "glm-5.2",
+        "kimi-k3",
         "sensenova-6.8-flash-lite",
     }
 
-    migrated = normalize_sensenova_config({"selected_model_id": "sensenova-6.7-flash-lite"})
-    assert migrated["selected_model_id"] == "sensenova-6.8-flash-lite"
-    assert migrated["selected_model_display_name"] == "SenseNova 6.8 Flash Lite"
+    current = normalize_sensenova_config({"selected_model_id": "sensenova-6.7-flash-lite"})
+    assert current["selected_model_id"] == "sensenova-6.8-flash-lite"
+    assert current["selected_model_display_name"] == "SenseNova 6.8 Flash Lite"
 
 
 def test_sensenova_model_command_fetches_live_catalog_before_selection(tmp_path, monkeypatch):
@@ -346,8 +359,9 @@ def test_anthropic_message_conversion_preserves_url_and_base64_images():
 
 def test_sensenova_u1_fast_tti_profile_and_capabilities(tmp_path):
     catalog = get_sensenova_tti_model_catalog()
-    assert [item["id"] for item in catalog] == ["sensenova-u1-fast"]
+    assert [item["id"] for item in catalog] == ["sensenova-u1-fast", "sensenova-u1.5-lite"]
     assert catalog[0]["input_modalities"] == ["text"]
+    assert catalog[1]["input_modalities"] == ["text"]
 
     captured = {}
 
@@ -369,4 +383,27 @@ def test_sensenova_u1_fast_tti_profile_and_capabilities(tmp_path):
 
     config = Config(sensenova={"api_key": "secret"})
     capabilities = build_media_capabilities(config=config, project_root=tmp_path)
-    assert capabilities["image"]["sources"]["sensenova"]["models"][0]["id"] == "sensenova-u1-fast"
+    assert [item["id"] for item in capabilities["image"]["sources"]["sensenova"]["models"]] == [
+        "sensenova-u1-fast",
+        "sensenova-u1.5-lite",
+    ]
+
+
+def test_sensenova_u1_5_lite_tti_profile_uses_verified_generation_contract(tmp_path):
+    captured = {}
+
+    class Images:
+        def generate(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"png").decode(), url=None)])
+
+    profile = get_sensenova_tti_profile("sensenova-u1.5-lite")
+    result = profile.generate_image(
+        SimpleNamespace(images=Images()),
+        prompt="poster",
+        output_path=tmp_path,
+        size="2048x2048",
+    )
+
+    assert captured == {"model": "sensenova-u1.5-lite", "prompt": "poster", "size": "2048x2048", "n": 1}
+    assert len(result["saved_images"]) == 1

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, shell } from "electron";
 import { assertCoreAction, assertCoreResponse, normalizeCorePayload } from "./core-actions";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { appendFile, copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -533,6 +533,43 @@ ipcMain.handle("core:cancel", async () => {
   await bridge.restart();
 });
 
+// Bring the window to the front: restore it if minimized, show it if hidden,
+// and take focus. Same sequence the single-instance guard uses at main.ts:418.
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+// Raise a native OS toast in Reverie's name. Gated to the background: when the
+// window is focused the user is already looking at the in-app panel/body, so a
+// system toast would just be the same thing said three times. The renderer
+// decides *when* to call this (it owns the translated copy); main owns *how*.
+// Clicking the toast pulls Reverie to the foreground.
+function notifyDesktop(title: string, body: string): void {
+  if (!Notification.isSupported()) return;
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return;
+  const icon = app.isPackaged
+    ? undefined
+    : path.resolve(uiRoot, "..", "ReverieCli-py", "reverie.ico");
+  try {
+    const notification = new Notification({ title, body, icon, silent: false });
+    notification.on("click", focusMainWindow);
+    notification.show();
+  } catch (error) {
+    void log(`Notification failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+ipcMain.handle("desktop:notify", (_event, rawPayload: unknown) => {
+  const payload = (rawPayload ?? {}) as { title?: unknown; body?: unknown };
+  const title = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : "Reverie";
+  const body = typeof payload.body === "string" ? payload.body.trim().slice(0, 220) : "";
+  if (!body) return;
+  notifyDesktop(title, body);
+});
+
 ipcMain.handle("desktop:select-workspace", async () => {
   if (!mainWindow || !bridge) return null;
   const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
@@ -839,6 +876,10 @@ async function runTuiFromDesktop(settings: DesktopSettings): Promise<void> {
 
 app.whenReady().then(async () => {
   if (!ownsDesktopInstance) return;
+  // Windows attributes a toast to whatever AppUserModelID raised it; without this
+  // the notification reads as "electron.app.…" instead of Reverie. Harmless on
+  // macOS/Linux, which ignore the id.
+  app.setAppUserModelId("Reverie");
   const settings = await readDesktopSettings();
   const startupMode = resolveDesktopStartupMode(
     launchOptions,

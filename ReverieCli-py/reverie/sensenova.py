@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .diagnostics import report_suppressed_exception
+from .proxy import normalize_proxy_url, requests_proxy_dict
 
 
 SENSENOVA_DEFAULT_API_URL = "https://token.sensenova.cn/v1"
@@ -29,8 +30,11 @@ SENSENOVA_FLASH_LITE_DEFAULT_MIN_P = 0.0
 SENSENOVA_FLASH_LITE_DEFAULT_PRESENCE_PENALTY = 1.5
 SENSENOVA_FLASH_LITE_DEFAULT_REPETITION_PENALTY = 1.0
 SENSENOVA_MODEL_CACHE_TTL_SECONDS = 60.0
+# SenseNova's /models endpoint can retain retired IDs after their inference
+# route has been removed. Keep those IDs out of selectors and migrate saved
+# configurations to the documented replacement.
 SENSENOVA_DEPRECATED_MODEL_IDS = {"sensenova-6.7-flash-lite"}
-SENSENOVA_MODEL_ID_MIGRATIONS = {
+SENSENOVA_MODEL_ID_MIGRATIONS: Dict[str, str] = {
     "sensenova-6.7-flash-lite": "sensenova-6.8-flash-lite",
 }
 
@@ -95,11 +99,25 @@ _SENSENOVA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "SenseNova DeepSeek V4 Flash with 1M context and selectable reasoning_effort.",
     ),
     _sensenova_model(
+        "deepseek-v4-pro",
+        "DeepSeek V4 Pro",
+        "SenseNova-hosted DeepSeek V4 Pro with a 1M context window.",
+        context_length=1_048_576,
+        thinking_control="provider-managed",
+    ),
+    _sensenova_model(
         "glm-5.2",
         "GLM-5.2",
         "SenseNova-hosted GLM-5.2 with a 1M context window for long-horizon tasks.",
         context_length=1_048_576,
         max_output_tokens=131_072,
+        thinking_control="provider-managed",
+    ),
+    _sensenova_model(
+        "kimi-k3",
+        "Kimi K3",
+        "SenseNova-hosted Kimi K3 with a 1M context window.",
+        context_length=1_048_576,
         thinking_control="provider-managed",
     ),
     _sensenova_model(
@@ -198,6 +216,15 @@ def _live_sensenova_model(raw_model: Any) -> Optional[Dict[str, Any]]:
     model["max_output_tokens"] = int(raw_model.get("max_output_length") or model["max_output_tokens"])
     model["vision"] = "image" in input_modalities or bool(model.get("vision"))
     model["tool_calling"] = "tools" in features or bool(model.get("tool_calling"))
+    for field in (
+        "input_modalities",
+        "output_modalities",
+        "supported_features",
+        "supported_sampling_parameters",
+        "pricing",
+    ):
+        if field in raw_model:
+            model[field] = raw_model[field]
     model["catalog_source"] = "api"
     return model
 
@@ -207,6 +234,7 @@ def fetch_sensenova_model_catalog(
     *,
     timeout: int = 5,
     force_refresh: bool = False,
+    proxy: Any = "",
 ) -> List[Dict[str, Any]]:
     """Fetch chat-capable models available to the configured SenseNova account."""
     cfg = default_sensenova_config()
@@ -216,7 +244,8 @@ def fetch_sensenova_model_catalog(
     if not api_key:
         return []
     models_url = _sensenova_models_url(cfg.get("api_url"))
-    cache_key = f"{models_url}:{sha256(api_key.encode('utf-8')).hexdigest()}"
+    configured_proxy = normalize_proxy_url(proxy)
+    cache_key = f"{models_url}:{sha256(api_key.encode('utf-8')).hexdigest()}:{configured_proxy}"
     now = time.monotonic()
     if (
         not force_refresh
@@ -225,11 +254,13 @@ def fetch_sensenova_model_catalog(
     ):
         return [dict(item) for item in _MODEL_CACHE.get("models", [])]
 
-    response = requests.get(
-        models_url,
-        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-        timeout=max(1, int(timeout or 5)),
-    )
+    request_kwargs: Dict[str, Any] = {
+        "headers": {"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+        "timeout": max(1, int(timeout or 5)),
+    }
+    if configured_proxy:
+        request_kwargs["proxies"] = requests_proxy_dict(configured_proxy)
+    response = requests.get(models_url, **request_kwargs)
     response.raise_for_status()
     payload = response.json()
     raw_models = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else []
@@ -243,12 +274,14 @@ def get_sensenova_model_catalog(
     *,
     fetch_live: bool = False,
     force_refresh: bool = False,
+    proxy: Any = "",
 ) -> List[Dict[str, Any]]:
     if fetch_live:
         try:
             live_models = fetch_sensenova_model_catalog(
                 sensenova_config,
                 force_refresh=force_refresh,
+                proxy=proxy,
             )
             if live_models:
                 return live_models
@@ -429,7 +462,10 @@ def build_sensenova_openai_options(sensenova_config: Any, model_id: Optional[str
     output_limit = int((selected or {}).get("max_output_tokens") or SENSENOVA_DEFAULT_MAX_TOKENS)
     requested_max_tokens = max(1, int(cfg.get("max_tokens") or output_limit))
     is_flash_lite = selected_id == "sensenova-6.8-flash-lite"
-    supports_reasoning_effort = selected_id in {"deepseek-v4-flash", "sensenova-6.8-flash-lite"}
+    supports_reasoning_effort = selected_id in {
+        "deepseek-v4-flash",
+        "sensenova-6.8-flash-lite",
+    }
     if is_flash_lite and requested_max_tokens == SENSENOVA_DEFAULT_MAX_TOKENS:
         requested_max_tokens = SENSENOVA_FLASH_LITE_DEFAULT_MAX_TOKENS
     temperature = float(cfg.get("temperature", SENSENOVA_DEFAULT_TEMPERATURE))

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences, type UiPreferences } from "./preferences";
-import type { CustomProviderRecord, DesktopState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
+import type { ContextUsage, CustomProviderRecord, DesktopState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
 
 /** One stored manual ("Manual Model") entry, in the core's own config shape. */
 type StandardModelConfig = {
@@ -240,6 +240,8 @@ function installDesktopApi(options: {
   gatePrompt?: boolean;
   gateSession?: boolean;
   initialSession?: SessionState;
+  contextUsage?: ContextUsage | null;
+  revealedSecret?: string;
 } = {}) {
   let promptFinished = false;
   let ratsEnabled = false;
@@ -730,6 +732,15 @@ function installDesktopApi(options: {
         context_engine: desktopState.workspace.context_engine,
       };
     }
+    if (action === "getContextUsage") {
+      return {
+        type: "context.usage",
+        usage: options.contextUsage ?? null,
+      };
+    }
+    if (action === "revealProviderSecret") {
+      return { type: "provider.secret", value: options.revealedSecret ?? "sk-revealed-key" };
+    }
     throw new Error(`Unexpected action: ${action}`);
   });
   // Stateful, like the Electron main process: a toggle that reads its own value
@@ -738,6 +749,7 @@ function installDesktopApi(options: {
   const api = {
     request,
     cancel: vi.fn(async () => undefined),
+    notify: vi.fn(async () => undefined),
     onEvent: vi.fn((listener: (message: { event: unknown }) => void) => {
       eventListeners.push(listener);
       return () => {
@@ -933,6 +945,74 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
   });
 
+  it("interrupts the streaming turn and enqueues a new one when the user submits mid-stream", async () => {
+    const { request, api, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+
+    await user.type(composer, "first question{Enter}");
+    // The turn is held in flight, so the app is in its running state.
+    await waitFor(() => expect(request).toHaveBeenCalledWith(
+      "runPrompt",
+      expect.objectContaining({ prompt: "first question" }),
+    ));
+
+    // The composer must stay enabled so the next prompt can be drafted mid-stream.
+    expect(composer.disabled).toBe(false);
+    await user.type(composer, "drafted while streaming");
+    expect(composer.value).toContain("drafted while streaming");
+
+    // Submitting mid-stream interrupts the current turn (a hard cancel) and then
+    // sends the typed text as a new turn -- the user's "stop and add this".
+    await user.type(composer, "{Enter}");
+    await waitFor(() => expect(api.cancel).toHaveBeenCalled());
+    await waitFor(() => expect(request).toHaveBeenCalledWith(
+      "runPrompt",
+      expect.objectContaining({ prompt: "drafted while streaming" }),
+    ));
+
+    releasePrompt();
+  });
+
+  it("jumps back into the active conversation when its title is double-clicked from another view", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    // Leave the chat view for Settings.
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+    expect(await screen.findByText("通用设置")).toBeTruthy();
+
+    // Double-clicking the active conversation's title returns to its content.
+    const row = [...document.querySelectorAll(".session-item")]
+      .find((item) => item.textContent?.includes("Initial session"));
+    if (!row) throw new Error("No active session row");
+    await user.dblClick(row);
+
+    await waitFor(() => expect(screen.queryByText("通用设置")).toBeNull());
+    expect(screen.getByRole("textbox", { name: /向 Test Model 提问/ })).toBeTruthy();
+  });
+
+  it("restores a conversation's unsent draft after a restart", async () => {
+    installDesktopApi();
+    const user = userEvent.setup();
+    const first = render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+
+    await user.type(composer, "a half-written thought");
+    await waitFor(() => expect(composer.value).toBe("a half-written thought"));
+
+    // Simulate a sudden quit: tear the window down without sending.
+    first.unmount();
+
+    // Reopen: a fresh window reads the same crash-safe store and reappears
+    // exactly where the composer was left for this conversation.
+    render(<App />);
+    const restored = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await waitFor(() => expect(restored.value).toBe("a half-written thought"));
+  });
+
   it("shows SubAgent runs as a timeline with a separate readable output view", async () => {
     const { request } = installDesktopApi();
     const user = userEvent.setup();
@@ -975,9 +1055,9 @@ describe("desktop GUI interactions", () => {
     expect(within(dialog).getByText("high")).toBeTruthy();
     expect(within(dialog).getByText("deletes-files")).toBeTruthy();
 
-    await user.click(within(dialog).getByRole("button", { name: "个性化回复" }));
+    await user.click(within(dialog).getByRole("button", { name: "我想额外说点" }));
     await user.type(within(dialog).getByRole("textbox"), "先解释清楚再执行");
-    await user.click(within(dialog).getByRole("button", { name: "发送给模型" }));
+    await user.click(within(dialog).getByRole("button", { name: "发送并拒绝本次" }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("resolveApproval", {
       approvalId: "approval-1",
@@ -1069,7 +1149,7 @@ describe("desktop GUI interactions", () => {
     expect(request).not.toHaveBeenCalledWith("selectModel", expect.anything());
     expect(within(dialog).getByText("选择思考程度")).toBeTruthy();
 
-    await user.click(within(dialog).getByRole("button", { name: /High/ }));
+    await user.click(within(dialog).getByRole("button", { name: /高/ }));
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectModel", {
       source: "test-source",
       modelId: "thinking-model",
@@ -1777,6 +1857,41 @@ describe("desktop GUI interactions", () => {
     await user.click(await screen.findByRole("button", { name: /Custom Provider/ }));
   }
 
+  it("shows complete long model IDs for built-in and custom providers", async () => {
+    const modelId = "ai21labs/jamba-1.5-large-instruct-2026-extended";
+    const model = { ...desktopState.models.sources[0].models[0], id: modelId, display_name: "Jamba Large" };
+    const customModel = { ...customProviderRecord().models[0], id: modelId, display_name: "Jamba Large" };
+    const provider = customProviderRecord({ models: [customModel] });
+    const customSource: ModelSource = {
+      id: "custom",
+      display_name: "Custom Provider",
+      active: false,
+      selected_model_id: "",
+      selected_reasoning: { control: "none", options: [], value: "" },
+      models: [],
+      config_fields: [],
+      custom_providers: [provider],
+    };
+    const initialState = {
+      ...desktopState,
+      models: {
+        ...desktopState.models,
+        sources: [{ ...desktopState.models.sources[0], models: [model] }, customSource],
+      },
+    };
+    installDesktopApi({ initialState });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "模型与提供商" }));
+    expect(screen.getByText(modelId).getAttribute("title")).toBe(modelId);
+
+    await user.click(await screen.findByRole("button", { name: /Custom Provider/ }));
+    expect(screen.getByText(modelId).getAttribute("title")).toBe(modelId);
+  });
+
   it("adds a custom provider from the desktop page with the four documented fields", async () => {
     const { request } = installDesktopApi({ customProviders: [] });
     const user = userEvent.setup();
@@ -1788,13 +1903,13 @@ describe("desktop GUI interactions", () => {
 
     await user.click(screen.getByRole("button", { name: "添加 Provider" }));
     const dialog = await screen.findByRole("dialog", { name: "添加 Provider" });
-    expect(within(dialog).getByText("POST <base>/chat/completions with a Bearer key.")).toBeTruthy();
+    expect(within(dialog).getByText("POST <base>/chat/completions —— 使用 Bearer 密钥。")).toBeTruthy();
     const submit = within(dialog).getByRole("button", { name: "添加 Provider" });
     expect((submit as HTMLButtonElement).disabled).toBe(true);
 
     await user.type(within(dialog).getByLabelText("Provider 名称"), "xkiro");
-    await user.type(within(dialog).getByLabelText("Base URL"), "https://api.xkiro.invalid/v1");
-    await user.type(within(dialog).getByLabelText("API Key"), "sk-live-secret");
+    await user.type(within(dialog).getByLabelText("基础 URL"), "https://api.xkiro.invalid/v1");
+    await user.type(within(dialog).getByLabelText("API 密钥"), "sk-live-secret");
     await user.selectOptions(within(dialog).getByLabelText("API 请求格式"), "anthropic");
     await user.click(within(dialog).getByRole("button", { name: "添加 Provider" }));
 
@@ -1802,7 +1917,7 @@ describe("desktop GUI interactions", () => {
       provider: { name: "xkiro", base_url: "https://api.xkiro.invalid/v1", api_key: "sk-live-secret", format: "anthropic" },
     }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "添加 Provider" })).toBeNull());
-    expect(await screen.findByText("Anthropic Messages")).toBeTruthy();
+    expect(await screen.findByText("Anthropic 消息")).toBeTruthy();
     expect(document.body.textContent).not.toContain("sk-live-secret");
   });
 
@@ -1819,7 +1934,14 @@ describe("desktop GUI interactions", () => {
 
     await openCustomProviderPage(user);
     expect(screen.getByText("sk-l…9f2c")).toBeTruthy();
+    expect(screen.queryByText("sk-a…env · 来自环境变量")).toBeNull();
+    const relaySummary = screen.getByRole("button", { name: /展开模型列表.*relay/ });
+    expect(relaySummary.getAttribute("aria-expanded")).toBe("false");
+    await user.click(relaySummary);
     expect(screen.getByText("sk-a…env · 来自环境变量")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /收起模型列表.*relay/ }));
+    expect(screen.queryByText("sk-a…env · 来自环境变量")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /展开模型列表.*relay/ }));
     expect(screen.getByText("使用中")).toBeTruthy();
     expect(screen.getByText("目录还是空的")).toBeTruthy();
 
@@ -1877,7 +1999,7 @@ describe("desktop GUI interactions", () => {
       modelId: "xkiro-lite",
       contextLimit: 64_000,
     }));
-    expect(await screen.findByText("64K ctx")).toBeTruthy();
+    expect(await screen.findByText("64K 上下文")).toBeTruthy();
 
     // The second selection of the same model reuses the stored limit silently.
     await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
@@ -2039,15 +2161,15 @@ describe("desktop GUI interactions", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "编辑标准模型" });
     expect((within(dialog).getByLabelText("模型 ID") as HTMLInputElement).value).toBe("gpt-5.4");
-    expect((within(dialog).getByLabelText("Base URL") as HTMLInputElement).value).toBe("https://api.example.com/v1");
+    expect((within(dialog).getByLabelText("基础 URL") as HTMLInputElement).value).toBe("https://api.example.com/v1");
     expect((within(dialog).getByLabelText(/请求路径/) as HTMLInputElement).value).toBe("/chat/completions");
-    expect((within(dialog).getByLabelText("Provider") as HTMLSelectElement).value).toBe("openai-chat");
-    // The key never reaches the renderer, so the form says so instead of
-    // pretending the empty field means "erase it".
-    const key = within(dialog).getByLabelText(/API Key/) as HTMLInputElement;
+    expect((within(dialog).getByLabelText("提供者") as HTMLSelectElement).value).toBe("openai-chat");
+    // The stored key can now be revealed on demand; until the user clicks the
+    // eye the field stays empty, and the hint explains how to view or remove it.
+    const key = within(dialog).getByLabelText(/API 密钥/) as HTMLInputElement;
     expect(key.value).toBe("");
     expect(key.placeholder).toBe("••••••••");
-    expect(within(dialog).getByText("留空表示保留现有密钥")).toBeTruthy();
+    expect(within(dialog).getByText("点击眼睛查看，清空并保存即可移除")).toBeTruthy();
     expect(within(dialog).getByText("1 个自定义请求头会原样保留。")).toBeTruthy();
 
     const displayName = within(dialog).getByLabelText("显示名称") as HTMLInputElement;
@@ -2073,13 +2195,86 @@ describe("desktop GUI interactions", () => {
     }));
     expect(await screen.findByText("标准模型已更新")).toBeTruthy();
     expect(await screen.findByText("GPT-5.4 Turbo")).toBeTruthy();
-    expect(screen.getByText("200K ctx")).toBeTruthy();
+    expect(screen.getByText("200K 上下文")).toBeTruthy();
 
     // Reopening proves the blank key left the stored one in place.
     await user.click(screen.getByRole("button", { name: "编辑标准模型" }));
     const reopened = await screen.findByRole("dialog", { name: "编辑标准模型" });
-    expect((within(reopened).getByLabelText(/API Key/) as HTMLInputElement).placeholder).toBe("••••••••");
+    expect((within(reopened).getByLabelText(/API 密钥/) as HTMLInputElement).placeholder).toBe("••••••••");
     expect((within(reopened).getByLabelText("上下文长度") as HTMLInputElement).value).toBe("200000");
+  });
+
+  it("reveals a stored key and clears it by emptying the field and saving", async () => {
+    const { request } = installDesktopApi({
+      revealedSecret: "sk-stored-secret",
+      standardModels: [{
+        model: "gpt-5.4",
+        model_display_name: "GPT-5.4",
+        provider: "openai-chat",
+        base_url: "https://api.example.com/v1",
+        api_key: "sk-stored-secret",
+        max_context_tokens: 128_000,
+        supports_vision: false,
+      }],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "模型与提供商" }));
+    await user.click(await screen.findByRole("button", { name: /Manual Model/ }));
+    await user.click(screen.getByRole("button", { name: "编辑标准模型" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "编辑标准模型" });
+    const key = within(dialog).getByLabelText(/API 密钥/) as HTMLInputElement;
+    expect(key.value).toBe("");
+
+    // Eye pulls the stored key into the field so it can be seen and edited.
+    await user.click(within(dialog).getByRole("button", { name: "查看/隐藏密钥" }));
+    await waitFor(() => expect(key.value).toBe("sk-stored-secret"));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("revealProviderSecret", expect.objectContaining({ kind: "standard", index: 0 })));
+
+    // Emptying the revealed key and saving is an explicit clear.
+    await user.clear(key);
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("updateStandardModel", expect.objectContaining({
+      index: 0,
+      clearFields: ["api_key"],
+    })));
+  });
+
+  it("shows the context-window ring with a per-segment breakdown after a turn", async () => {
+    const usage: ContextUsage = {
+      tokenizer: { name: "cl100k_base", label: "cl100k", exact: true, detail: "" },
+      total_tokens: 5000,
+      max_tokens: 100_000,
+      remaining_tokens: 95_000,
+      percentage: 5,
+      overhead_tokens: 100,
+      segments: [
+        { key: "system_prompt", tokens: 3000, messages: 1, share: 60 },
+        { key: "user", tokens: 1900, messages: 2, share: 38 },
+      ],
+      reasoning_tokens: 0,
+      payload_message_count: 3,
+      history_message_count: 2,
+      history_limit: 40,
+      compaction_tokens: 70_000,
+      rotation_tokens: 82_000,
+    };
+    const { request } = installDesktopApi({ contextUsage: usage });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "inspect the cache{Enter}");
+
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getContextUsage", expect.anything()));
+    const ring = await screen.findByRole("button", { name: /上下文窗口已用 5%/ });
+    await user.hover(ring);
+    expect(await screen.findByText("系统提示词")).toBeTruthy();
+    expect(screen.getByText("你的消息")).toBeTruthy();
+    expect(screen.getByText("3,000")).toBeTruthy();
   });
 
   it("keeps the inspector mounted while it collapses, and remembers the choice", async () => {
@@ -2177,7 +2372,7 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByText(provisional)).toBeNull();
   });
 
-  it("keeps the experimental badge in English, matching the core's own setting copy", async () => {
+  it("translates the experimental badge in the Chinese interface", async () => {
     installDesktopApi({
       settingItems: [{
         name: "Thinking Tool",
@@ -2193,9 +2388,9 @@ describe("desktop GUI interactions", () => {
 
     await user.click(await screen.findByRole("button", { name: "设置" }));
 
-    const badge = await screen.findByText("Experimental");
+    const badge = await screen.findByText("实验性");
     expect(badge.className).toBe("setting-badge");
-    expect(screen.queryByText("实验性")).toBeNull();
+    expect(screen.queryByText("Experimental")).toBeNull();
   });
 
   it("returns to chat when the active footer settings button is clicked again", async () => {

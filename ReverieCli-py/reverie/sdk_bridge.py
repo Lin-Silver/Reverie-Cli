@@ -137,7 +137,7 @@ class ReverieSdkBridge:
             if self.interface is not None:
                 self._dispose_interface()
             self.project_root = root
-            self.interface = ReverieInterface(root, headless=True)
+            self.interface = ReverieInterface(root, headless=True, runtime_surface="desktop")
             self.interface._context_worker_limit = _interactive_context_worker_limit()
             self.interface.rats_runtime = self.rats_runtime
         elif self.interface is not None:
@@ -619,6 +619,29 @@ class ReverieSdkBridge:
                 "type": "context.status",
                 "context_engine": self.context_status_payload(),
             }
+        if action == "getContextUsage":
+            interface = self.ensure_interface()
+            agent = interface.agent
+            usage: Optional[Dict[str, Any]] = None
+            if agent is not None:
+                # Reflect the session the composer is showing so the ring matches
+                # what the next turn would send. Safe when idle; the desktop only
+                # asks for this between turns and on session open.
+                session_id = str(payload.get("sessionId") or "").strip()
+                if session_id:
+                    session = interface.session_manager.load_session(session_id)
+                    if session is not None:
+                        interface._sync_workspace_memory_message(session)
+                        agent.set_history(session.messages)
+                try:
+                    usage = agent.describe_context_usage()
+                except Exception:  # A usage read must never break the UI.
+                    usage = None
+            return {
+                "id": request_id,
+                "type": "context.usage",
+                "usage": _json_safe(usage),
+            }
         if action == "getSubagents":
             manager = self.ensure_interface().subagent_manager
             return {
@@ -772,6 +795,24 @@ class ReverieSdkBridge:
                 "models": self.model_sources_payload(),
                 "workspace": self.workspace_payload(),
             }
+        if action == "revealProviderSecret":
+            from .desktop_catalog import reveal_provider_secret
+
+            interface = self.ensure_interface()
+            config = interface.config_manager.load()
+            value = reveal_provider_secret(
+                config,
+                kind=str(payload.get("kind") or "provider"),
+                field=str(payload.get("field") or "api_key"),
+                source=payload.get("source"),
+                index=payload.get("index"),
+                provider_ref=payload.get("providerId") or payload.get("provider"),
+            )
+            return {
+                "id": request_id,
+                "type": "provider.secret",
+                "value": value,
+            }
         if action == "setProviderConfig":
             from .desktop_catalog import apply_provider_config_patch
 
@@ -805,6 +846,7 @@ class ReverieSdkBridge:
                         config,
                         index,
                         payload.get("model") if isinstance(payload.get("model"), dict) else {},
+                        payload.get("clearFields") if isinstance(payload.get("clearFields"), list) else [],
                     )
                 else:
                     delete_standard_model(config, index)
@@ -846,6 +888,7 @@ class ReverieSdkBridge:
                     config,
                     provider_ref,
                     payload.get("patch") if isinstance(payload.get("patch"), dict) else {},
+                    payload.get("clearFields") if isinstance(payload.get("clearFields"), list) else [],
                 )
             elif action == "deleteCustomProvider":
                 delete_custom_provider(config, provider_ref)

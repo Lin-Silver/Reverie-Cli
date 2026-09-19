@@ -9,6 +9,7 @@ from reverie.config import Config, ModelConfig
 from reverie.desktop_catalog import (
     add_standard_model,
     apply_model_selection,
+    apply_provider_config_patch,
     build_model_sources_payload,
     delete_standard_model,
     update_standard_model,
@@ -153,6 +154,15 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     assert agnes["modalities"] == {"live": False, "llm": 3, "tti": 2, "ttv": 1}
 
     opencode = _source(payload, "opencode")
+    opencode_field_kinds = {field["key"]: field["kind"] for field in opencode["config_fields"]}
+    assert opencode_field_kinds["use_builtin_model_catalog"] == "bool"
+    # The reverse-proxy identity fields must reach the desktop so a user can
+    # point the source at a proxy and mimic the official client from the GUI.
+    assert opencode_field_kinds["api_url"] == "url"
+    assert opencode_field_kinds["client_name"] == "text"
+    assert opencode_field_kinds["user_agent"] == "text"
+    assert opencode["config"]["values"]["use_builtin_model_catalog"] is False
+    assert opencode["config"]["values"]["api_url"]
     deepseek = next(item for item in opencode["models"] if item["id"] == "deepseek-v4-flash-free")
     assert deepseek["reasoning"]["control"] == "effort"
     assert [item["id"] for item in deepseek["reasoning"]["options"]] == ["low", "high", "max"]
@@ -183,11 +193,12 @@ def test_desktop_live_refresh_passes_sensenova_config_to_provider(monkeypatch) -
 
     captured = {}
 
-    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False):
+    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False, proxy=""):
         captured.update(
             provider_config=dict(provider_config),
             fetch_live=fetch_live,
             force_refresh=force_refresh,
+            proxy=proxy,
         )
         return [{
             "id": "future-chat-model",
@@ -206,7 +217,10 @@ def test_desktop_live_refresh_passes_sensenova_config_to_provider(monkeypatch) -
         }]
 
     monkeypatch.setattr(sensenova_module, "get_sensenova_model_catalog", fake_catalog)
-    config = Config(sensenova={"api_key": "sense-test", "selected_model_id": "future-chat-model"})
+    config = Config(
+        api_proxy="http://127.0.0.1:7890",
+        sensenova={"api_key": "sense-test", "selected_model_id": "future-chat-model"},
+    )
 
     payload = build_model_sources_payload(config, fetch_live=True)
     source = _source(payload, "sensenova")
@@ -214,7 +228,107 @@ def test_desktop_live_refresh_passes_sensenova_config_to_provider(monkeypatch) -
     assert captured["provider_config"]["api_key"] == "sense-test"
     assert captured["fetch_live"] is True
     assert captured["force_refresh"] is True
+    assert captured["proxy"] == "http://127.0.0.1:7890"
     assert [item["id"] for item in source["models"]] == ["future-chat-model"]
+    assert source["catalog_live"] is True
+
+
+def test_desktop_catalog_uses_live_opencode_models_when_key_is_configured(monkeypatch) -> None:
+    from reverie import opencode as opencode_module
+
+    captured = []
+
+    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False, proxy=""):
+        captured.append({
+            "fetch_live": fetch_live,
+            "force_refresh": force_refresh,
+            "provider_config": dict(provider_config),
+        })
+        return [{
+            "id": "claude-fable-5",
+            "display_name": "claude-fable-5",
+            "description": "OpenCode Zen model returned by the live API catalog.",
+            "transport": "openai-chat",
+            "endpoint": "/chat/completions",
+            "catalog_source": "api",
+        }]
+
+    monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", fake_catalog)
+    config = Config(opencode={"api_key": "zen-test", "selected_model_id": "claude-fable-5"})
+
+    source = _source(build_model_sources_payload(config), "opencode")
+
+    live_call = next(item for item in captured if item["fetch_live"])
+    assert live_call == {
+        "fetch_live": True,
+        "force_refresh": False,
+        "provider_config": config.opencode,
+    }
+    assert [item["id"] for item in source["models"]] == ["claude-fable-5"]
+    assert source["catalog_live"] is True
+
+
+def test_opencode_builtin_catalog_setting_is_persisted_by_provider_patch() -> None:
+    config = Config()
+
+    apply_provider_config_patch(config, "opencode", {"use_builtin_model_catalog": True})
+
+    assert config.opencode["use_builtin_model_catalog"] is True
+
+
+def test_opencode_live_only_model_can_be_selected_and_then_falls_back_to_builtin(monkeypatch) -> None:
+    from reverie import opencode as opencode_module
+
+    live_model = {
+        "id": "claude-fable-5",
+        "display_name": "claude-fable-5",
+        "description": "OpenCode Zen model returned by the live API catalog.",
+        "transport": "openai-chat",
+        "endpoint": "/chat/completions",
+        "catalog_source": "api",
+    }
+
+    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False, proxy=""):
+        return [dict(live_model)] if not provider_config.get("use_builtin_model_catalog") else [
+            {"id": "deepseek-v4-flash-free", "display_name": "DeepSeek V4 Flash Free"}
+        ]
+
+    monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", fake_catalog)
+    config = Config(opencode={"api_key": "zen-test"})
+
+    selected = apply_model_selection(config, "opencode", "claude-fable-5")
+    assert selected["id"] == "claude-fable-5"
+    assert config.opencode["selected_model_id"] == "claude-fable-5"
+
+    apply_provider_config_patch(config, "opencode", {"use_builtin_model_catalog": True})
+
+    assert config.opencode["use_builtin_model_catalog"] is True
+    assert config.opencode["selected_model_id"] == "deepseek-v4-flash-free"
+
+
+def test_desktop_live_refresh_passes_global_proxy_to_opencode(monkeypatch) -> None:
+    from reverie import opencode as opencode_module
+
+    captured = []
+
+    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False, proxy=""):
+        captured.append({
+            "provider_config": dict(provider_config),
+            "fetch_live": fetch_live,
+            "force_refresh": force_refresh,
+            "proxy": proxy,
+        })
+        return [{"id": "big-pickle", "catalog_source": "api"}]
+
+    monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", fake_catalog)
+    config = Config(api_proxy="127.0.0.1:7890")
+
+    payload = build_model_sources_payload(config, fetch_live=True)
+    source = _source(payload, "opencode")
+
+    live_call = next(item for item in captured if item["fetch_live"])
+    assert live_call["force_refresh"] is True
+    assert live_call["proxy"] == "127.0.0.1:7890"
     assert source["catalog_live"] is True
 
 
@@ -227,7 +341,7 @@ def test_model_selection_updates_model_specific_reasoning(monkeypatch) -> None:
     # to, so pin that and let the test check the selection logic instead.
     catalog = [dict(item) for item in opencode_module._OPENCODE_MODEL_CATALOG]
 
-    def offline_catalog(provider_config=None, *, fetch_live=False, force_refresh=False):
+    def offline_catalog(provider_config=None, *, fetch_live=False, force_refresh=False, proxy=""):
         return [dict(item) for item in catalog]
 
     monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", offline_catalog)
@@ -842,6 +956,71 @@ def test_standard_model_crud_preserves_secret_when_update_omits_it() -> None:
     assert config.models == []
 
 
+def test_reveal_provider_secret_returns_raw_keys_for_every_kind() -> None:
+    from reverie.desktop_catalog import reveal_provider_secret
+
+    builtin = Config(opencode={"api_key": "zen-test"})
+    assert reveal_provider_secret(builtin, kind="provider", source="opencode", field="api_key") == "zen-test"
+
+    standard = Config()
+    add_standard_model(standard, {
+        "model": "local-model",
+        "model_display_name": "Local Model",
+        "base_url": "http://127.0.0.1:8000/v1",
+        "api_key": "secret-key",
+        "provider": "openai-chat",
+    })
+    assert reveal_provider_secret(standard, kind="standard", index=0) == "secret-key"
+
+    custom = _custom_provider_config()
+    assert reveal_provider_secret(custom, kind="custom", provider_ref="xkiro") == "xk-live-abcdef123456"
+
+
+def test_reveal_provider_secret_refuses_non_secret_fields() -> None:
+    from reverie.desktop_catalog import reveal_provider_secret
+
+    with pytest.raises(ValueError, match="secret fields"):
+        reveal_provider_secret(Config(opencode={"api_key": "zen-test"}), kind="provider", source="opencode", field="api_url")
+
+
+def test_apply_provider_config_patch_clears_secret_with_clear_fields() -> None:
+    from reverie.desktop_catalog import apply_provider_config_patch
+
+    config = Config(opencode={"api_key": "zen-test", "selected_model_id": "claude-fable-5"})
+    apply_provider_config_patch(config, "opencode", {}, ["api_key"])
+    assert config.opencode["api_key"] == ""
+
+
+def test_update_standard_model_clears_key_with_clear_fields() -> None:
+    config = Config()
+    add_standard_model(config, {
+        "model": "local-model",
+        "model_display_name": "Local Model",
+        "base_url": "http://127.0.0.1:8000/v1",
+        "api_key": "secret-key",
+        "provider": "openai-chat",
+    })
+    # A blank patch still preserves the key; only clear_fields wipes it.
+    update_standard_model(config, 0, {"api_key": ""})
+    assert config.models[0].api_key == "secret-key"
+    update_standard_model(config, 0, {}, ["api_key"])
+    assert config.models[0].api_key == ""
+
+
+def test_update_custom_provider_clears_key_with_clear_fields(monkeypatch) -> None:
+    from reverie.custom_providers import find_custom_provider
+    from reverie.desktop_catalog import update_custom_provider
+
+    calls = _install_fake_catalog(monkeypatch)
+    config = _custom_provider_config()
+
+    update_custom_provider(config, "xkiro", {}, ["api_key"])
+
+    assert find_custom_provider(config.custom_providers, "xkiro")["api_key"] == ""
+    # Clearing a key must not trigger a catalog fetch that could only fail.
+    assert calls == []
+
+
 def test_prompt_cli_accepts_uppercase_p_and_runtime_model_overrides(monkeypatch, tmp_path: Path) -> None:
     from reverie import __main__ as entrypoint
     import reverie.cli.interface as interface_module
@@ -1360,9 +1539,10 @@ def test_sdk_bridge_switches_workspace_interfaces_without_replacing_the_bridge(m
             self.closed = True
 
     class _NewInterface:
-        def __init__(self, project_root: Path, headless: bool = False):
+        def __init__(self, project_root: Path, headless: bool = False, runtime_surface: str = "terminal"):
             self.project_root = project_root
             self.headless = headless
+            self.runtime_surface = runtime_surface
 
     bridge = ReverieSdkBridge()
     old_interface = _OldInterface()
@@ -1376,6 +1556,7 @@ def test_sdk_bridge_switches_workspace_interfaces_without_replacing_the_bridge(m
     assert bridge.project_root == second_root.resolve()
     assert next_interface.project_root == second_root.resolve()
     assert next_interface.headless is True
+    assert next_interface.runtime_surface == "desktop"
 
 
 def test_delete_project_data_removes_reverie_records_but_preserves_project_files(monkeypatch, tmp_path: Path) -> None:

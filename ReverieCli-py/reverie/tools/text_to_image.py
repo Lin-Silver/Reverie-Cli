@@ -163,7 +163,7 @@ Examples:
             "sampler": {"type": "string", "description": "Sampler name"},
             "scheduler": {"type": "string", "description": "Scheduler name"},
             "batch_size": {"type": "integer", "description": "Batch size"},
-            "n": {"type": "integer", "description": "Remote image count. SenseNova U1 Fast and Pollinations currently support 1."},
+            "n": {"type": "integer", "description": "Remote image count. SenseNova U1 models and Pollinations currently support 1."},
             "size": {
                 "type": "string",
                 "description": "Remote image size: 1024x1024, 1024x1536, 1536x1024, or auto.",

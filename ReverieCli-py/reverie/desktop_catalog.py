@@ -40,6 +40,9 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
     "opencode": [
         {"key": "api_key", "label": "API key", "kind": "secret", "optional": True},
         {"key": "api_url", "label": "API URL", "kind": "url"},
+        {"key": "client_name", "label": "Client name override", "kind": "text", "optional": True},
+        {"key": "user_agent", "label": "User-Agent override", "kind": "text", "optional": True},
+        {"key": "use_builtin_model_catalog", "label": "Use built-in model catalog", "kind": "bool"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
         {"key": "temperature", "label": "Temperature", "kind": "float", "min": 0, "max": 2},
     ],
@@ -106,12 +109,22 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
 
         return get_webgemini_model_catalog()
     if source == "opencode":
-        from .opencode import get_opencode_model_catalog
+        from .opencode import get_opencode_model_catalog, resolve_opencode_api_key
+
+        opencode_config = getattr(config, "opencode", {})
+        use_builtin_catalog = bool(
+            isinstance(opencode_config, dict)
+            and opencode_config.get("use_builtin_model_catalog", False)
+        )
+        # A configured key makes the normal desktop state use the provider's
+        # complete live catalog. An explicit refresh still works anonymously.
+        load_live_catalog = fetch_live or (not use_builtin_catalog and bool(resolve_opencode_api_key(opencode_config)))
 
         return get_opencode_model_catalog(
-            getattr(config, "opencode", {}),
-            fetch_live=fetch_live,
+            opencode_config,
+            fetch_live=load_live_catalog,
             force_refresh=fetch_live,
+            proxy=getattr(config, "api_proxy", ""),
         )
     if source == "aihubmix":
         from .aihubmix import get_aihubmix_model_catalog
@@ -128,6 +141,7 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
             getattr(config, "sensenova", {}),
             fetch_live=fetch_live,
             force_refresh=fetch_live,
+            proxy=getattr(config, "api_proxy", ""),
         )
     if source == "modelscope":
         from .modelscope import get_modelscope_model_catalog
@@ -284,6 +298,50 @@ def _safe_provider_config(source: str, config: Config) -> Dict[str, Any]:
             configured_secrets[key] = bool(str(provider_config.get(key) or "").strip())
             provider_config[key] = ""
     return {"values": provider_config, "configured_secrets": configured_secrets}
+
+
+def reveal_provider_secret(
+    config: Config,
+    *,
+    kind: str,
+    field: str = "api_key",
+    source: Optional[str] = None,
+    index: Optional[int] = None,
+    provider_ref: Any = None,
+) -> str:
+    """Return one raw stored secret for the desktop settings UI, on explicit demand.
+
+    The bulk model-sources payload deliberately never carries raw secrets (they
+    are blanked/masked). This is the only path that hands a raw value back, and
+    only for the single field the user asked to see, so exposure stays minimal.
+    """
+    field = str(field or "api_key")
+    if field not in _SECRET_FIELDS:
+        raise ValueError(f"Only secret fields can be revealed: {field}")
+    normalized_kind = str(kind or "").strip().lower()
+    if normalized_kind in {"provider", "builtin", "built-in"}:
+        normalized_source = normalize_active_model_source(source)
+        if normalized_source in {"standard", "custom"}:
+            raise ValueError("Use the matching kind for standard models or custom providers.")
+        declared = {item["key"] for item in _PROVIDER_CONFIG_FIELDS.get(normalized_source, [])}
+        if field not in declared:
+            raise ValueError(f"{normalized_source} has no {field} field.")
+        return str(_raw_provider_config(normalized_source, config).get(field) or "")
+    if normalized_kind == "standard":
+        if index is None:
+            raise ValueError("A standard model index is required.")
+        position = int(index)
+        if position < 0 or position >= len(config.models):
+            raise ValueError("Standard model index is out of range.")
+        return str(getattr(config.models[position], field, "") or "")
+    if normalized_kind == "custom":
+        from .custom_providers import resolve_custom_provider_api_key
+
+        record = _require_custom_provider(config, provider_ref)
+        if field == "api_key":
+            return str(resolve_custom_provider_api_key(record) or "")
+        return str(record.get(field) or "")
+    raise ValueError(f"Unknown secret kind: {kind}")
 
 
 def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> Dict[str, Any]:
@@ -572,11 +630,17 @@ def apply_provider_config_patch(
             raise ValueError(f"Only declared secret fields can be cleared: {key}")
         provider_config[key] = ""
     setattr(config, normalized_source, provider_config)
+    selection_id = provider_config.get("selected_model_id", "")
+    if normalized_source == "opencode" and bool(provider_config.get("use_builtin_model_catalog", False)):
+        from .opencode import OPENCODE_DEFAULT_MODEL_ID, get_opencode_model_catalog
+
+        if _catalog_match(get_opencode_model_catalog(provider_config), selection_id) is None:
+            selection_id = OPENCODE_DEFAULT_MODEL_ID
     # Re-apply the current selection so the provider's native normalizer runs.
     apply_model_selection(
         config,
         normalized_source,
-        provider_config.get("selected_model_id", ""),
+        selection_id,
         provider_config.get("reasoning_effort", provider_config.get("thinking_mode")),
     )
 
@@ -607,8 +671,19 @@ def add_standard_model(config: Config, payload: Dict[str, Any]) -> int:
     return config.active_model_index
 
 
-def update_standard_model(config: Config, index: int, payload: Dict[str, Any]) -> None:
-    """Update one custom model while preserving an omitted API key."""
+def update_standard_model(
+    config: Config,
+    index: int,
+    payload: Dict[str, Any],
+    clear_fields: Optional[List[str]] = None,
+) -> None:
+    """Update one custom model.
+
+    A blank ``api_key`` in the patch still preserves the stored key (so other
+    fields can be edited without re-entering it). To actually remove the key,
+    pass ``clear_fields=["api_key"]`` -- an explicit clear the UI sends when the
+    user empties a revealed key.
+    """
     if index < 0 or index >= len(config.models):
         raise ValueError("Standard model index is out of range.")
     current = config.models[index]
@@ -617,6 +692,10 @@ def update_standard_model(config: Config, index: int, payload: Dict[str, Any]) -
         if key == "api_key" and value in (None, ""):
             continue
         merged[key] = value
+    for key in clear_fields or []:
+        if key != "api_key":
+            raise ValueError(f"Only the api_key field can be cleared: {key}")
+        merged["api_key"] = ""
     replacement_config = Config(models=[])
     new_index = add_standard_model(replacement_config, merged)
     config.models[index] = replacement_config.models[new_index]
@@ -802,9 +881,17 @@ def create_custom_provider(config: Config, payload: Dict[str, Any]) -> Dict[str,
 
 
 def update_custom_provider(
-    config: Config, provider_ref: Any, patch: Dict[str, Any]
+    config: Config,
+    provider_ref: Any,
+    patch: Dict[str, Any],
+    clear_fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Edit one provider's four fields, preserving an omitted API key."""
+    """Edit one provider's fields, preserving an omitted API key.
+
+    A blank ``api_key`` in the patch is ignored (the stored key stays). To remove
+    the key, pass ``clear_fields=["api_key"]`` -- the explicit clear the UI sends
+    when the user empties a revealed key.
+    """
     from .custom_providers import (
         CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORT,
         normalize_custom_provider_format,
@@ -866,6 +953,12 @@ def update_custom_provider(
         # An explicit depth decides the switch unless the same patch set it.
         if "thinking" not in patch:
             record["thinking"] = depth != "off"
+    for key in clear_fields or []:
+        if key != "api_key":
+            raise ValueError(f"Only the api_key field can be cleared: {key}")
+        # Don't re-sync on a clear: with no key the catalog fetch would only fail,
+        # and the already-stored model list stays valid for display.
+        record["api_key"] = ""
 
     config.custom_providers = upsert_custom_provider(getattr(config, "custom_providers", {}), record)
     stored = _require_custom_provider(config, record["id"])

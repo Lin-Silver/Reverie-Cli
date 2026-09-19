@@ -24,6 +24,8 @@ export const CORE_RESPONSE_CONTRACT = {
   getSession: { type: "session", required: ["session", "sessions"] },
   getFileChanges: { type: "file.changes", required: ["session_id", "changes"] },
   getContextStatus: { type: "context.status", required: ["context_engine"] },
+  getContextUsage: { type: "context.usage", required: ["usage"] },
+  revealProviderSecret: { type: "provider.secret", required: ["value"] },
   getSubagents: { type: "subagents", required: ["subagents"] },
   getSubagentRunLog: { type: "subagent.log", required: ["run_id", "log"] },
   createSession: { type: "session.created", required: ["session", "sessions"] },

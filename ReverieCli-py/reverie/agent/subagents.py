@@ -547,6 +547,7 @@ class SubagentManager:
             operation_history=None,
             rollback_manager=None,
             config=config,
+            runtime_surface=getattr(self.interface, "runtime_surface", "terminal"),
             agent_id=spec.id,
             agent_color=spec.color,
             parent_agent_id="main",

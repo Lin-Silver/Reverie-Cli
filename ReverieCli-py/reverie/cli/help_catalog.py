@@ -178,8 +178,8 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "opencode": {
         "command": "/opencode",
         "section": "Providers",
-        "summary": "Configure the Opencode source backed by OpenCode Zen chat-completions models.",
-        "detail": "Reverie refreshes `/v1/models` when the picker opens. Without a key it lists the current anonymous free Chat Completions models, including `big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `hy3-free`, `ling-3.0-tiny-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, and `laguna-s-2.1-free`. With a key it also lists accessible paid Chat Completions models. Models that require Responses, Anthropic Messages, or Google-specific endpoints are excluded from this source.",
+        "summary": "Configure the Opencode source backed by OpenCode Zen chat-completions and Responses models.",
+        "detail": "Reverie refreshes `/v1/models` when the picker opens. Without a key it lists the current anonymous free models, including `big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`, `muse-spark-1.3-contributor-free`, `muse-spark-1.2-contributor-free`, `hy3-free`, `ling-3.0-flash-fin-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, and `laguna-s-2.1-free`. With a key it also lists accessible paid Chat Completions and Responses models. Models that require Anthropic Messages or Google-specific endpoints are excluded from this source.",
         "overview": "status, key [api-key], activate, model [id], endpoint [value]",
         "aliases": ["/oc"],
         "subcommands": [

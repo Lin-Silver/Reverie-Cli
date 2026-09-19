@@ -18,6 +18,30 @@ def test_reverie_prompt_uses_codex_style_agentic_positioning() -> None:
     assert "Ultra Agentic" not in prompt
 
 
+def test_reverie_desktop_prompt_identifies_the_gui_without_claiming_a_terminal_session() -> None:
+    prompt = build_system_prompt(
+        model_name="Agnes 3.0 Flash",
+        mode="reverie",
+        runtime_surface="desktop",
+    )
+
+    assert "You are operating as and within Reverie Desktop" in prompt
+    assert "You are Reverie, running in the Reverie Desktop GUI." in prompt
+    assert "You are responding inside the Reverie Desktop graphical application, not a terminal session." in prompt
+    assert "the CLI is the embedded backend rather than the current user-facing surface" in prompt
+    assert "You are Reverie, running in Reverie CLI." not in prompt
+    assert "a terminal-based agentic coding assistant" not in prompt
+    assert "Do not infer or invent the configured model's vendor" in prompt
+
+
+def test_reverie_runtime_surface_defaults_to_terminal_and_accepts_gui_alias() -> None:
+    terminal_prompt = build_system_prompt(model_name="Test Model", mode="reverie")
+    gui_prompt = build_system_prompt(model_name="Test Model", mode="writer", runtime_surface="gui")
+
+    assert "You are responding inside the Reverie terminal/CLI interface." in terminal_prompt
+    assert "You are responding inside the Reverie Desktop graphical application" in gui_prompt
+
+
 def test_reverie_prompt_keeps_codex_how_you_work_sections() -> None:
     prompt = build_system_prompt(model_name="Test Model", mode="reverie")
 

@@ -140,6 +140,7 @@ def _builtin_endpoint(source: str, config: Config) -> Tuple[str, str, str, str, 
     if source == "opencode":
         from .opencode import (
             OPENCODE_DEFAULT_API_URL,
+            build_opencode_runtime_model_data,
             normalize_opencode_config,
             resolve_opencode_api_key,
             resolve_opencode_sdk_base_url,
@@ -147,7 +148,14 @@ def _builtin_endpoint(source: str, config: Config) -> Tuple[str, str, str, str, 
 
         cfg = normalize_opencode_config(raw)
         base = resolve_opencode_sdk_base_url(cfg.get("api_url", OPENCODE_DEFAULT_API_URL))
-        return base, resolve_opencode_api_key(cfg), "openai-chat", str(cfg.get("selected_model_id", "") or ""), str(cfg.get("selected_model_display_name", "") or "")
+        runtime = build_opencode_runtime_model_data(cfg)
+        return (
+            base,
+            resolve_opencode_api_key(cfg),
+            str((runtime or {}).get("provider") or "openai-chat"),
+            str(cfg.get("selected_model_id", "") or ""),
+            str(cfg.get("selected_model_display_name", "") or ""),
+        )
     if source == "codex":
         from .codex import (
             normalize_codex_config,

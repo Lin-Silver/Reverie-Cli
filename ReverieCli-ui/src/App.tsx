@@ -1413,6 +1413,7 @@ function MentionPicker({
 const CONTEXT_SEGMENT_COLORS: Record<string, string> = {
   system_prompt: "#c7b5ff",
   injected_context: "#7fb0ff",
+  memory: "#5fc8d6",
   user: "#7fd6ad",
   assistant: "#f0c274",
   tool: "#e59aa0",

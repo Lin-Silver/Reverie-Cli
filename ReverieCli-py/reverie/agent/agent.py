@@ -7503,6 +7503,13 @@ class ReverieAgent:
                 total_chars += len(str(tool_calls))
         return total_chars // 4
 
+    #: System-message content prefixes that mark injected memory rather than
+    #: general context, so the token audit can bill them to their own segment.
+    #: Both are literal markers written by the two memory paths: the Memory OS
+    #: context package (agent._memory_context_package_message) and the workspace
+    #: global memory note (interface._sync_workspace_memory_message).
+    _MEMORY_CONTEXT_MARKERS = (MEMORY_CONTEXT_PROMPT_HEADER, "[WORKSPACE GLOBAL MEMORY]")
+
     def describe_context_usage(self) -> Dict[str, Any]:
         """Break the live request payload into an auditable token budget.
 
@@ -7531,6 +7538,10 @@ class ReverieAgent:
             role = str(message.get("role", "") or "").strip().lower() or "unknown"
             if index == 0 and role == "system":
                 key = "system_prompt"
+            elif role == "system" and _coerce_text_fragments(
+                message.get("content")
+            ).lstrip().startswith(self._MEMORY_CONTEXT_MARKERS):
+                key = "memory"
             elif role == "system":
                 key = "injected_context"
             else:
@@ -7578,7 +7589,7 @@ class ReverieAgent:
             if reasoning:
                 reasoning_tokens += WorkspaceStatsManager.count_text_tokens(reasoning)
 
-        segment_order = ("system_prompt", "injected_context", "user", "assistant", "tool")
+        segment_order = ("system_prompt", "injected_context", "memory", "user", "assistant", "tool")
         segments = [
             {
                 "key": key,

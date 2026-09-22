@@ -2254,7 +2254,8 @@ describe("desktop GUI interactions", () => {
       overhead_tokens: 100,
       segments: [
         { key: "system_prompt", tokens: 3000, messages: 1, share: 60 },
-        { key: "user", tokens: 1900, messages: 2, share: 38 },
+        { key: "memory", tokens: 800, messages: 2, share: 16 },
+        { key: "user", tokens: 1100, messages: 2, share: 22 },
       ],
       reasoning_tokens: 0,
       payload_message_count: 3,
@@ -2273,6 +2274,7 @@ describe("desktop GUI interactions", () => {
     const ring = await screen.findByRole("button", { name: /上下文窗口已用 5%/ });
     await user.hover(ring);
     expect(await screen.findByText("系统提示词")).toBeTruthy();
+    expect(screen.getByText("记忆")).toBeTruthy();
     expect(screen.getByText("你的消息")).toBeTruthy();
     expect(screen.getByText("3,000")).toBeTruthy();
   });

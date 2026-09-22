@@ -147,6 +147,37 @@ def test_segments_name_the_prompt_parts_separately() -> None:
     assert abs(sum(segment["share"] for segment in usage["segments"]) - 100.0) < 25.0
 
 
+def test_injected_memory_is_billed_to_its_own_segment() -> None:
+    """Both memory paths carry a marker, so their tokens leave ``injected_context``.
+
+    The Memory OS context package and the workspace global-memory note are both
+    system messages; without the marker check they folded into the same bucket as
+    every other injected system message, hiding what memory actually costs.
+    """
+    from reverie.memory import MEMORY_CONTEXT_PROMPT_HEADER
+
+    payload = [
+        {"role": "system", "content": "You are Reverie. " * 40},
+        {"role": "system", "content": "[WORKING MEMORY] a plain injected note " * 10},
+        {"role": "system", "content": f"{MEMORY_CONTEXT_PROMPT_HEADER}\nretrieved evidence " * 10},
+        {"role": "system", "content": "[WORKSPACE GLOBAL MEMORY]\nproject facts " * 10},
+        {"role": "user", "content": "Explain the indexer."},
+    ]
+    agent = _agent(payload=payload)
+
+    usage = agent.describe_context_usage()
+    by_key = {segment["key"]: segment for segment in usage["segments"]}
+
+    assert "memory" in by_key
+    assert by_key["memory"]["messages"] == 2
+    assert by_key["memory"]["tokens"] > 0
+    # The unmarked injected note stays where it was.
+    assert by_key["injected_context"]["messages"] == 1
+    # Memory sorts right after injected_context in the reported order.
+    order = [segment["key"] for segment in usage["segments"]]
+    assert order.index("memory") == order.index("injected_context") + 1
+
+
 def test_gates_are_derived_from_the_ratios_the_agent_enforces() -> None:
     agent = _agent(max_tokens=200_000)
 

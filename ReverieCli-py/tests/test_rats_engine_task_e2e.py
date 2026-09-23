@@ -667,6 +667,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         requested_dynamic_tools = [
             "animation.configure",
             "scene.open",
+            "scene.duplicate_node",
+            "scene.move_node",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -713,6 +715,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         definitions_by_name = {item["name"]: item for item in definitions}
         assert definitions_by_name["world.get_cell_state"].get("permission") == "read"
         assert definitions_by_name["world.set_cell_state"].get("permission") == "run"
+        assert definitions_by_name["scene.duplicate_node"].get("permission") == "edit"
+        assert definitions_by_name["scene.move_node"].get("permission") == "edit"
 
         configured = executor.execute(
             dynamic_tools["animation.configure"],
@@ -745,6 +749,32 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         )
         assert animation_status.success is True
         assert_response_schema("animation.status", animation_status.data)
+
+        # scene.duplicate_node / scene.move_node reach the Cli purely through the
+        # shared RATS tool catalog, so exercise them against the live session on
+        # the scene opened above: the object-CRUD pair is proven end to end from
+        # the client, not merely listed by discovery. Only a copy is created and
+        # then reparented, so the originals animation.play acted on are untouched.
+        duplicated_node = executor.execute(
+            dynamic_tools["scene.duplicate_node"],
+            {"node_path": "AnimationPlayer"},
+        )
+        assert (
+            duplicated_node.success is True
+            and duplicated_node.data.get("source_path") == "AnimationPlayer"
+            and duplicated_node.data.get("node_path") == "AnimationPlayer2"
+            and duplicated_node.data.get("type") == "AnimationPlayer"
+        ), duplicated_node.error or duplicated_node.data
+        moved_node = executor.execute(
+            dynamic_tools["scene.move_node"],
+            {"node_path": "AnimationPlayer2", "new_parent_path": "StateMachine"},
+        )
+        assert (
+            moved_node.success is True
+            and moved_node.data.get("node_path") == "AnimationPlayer2"
+            and moved_node.data.get("new_node_path") == "StateMachine/AnimationPlayer2"
+            and moved_node.data.get("type") == "AnimationPlayer"
+        ), moved_node.error or moved_node.data
 
         region = executor.execute(
             dynamic_tools["world.create_region"],

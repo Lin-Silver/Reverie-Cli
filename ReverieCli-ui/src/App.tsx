@@ -4932,6 +4932,17 @@ export default function App() {
     }
   }, []);
 
+  // Keep the composer's context ring current without anyone having to click a
+  // session. The reading reflects the payload the *next* turn would send, and
+  // the core only answers between turns, so this fires when the active session
+  // changes or a turn finishes (running flips back to false) -- which also
+  // covers the restored session painted on startup, the case where the ring was
+  // silently empty because nothing ever asked for its usage.
+  useEffect(() => {
+    if (running || !session?.id) return;
+    void refreshContextUsage(session.id);
+  }, [session?.id, running, refreshContextUsage]);
+
   const openSession = useCallback(async (id: string) => {
     // Re-selecting the conversation already in view is just a jump back to its
     // chat content, so honour it even mid-run: without this, clicking (or

@@ -675,6 +675,10 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.remove_from_group",
             "node.get_groups",
             "scene.find_in_group",
+            "scene.connect_signal",
+            "scene.disconnect_signal",
+            "node.get_signal_connections",
+            "node.list_signals",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -706,18 +710,31 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert {item.get("name") for item in definitions} == set(requested_dynamic_tools)
         executor = ToolExecutor(project_root)
         executor.update_context("rats_runtime", runtime)
-        schemas = {
-            item["function"]["name"]: item["function"]["parameters"]
-            for item in executor.get_tool_schemas(mode="reverie")
-        }
         dynamic_tools = {
             native_name: f"rats_reverie_engine_{native_name.replace('.', '_')}"
             for native_name in requested_dynamic_tools
         }
-        assert all(name in schemas for name in dynamic_tools.values())
-        assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
-        assert schemas[dynamic_tools["world.streaming_status"]].get("additionalProperties") is False
-        assert schemas[dynamic_tools["world.set_cell_state"]]["properties"]["state"].get("additionalProperties") is True
+        # Progressive disclosure caps the resident working set at
+        # rats._MAX_LOADED_DEFINITIONS_PER_SESSION, so the full catalog described
+        # above cannot stay model-visible all at once. Each coherent flow below
+        # re-describes exactly the tools it is about to call, immediately before
+        # calling them -- which is how a real caller keeps one task's tools loaded
+        # without overflowing the cap -- and asserts that working set is resident.
+        def _resident_schemas():
+            return {
+                item["function"]["name"]: item["function"]["parameters"]
+                for item in executor.get_tool_schemas(mode="reverie")
+            }
+
+        def _load_working_set(names):
+            for offset in range(0, len(names), 16):
+                runtime.describe(service_id, names[offset : offset + 16], provider_id=PROVIDER_ID)
+            schemas = _resident_schemas()
+            assert all(dynamic_tools[name] in schemas for name in names), (
+                sorted(name for name in names if dynamic_tools[name] not in schemas)
+            )
+            return schemas
+
         definitions_by_name = {item["name"]: item for item in definitions}
         assert definitions_by_name["world.get_cell_state"].get("permission") == "read"
         assert definitions_by_name["world.set_cell_state"].get("permission") == "run"
@@ -729,6 +746,34 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["node.remove_from_group"].get("permission") == "edit"
         assert definitions_by_name["node.get_groups"].get("permission") == "read"
         assert definitions_by_name["scene.find_in_group"].get("permission") == "read"
+        assert definitions_by_name["scene.connect_signal"].get("permission") == "edit"
+        assert definitions_by_name["scene.disconnect_signal"].get("permission") == "edit"
+        assert definitions_by_name["node.get_signal_connections"].get("permission") == "read"
+        assert definitions_by_name["node.list_signals"].get("permission") == "read"
+
+        # Scene-editing working set: everything exercised against the
+        # animation_runtime scene below (animation, object CRUD, prefab, group and
+        # signal tools) is one coherent task, so load it as one working set.
+        scene_editing_tools = [
+            "animation.configure",
+            "scene.open",
+            "animation.play",
+            "animation.status",
+            "scene.duplicate_node",
+            "scene.move_node",
+            "scene.instantiate",
+            "scene.pack",
+            "node.add_to_group",
+            "node.remove_from_group",
+            "node.get_groups",
+            "scene.find_in_group",
+            "scene.connect_signal",
+            "scene.disconnect_signal",
+            "node.get_signal_connections",
+            "node.list_signals",
+        ]
+        schemas = _load_working_set(scene_editing_tools)
+        assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
 
         configured = executor.execute(
             dynamic_tools["animation.configure"],
@@ -866,6 +911,82 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and untagged.data.get("applied") is True
             and untagged.data.get("groups") == []
         ), untagged.error or untagged.data
+
+        # signal-wiring tools are the §9 event-graph family on the same shared
+        # catalog: discover a node's signals, wire one to another node's method
+        # as a persistent connection, read it back per-node, then unwire it.
+        # Nothing is saved, so the edge lives only in the in-memory session the
+        # world block reopens away below.
+        node_signals = executor.execute(
+            dynamic_tools["node.list_signals"],
+            {"node_path": "StateMachine"},
+        )
+        assert (
+            node_signals.success is True
+            and "renamed" in node_signals.data.get("signals", [])
+            and node_signals.data.get("count", 0) > 0
+        ), node_signals.error or node_signals.data
+        signal_edge = {
+            "from_path": "StateMachine",
+            "signal": "renamed",
+            "to_path": "AnimationPlayer",
+            "method": "queue_free",
+        }
+        expected_signal_conn = [{"signal": "renamed", "to": "AnimationPlayer", "method": "queue_free"}]
+        wired = executor.execute(
+            dynamic_tools["scene.connect_signal"],
+            signal_edge,
+        )
+        assert (
+            wired.success is True
+            and wired.data.get("applied") is True
+            and wired.data.get("connections") == expected_signal_conn
+        ), wired.error or wired.data
+        signal_connections = executor.execute(
+            dynamic_tools["node.get_signal_connections"],
+            {"node_path": "StateMachine"},
+        )
+        assert (
+            signal_connections.success is True
+            and signal_connections.data.get("connections") == expected_signal_conn
+            and signal_connections.data.get("count") == 1
+        ), signal_connections.error or signal_connections.data
+        unwired = executor.execute(
+            dynamic_tools["scene.disconnect_signal"],
+            signal_edge,
+        )
+        assert (
+            unwired.success is True
+            and unwired.data.get("applied") is True
+            and unwired.data.get("connections") == []
+        ), unwired.error or unwired.data
+
+        # World-streaming working set: the largest single-task tool group the
+        # engine publishes. Re-describe it here (plus scene.open, which this flow
+        # reuses to swap in the streaming scene) as its own coherent set, proving
+        # it loads within the cap after the scene-editing set is done with.
+        world_streaming_tools = [
+            "scene.open",
+            "world.create_region",
+            "world.create_cell",
+            "world.start_streaming",
+            "world.refresh_streaming",
+            "world.load_cell",
+            "world.release_cell",
+            "world.rebase_origin",
+            "world.set_streaming_budget",
+            "world.set_cell_state",
+            "world.get_cell_state",
+            "world.clear_cell_state",
+            "world.save_state_store",
+            "world.load_state_store",
+            "world.clear_state_store",
+            "world.streaming_status",
+            "world.stop_streaming",
+        ]
+        schemas = _load_working_set(world_streaming_tools)
+        assert schemas[dynamic_tools["world.streaming_status"]].get("additionalProperties") is False
+        assert schemas[dynamic_tools["world.set_cell_state"]]["properties"]["state"].get("additionalProperties") is True
 
         region = executor.execute(
             dynamic_tools["world.create_region"],

@@ -669,6 +669,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.open",
             "scene.duplicate_node",
             "scene.move_node",
+            "scene.instantiate",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -717,6 +718,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["world.set_cell_state"].get("permission") == "run"
         assert definitions_by_name["scene.duplicate_node"].get("permission") == "edit"
         assert definitions_by_name["scene.move_node"].get("permission") == "edit"
+        assert definitions_by_name["scene.instantiate"].get("permission") == "edit"
 
         configured = executor.execute(
             dynamic_tools["animation.configure"],
@@ -775,6 +777,24 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and moved_node.data.get("new_node_path") == "StateMachine/AnimationPlayer2"
             and moved_node.data.get("type") == "AnimationPlayer"
         ), moved_node.error or moved_node.data
+
+        # scene.instantiate is the §9 prefab primitive on the same shared catalog:
+        # drop an existing project scene into the live session as a sub-scene
+        # reference. world_content.tscn is a distinct file from the open scene, so
+        # this is a genuine cross-scene instance (not the self-instance the Engine
+        # guards). Nothing is saved, so the prefab source and the open scene files
+        # stay byte-for-byte as the world block below reopens the session anyway.
+        instantiated = executor.execute(
+            dynamic_tools["scene.instantiate"],
+            {"path": "scenes/world_content.tscn"},
+        )
+        assert (
+            instantiated.success is True
+            and instantiated.data.get("applied") is True
+            and instantiated.data.get("node_path") == "CliWorldContent"
+            and instantiated.data.get("source_scene") == "scenes/world_content.tscn"
+            and instantiated.data.get("type") == "Node3D"
+        ), instantiated.error or instantiated.data
 
         region = executor.execute(
             dynamic_tools["world.create_region"],

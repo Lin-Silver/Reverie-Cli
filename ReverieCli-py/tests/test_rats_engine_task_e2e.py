@@ -671,6 +671,10 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.move_node",
             "scene.instantiate",
             "scene.pack",
+            "node.add_to_group",
+            "node.remove_from_group",
+            "node.get_groups",
+            "scene.find_in_group",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -721,6 +725,10 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["scene.move_node"].get("permission") == "edit"
         assert definitions_by_name["scene.instantiate"].get("permission") == "edit"
         assert definitions_by_name["scene.pack"].get("permission") == "edit"
+        assert definitions_by_name["node.add_to_group"].get("permission") == "edit"
+        assert definitions_by_name["node.remove_from_group"].get("permission") == "edit"
+        assert definitions_by_name["node.get_groups"].get("permission") == "read"
+        assert definitions_by_name["scene.find_in_group"].get("permission") == "read"
 
         configured = executor.execute(
             dynamic_tools["animation.configure"],
@@ -814,6 +822,50 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and packed_branch.data.get("node_path") == "AnimationPlayer"
             and packed_branch.data.get("type") == "AnimationPlayer"
         ), packed_branch.error or packed_branch.data
+
+        # node group tools are the §9 entity-tagging family on the same shared
+        # catalog: tag a live scene node with a persistent group and query it both
+        # per-node (node.get_groups) and scene-wide (scene.find_in_group), then drop
+        # the tag again. Nothing is saved, so the membership lives only in the
+        # in-memory session the world block reopens away below.
+        tagged = executor.execute(
+            dynamic_tools["node.add_to_group"],
+            {"node_path": "StateMachine", "group": "cli_enemies"},
+        )
+        assert (
+            tagged.success is True
+            and tagged.data.get("applied") is True
+            and tagged.data.get("node_path") == "StateMachine"
+            and tagged.data.get("group") == "cli_enemies"
+            and tagged.data.get("groups") == ["cli_enemies"]
+        ), tagged.error or tagged.data
+        node_groups = executor.execute(
+            dynamic_tools["node.get_groups"],
+            {"node_path": "StateMachine"},
+        )
+        assert (
+            node_groups.success is True
+            and node_groups.data.get("groups") == ["cli_enemies"]
+            and node_groups.data.get("count") == 1
+        ), node_groups.error or node_groups.data
+        found_in_group = executor.execute(
+            dynamic_tools["scene.find_in_group"],
+            {"group": "cli_enemies"},
+        )
+        assert (
+            found_in_group.success is True
+            and found_in_group.data.get("nodes") == ["StateMachine"]
+            and found_in_group.data.get("count") == 1
+        ), found_in_group.error or found_in_group.data
+        untagged = executor.execute(
+            dynamic_tools["node.remove_from_group"],
+            {"node_path": "StateMachine", "group": "cli_enemies"},
+        )
+        assert (
+            untagged.success is True
+            and untagged.data.get("applied") is True
+            and untagged.data.get("groups") == []
+        ), untagged.error or untagged.data
 
         region = executor.execute(
             dynamic_tools["world.create_region"],

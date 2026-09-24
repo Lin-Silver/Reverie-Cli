@@ -670,6 +670,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.duplicate_node",
             "scene.move_node",
             "scene.instantiate",
+            "scene.pack",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -719,6 +720,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["scene.duplicate_node"].get("permission") == "edit"
         assert definitions_by_name["scene.move_node"].get("permission") == "edit"
         assert definitions_by_name["scene.instantiate"].get("permission") == "edit"
+        assert definitions_by_name["scene.pack"].get("permission") == "edit"
 
         configured = executor.execute(
             dynamic_tools["animation.configure"],
@@ -795,6 +797,23 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and instantiated.data.get("source_scene") == "scenes/world_content.tscn"
             and instantiated.data.get("type") == "Node3D"
         ), instantiated.error or instantiated.data
+
+        # scene.pack is the §9 prefab produce-side on the same shared catalog: extract
+        # an in-scene branch into a new project .tscn without mutating the host scene.
+        # AnimationPlayer is a plain branch of the open scene; packing it is a genuine
+        # cross-scene write that leaves the open scene untouched (nothing is saved, so
+        # the world block below reopens the session regardless).
+        packed_branch = executor.execute(
+            dynamic_tools["scene.pack"],
+            {"node_path": "AnimationPlayer", "path": "scenes/cli_packed_branch.tscn"},
+        )
+        assert (
+            packed_branch.success is True
+            and packed_branch.data.get("applied") is True
+            and packed_branch.data.get("path") == "scenes/cli_packed_branch.tscn"
+            and packed_branch.data.get("node_path") == "AnimationPlayer"
+            and packed_branch.data.get("type") == "AnimationPlayer"
+        ), packed_branch.error or packed_branch.data
 
         region = executor.execute(
             dynamic_tools["world.create_region"],

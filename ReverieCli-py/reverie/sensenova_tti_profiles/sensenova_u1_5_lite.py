@@ -1,49 +1,46 @@
-"""SenseNova U1.5 Lite image generation profile."""
+"""SenseNova U1.5 Lite image generation and editing profile."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-from ..aihubmix_tti_profiles.common import get_field, iter_response_data, normalize_choice, save_base64_image, save_url_image
+from .common import build_metadata, run_sensenova_image
 
 
 MODEL_ID = "sensenova-u1.5-lite"
 DISPLAY_NAME = "SenseNova U1.5 Lite"
-DESCRIPTION = "SenseNova unified image generation and editing model."
-SUPPORTED_SIZES = {"2048x2048"}
+DESCRIPTION = "SenseNova unified image generation and editing model (text-to-image and image editing)."
+SUPPORTS_EDIT = True
+DEFAULT_SIZE = "2048x2048"
+# U1.5 Lite accepts arbitrary sizes up to 4K plus ``auto``; the set below is a
+# convenience list for the picker, but any WIDTHxHEIGHT is passed through.
+SUPPORTED_SIZES = {
+    "1024x1024", "2048x2048", "2752x1536", "1536x2752",
+    "2496x1664", "1664x2496", "4096x4096",
+}
 
 
 def metadata() -> Dict[str, Any]:
-    return {
-        "id": MODEL_ID,
-        "display_name": DISPLAY_NAME,
-        "description": DESCRIPTION,
-        "api": "images.generate",
-        "input_modalities": ["text"],
-        "output_modalities": ["image"],
-        "supports_n": False,
-        "supported_sizes": sorted(SUPPORTED_SIZES),
-    }
+    return build_metadata(
+        model_id=MODEL_ID,
+        display_name=DISPLAY_NAME,
+        description=DESCRIPTION,
+        supported_sizes=sorted(SUPPORTED_SIZES),
+        supports_edit=SUPPORTS_EDIT,
+        default_size=DEFAULT_SIZE,
+    )
 
 
-def generate_image(client: Any, *, prompt: str, output_path: Path, size: Any = "2048x2048", **_: Any) -> Dict[str, Any]:
-    normalized_size = normalize_choice(size, SUPPORTED_SIZES, "2048x2048")
-    response = client.images.generate(model=MODEL_ID, prompt=prompt, size=normalized_size, n=1)
-    data_items = list(iter_response_data(response))
-    saved_images: List[str] = []
-    for index, item in enumerate(data_items, start=1):
-        b64_json = get_field(item, "b64_json", "")
-        if b64_json:
-            saved_images.append(save_base64_image(b64_json, output_path, stem="sensenova_u1_5_lite", index=index, total=len(data_items)))
-            continue
-        image_url = get_field(item, "url", "")
-        if image_url:
-            saved_images.append(save_url_image(image_url, output_path, stem="sensenova_u1_5_lite", index=index, total=len(data_items)))
-    return {
-        "model": MODEL_ID,
-        "display_name": DISPLAY_NAME,
-        "saved_images": saved_images,
-        "text_parts": [],
-        "request": {"n": 1, "size": normalized_size},
-    }
+def generate_image(*, prompt: str, output_path: Path, **kwargs: Any) -> Dict[str, Any]:
+    return run_sensenova_image(
+        model_id=MODEL_ID,
+        display_name=DISPLAY_NAME,
+        prompt=prompt,
+        output_path=output_path,
+        supported_sizes=SUPPORTED_SIZES,
+        default_size=DEFAULT_SIZE,
+        permissive_size=True,
+        supports_edit=SUPPORTS_EDIT,
+        **kwargs,
+    )

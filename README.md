@@ -13,6 +13,7 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
 - **Approval policy**: Three tool-call approval modes — Default (software policy only), Auto Check (a stateless model review rates each call's risk and pauses only on risky ones), and Strict (every call waits for you); answer allow, deny, or reply in your own words to redirect the model. See [SECURITY_PERMISSIONS.md](docs/SECURITY_PERMISSIONS.md)
 - **Inline media**: Attach images and video directly in conversations
+- **Image generation**: Choose local or remote image models in Desktop Settings → Image models. Pollinations generation requires an API key; SenseNova editing chooses its output dimensions automatically unless `size` is specified.
 - **Experimental integrations**: Blender, Blockbench, legacy Godot/O3DE migration, Ashfox MCP, image/video generation, and embedded browser automation
 - **Browser automation**: Embedded Chromium runtime for web inspection and interaction
 - **Subagent delegation**: Parallel investigation and implementation tasks

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Optional, Dict, Any, List
 from pathlib import Path
+import base64
+import mimetypes
 import subprocess
 import sys
 import shutil
@@ -94,6 +96,8 @@ Supports:
 - AIhubMix image API parameters: n, size, quality, aspect_ratio
 - Pollinations image API parameters: n, size, quality, response_format, safe
 - Agnes image API parameters: n, size, quality, response_format, seed
+- SenseNova image API parameters: size, output_format, response_format, watermark, prompt_extend
+- SenseNova image editing (source=sensenova, model=sensenova-u1.5-lite) with reference images
 
 Examples:
 - List models: {"action": "list_models"}
@@ -102,7 +106,8 @@ Examples:
 - Generate with AIhubMix: {"action": "generate", "source": "aihubmix", "model": "gpt-image-2-free", "prompt": "a vase of flowers"}
 - Generate with Pollinations: {"action": "generate", "source": "pollinations", "model": "flux", "prompt": "a vase of flowers"}
 - Generate with Agnes: {"action": "generate", "source": "agnes", "model": "agnes-image-2.1-flash", "prompt": "a vase of flowers"}
-- Generate with SenseNova: {"action": "generate", "source": "sensenova", "model": "sensenova-u1-fast", "prompt": "an information-rich poster"}"""
+- Generate with SenseNova: {"action": "generate", "source": "sensenova", "model": "sensenova-u1-fast", "prompt": "an information-rich poster"}
+- Edit with SenseNova: {"action": "generate", "source": "sensenova", "model": "sensenova-u1.5-lite", "prompt": "make the sky pink", "reference_images": ["images/source.png"]}"""
 
     parameters = {
         "type": "object",
@@ -166,7 +171,7 @@ Examples:
             "n": {"type": "integer", "description": "Remote image count. SenseNova U1 models and Pollinations currently support 1."},
             "size": {
                 "type": "string",
-                "description": "Remote image size: 1024x1024, 1024x1536, 1536x1024, or auto.",
+                "description": "Remote image size, such as 1024x1024 or auto. SenseNova edits default to auto; specify dimensions to control the output size.",
             },
             "quality": {
                 "type": "string",
@@ -178,7 +183,29 @@ Examples:
             },
             "response_format": {
                 "type": "string",
-                "description": "Remote response format for Pollinations/Agnes: b64_json or url.",
+                "description": "Remote response format for Pollinations/Agnes/SenseNova: b64_json or url.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["generate", "edit"],
+                "description": "SenseNova operation: generate (text-to-image) or edit (requires reference_images). Inferred as edit when reference_images are present.",
+            },
+            "reference_images": {
+                "type": "array",
+                "description": "SenseNova image editing inputs: workspace-relative image paths or HTTP(S)/data URLs. Presence switches the request to the editing endpoint.",
+                "items": {"type": "string"},
+            },
+            "output_format": {
+                "type": "string",
+                "description": "SenseNova output image format: png, jpeg, or webp (default png).",
+            },
+            "watermark": {
+                "type": "boolean",
+                "description": "SenseNova watermark toggle (default false).",
+            },
+            "prompt_extend": {
+                "type": "boolean",
+                "description": "SenseNova prompt auto-expansion toggle (default true).",
             },
             "safe": {
                 "type": "boolean",
@@ -720,7 +747,53 @@ Examples:
             "default_model": str(tti_cfg.get("default_model", "sensenova-u1-fast") or "sensenova-u1-fast").strip(),
             "timeout": max(1, timeout),
             "default_size": str(tti_cfg.get("default_size", "2752x1536") or "2752x1536").strip(),
+            "output_format": str(tti_cfg.get("output_format", "png") or "png").strip(),
+            "response_format": str(tti_cfg.get("response_format", "url") or "url").strip(),
+            "watermark": bool(tti_cfg.get("watermark", False)),
+            "prompt_extend": bool(tti_cfg.get("prompt_extend", True)),
         }
+
+    def _collect_sensenova_reference_urls(self, kwargs: Dict[str, Any]) -> List[str]:
+        """Turn reference-image inputs into ``image_url`` strings for editing.
+
+        Accepts workspace-relative file paths (read and encoded as data URLs) and
+        HTTP(S)/data URLs (passed through). Absolute local paths are rejected in
+        keeping with the tool's other path handling, so editing stays inside the
+        workspace.
+        """
+        raw = (
+            kwargs.get("reference_images")
+            or kwargs.get("images")
+            or kwargs.get("image")
+            or kwargs.get("reference_image")
+        )
+        if raw is None:
+            return []
+        candidates = raw if isinstance(raw, (list, tuple)) else [raw]
+        urls: List[str] = []
+        for candidate in candidates:
+            text = str(candidate or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if lowered.startswith(("http://", "https://", "data:")):
+                urls.append(text)
+                continue
+            normalized = os.path.expandvars(text)
+            probe = Path(normalized).expanduser()
+            if probe.is_absolute() or self._looks_like_absolute_path(normalized):
+                raise ValueError(
+                    "reference image paths must be workspace-relative "
+                    f"(for example: 'images/source.png'); got '{text}'."
+                )
+            resolved = self.resolve_workspace_path(probe, purpose="read reference image")
+            if not resolved.exists() or not resolved.is_file():
+                raise ValueError(f"reference image not found: {text}")
+            mime, _ = mimetypes.guess_type(str(resolved))
+            mime = mime if (mime or "").startswith("image/") else "image/png"
+            encoded = base64.b64encode(resolved.read_bytes()).decode("ascii")
+            urls.append(f"data:{mime};base64,{encoded}")
+        return urls
 
     def _generate_sensenova(self, *, config: Dict[str, Any], prompt: str, kwargs: Dict[str, Any]) -> ToolResult:
         runtime_cfg = self._get_sensenova_tti_runtime_config(config)
@@ -731,11 +804,34 @@ Examples:
                 "SenseNova API key is required. Set sensenova.api_key, SENSENOVA_API_KEY, or SENSE_API_KEY."
             )
 
+        try:
+            reference_urls = self._collect_sensenova_reference_urls(kwargs)
+        except ValueError as exc:
+            return ToolResult.fail(str(exc))
+
+        requested_mode = str(kwargs.get("mode", "") or "").strip().lower()
+        if requested_mode == "edit" and not reference_urls:
+            return ToolResult.fail(
+                "SenseNova image editing requires at least one reference image "
+                "(pass reference_images)."
+            )
+        is_edit = requested_mode == "edit" or bool(reference_urls)
+
         model_request = kwargs.get("display_name") or kwargs.get("model") or runtime_cfg.get("default_model")
         selected = resolve_sensenova_tti_model(model_request)
         if not selected:
             available = ", ".join(item["id"] for item in get_sensenova_tti_model_catalog())
             return ToolResult.fail(f"Unknown SenseNova TTI model '{model_request}'. Available models: {available}")
+        # Editing needs an edit-capable model; transparently fall back to the
+        # unified model when the caller asked to edit with a generate-only one.
+        if is_edit and not selected.get("supports_edit"):
+            edit_model = next(
+                (item for item in get_sensenova_tti_model_catalog() if item.get("supports_edit")),
+                None,
+            )
+            if edit_model is None:
+                return ToolResult.fail("No SenseNova model in the catalog supports image editing.")
+            selected = edit_model
         profile = get_sensenova_tti_profile(selected["id"])
         if profile is None:
             return ToolResult.fail(f"SenseNova TTI profile not found for model: {selected['id']}")
@@ -749,42 +845,39 @@ Examples:
             return ToolResult.fail(str(exc))
 
         try:
-            from openai import OpenAI
-        except Exception as exc:
-            return ToolResult.fail(f"OpenAI Python SDK is required for SenseNova TTI: {exc}")
-        client_kwargs = {
-            "api_key": runtime_cfg["api_key"],
-            "base_url": runtime_cfg["base_url"],
-            "timeout": runtime_cfg["timeout"],
-        }
-        try:
-            client = OpenAI(**client_kwargs)
-        except TypeError:
-            client_kwargs.pop("timeout", None)
-            client = OpenAI(**client_kwargs)
-
-        try:
             result = profile.generate_image(
-                client,
                 prompt=prompt,
                 output_path=output_path,
-                size=kwargs.get("size", runtime_cfg.get("default_size", "2752x1536")),
+                base_url=runtime_cfg["base_url"],
+                api_key=runtime_cfg.get("api_key", ""),
+                timeout=runtime_cfg["timeout"],
+                size=kwargs.get("size", "auto" if is_edit else runtime_cfg.get("default_size", "2752x1536")),
+                reference_images=reference_urls,
+                output_format=kwargs.get("output_format", runtime_cfg.get("output_format", "png")),
+                response_format=kwargs.get("response_format", runtime_cfg.get("response_format", "url")),
+                watermark=kwargs.get("watermark", runtime_cfg.get("watermark", False)),
+                prompt_extend=kwargs.get("prompt_extend", runtime_cfg.get("prompt_extend", True)),
             )
         except Exception as exc:
-            return ToolResult.fail(f"SenseNova TTI generation failed for {selected['id']}: {exc}")
+            action_word = "editing" if is_edit else "generation"
+            return ToolResult.fail(f"SenseNova TTI {action_word} failed for {selected['id']}: {exc}")
 
         saved_images = [str(path) for path in result.get("saved_images", []) if str(path).strip()]
+        mode_label = "image editing" if is_edit else "text-to-image generation"
         output_lines = [
-            "SenseNova text-to-image generation finished",
+            f"SenseNova {mode_label} finished",
             f"Model: {selected['display_name']} ({selected['id']})",
             f"Base URL: {runtime_cfg['base_url']}",
             f"Output target: {output_path}",
         ]
+        if is_edit:
+            output_lines.append(f"Reference images: {len(reference_urls)}")
         if saved_images:
             output_lines.append("Generated images:")
             output_lines.extend(f"- {path}" for path in saved_images)
         payload = {
             "source": "sensenova",
+            "mode": "edit" if is_edit else "generate",
             "model": selected["id"],
             "model_display_name": selected["display_name"],
             "saved_images": saved_images,

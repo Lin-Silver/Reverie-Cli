@@ -8,6 +8,10 @@ from reverie import sensenova as sensenova_module
 from reverie.agent.agent import ReverieAgent, _convert_messages_to_anthropic_format
 from reverie.cli.commands import CommandHandler
 from reverie.config import Config
+from reverie.desktop_catalog import (
+    apply_image_model_selection,
+    build_image_model_sources_payload,
+)
 from reverie.media_capabilities import build_media_capabilities
 from reverie.sensenova import (
     build_sensenova_runtime_model_data,
@@ -21,6 +25,7 @@ from reverie.sensenova import (
 )
 from reverie.sensenova_tti_profiles.registry import get_sensenova_tti_model_catalog, get_sensenova_tti_profile
 from reverie.provider_smoke import BUILTIN_PROVIDER_NAMES, SMOKE_RUNNERS
+from reverie.tools.text_to_image import TextToImageTool
 
 
 def test_sensenova_deepseek_v4_flash_catalog_contract():
@@ -357,28 +362,54 @@ def test_anthropic_message_conversion_preserves_url_and_base64_images():
     assert blocks[2] == {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": encoded}}
 
 
-def test_sensenova_u1_fast_tti_profile_and_capabilities(tmp_path):
+def _fake_sensenova_image_post(captured):
+    def _post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = json
+        captured["timeout"] = timeout
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"data": [{"b64_json": base64.b64encode(b"png").decode()}]},
+        )
+
+    return _post
+
+
+def test_sensenova_u1_fast_tti_profile_and_capabilities(tmp_path, monkeypatch):
     catalog = get_sensenova_tti_model_catalog()
     assert [item["id"] for item in catalog] == ["sensenova-u1-fast", "sensenova-u1.5-lite"]
     assert catalog[0]["input_modalities"] == ["text"]
-    assert catalog[1]["input_modalities"] == ["text"]
+    assert catalog[0]["supports_edit"] is False
+    assert catalog[1]["input_modalities"] == ["text", "image"]
+    assert catalog[1]["supports_edit"] is True
+
+    from reverie.sensenova_tti_profiles import common as sensenova_tti_common
 
     captured = {}
-
-    class Images:
-        def generate(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"png").decode(), url=None)])
+    monkeypatch.setattr(sensenova_tti_common.requests, "post", _fake_sensenova_image_post(captured))
 
     profile = get_sensenova_tti_profile("sensenova-u1-fast")
     result = profile.generate_image(
-        SimpleNamespace(images=Images()),
         prompt="infographic",
         output_path=tmp_path,
+        base_url="https://token.sensenova.cn/v1",
+        api_key="secret",
         size="2048x2048",
-        n=4,
     )
-    assert captured == {"model": "sensenova-u1-fast", "prompt": "infographic", "size": "2048x2048", "n": 1}
+    assert captured["url"] == "https://token.sensenova.cn/v1/images/generations"
+    assert captured["headers"]["Authorization"] == "Bearer secret"
+    assert captured["payload"] == {
+        "model": "sensenova-u1-fast",
+        "prompt": "infographic",
+        "n": 1,
+        "size": "2048x2048",
+        "response_format": "url",
+        "watermark": False,
+        "prompt_extend": True,
+        "output_format": "png",
+    }
+    assert result["request"]["mode"] == "generate"
     assert len(result["saved_images"]) == 1
 
     config = Config(sensenova={"api_key": "secret"})
@@ -389,21 +420,141 @@ def test_sensenova_u1_fast_tti_profile_and_capabilities(tmp_path):
     ]
 
 
-def test_sensenova_u1_5_lite_tti_profile_uses_verified_generation_contract(tmp_path):
-    captured = {}
+def test_sensenova_u1_5_lite_tti_profile_generates_and_edits(tmp_path, monkeypatch):
+    from reverie.sensenova_tti_profiles import common as sensenova_tti_common
 
-    class Images:
-        def generate(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(data=[SimpleNamespace(b64_json=base64.b64encode(b"png").decode(), url=None)])
+    captured = {}
+    monkeypatch.setattr(sensenova_tti_common.requests, "post", _fake_sensenova_image_post(captured))
 
     profile = get_sensenova_tti_profile("sensenova-u1.5-lite")
-    result = profile.generate_image(
-        SimpleNamespace(images=Images()),
+
+    # Text-to-image path hits the generations endpoint with an output format.
+    gen_result = profile.generate_image(
         prompt="poster",
         output_path=tmp_path,
+        base_url="https://token.sensenova.cn/v1",
+        api_key="secret",
         size="2048x2048",
     )
+    assert captured["url"] == "https://token.sensenova.cn/v1/images/generations"
+    assert captured["payload"]["size"] == "2048x2048"
+    assert captured["payload"]["output_format"] == "png"
+    assert gen_result["request"]["mode"] == "generate"
+    assert len(gen_result["saved_images"]) == 1
 
-    assert captured == {"model": "sensenova-u1.5-lite", "prompt": "poster", "size": "2048x2048", "n": 1}
-    assert len(result["saved_images"]) == 1
+    # A reference image switches to the editing endpoint, sends images[], and
+    # defaults the size to auto so the provider chooses output dimensions.
+    edit_result = profile.generate_image(
+        prompt="make the sky pink",
+        output_path=tmp_path,
+        base_url="https://token.sensenova.cn/v1",
+        api_key="secret",
+        reference_images=["data:image/png;base64,QUJD"],
+    )
+    assert captured["url"] == "https://token.sensenova.cn/v1/images/edits"
+    assert captured["payload"]["images"] == [{"image_url": "data:image/png;base64,QUJD"}]
+    assert captured["payload"]["size"] == "auto"
+    assert "output_format" not in captured["payload"]
+    assert edit_result["request"]["mode"] == "edit"
+    assert edit_result["request"]["reference_count"] == 1
+
+
+def test_text_to_image_sensenova_editing_encodes_reference_and_selects_edit_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("SENSENOVA_API_KEY", "sense-test")
+    (tmp_path / "source.png").write_bytes(b"\x89PNG\r\n\x1a\nsource")
+
+    from reverie.sensenova_tti_profiles import common as sensenova_tti_common
+
+    captured = {}
+    monkeypatch.setattr(sensenova_tti_common.requests, "post", _fake_sensenova_image_post(captured))
+
+    tool = TextToImageTool({"project_root": tmp_path})
+    result = tool.execute(
+        action="generate",
+        source="sensenova",
+        model="sensenova-u1-fast",  # generate-only; must fall back to an edit-capable model
+        prompt="make the sky pink",
+        reference_images=["source.png"],
+        output_path="out",
+    )
+
+    assert result.success is True
+    assert result.data["mode"] == "edit"
+    assert result.data["model"] == "sensenova-u1.5-lite"
+    assert captured["url"].endswith("/images/edits")
+    assert captured["payload"]["size"] == "auto"
+    image_url = captured["payload"]["images"][0]["image_url"]
+    assert image_url.startswith("data:image/png;base64,")
+
+
+def test_text_to_image_sensenova_rejects_absolute_reference_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("SENSENOVA_API_KEY", "sense-test")
+    tool = TextToImageTool({"project_root": tmp_path})
+
+    result = tool.execute(
+        action="generate",
+        source="sensenova",
+        prompt="edit this",
+        reference_images=["C:/secrets/private.png"],
+    )
+
+    assert result.success is False
+    assert "workspace-relative" in (result.error or "")
+
+
+def test_build_image_model_sources_payload_exposes_sources_and_edit_flag(monkeypatch):
+    monkeypatch.delenv("POLLINATIONS_API_KEY", raising=False)
+    monkeypatch.delenv("POLLINATIONS_TOKEN", raising=False)
+    config = Config(sensenova={"api_key": "sense-test"})
+    payload = build_image_model_sources_payload(config)
+
+    assert payload["active_source"] == "local"
+    sources = {item["id"]: item for item in payload["sources"]}
+    assert set(sources) == {"local", "aihubmix", "pollinations", "agnes", "sensenova"}
+
+    sensenova = sources["sensenova"]
+    assert sensenova["requires_api_key"] is True
+    assert sensenova["api_key_available"] is True
+    assert sensenova["selected_model_id"] == "sensenova-u1-fast"
+    models = {item["id"]: item for item in sensenova["models"]}
+    assert models["sensenova-u1-fast"]["supports_edit"] is False
+    assert models["sensenova-u1.5-lite"]["supports_edit"] is True
+    assert models["sensenova-u1.5-lite"]["input_modalities"] == ["text", "image"]
+
+    # Local runs on-device; Pollinations generation requires an API key.
+    assert sources["local"]["requires_api_key"] is False
+    assert sources["pollinations"]["requires_api_key"] is True
+    assert sources["pollinations"]["api_key_available"] is False
+
+
+def test_apply_image_model_selection_switches_source_and_default_model():
+    config = Config(sensenova={"api_key": "sense-test"})
+
+    selected = apply_image_model_selection(config, "sensenova", "sensenova-u1.5-lite")
+    assert selected == {
+        "id": "sensenova-u1.5-lite",
+        "display_name": "SenseNova U1.5 Lite",
+        "source": "sensenova",
+        "supports_edit": True,
+    }
+    assert config.text_to_image["active_source"] == "sensenova"
+    assert config.text_to_image["sensenova"]["default_model"] == "sensenova-u1.5-lite"
+
+    payload = build_image_model_sources_payload(config)
+    assert payload["active_source"] == "sensenova"
+    assert payload["active_model"] == {
+        "id": "sensenova-u1.5-lite",
+        "display_name": "SenseNova U1.5 Lite",
+        "source": "sensenova",
+        "supports_edit": True,
+    }
+
+
+def test_apply_image_model_selection_rejects_unknown_model():
+    config = Config(sensenova={"api_key": "sense-test"})
+    try:
+        apply_image_model_selection(config, "sensenova", "does-not-exist")
+    except ValueError as exc:
+        assert "does-not-exist" in str(exc)
+    else:  # pragma: no cover - the call must raise
+        raise AssertionError("expected ValueError for an unknown image model")

@@ -4,6 +4,7 @@ import type {
   CustomProviderRecord,
   DesktopState,
   FileChange,
+  ImageModelSourcesState,
   ModelSourcesState,
   PluginsState,
   PromptResult,
@@ -100,6 +101,9 @@ interface CoreRequestMap {
   getModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   selectModel: { payload: { source: string; modelId: string; reasoning?: string }; response: Envelope<"model.selected", { selected: Record<string, unknown>; models: ModelSourcesState; workspace: WorkspaceState }> };
+  getImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
+  refreshImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
+  selectImageModel: { payload: { source: string; modelId: string }; response: Envelope<"image-model.selected", { selected: Record<string, unknown>; imageModels: ImageModelSourcesState }> };
   setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models: ModelSourcesState; workspace: WorkspaceState }> };
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };

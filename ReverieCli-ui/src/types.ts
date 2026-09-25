@@ -363,6 +363,45 @@ export interface ModelSourcesState {
   sources: ModelSource[];
 }
 
+/** One text-to-image model within a source's catalog (see desktop_catalog.py). */
+export interface ImageModelRecord {
+  id: string;
+  display_name: string;
+  description: string;
+  supports_edit: boolean;
+  input_modalities: string[];
+  output_modalities: string[];
+  supported_sizes: string[];
+  default_size: string;
+  /** Local ComfyUI models only: whether the checkpoint file exists on disk. */
+  exists: boolean;
+}
+
+export interface ImageModelSource {
+  id: string;
+  display_name: string;
+  active: boolean;
+  enabled: boolean;
+  selected_model_id: string;
+  api_key_available: boolean;
+  requires_api_key: boolean;
+  configured_count: number;
+  models: ImageModelRecord[];
+}
+
+export interface ActiveImageModel {
+  id: string;
+  display_name: string;
+  source: string;
+  supports_edit: boolean;
+}
+
+export interface ImageModelSourcesState {
+  active_source: string;
+  active_model: ActiveImageModel | null;
+  sources: ImageModelSource[];
+}
+
 export interface SessionInfo {
   id: string;
   name: string;

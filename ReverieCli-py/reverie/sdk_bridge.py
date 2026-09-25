@@ -370,6 +370,16 @@ class ReverieSdkBridge:
         interface = self.ensure_interface()
         return _json_safe(build_model_sources_payload(interface.config_manager.load(), fetch_live=fetch_live))
 
+    def image_model_sources_payload(self) -> Dict[str, Any]:
+        from .desktop_catalog import build_image_model_sources_payload
+
+        interface = self.ensure_interface()
+        return _json_safe(
+            build_image_model_sources_payload(
+                interface.config_manager.load(), project_root=self.project_root
+            )
+        )
+
     @staticmethod
     def _session_info_payload(info: Any) -> Dict[str, Any]:
         return {
@@ -794,6 +804,29 @@ class ReverieSdkBridge:
                 "selected": _json_safe(selected),
                 "models": self.model_sources_payload(),
                 "workspace": self.workspace_payload(),
+            }
+        if action in {"getImageModelSources", "refreshImageModelSources"}:
+            return {
+                "id": request_id,
+                "type": "image-models",
+                "imageModels": self.image_model_sources_payload(),
+            }
+        if action == "selectImageModel":
+            from .desktop_catalog import apply_image_model_selection
+
+            interface = self.ensure_interface()
+            config = interface.config_manager.load()
+            selected = apply_image_model_selection(
+                config,
+                payload.get("source"),
+                payload.get("modelId") or payload.get("model") or "",
+            )
+            interface.config_manager.save(config)
+            return {
+                "id": request_id,
+                "type": "image-model.selected",
+                "selected": _json_safe(selected),
+                "imageModels": self.image_model_sources_payload(),
             }
         if action == "revealProviderSecret":
             from .desktop_catalog import reveal_provider_secret

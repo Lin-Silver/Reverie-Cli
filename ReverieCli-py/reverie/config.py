@@ -319,6 +319,10 @@ def default_text_to_image_config() -> Dict[str, Any]:
             "default_model": "sensenova-u1-fast",
             "timeout": 300,
             "default_size": "2752x1536",
+            "output_format": "png",
+            "response_format": "url",
+            "watermark": False,
+            "prompt_extend": True,
         },
     }
 

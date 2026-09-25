@@ -14,9 +14,11 @@ from .config import (
     ModelConfig,
     MODEL_SOURCE_DISPLAY_NAMES,
     SUPPORTED_ACTIVE_MODEL_SOURCES,
+    SUPPORTED_TTI_SOURCES,
     model_source_display_name,
     normalize_active_model_source,
     normalize_model_provider,
+    normalize_tti_source,
 )
 
 
@@ -1108,3 +1110,213 @@ def probe_provider_availability(
         entry["provider_id"] = str(row.record.get("id") or "") if row.kind == "custom" else ""
         results.append(entry)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Image-generation (text-to-image) model selection
+#
+# The desktop UI gets an image-model picker that mirrors the text-model picker,
+# so these helpers return a parallel ``sources``/``active_model`` shape backed by
+# the TTI catalogs and ``text_to_image`` config rather than the chat providers.
+# ---------------------------------------------------------------------------
+
+_IMAGE_SOURCE_DISPLAY_NAMES: Dict[str, str] = {
+    "local": "Local (ComfyUI)",
+    "aihubmix": "AiHubMix",
+    "pollinations": "Pollinations",
+    "agnes": "Agnes AI",
+    "sensenova": "SenseNova",
+}
+
+# Remote image generation requires a credential; local runs on-device.
+_IMAGE_SOURCES_REQUIRING_KEY = {"aihubmix", "pollinations", "agnes", "sensenova"}
+
+
+def image_model_source_display_name(source: Any) -> str:
+    key = str(source or "").strip().lower()
+    return _IMAGE_SOURCE_DISPLAY_NAMES.get(key, key.title() or "Image models")
+
+
+def _image_catalog_for_source(source: str) -> List[Dict[str, Any]]:
+    """Return the built-in model catalog for a remote image source."""
+    if source == "aihubmix":
+        from .aihubmix_tti_profiles.registry import get_aihubmix_tti_model_catalog
+
+        return get_aihubmix_tti_model_catalog()
+    if source == "pollinations":
+        from .pollinations_tti_profiles.registry import get_pollinations_tti_model_catalog
+
+        return get_pollinations_tti_model_catalog()
+    if source == "agnes":
+        from .agnes_tti_profiles.registry import get_agnes_tti_model_catalog
+
+        return get_agnes_tti_model_catalog()
+    if source == "sensenova":
+        from .sensenova_tti_profiles.registry import get_sensenova_tti_model_catalog
+
+        return get_sensenova_tti_model_catalog()
+    return []
+
+
+def _image_model_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one remote image-model catalog row for the desktop picker."""
+    model_id = str(raw.get("id") or raw.get("display_name") or "").strip()
+    input_modalities = [str(m) for m in raw.get("input_modalities", []) if str(m)] or ["text"]
+    output_modalities = [str(m) for m in raw.get("output_modalities", []) if str(m)] or ["image"]
+    return {
+        "id": model_id,
+        "display_name": str(raw.get("display_name") or model_id).strip(),
+        "description": str(raw.get("description") or "").strip(),
+        "supports_edit": bool(raw.get("supports_edit", False)),
+        "input_modalities": input_modalities,
+        "output_modalities": output_modalities,
+        "supported_sizes": [str(s) for s in raw.get("supported_sizes", []) if str(s)],
+        "default_size": str(raw.get("default_size", "") or "").strip(),
+        "exists": True,
+    }
+
+
+def _local_image_model_entry(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one local ComfyUI model row (keyed by display name)."""
+    display = str(raw.get("display_name") or "").strip()
+    output_modalities = [str(m) for m in raw.get("output_modalities", []) if str(m)] or ["image"]
+    return {
+        "id": display,
+        "display_name": display,
+        "description": str(raw.get("configured_path") or "").strip(),
+        "supports_edit": False,
+        "input_modalities": ["text"],
+        "output_modalities": output_modalities,
+        "supported_sizes": [],
+        "default_size": "",
+        "exists": bool(raw.get("exists", False)),
+    }
+
+
+def build_image_model_sources_payload(
+    config: Config, *, project_root: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Return image source/model metadata for the desktop image-model picker.
+
+    Mirrors :func:`build_model_sources_payload` but for the text-to-image tool,
+    reusing :func:`build_media_capabilities` so the picker stays on the same
+    source of truth as the runtime capability digest.
+    """
+    from pathlib import Path
+
+    from .media_capabilities import build_media_capabilities
+
+    caps = build_media_capabilities(
+        config=config,
+        project_root=Path(project_root) if project_root else None,
+    )
+    image = caps.get("image", {}) if isinstance(caps, dict) else {}
+    raw_sources = image.get("sources", {}) if isinstance(image.get("sources"), dict) else {}
+    active_source = normalize_tti_source(image.get("active_source", "local"))
+
+    sources: List[Dict[str, Any]] = []
+    active_model_entry: Optional[Dict[str, Any]] = None
+    for source in SUPPORTED_TTI_SOURCES:
+        raw = raw_sources.get(source, {}) if isinstance(raw_sources.get(source), dict) else {}
+        models: List[Dict[str, Any]] = []
+        for item in raw.get("models", []) or []:
+            if not isinstance(item, dict):
+                continue
+            models.append(
+                _local_image_model_entry(item) if source == "local" else _image_model_entry(item)
+            )
+
+        selected_id = str(raw.get("default_model", "") or "").strip()
+        selected = next(
+            (m for m in models if m["id"].lower() == selected_id.lower()), None
+        )
+        if selected is None and models:
+            selected = models[0]
+            selected_id = selected["id"]
+
+        sources.append(
+            {
+                "id": source,
+                "display_name": image_model_source_display_name(source),
+                "active": source == active_source,
+                "enabled": bool(raw.get("enabled", True)),
+                "selected_model_id": selected_id,
+                "api_key_available": bool(raw.get("api_key_available", source == "local")),
+                "requires_api_key": source in _IMAGE_SOURCES_REQUIRING_KEY,
+                "configured_count": int(raw.get("configured_count", len(models)) or 0),
+                "models": models,
+            }
+        )
+        if source == active_source and selected is not None:
+            active_model_entry = {
+                "id": selected["id"],
+                "display_name": selected["display_name"],
+                "source": source,
+                "supports_edit": bool(selected.get("supports_edit", False)),
+            }
+
+    return {
+        "active_source": active_source,
+        "active_model": active_model_entry,
+        "sources": sources,
+    }
+
+
+def apply_image_model_selection(config: Config, source: Any, model_id: Any = "") -> Dict[str, Any]:
+    """Apply an image-generation source/model selection to a Config instance.
+
+    Local selections persist a model display name; remote selections persist the
+    source's ``default_model`` id. Either way the active TTI source is switched.
+    """
+    from .config import (
+        default_text_to_image_config,
+        normalize_tti_models,
+        resolve_tti_default_display_name,
+    )
+
+    normalized_source = normalize_tti_source(source)
+    tti = dict(getattr(config, "text_to_image", {}) or {})
+    query = str(model_id or "").strip()
+
+    if normalized_source == "local":
+        models = normalize_tti_models(
+            tti.get("models", []), legacy_model_paths=tti.get("model_paths", [])
+        )
+        if query:
+            match = next(
+                (m for m in models if str(m.get("display_name", "")).lower() == query.lower()),
+                None,
+            ) or next(
+                (m for m in models if query.lower() in str(m.get("display_name", "")).lower()),
+                None,
+            )
+            if match is None:
+                raise ValueError(f"Unknown local image model: {model_id}")
+            tti["default_model_display_name"] = str(match.get("display_name") or "")
+        tti["active_source"] = "local"
+        setattr(config, "text_to_image", tti)
+        resolved = resolve_tti_default_display_name(tti)
+        return {"id": resolved, "display_name": resolved, "source": "local", "supports_edit": False}
+
+    catalog = _image_catalog_for_source(normalized_source)
+    selected = _catalog_match(catalog, query) if query else (catalog[0] if catalog else None)
+    if selected is None:
+        raise ValueError(
+            f"Unknown or ambiguous image model for "
+            f"{image_model_source_display_name(normalized_source)}: {model_id}"
+        )
+
+    defaults = default_text_to_image_config().get(normalized_source, {})
+    section = dict(defaults)
+    if isinstance(tti.get(normalized_source), dict):
+        section.update(tti.get(normalized_source, {}))
+    section["default_model"] = str(selected.get("id") or "")
+    tti[normalized_source] = section
+    tti["active_source"] = normalized_source
+    setattr(config, "text_to_image", tti)
+    return {
+        "id": str(selected.get("id") or ""),
+        "display_name": str(selected.get("display_name") or selected.get("id") or ""),
+        "source": normalized_source,
+        "supports_edit": bool(selected.get("supports_edit", False)),
+    }

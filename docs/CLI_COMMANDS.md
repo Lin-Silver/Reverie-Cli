@@ -123,6 +123,7 @@ Raw stream frames (`[[REVERIE_EVENT]]{...}`) are internal protocol details rende
 | `/CE stats` | Show token statistics |
 | `/tti models` | Open the TTI model selector |
 | `/tti add` | Add a TTI model entry |
+| `/tti source <source>` | Select a TTI source; `/tti source pollinations` prompts for its API key when needed |
 | `/tti <prompt>` | Generate an image using the default TTI model |
 
 MCP discovery runs silently in the background. A server's tools, resource access, prompt guidance, and tool descriptions become visible to the model only after that server passes discovery; pending and failed servers remain excluded. `/mcp status` and its refresh UI read the cached health snapshot without blocking the terminal on network checks.

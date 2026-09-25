@@ -1,3 +1,7 @@
+## Unreleased
+
+* Corrected SenseNova image editing to send `size=auto` unless the caller specifies dimensions, aligned Pollinations' image-model credential warning with its key-required runtime, and added a Desktop image-model picker interaction test. Verified one real SenseNova U1.5 Lite generation and one edit on 2026-09-25; the provider chose a 2048×2048 edited output from a 1024×1024 input when given `auto`.
+
 ## Reverie CLI v2.5.0 - Trusted Portable Core and Multi-Platform Releases
 
 Released 2026-07-17.

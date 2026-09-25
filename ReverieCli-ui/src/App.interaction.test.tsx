@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences, type UiPreferences } from "./preferences";
-import type { ContextUsage, CustomProviderRecord, DesktopState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
+import type { ContextUsage, CustomProviderRecord, DesktopState, ImageModelSourcesState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
 
 /** One stored manual ("Manual Model") entry, in the core's own config shape. */
 type StandardModelConfig = {
@@ -233,6 +233,7 @@ function installDesktopApi(options: {
   ratsTaskEvents?: (payload: Record<string, unknown>, cancelled: boolean) => Record<string, unknown>;
   ratsTaskLogText?: (payload: Record<string, unknown>) => string;
   refreshedModels?: ModelSourcesState;
+  imageModels?: ImageModelSourcesState;
   initialState?: DesktopState;
   customProviders?: CustomProviderRecord[];
   standardModels?: StandardModelConfig[];
@@ -250,6 +251,7 @@ function installDesktopApi(options: {
   let ratsCustomProviders: RatsCustomProviderDefinition[] = (options.ratsCustomProviders ?? []).map((definition) => ({ ...definition }));
   let providers: CustomProviderRecord[] = (options.customProviders ?? []).map((record) => ({ ...record }));
   let standardModels: StandardModelConfig[] = (options.standardModels ?? []).map((record) => ({ ...record }));
+  let imageModels = options.imageModels;
   const customSource = (): ModelSource => ({
     id: "custom",
     display_name: "Custom Provider",
@@ -534,6 +536,27 @@ function installDesktopApi(options: {
       type: "models",
       models: options.refreshedModels ?? models(),
     };
+    if (action === "refreshImageModelSources") return { type: "image-models", imageModels };
+    if (action === "selectImageModel") {
+      if (!imageModels) throw new Error("Image models are unavailable.");
+      const sourceId = String(payload.source);
+      const modelId = String(payload.modelId);
+      const source = imageModels.sources.find((item) => item.id === sourceId);
+      const model = source?.models.find((item) => item.id === modelId);
+      if (!source || !model) throw new Error("Unknown image model.");
+      const selected = { id: model.id, display_name: model.display_name, source: sourceId, supports_edit: model.supports_edit };
+      imageModels = {
+        ...imageModels,
+        active_source: sourceId,
+        active_model: selected,
+        sources: imageModels.sources.map((item) => ({
+          ...item,
+          active: item.id === sourceId,
+          selected_model_id: item.id === sourceId ? modelId : item.selected_model_id,
+        })),
+      };
+      return { type: "image-model.selected", selected, imageModels };
+    }
     if (action === "addStandardModel" || action === "updateStandardModel" || action === "deleteStandardModel") {
       const draft = (payload.model ?? {}) as Partial<StandardModelConfig>;
       let index = standardModels.length;
@@ -1189,6 +1212,53 @@ describe("desktop GUI interactions", () => {
     await user.click(await within(dialog).findByRole("button", { name: /SenseNova/ }));
 
     expect(await within(dialog).findByRole("button", { name: /SenseNova 6.8 Flash Lite/ })).toBeTruthy();
+  });
+
+  it("loads image models on demand, explains missing Pollinations credentials, and switches the image model", async () => {
+    const imageModels: ImageModelSourcesState = {
+      active_source: "local",
+      active_model: null,
+      sources: [{
+        id: "local", display_name: "Local (ComfyUI)", active: true, enabled: true,
+        selected_model_id: "", api_key_available: true, requires_api_key: false,
+        configured_count: 0, models: [],
+      }, {
+        id: "pollinations", display_name: "Pollinations", active: false, enabled: true,
+        selected_model_id: "flux", api_key_available: false, requires_api_key: true,
+        configured_count: 1, models: [{
+          id: "flux", display_name: "Flux", description: "", supports_edit: false,
+          input_modalities: ["text"], output_modalities: ["image"],
+          supported_sizes: ["1024x1024"], default_size: "1024x1024", exists: true,
+        }],
+      }, {
+        id: "sensenova", display_name: "SenseNova", active: false, enabled: true,
+        selected_model_id: "sensenova-u1-fast", api_key_available: true, requires_api_key: true,
+        configured_count: 1, models: [{
+          id: "sensenova-u1.5-lite", display_name: "SenseNova U1.5 Lite", description: "",
+          supports_edit: true, input_modalities: ["text", "image"], output_modalities: ["image"],
+          supported_sizes: ["2048x2048"], default_size: "2048x2048", exists: true,
+        }],
+      }],
+    };
+    const { request } = installDesktopApi({ imageModels });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "设置" });
+    expect(request).not.toHaveBeenCalledWith("refreshImageModelSources", {});
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(screen.getByRole("button", { name: "生图模型" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("refreshImageModelSources", {}));
+    await user.click(await screen.findByRole("button", { name: "Pollinations" }));
+    expect(screen.getByText("需要 API 密钥")).toBeTruthy();
+    expect(screen.getByText("使用 /tti source pollinations 配置 API 密钥，然后刷新。") ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "SenseNova" }));
+    await user.click(screen.getByRole("button", { name: /SenseNova U1.5 Lite/ }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectImageModel", {
+      source: "sensenova", modelId: "sensenova-u1.5-lite",
+    }));
+    expect(await screen.findByText("已切换生图模型到 SenseNova U1.5 Lite")).toBeTruthy();
   });
 
   it("hides model selection while Computer mode uses its pinned model", async () => {

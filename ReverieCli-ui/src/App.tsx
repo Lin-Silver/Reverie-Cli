@@ -88,6 +88,8 @@ import type {
   CustomProviderRecord,
   DesktopPaths,
   DesktopState,
+  ImageModelRecord,
+  ImageModelSourcesState,
   LiveTurn,
   ModelRecord,
   ModelSource,
@@ -2713,6 +2715,78 @@ function ProviderSettings({
   );
 }
 
+function ImageProviderSettings({
+  imageModels,
+  selectImageModel,
+  refresh,
+}: {
+  imageModels: ImageModelSourcesState | null;
+  selectImageModel: (source: string, model: ImageModelRecord) => void;
+  refresh: () => void;
+}) {
+  const { t } = useI18n();
+  const [sourceId, setSourceId] = useState("");
+  // Fetch once when the tab first mounts and nothing is loaded yet.
+  useEffect(() => { if (!imageModels) refresh(); }, [imageModels, refresh]);
+  // Follow the active source once the catalog arrives, until the user picks a tab.
+  useEffect(() => { if (!sourceId && imageModels) setSourceId(imageModels.active_source); }, [imageModels, sourceId]);
+  if (!imageModels) {
+    return <div className="empty-panel compact"><Image size={22} /><strong>{t("正在加载生图模型…")}</strong></div>;
+  }
+  const sources = imageModels.sources;
+  const source = sources.find((item) => item.id === sourceId) ?? sources[0];
+  if (!source) return null;
+  const needsKey = source.requires_api_key && !source.api_key_available;
+  return (
+    <div className="provider-settings">
+      <div className="provider-tabs">
+        {sources.map((item) => <button type="button" key={item.id} className={item.id === source.id ? "active" : ""} onClick={() => setSourceId(item.id)}>{item.display_name}{item.active && <span />}</button>)}
+      </div>
+      <div className="provider-content">
+        <div className="section-heading">
+          <div>
+            <h2>{source.display_name}</h2>
+            <p>{t("image.modelCount", { count: source.models.length })}{source.requires_api_key ? ` · ${source.api_key_available ? t("密钥已配置") : t("未配置密钥")}` : ""}</p>
+          </div>
+          <button type="button" className="primary-button small" onClick={refresh}><RefreshCw size={13} />{t("刷新")}</button>
+        </div>
+        {needsKey && (
+          <div className="empty-panel compact">
+            <Image size={22} />
+            <strong>{t("需要 API 密钥")}</strong>
+            <span>{source.id === "pollinations"
+              ? t("使用 /tti source pollinations 配置 API 密钥，然后刷新。")
+              : t("请在“模型与提供商”页为该来源配置密钥后再生成图片。")}</span>
+          </div>
+        )}
+        <div className="settings-model-grid">
+          {source.models.map((model) => (
+            <div className={`settings-model-card ${source.active && source.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
+              <button type="button" className="model-card-main" onClick={() => selectImageModel(source.id, model)}>
+                <div><strong>{model.display_name}</strong><span title={model.id}>{model.id}</span></div>
+                {source.active && source.selected_model_id === model.id ? <CheckCircle2 size={16} /> : <Circle size={14} />}
+              </button>
+              {model.description && <p>{t(model.description)}</p>}
+              <div className="tag-row">
+                <span>{model.supports_edit ? t("支持编辑") : t("仅生成")}</span>
+                {model.default_size && <span>{model.default_size}</span>}
+                {source.id === "local" && !model.exists && <span>{t("模型文件缺失")}</span>}
+              </div>
+            </div>
+          ))}
+          {source.models.length === 0 && (
+            <div className="empty-panel compact">
+              <Image size={22} />
+              <strong>{t("该来源暂无可用生图模型")}</strong>
+              <span>{t("先在下方或“模型与提供商”页填好连接配置，再刷新生图目录。")}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsView({
   state,
   updateSetting,
@@ -2731,6 +2805,9 @@ function SettingsView({
   updatePreferences,
   selectBackground,
   clearBackground,
+  imageModels,
+  refreshImageModels,
+  selectImageModel,
 }: {
   state: DesktopState;
   updateSetting: (key: string, value: unknown) => void;
@@ -2749,9 +2826,12 @@ function SettingsView({
   updatePreferences: (patch: Partial<UiPreferences>) => void;
   selectBackground: () => void;
   clearBackground: () => void;
+  imageModels: ImageModelSourcesState | null;
+  refreshImageModels: () => void;
+  selectImageModel: (source: string, model: ImageModelRecord) => void;
 }) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"general" | "appearance" | "conversation" | "models" | "about">("general");
+  const [tab, setTab] = useState<"general" | "appearance" | "conversation" | "models" | "images" | "about">("general");
   const items = state.settings.items.filter((item) => !item.key.startsWith("plugin_enabled:") && !["active_model_source", "active_model_index"].includes(item.key));
   const activeBackgroundUrl = effectiveBackgroundUrl(preferences);
   const activeBackgroundLabel = preferences.backgroundPreset === "custom"
@@ -2765,6 +2845,7 @@ function SettingsView({
         <button type="button" className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={15} />{t("外观")}</button>
         <button type="button" className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}><MessageSquare size={15} />{t("对话显示")}</button>
         <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><Brain size={15} />{t("模型与提供商")}</button>
+        <button type="button" className={tab === "images" ? "active" : ""} onClick={() => setTab("images")}><Image size={15} />{t("生图模型")}</button>
         <button type="button" className={tab === "about" ? "active" : ""} onClick={() => setTab("about")}><Info size={15} />{t("关于")}</button>
       </div>
       <div className="settings-content">
@@ -2942,6 +3023,12 @@ function SettingsView({
           <>
             <PageHeader icon={<Brain size={20} />} title={t("模型与提供商")} description={t("选择模型、配置凭据，并检查模型级思考与多模态能力。")} />
             <ProviderSettings state={state} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={addStandard} editStandard={editStandard} deleteStandard={deleteStandard} customProviders={customProviders} />
+          </>
+        )}
+        {tab === "images" && (
+          <>
+            <PageHeader icon={<Image size={20} />} title={t("生图模型")} description={t("选择用于文生图和图片编辑的模型；所选模型会用于内置图片生成工具。")} />
+            <ImageProviderSettings imageModels={imageModels} refresh={refreshImageModels} selectImageModel={selectImageModel} />
           </>
         )}
         {tab === "about" && (
@@ -4557,6 +4644,9 @@ export default function App() {
   const [contextLimitModal, setContextLimitModal] = useState<{ provider: CustomProviderRecord; model: CustomProviderModel } | null>(null);
   const [providerProbes, setProviderProbes] = useState<Record<string, ProviderProbe>>({});
   const [providerProbing, setProviderProbing] = useState(false);
+  // Image-generation catalog is fetched lazily (its own bridge action), so it is
+  // not part of DesktopState and lives here until the settings tab asks for it.
+  const [imageModels, setImageModels] = useState<ImageModelSourcesState | null>(null);
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; name: string } | null>(null);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
@@ -5652,6 +5742,21 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [customProviderById, selectCustomProviderModel, t, toast]);
 
+  const refreshImageModels = useCallback(async () => {
+    try {
+      const response = await window.reverie.request("refreshImageModelSources", {});
+      setImageModels(response.imageModels);
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [toast]);
+
+  const selectImageModel = useCallback(async (source: string, model: ImageModelRecord) => {
+    try {
+      const response = await window.reverie.request("selectImageModel", { source, modelId: model.id });
+      setImageModels(response.imageModels);
+      toast(t("image.switched", { name: model.display_name }), "success");
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+  }, [t, toast]);
+
   const saveCustomProviderContextLimit = useCallback(async (
     provider: CustomProviderRecord,
     model: CustomProviderModel,
@@ -5913,9 +6018,9 @@ export default function App() {
     if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
-    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} />;
+    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} />;
     return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
-  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
+  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;

@@ -681,6 +681,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.list_signals",
             "node.list_properties",
             "node.list_methods",
+            "scene.find_nodes",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -754,6 +755,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["node.list_signals"].get("permission") == "read"
         assert definitions_by_name["node.list_properties"].get("permission") == "read"
         assert definitions_by_name["node.list_methods"].get("permission") == "read"
+        assert definitions_by_name["scene.find_nodes"].get("permission") == "read"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -777,6 +779,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.list_signals",
             "node.list_properties",
             "node.list_methods",
+            "scene.find_nodes",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1007,6 +1010,47 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and "no_such_method" not in method_names
         ), node_methods.error or node_methods.data
 
+        # scene.find_nodes rounds out the §9 discovery family on the same shared
+        # catalog: locate live nodes by an is-a class filter and/or a case-sensitive
+        # name glob over the whole open scene in one call, so an agent can target a
+        # node without walking a full scene.get_tree dump. Read-only; nothing mutated
+        # or saved. The AnimationPlayer copy reparented under StateMachine above makes
+        # the type filter a genuine cross-branch, multi-hit query, and its result must
+        # come back as sorted root-relative paths with a matching count.
+        found_by_type = executor.execute(
+            dynamic_tools["scene.find_nodes"],
+            {"type": "AnimationPlayer"},
+        )
+        assert (
+            found_by_type.success is True
+            and found_by_type.data.get("nodes") == ["AnimationPlayer", "StateMachine/AnimationPlayer2"]
+            and found_by_type.data.get("count") == 2
+            and found_by_type.data.get("type") == "AnimationPlayer"
+        ), found_by_type.error or found_by_type.data
+        found_by_name = executor.execute(
+            dynamic_tools["scene.find_nodes"],
+            {"pattern": "StateMachine"},
+        )
+        assert (
+            found_by_name.success is True
+            and found_by_name.data.get("nodes") == ["StateMachine"]
+            and found_by_name.data.get("count") == 1
+            and found_by_name.data.get("pattern") == "StateMachine"
+        ), found_by_name.error or found_by_name.data
+        found_combined = executor.execute(
+            dynamic_tools["scene.find_nodes"],
+            {"type": "AnimationPlayer", "pattern": "*2"},
+        )
+        assert (
+            found_combined.success is True
+            and found_combined.data.get("nodes") == ["StateMachine/AnimationPlayer2"]
+            and found_combined.data.get("count") == 1
+        ), found_combined.error or found_combined.data
+        rejected_find = executor.execute(
+            dynamic_tools["scene.find_nodes"],
+            {},
+        )
+        assert rejected_find.success is False, rejected_find.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

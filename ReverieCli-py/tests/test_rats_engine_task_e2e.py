@@ -679,6 +679,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.disconnect_signal",
             "node.get_signal_connections",
             "node.list_signals",
+            "node.list_properties",
+            "node.list_methods",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -750,6 +752,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["scene.disconnect_signal"].get("permission") == "edit"
         assert definitions_by_name["node.get_signal_connections"].get("permission") == "read"
         assert definitions_by_name["node.list_signals"].get("permission") == "read"
+        assert definitions_by_name["node.list_properties"].get("permission") == "read"
+        assert definitions_by_name["node.list_methods"].get("permission") == "read"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -771,6 +775,8 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.disconnect_signal",
             "node.get_signal_connections",
             "node.list_signals",
+            "node.list_properties",
+            "node.list_methods",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -960,6 +966,46 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             and unwired.data.get("applied") is True
             and unwired.data.get("connections") == []
         ), unwired.error or unwired.data
+
+        # node-introspection tools are the §9 discovery family on the same shared
+        # catalog: enumerate a live node's inspectable properties (with type and
+        # editability) and its callable methods -- which is how an agent finds a
+        # valid target for node.set_property and a valid method for
+        # scene.connect_signal before calling them. Both are read-only; nothing is
+        # mutated or saved. The editability the engine reports must survive the
+        # round-trip, so an exported Resource property is asserted non-editable
+        # while a plain node property is not.
+        node_properties = executor.execute(
+            dynamic_tools["node.list_properties"],
+            {"node_path": "StateMachine"},
+        )
+        prop_entries = node_properties.data.get("properties", []) if node_properties.success else []
+        prop_names = [entry.get("name") for entry in prop_entries]
+        configuration_entry = next(
+            (entry for entry in prop_entries if entry.get("name") == "configuration"), None
+        )
+        assert (
+            node_properties.success is True
+            and len(prop_entries) > 0
+            and node_properties.data.get("count") == len(prop_entries)
+            and all(set(entry.keys()) == {"name", "type", "editable"} for entry in prop_entries)
+            and prop_names == sorted(prop_names)
+            and "process_mode" in prop_names
+            and configuration_entry == {"name": "configuration", "type": "Object", "editable": False}
+        ), node_properties.error or node_properties.data
+        node_methods = executor.execute(
+            dynamic_tools["node.list_methods"],
+            {"node_path": "StateMachine"},
+        )
+        method_names = node_methods.data.get("methods", []) if node_methods.success else []
+        assert (
+            node_methods.success is True
+            and all(isinstance(name, str) for name in method_names)
+            and method_names == sorted(set(method_names))
+            and node_methods.data.get("count") == len(method_names)
+            and "queue_free" in method_names
+            and "no_such_method" not in method_names
+        ), node_methods.error or node_methods.data
 
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow

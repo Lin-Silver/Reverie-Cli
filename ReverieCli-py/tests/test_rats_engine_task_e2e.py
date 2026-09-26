@@ -682,6 +682,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.list_properties",
             "node.list_methods",
             "scene.find_nodes",
+            "scene.rename_node",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -756,6 +757,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["node.list_properties"].get("permission") == "read"
         assert definitions_by_name["node.list_methods"].get("permission") == "read"
         assert definitions_by_name["scene.find_nodes"].get("permission") == "read"
+        assert definitions_by_name["scene.rename_node"].get("permission") == "edit"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -780,6 +782,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.list_properties",
             "node.list_methods",
             "scene.find_nodes",
+            "scene.rename_node",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1051,6 +1054,47 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {},
         )
         assert rejected_find.success is False, rejected_find.data
+        # scene.rename_node is the edit counterpart on the same shared catalog:
+        # rename one live node in place and have it answer to the new path. The
+        # AnimationPlayer copy reparented under StateMachine gives a cross-branch,
+        # non-root target, so the reported new_node_path must carry the StateMachine
+        # prefix rather than being a bare name. find_nodes (read) is used to confirm
+        # the move landed and the old name retired -- the two discovery tools
+        # cross-checking each other over one session.
+        renamed = executor.execute(
+            dynamic_tools["scene.rename_node"],
+            {"node_path": "StateMachine/AnimationPlayer2", "name": "AnimationPlayerRenamed"},
+        )
+        assert (
+            renamed.success is True
+            and renamed.data.get("applied") is True
+            and renamed.data.get("node_path") == "StateMachine/AnimationPlayer2"
+            and renamed.data.get("new_node_path") == "StateMachine/AnimationPlayerRenamed"
+            and renamed.data.get("name") == "AnimationPlayerRenamed"
+            and renamed.data.get("execution_thread") == "main"
+        ), renamed.error or renamed.data
+        confirm_renamed = executor.execute(
+            dynamic_tools["scene.find_nodes"],
+            {"pattern": "AnimationPlayerRenamed"},
+        )
+        assert (
+            confirm_renamed.success is True
+            and confirm_renamed.data.get("nodes") == ["StateMachine/AnimationPlayerRenamed"]
+        ), confirm_renamed.error or confirm_renamed.data
+        confirm_retired = executor.execute(
+            dynamic_tools["scene.find_nodes"],
+            {"pattern": "AnimationPlayer2"},
+        )
+        assert (
+            confirm_retired.success is True
+            and confirm_retired.data.get("nodes") == []
+        ), confirm_retired.error or confirm_retired.data
+        # An invalid Node name is refused before any mutation, structure-independent.
+        rejected_rename = executor.execute(
+            dynamic_tools["scene.rename_node"],
+            {"node_path": "StateMachine/AnimationPlayerRenamed", "name": "bad/name"},
+        )
+        assert rejected_rename.success is False, rejected_rename.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

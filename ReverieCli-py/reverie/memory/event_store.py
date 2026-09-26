@@ -87,15 +87,35 @@ class EventStore:
 
     def tail(self, limit: int = 100, *, event_type: str = "") -> List[EventRecord]:
         try:
-            wanted = str(event_type or "").strip().lower()
-            events = [
-                event
-                for event in self.iter_events()
-                if not wanted or event.event_type == wanted
-            ]
+            return self.query(event_type=event_type, limit=limit)
         except Exception:
             return []
-        return events[-max(1, int(limit or 1)) :]
+
+    def _iter_recent_events(self) -> Iterable[EventRecord]:
+        """Read complete UTF-8 records backwards without loading the log."""
+        if not self.events_path.exists():
+            return
+        with self.events_path.open("rb") as handle:
+            handle.seek(0, 2)
+            position = handle.tell()
+            pending = b""
+            while position:
+                size = min(position, 65536)
+                position -= size
+                handle.seek(position)
+                lines = (handle.read(size) + pending).split(b"\n")
+                pending = lines.pop(0)
+                if position == 0:
+                    lines.insert(0, pending)
+                for line in reversed(lines):
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    if isinstance(data, dict):
+                        yield EventRecord.from_dict(data)
 
     def query(
         self,
@@ -106,8 +126,9 @@ class EventStore:
     ) -> List[EventRecord]:
         wanted_type = str(event_type or "").strip().lower()
         needle = str(contains or "").strip().lower()
+        wanted_count = max(1, int(limit or 1))
         hits: List[EventRecord] = []
-        for event in self.iter_events():
+        for event in self._iter_recent_events():
             if wanted_type and event.event_type != wanted_type:
                 continue
             if needle:
@@ -115,4 +136,6 @@ class EventStore:
                 if needle not in haystack:
                     continue
             hits.append(event)
-        return hits[-max(1, int(limit or 1)) :]
+            if len(hits) >= wanted_count:
+                break
+        return list(reversed(hits))

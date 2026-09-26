@@ -176,12 +176,31 @@ class MemoryStore:
                     (item.id, self._search_text(item)),
                 )
 
-    def load_items(self, *, include_deleted: bool = False) -> List[MemoryItem]:
-        where = "" if include_deleted else "WHERE status='active'"
+    def load_items(
+        self, *, include_deleted: bool = False, scope: str = "",
+        memory_type: str = "", session_id: str = "", limit: Optional[int] = None,
+    ) -> List[MemoryItem]:
+        conditions = [] if include_deleted else ["status='active'"]
+        parameters: List[Any] = []
+        if scope:
+            conditions.append("scope=?")
+            parameters.append(normalize_scope(scope, ""))
+        if memory_type:
+            conditions.append("memory_type=?")
+            parameters.append(normalize_memory_type(memory_type, ""))
+        if session_id:
+            conditions.append("(scope!='session' OR COALESCE(json_extract(payload, '$.metadata.session_id'), '') IN ('', ?))")
+            parameters.append(str(session_id))
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = " LIMIT ?"
+            parameters.append(max(1, int(limit)))
         try:
             with self._connect() as connection:
                 rows = connection.execute(
-                    f"SELECT payload FROM memories {where} ORDER BY updated_at DESC, id ASC"
+                    f"SELECT payload FROM memories {where} ORDER BY updated_at DESC, id ASC{limit_clause}",
+                    parameters,
                 ).fetchall()
         except sqlite3.Error:
             return []
@@ -203,7 +222,7 @@ class MemoryStore:
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT payload FROM memories WHERE fingerprint=? ORDER BY updated_at DESC LIMIT 1",
+                "SELECT payload FROM memories WHERE fingerprint=? AND status='active' ORDER BY updated_at DESC LIMIT 1",
                 (item.fingerprint(),),
             ).fetchone()
             if row is not None:
@@ -252,7 +271,7 @@ class MemoryStore:
         return self._decode(row) if row is not None else None
 
     def correct(self, memory_id: str, content: str, *, tags: Optional[List[str]] = None) -> Optional[MemoryItem]:
-        existing = self.get(memory_id, include_deleted=True)
+        existing = self.get(memory_id)
         if existing is None:
             return None
         replacement = MemoryItem.from_dict(
@@ -364,8 +383,23 @@ class MemoryStore:
                 item = self._decode(row)
                 item.last_accessed_at = utc_now()
                 item.access_count = max(0, int(item.access_count or 0)) + 1
-                self._write_item(connection, item)
+                connection.execute(
+                    "UPDATE memories SET payload=? WHERE id=?",
+                    (json.dumps(item.to_dict(), ensure_ascii=False, separators=(",", ":")), memory_id),
+                )
             connection.commit()
+
+    def is_searchable(self, memory_id: str) -> bool:
+        """Check committed persistence and index membership without ranking memories."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM memories WHERE id=? AND status='active'", (memory_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if not self._fts_available:
+                return True  # The retriever falls back to the persisted records.
+            return connection.execute("SELECT id FROM memory_fts WHERE id=?", (memory_id,)).fetchone() is not None
 
     def status(self) -> Dict[str, Any]:
         with self._connect() as connection:

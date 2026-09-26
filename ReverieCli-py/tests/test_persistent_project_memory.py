@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from reverie.agent.system_prompt import build_system_prompt
+from reverie.agent.tool_descriptions import get_tool_descriptions_for_mode
 from reverie.memory import MEMANTO_MEMORY_TYPES, MemoryOS
 from reverie.tools.codebase_retrieval import CodebaseRetrievalTool
 from reverie.tools.memory_manager import MemoryManagerTool
@@ -124,3 +125,15 @@ def test_context_engine_memory_query_and_system_prompt_use_active_memory(tmp_pat
     assert "packaged executable" in result.output
     assert "Proactively call `memory_retrieval" in prompt
     assert "memory_manager(action=\"remember\"" in prompt
+    assert "call `memory_manager(action=\"remember\")` directly" in prompt
+    assert "in your own words as `content`" in prompt
+    assert "only after a successful tool result" in prompt
+    assert "Do not call `memory_retrieval` just to verify a successful remember call" in prompt
+    assert "a successful remember result completes the task; stop calling tools" in prompt
+    manifest = get_tool_descriptions_for_mode("reverie")
+    assert "### `memory_manager`" in manifest
+    assert "model-authored content" in manifest
+    assert "scope: session, project, workflow, or procedural" in manifest
+    assert "stop after a successful memory_manager remember result" in manifest
+    assert "repository retrieval is unnecessary" in manifest
+    assert "need no repository retrieval" in MemoryManagerTool.description

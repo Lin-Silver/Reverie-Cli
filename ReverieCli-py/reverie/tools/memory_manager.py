@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from .base import BaseTool, ToolResult
-from .memory_retrieval import get_memory_os_from_context
+from .memory_retrieval import get_memory_os_from_context, get_memory_session_id
 
 
 class MemoryManagerTool(BaseTool):
@@ -18,10 +18,13 @@ class MemoryManagerTool(BaseTool):
     tool_tags = ("memory", "manager", "correction", "deletion", "consolidation")
     read_only = False
     concurrency_safe = False
+    workspace_checkpoint = False
 
     description = """Manage Reverie's project-isolated persistent MemoryItems.
 
-Use remember for explicit durable instructions, facts, decisions, goals, commitments, preferences, relationships, context, events, learnings, observations, artifacts, or errors. Do not use it for greetings, acknowledgements, thanks, or other transient chatter. Never store credentials. Corrections create a new version; conflicts are surfaced rather than silently overwritten."""
+Use remember for explicit durable instructions, facts, decisions, goals, commitments, preferences, relationships, context, events, learnings, observations, artifacts, or errors. Do not use it for greetings, acknowledgements, thanks, or other transient chatter. Never store credentials. Corrections create a new version; conflicts are surfaced rather than silently overwritten.
+
+For an exact memory_id, call get, correct, or delete directly. These actions operate on memory records and need no repository retrieval. After the requested action succeeds, briefly report its result and stop."""
 
     parameters = {
         "type": "object",
@@ -33,9 +36,9 @@ Use remember for explicit durable instructions, facts, decisions, goals, commitm
             },
             "memory_id": {"type": "string", "description": "Target memory id for get/correct/delete.", "default": ""},
             "query": {"type": "string", "description": "Optional search query for list.", "default": ""},
-            "content": {"type": "string", "description": "Replacement content for correct.", "default": ""},
-            "scope": {"type": "string", "description": "Optional scope filter for list.", "default": ""},
-            "memory_type": {"type": "string", "description": "Optional type filter for list.", "default": ""},
+            "content": {"type": "string", "description": "Model-authored, self-contained memory text for remember; replacement text for correct.", "default": ""},
+            "scope": {"type": "string", "description": "Scope for remember (default project) or list filter: session, project, workflow, procedural.", "default": ""},
+            "memory_type": {"type": "string", "description": "Type for remember (default fact) or list filter, such as instruction, preference, project_decision.", "default": ""},
             "tags": {"type": "array", "items": {"type": "string"}, "description": "Durable memory tags.", "default": []},
             "confidence": {"type": "number", "description": "Confidence from 0 to 1.", "default": 0.8},
             "provenance": {"type": "string", "description": "Origin such as explicit_statement, inferred_from_event, or verified_artifact.", "default": "explicit_statement"},
@@ -65,11 +68,12 @@ Use remember for explicit durable instructions, facts, decisions, goals, commitm
                 source=str(kwargs.get("source") or "agent"),
                 topic=str(kwargs.get("topic") or ""),
                 supersedes=list(kwargs.get("supersedes") or []),
+                session_id=get_memory_session_id(self.context),
             )
             item = remembered["memory"]
             conflicts = remembered["conflicts"]
             return ToolResult.ok(
-                f"Remembered {item.id}; immediately searchable=yes; conflicts={len(conflicts)}.",
+                f"Remembered {item.id}; immediately searchable={'yes' if remembered['searchable_immediately'] else 'no'}; conflicts={len(conflicts)}.",
                 {
                     "memory": item.to_dict(),
                     "conflicts": [conflict.to_dict() for conflict in conflicts],
@@ -143,10 +147,16 @@ Use remember for explicit durable instructions, facts, decisions, goals, commitm
                 scope=str(kwargs.get("scope") or ""),
                 memory_type=str(kwargs.get("memory_type") or ""),
                 limit=limit,
+                session_id=get_memory_session_id(self.context),
             )
             items = [hit.item for hit in hits]
         else:
-            items = memory_os.memory_store.load_items()[:limit]
+            items = memory_os.memory_store.load_items(
+                scope=str(kwargs.get("scope") or ""),
+                memory_type=str(kwargs.get("memory_type") or ""),
+                session_id=get_memory_session_id(self.context),
+                limit=limit,
+            )
         if not items:
             return ToolResult.ok("No structured memories found.", {"memories": []})
         lines = ["# Structured Memories"]

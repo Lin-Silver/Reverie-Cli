@@ -158,13 +158,15 @@ class MemoryItem:
     def fingerprint(self) -> str:
         import hashlib
 
-        raw = "\n".join(
-            [
-                normalize_scope(self.scope),
-                normalize_memory_type(self.memory_type),
-                " ".join(str(self.content or "").lower().split()),
-            ]
-        )
+        parts = [
+            normalize_scope(self.scope),
+            normalize_memory_type(self.memory_type),
+            " ".join(str(self.content or "").lower().split()),
+        ]
+        session_id = str((self.metadata or {}).get("session_id") or "")
+        if normalize_scope(self.scope) == "session" and session_id:
+            parts.append(session_id)
+        raw = "\n".join(parts)
         return hashlib.sha1(raw.encode("utf-8", errors="replace")).hexdigest()[:24]
 
     def to_dict(self) -> Dict[str, Any]:

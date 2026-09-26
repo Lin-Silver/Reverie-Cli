@@ -11,7 +11,9 @@
     "Use exact tool names and exact schema field names.",
     "Start with required fields, then add optional fields only when needed.",
     "Prefer narrow, reversible, read-only calls before high-impact calls.",
-    "Retrieve or inspect before editing; verify after editing.",
+    "Retrieve or inspect repository evidence before code edits; verify after code edits. For memory record operations, use the memory tools and their reported results.",
+    "For a memory request with an exact memory_id, call memory_manager get, correct, or delete directly. Stop after the requested memory action succeeds; repository retrieval is unnecessary.",
+    "For a direct save request, stop after a successful memory_manager remember result; do not call memory_retrieval, list, get, or status to verify the write.",
     "After any tool use, return a user-facing response instead of stopping at raw output."
   ],
   "mode_profiles": {
@@ -31,6 +33,8 @@
       "tools": [
         "codebase-retrieval",
         "git-commit-retrieval",
+        "memory_retrieval",
+        "memory_manager",
         "str_replace_editor",
         "create_file",
         "file_ops",
@@ -519,7 +523,7 @@
     },
     "memory_retrieval": {
       "purpose": "Query structured long-term memory with scope/type/evidence/confidence metadata.",
-      "use_when": "User preferences, project decisions, failures, successful workflows, or prior feedback matter.",
+      "use_when": "User preferences, project decisions, failures, successful workflows, or prior feedback matter. Do not call it just to confirm that memory_manager successfully saved and indexed a new memory.",
       "parameters": {
         "query": "Current request or memory search query.",
         "scope": "Optional session, project, workflow, or procedural filter.",
@@ -532,16 +536,20 @@
       ]
     },
     "memory_manager": {
-      "purpose": "List, inspect, correct, delete, or consolidate structured MemoryItems.",
-      "use_when": "A durable memory needs to be created, explained, corrected, deleted, or manually consolidated; do not use it for transient chatter.",
+      "purpose": "Create, list, inspect, correct, delete, or consolidate structured MemoryItems.",
+      "use_when": "Use remember to create a durable memory from the model-authored content; manage it when the user asks. Do not use it for transient chatter.",
       "parameters": {
-        "action": "list, get, correct, delete, or consolidate.",
+        "action": "remember, list, get, correct, delete, consolidate, conflicts, or status.",
         "memory_id": "Target MemoryItem id.",
         "query": "Optional list/search query.",
-        "content": "Replacement content for correct.",
+        "content": "Concise memory text authored by the model for remember, or replacement text for correct.",
+        "memory_type": "Type of durable memory, such as instruction, preference, decision, fact, or learning.",
+        "scope": "Memory scope: session, project, workflow, or procedural.",
+        "topic": "Stable topic key for conflict detection and versioning.",
         "hard": "Optional hard-delete flag."
       },
       "examples": [
+        "memory_manager(action=\"remember\", content=\"Run the affected end-to-end workflow before reporting a feature complete.\", memory_type=\"instruction\", scope=\"project\", topic=\"verification\")",
         "memory_manager(action=\"list\", query=\"failed command\")",
         "memory_manager(action=\"correct\", memory_id=\"mem_...\", content=\"...\")"
       ]

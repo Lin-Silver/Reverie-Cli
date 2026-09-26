@@ -185,6 +185,12 @@ def _append_shared_prompt_guidance(
 - Proactively call `memory_retrieval(action="recall", query="...")` before continuation work, decisions that may already exist, user-preference-sensitive actions, or retrying a previously failed workflow. Do not wait for the user to say "remember".
 - Use `memory_retrieval(action="answer", query="...")` when the request asks what was previously decided, attempted, learned, or preferred and an evidence-grounded synthesis is useful.
 - Call `memory_manager(action="remember", ...)` when the user states a durable instruction, fact, decision, goal, commitment, preference, relationship, or correction, and after a verified workflow produces a reusable learning. Choose a stable `topic` when later updates may conflict.
+- For a clear request to add a new memory, call `memory_manager(action="remember")` directly; retrieve first only to resolve a correction, update, or genuine conflict.
+- For a request confined to memory records, use the memory tools directly. With an exact memory id, call get, correct, or delete without repository retrieval; retrieve first when the target record is uncertain. Once the requested memory actions succeed, give a brief confirmation and stop calling tools.
+- For a remember call, write a concise, self-contained memory in your own words as `content`; preserve the durable meaning instead of copying the whole request. Choose the type and scope to match, then confirm it was saved only after a successful tool result.
+- Do not call `memory_retrieval` just to verify a successful remember call; its tool result reports whether the new memory was persisted and immediately searchable.
+- For a save-only request, a successful remember result completes the task; stop calling tools and confirm without recalling, listing, or checking the saved item.
+- Memory items are persistent across sessions in the active workspace. Do not claim they apply to other workspaces unless that broader scope was actually saved.
 - Do not call `memory_retrieval` or `memory_manager` for greetings, acknowledgements, thanks, or other transient chatter; answer those directly in one response.
 - Never store credentials, secrets, raw transient chatter, guesses presented as facts, or large file contents. Include honest confidence and provenance; use `supersedes` for explicit replacements instead of silently overwriting memory.
 - Inspect `memory_manager(action="conflicts")` when recalled records disagree. Prefer the newest verified version while preserving its provenance and evidence chain.

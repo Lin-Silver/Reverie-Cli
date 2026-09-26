@@ -1296,17 +1296,20 @@ class ToolExecutor:
                 return result
 
         before_checkpoint = None
-        if isinstance(shadow_guard, ShadowGitManager) and needs_workspace_checkpoint:
-            try:
-                before_checkpoint = shadow_guard.checkpoint(
-                    f"Before tool {tool.name}",
-                    force_paths=self._candidate_file_paths(tool.name, normalized_arguments),
-                )
-            except WorkspaceGuardError as exc:
-                return ToolResult.fail(f"Workspace checkpoint unavailable; tool execution refused: {exc}")
-
         started = time.perf_counter()
         try:
+            if (
+                isinstance(shadow_guard, ShadowGitManager)
+                and needs_workspace_checkpoint
+                and not bool(getattr(tool, "read_only", False))
+            ):
+                try:
+                    before_checkpoint = shadow_guard.checkpoint(
+                        f"Before tool {tool.name}",
+                        force_paths=self._candidate_file_paths(tool.name, normalized_arguments),
+                    )
+                except WorkspaceGuardError as exc:
+                    raise WorkspaceGuardError(f"Workspace checkpoint unavailable; tool execution refused: {exc}") from exc
             result = tool.execute(**normalized_arguments)
             if isinstance(shadow_guard, ShadowGitManager) and before_checkpoint is not None:
                 deleted_paths = shadow_guard.deleted_paths_since(before_checkpoint.commit)

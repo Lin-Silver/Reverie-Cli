@@ -12,7 +12,7 @@ from .assembler import ContextAssembler
 from .consolidator import MemoryConsolidator
 from .event_store import EventStore
 from .evolution import EvolutionFeedbackPipeline
-from .models import MemoryContextPackage, EventRecord, MemoryItem, coerce_tags, new_id, utc_now
+from .models import MemoryContextPackage, EventRecord, MemoryItem, coerce_tags, new_id, normalize_memory_type, normalize_scope, utc_now
 from .retriever import MemoryRetriever, tokenize
 from .safety import redact_memory_text
 from .store import MemoryStore
@@ -86,6 +86,8 @@ class MemoryOS:
         safe_content = redact_memory_text(content).strip()
         if not safe_content:
             raise ValueError("Memory content is required.")
+        scope = normalize_scope(scope)
+        memory_type = normalize_memory_type(memory_type)
         event = self.event_store.append(
             "memory_remembered",
             {
@@ -123,11 +125,10 @@ class MemoryOS:
             item.metadata["conflict_ids"] = [conflict.id for conflict in conflicts]
         superseded_ids = [str(value) for value in (supersedes or []) if str(value or "").strip()]
         stored = self.memory_store.supersede(superseded_ids, item) if superseded_ids else self.memory_store.upsert(item)
-        immediate_hits = self.retriever.search(safe_content, limit=3)
         return {
             "memory": stored,
             "conflicts": conflicts,
-            "searchable_immediately": any(hit.item.id == stored.id for hit in immediate_hits),
+            "searchable_immediately": self.memory_store.is_searchable(stored.id),
         }
 
     def detect_conflicts(self, candidate: MemoryItem) -> List[MemoryItem]:
@@ -135,10 +136,14 @@ class MemoryOS:
         candidate_topic = str((candidate.metadata or {}).get("topic") or "").strip().lower()
         candidate_tokens = set(tokenize(candidate.content))
         candidate_polarity = self._polarity(candidate.content)
+        candidate_fingerprint = candidate.fingerprint()
         conflicts: List[MemoryItem] = []
         decision_types = {"decision", "project_decision", "instruction", "preference", "commitment", "goal"}
-        for existing in self.memory_store.load_items():
-            if existing.id == candidate.id or existing.fingerprint() == candidate.fingerprint():
+        for existing in self.memory_store.load_items(
+            scope=candidate.scope,
+            session_id=str((candidate.metadata or {}).get("session_id") or ""),
+        ):
+            if existing.id == candidate.id or existing.fingerprint() == candidate_fingerprint:
                 continue
             if existing.scope != candidate.scope:
                 continue
@@ -149,12 +154,17 @@ class MemoryOS:
                 continue
             existing_topic = str((existing.metadata or {}).get("topic") or "").strip().lower()
             explicit_topic_conflict = bool(candidate_topic and existing_topic and candidate_topic == existing_topic)
+            if explicit_topic_conflict:
+                conflicts.append(existing)
+                continue
+            polarity_conflict = candidate_polarity != 0 and self._polarity(existing.content) == -candidate_polarity
+            if not polarity_conflict:
+                continue
             existing_tokens = set(tokenize(existing.content))
             overlap = len(candidate_tokens.intersection(existing_tokens)) / max(
                 1, min(len(candidate_tokens), len(existing_tokens))
             )
-            polarity_conflict = candidate_polarity != 0 and self._polarity(existing.content) == -candidate_polarity
-            if explicit_topic_conflict or (overlap >= 0.45 and polarity_conflict):
+            if overlap >= 0.45:
                 conflicts.append(existing)
         return conflicts[:20]
 

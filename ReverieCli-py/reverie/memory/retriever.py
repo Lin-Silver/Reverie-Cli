@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .models import MemoryItem, MemorySearchHit, normalize_memory_type, normalize_scope
@@ -49,10 +50,17 @@ def _character_ngrams(value: Any, size: int = 3) -> Set[str]:
 
 
 def _jaccard(left: Iterable[str], right: Iterable[str]) -> float:
-    a, b = set(left), set(right)
+    a = left if isinstance(left, (set, frozenset)) else set(left)
+    b = right if isinstance(right, (set, frozenset)) else set(right)
     if not a or not b:
         return 0.0
-    return len(a.intersection(b)) / max(1, len(a.union(b)))
+    overlap = len(a.intersection(b))
+    return overlap / max(1, len(a) + len(b) - overlap)
+
+
+@lru_cache(maxsize=2048)
+def _cached_text_features(text: str):
+    return frozenset(tokenize(text)), frozenset(_character_ngrams(text))
 
 
 class MemoryRetriever:
@@ -132,7 +140,9 @@ class MemoryRetriever:
         include_history = as_of_time is not None
         hits: List[MemorySearchHit] = []
 
-        for item in self.store.load_items(include_deleted=include_history):
+        for item in self.store.load_items(
+            include_deleted=include_history, scope=scope, memory_type=memory_type, session_id=session_id,
+        ):
             if item.status == "deleted":
                 continue
             if not include_history and item.status != "active":
@@ -165,10 +175,13 @@ class MemoryRetriever:
                 continue
 
             searchable = " ".join([item.content, " ".join(item.tags or []), str((item.metadata or {}).get("topic") or "")])
-            item_tokens = set(tokenize(searchable))
+            if len(searchable) <= 4096:
+                item_tokens, item_ngrams = _cached_text_features(searchable)
+            else:
+                item_tokens, item_ngrams = set(tokenize(searchable)), _character_ngrams(searchable)
             overlap = query_tokens.intersection(item_tokens)
             token_similarity = _jaccard(query_tokens, item_tokens)
-            char_similarity = _jaccard(query_ngrams, _character_ngrams(searchable))
+            char_similarity = _jaccard(query_ngrams, item_ngrams)
             exact_phrase = bool(query_text and query_text.lower() in searchable.lower())
             memory_type_name = normalize_memory_type(item.memory_type)
 
@@ -227,12 +240,15 @@ class MemoryRetriever:
         """Apply a small MMR-style redundancy penalty to the fused ranking."""
         remaining = sorted(hits, key=lambda hit: (-hit.score, hit.item.id))
         selected: List[MemorySearchHit] = []
+        content_tokens: Dict[str, Set[str]] = {}
         while remaining and len(selected) < limit:
             best_index = 0
             best_utility = float("-inf")
             for index, hit in enumerate(remaining[: max(40, limit * 4)]):
+                if hit.item.id not in content_tokens:
+                    content_tokens[hit.item.id] = set(tokenize(hit.item.content))
                 redundancy = max(
-                    (_jaccard(tokenize(hit.item.content), tokenize(chosen.item.content)) for chosen in selected),
+                    (_jaccard(content_tokens[hit.item.id], content_tokens[chosen.item.id]) for chosen in selected),
                     default=0.0,
                 )
                 utility = hit.score - redundancy * 1.25

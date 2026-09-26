@@ -176,6 +176,10 @@ _NVIDIA_RATE_LIMIT_LOCK = threading.Lock()
 _NVIDIA_LAST_REQUEST_AT = 0.0
 
 
+def _api_retry_delay(attempt: int, initial_backoff: float) -> float:
+    return API_RETRY_DELAYS_SECONDS[min(attempt, len(API_RETRY_DELAYS_SECONDS) - 1)] * max(0.0, float(initial_backoff))
+
+
 def _wait_for_nvidia_rate_limit() -> None:
     global _NVIDIA_LAST_REQUEST_AT
     with _NVIDIA_RATE_LIMIT_LOCK:
@@ -1766,14 +1770,14 @@ def make_api_request_with_retry(
     proxies: Optional[Dict[str, str]] = None,
 ) -> Any:
     """
-    Make an API request with fixed retry delays.
+    Make an API request with bounded retries and configurable delay scaling.
     
     Args:
         url: The API endpoint URL
         headers: Request headers
         payload: Request payload (will be validated and sanitized)
-        max_retries: Ignored; Reverie uses five fixed retry attempts.
-        initial_backoff: Ignored; Reverie uses 1, 3, 5, 7, and 15 second delays.
+        max_retries: Maximum retries after the initial request; zero disables retries.
+        initial_backoff: Scale for the 1, 3, 5, 7, and 15 second delay schedule.
         stream: Whether to stream the response
         timeout: Request timeout in seconds
         on_retry: Optional callback invoked before each retry sleep.
@@ -1803,7 +1807,7 @@ def make_api_request_with_retry(
         is_nvidia_api_url(url)
         or is_nvidia_model(str(sanitized_payload.get("model", "") or ""))
     )
-    attempts = API_RETRY_ATTEMPTS
+    attempts = max(0, int(max_retries))
     for attempt in range(attempts + 1):
         try:
             if is_nvidia_request:
@@ -1922,7 +1926,7 @@ def make_api_request_with_retry(
             logger.warning(f"Request exception on attempt {attempt + 1}: {e}")
         
         if attempt < attempts:
-            backoff = API_RETRY_DELAYS_SECONDS[attempt]
+            backoff = _api_retry_delay(attempt, initial_backoff)
             if callable(on_retry) and last_error is not None:
                 try:
                     on_retry(float(backoff), attempt + 1, attempts, last_error)
@@ -2105,8 +2109,8 @@ class ReverieAgent:
         self.api_enable_debug_logging = False
 
         if config:
-            self.api_max_retries = API_RETRY_ATTEMPTS
-            self.api_initial_backoff = API_RETRY_DELAYS_SECONDS[0]
+            self.api_max_retries = max(0, int(getattr(config, 'api_max_retries', API_RETRY_ATTEMPTS)))
+            self.api_initial_backoff = max(0.0, float(getattr(config, 'api_initial_backoff', API_RETRY_DELAYS_SECONDS[0])))
             self.api_timeout = getattr(config, 'api_timeout', 60)
             self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
         
@@ -2229,8 +2233,8 @@ class ReverieAgent:
         self.api_timeout = 60
         self.api_enable_debug_logging = False
         if config:
-            self.api_max_retries = API_RETRY_ATTEMPTS
-            self.api_initial_backoff = API_RETRY_DELAYS_SECONDS[0]
+            self.api_max_retries = max(0, int(getattr(config, 'api_max_retries', API_RETRY_ATTEMPTS)))
+            self.api_initial_backoff = max(0.0, float(getattr(config, 'api_initial_backoff', API_RETRY_DELAYS_SECONDS[0])))
             self.api_timeout = getattr(config, 'api_timeout', 60)
             self.api_enable_debug_logging = getattr(config, 'api_enable_debug_logging', False)
 
@@ -2292,12 +2296,13 @@ class ReverieAgent:
                     "base_url": sdk_base_url,
                     "api_key": self.api_key,
                     "timeout": self._resolve_provider_timeout(),
+                    "max_retries": 0 if self.provider == "openai-chat" else self.api_max_retries,
                 }
                 http_client = self._build_proxied_http_client()
                 if http_client is not None:
                     client_kwargs["http_client"] = http_client
                 client_kwargs["default_headers"] = apply_reverie_client_identity(self.custom_headers)
-                optional_kwargs = ("default_headers", "timeout", "http_client")
+                optional_kwargs = ("default_headers", "timeout", "http_client", "max_retries")
                 while True:
                     try:
                         self._client = OpenAI(**client_kwargs)
@@ -2959,6 +2964,15 @@ class ReverieAgent:
 
         last_user_index, user_text = self._writer_latest_user_turn()
         if last_user_index < 0 or not user_text:
+            return None
+        direct_memory_request = re.match(
+            r"^(?:please\s+|请\s*)?(?:"
+            r"(?:call|invoke|use|调用|使用|用)\s*`?memory_(?:manager|retrieval)\b|"
+            r"(?:correct|update|delete|forget|修改|更新|删除|忘记)\s*(?:the\s+)?"
+            r"(?:memory\b|记忆)\s*[:：`]?\s*mem_[a-z0-9_]+\b)",
+            user_text,
+        )
+        if direct_memory_request:
             return None
         if any(
             phrase in user_text
@@ -3807,7 +3821,7 @@ class ReverieAgent:
 
     def _create_openai_chat_completion(self, **kwargs: Any) -> Any:
         """Call OpenAI-compatible chat completions with SDK compatibility and transient retries."""
-        retries = API_RETRY_ATTEMPTS
+        retries = self.api_max_retries
         last_error: Optional[Exception] = None
         call_kwargs = apply_openai_prompt_cache(kwargs, namespace="agent-chat")
         fresh_user_query_retry_used = False
@@ -3874,20 +3888,12 @@ class ReverieAgent:
                         source_label,
                     )
                     continue
-                if (
-                    _should_retry_without_tooling(status_code)
-                    and isinstance(call_kwargs.get("tools"), list)
-                    and call_kwargs.get("tools")
-                ):
-                    logger.warning(
-                        "OpenAI-compatible SDK call failed with provider error; retrying once with tool-calling fields preserved"
-                    )
-                    return self._call_openai_chat_completion_once(call_kwargs)
                 if isinstance(status_code, int) and 400 <= status_code < 500 and status_code != 429:
                     raise
-                if attempt >= retries or not _is_recoverable_stream_exception(exc):
+                transient_status = isinstance(status_code, int) and (status_code == 429 or 500 <= status_code < 600)
+                if attempt >= retries or not (transient_status or _is_recoverable_stream_exception(exc)):
                     raise
-                backoff = API_RETRY_DELAYS_SECONDS[attempt]
+                backoff = _api_retry_delay(attempt, self.api_initial_backoff)
                 self._emit_api_retry_event(
                     provider_label=self._openai_sdk_provider_label(),
                     model=call_kwargs.get("model", self.model),
@@ -5566,14 +5572,16 @@ class ReverieAgent:
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
-    def _build_openai_responses_payload(self, *, stream: bool) -> Dict[str, Any]:
+    def _build_openai_responses_payload(
+        self, *, stream: bool, messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """Build a minimal, provider-neutral OpenAI Responses request."""
         from ..codex import build_codex_request_payload
 
         tools = self.get_visible_tool_schemas()
         converted = build_codex_request_payload(
             model_name=self.model,
-            messages=self._build_messages(resolve_local_images=True),
+            messages=messages if messages is not None else self._build_messages(resolve_local_images=True),
             tools=tools or None,
             stream=stream,
         )
@@ -5695,8 +5703,8 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
-            payload = self._build_openai_responses_payload(stream=True)
+            messages = self._resolve_messages_for_request(request_messages)
+            payload = self._build_openai_responses_payload(stream=True, messages=messages)
             effective_timeout = self._resolve_provider_timeout()
             yield self._model_request_stream_event(
                 provider_label=self._responses_provider_label(use_curl=direct_http),
@@ -5778,7 +5786,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
+            messages = self._resolve_messages_for_request(request_messages)
             effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             provider_options: Dict[str, Any] = {}
@@ -5970,7 +5978,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
+            messages = self._resolve_messages_for_request(request_messages)
             if self._openai_request_fallback_active:
                 payload = self._build_openai_chat_completion_kwargs(
                     messages=messages,
@@ -6096,7 +6104,7 @@ class ReverieAgent:
             tools = self.get_visible_tool_schemas()
             anthropic_tools = _convert_tools_to_anthropic_format(tools)
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
+            messages = self._resolve_messages_for_request(request_messages)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
             kwargs = {
@@ -6283,8 +6291,8 @@ class ReverieAgent:
         while True:
             self._check_and_compress_context(session_id=session_id)
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
-            payload = self._build_openai_responses_payload(stream=False)
+            messages = self._resolve_messages_for_request(request_messages)
+            payload = self._build_openai_responses_payload(stream=False, messages=messages)
             if direct_http:
                 response = self._make_direct_request(payload, stream=False, session_id=session_id)
                 result = self._response_json_with_prompt_cache_fallback(
@@ -6338,7 +6346,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
+            messages = self._resolve_messages_for_request(request_messages)
             effective_timeout = self._resolve_provider_timeout()
             # For OpenAI-compatible SDK calls, include thinking flags via extra_body when applicable
             provider_options: Dict[str, Any] = {}
@@ -6633,7 +6641,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
             request_messages = self._build_messages()
-            messages = self._build_messages(resolve_local_images=True)
+            messages = self._resolve_messages_for_request(request_messages)
             if self._openai_request_fallback_active:
                 payload = self._build_openai_chat_completion_kwargs(
                     messages=messages,

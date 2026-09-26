@@ -22,6 +22,14 @@ def get_memory_os_from_context(context: Optional[Dict[str, Any]]) -> MemoryOS:
     return memory_os
 
 
+def get_memory_session_id(context: Optional[Dict[str, Any]]) -> str:
+    ctx = context if isinstance(context, dict) else {}
+    agent = ctx.get("agent")
+    if agent is not None and hasattr(agent, "_current_session_details"):
+        return str(agent._current_session_details("default")[0])
+    return str(ctx.get("session_id") or "default")
+
+
 class MemoryRetrievalTool(BaseTool):
     """Query structured project/session/workflow memory with evidence."""
 
@@ -74,6 +82,7 @@ Use this proactively before making claims about user preferences, project decisi
         limit = self._int(kwargs.get("limit"), 8)
         memory_os = get_memory_os_from_context(self.context)
         filters = {
+            "session_id": get_memory_session_id(self.context),
             "scope": str(kwargs.get("scope") or ""),
             "memory_type": str(kwargs.get("memory_type") or ""),
             "min_confidence": self._float(kwargs.get("min_confidence"), 0.0),

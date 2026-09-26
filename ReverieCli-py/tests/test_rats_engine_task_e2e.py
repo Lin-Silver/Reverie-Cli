@@ -685,6 +685,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.rename_node",
             "scene.reorder_node",
             "project.list_files",
+            "project.read_file",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -762,6 +763,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["scene.rename_node"].get("permission") == "edit"
         assert definitions_by_name["scene.reorder_node"].get("permission") == "edit"
         assert definitions_by_name["project.list_files"].get("permission") == "read"
+        assert definitions_by_name["project.read_file"].get("permission") == "read"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -789,6 +791,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.rename_node",
             "scene.reorder_node",
             "project.list_files",
+            "project.read_file",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1152,6 +1155,41 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"directory": "../escape"},
         )
         assert rejected_list.success is False, rejected_list.data
+        # project.read_file is the read-only content primitive beside list_files:
+        # pull the scene opened above straight back over RTP. A .tscn is UTF-8 text,
+        # so the engine must decode it and report a whole, untruncated read on the
+        # main thread rather than base64 bytes.
+        read = executor.execute(
+            dynamic_tools["project.read_file"],
+            {"path": "scenes/animation_runtime.tscn"},
+        )
+        assert (
+            read.success is True
+            and read.data.get("is_text") is True
+            and read.data.get("encoding") == "utf-8"
+            and read.data.get("execution_thread") == "main"
+            and read.data.get("truncated") is False
+            and read.data.get("bytes_read") == read.data.get("size_bytes")
+            and isinstance(read.data.get("content"), str)
+            and read.data["content"].startswith("[gd_scene")
+        ), read.error or read.data
+        # A byte cap truncates and flags the partial read without misstating the size.
+        capped = executor.execute(
+            dynamic_tools["project.read_file"],
+            {"path": "scenes/animation_runtime.tscn", "max_bytes": 16},
+        )
+        assert (
+            capped.success is True
+            and capped.data.get("truncated") is True
+            and capped.data.get("bytes_read") == 16
+            and capped.data.get("size_bytes") == read.data.get("size_bytes")
+        ), capped.error or capped.data
+        # A path escaping the project boundary is refused before any read.
+        rejected_read = executor.execute(
+            dynamic_tools["project.read_file"],
+            {"path": "../escape"},
+        )
+        assert rejected_read.success is False, rejected_read.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

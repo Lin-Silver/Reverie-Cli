@@ -684,6 +684,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.find_nodes",
             "scene.rename_node",
             "scene.reorder_node",
+            "project.list_files",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -760,6 +761,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["scene.find_nodes"].get("permission") == "read"
         assert definitions_by_name["scene.rename_node"].get("permission") == "edit"
         assert definitions_by_name["scene.reorder_node"].get("permission") == "edit"
+        assert definitions_by_name["project.list_files"].get("permission") == "read"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -786,6 +788,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.find_nodes",
             "scene.rename_node",
             "scene.reorder_node",
+            "project.list_files",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1122,6 +1125,33 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"node_path": "StateMachine/AnimationPlayerRenamed", "index": -1},
         )
         assert rejected_reorder.success is False, rejected_reorder.data
+        # project.list_files is the read-only discovery primitive on the same
+        # shared catalog: enumerate the confined project tree filtered to scenes.
+        # The scene opened above (scenes/animation_runtime.tscn) is always present,
+        # so the check stays structure-robust while proving the read reaches the
+        # engine on the main thread with the bounded, sorted contract.
+        listed = executor.execute(
+            dynamic_tools["project.list_files"],
+            {"extensions": ["tscn"]},
+        )
+        assert (
+            listed.success is True
+            and isinstance(listed.data.get("entries"), list)
+            and listed.data.get("count") == len(listed.data["entries"])
+            and listed.data.get("truncated") is False
+            and listed.data.get("execution_thread") == "main"
+            and any(
+                entry.get("path") == "scenes/animation_runtime.tscn"
+                for entry in listed.data["entries"]
+            )
+            and all(entry.get("extension") == "tscn" for entry in listed.data["entries"])
+        ), listed.error or listed.data
+        # A directory escaping the project boundary is refused before any read.
+        rejected_list = executor.execute(
+            dynamic_tools["project.list_files"],
+            {"directory": "../escape"},
+        )
+        assert rejected_list.success is False, rejected_list.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

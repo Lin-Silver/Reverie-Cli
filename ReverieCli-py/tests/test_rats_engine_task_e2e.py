@@ -683,6 +683,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.list_methods",
             "scene.find_nodes",
             "scene.rename_node",
+            "scene.reorder_node",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -758,6 +759,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["node.list_methods"].get("permission") == "read"
         assert definitions_by_name["scene.find_nodes"].get("permission") == "read"
         assert definitions_by_name["scene.rename_node"].get("permission") == "edit"
+        assert definitions_by_name["scene.reorder_node"].get("permission") == "edit"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -783,6 +785,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "node.list_methods",
             "scene.find_nodes",
             "scene.rename_node",
+            "scene.reorder_node",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1095,6 +1098,30 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"node_path": "StateMachine/AnimationPlayerRenamed", "name": "bad/name"},
         )
         assert rejected_rename.success is False, rejected_rename.data
+        # scene.reorder_node lands alongside rename on the same shared edit catalog:
+        # move a live node to a chosen slot among its siblings, the gap add_node and
+        # move_node leave since both only append. Reordering the renamed
+        # AnimationPlayer to the front is always in-bounds -- its own presence
+        # guarantees at least one sibling slot -- so the check stays
+        # structure-robust while proving the ordering edit reaches the engine.
+        reordered = executor.execute(
+            dynamic_tools["scene.reorder_node"],
+            {"node_path": "StateMachine/AnimationPlayerRenamed", "index": 0},
+        )
+        assert (
+            reordered.success is True
+            and reordered.data.get("applied") is True
+            and reordered.data.get("index") == 0
+            and isinstance(reordered.data.get("old_index"), int)
+            and reordered.data.get("name") == "AnimationPlayerRenamed"
+            and reordered.data.get("execution_thread") == "main"
+        ), reordered.error or reordered.data
+        # A target index outside the sibling range is refused before any mutation.
+        rejected_reorder = executor.execute(
+            dynamic_tools["scene.reorder_node"],
+            {"node_path": "StateMachine/AnimationPlayerRenamed", "index": -1},
+        )
+        assert rejected_reorder.success is False, rejected_reorder.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

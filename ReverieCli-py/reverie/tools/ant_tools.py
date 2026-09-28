@@ -23,6 +23,7 @@ class TaskBoundaryTool(BaseTool):
     and estimated scope to create a visible task UI for users.
     """
     name = "task_boundary"
+    workspace_checkpoint = False
     search_hint = "track task stages and progress boundaries during long-running work"
     tool_category = "planning"
     tool_tags = ("task", "progress", "stage", "planning", "execution", "verification")

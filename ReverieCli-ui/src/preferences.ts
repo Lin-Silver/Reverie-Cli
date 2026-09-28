@@ -56,7 +56,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   showReasoning: true,
   expandReasoning: true,
   showToolCalls: true,
-  showToolResults: false,
+  showToolResults: true,
   expandToolResults: false,
   showLiveActivity: true,
   // Off by default: the board's job is to be scannable at a glance, and the

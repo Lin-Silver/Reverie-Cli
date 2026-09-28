@@ -17,6 +17,42 @@ const turn: LiveTurn = {
 };
 
 describe("live stream batching", () => {
+  it("interleaves commentary and tools even when they arrive in one render batch", () => {
+    const merged = mergeLiveTurnBatch({ ...turn, assistantText: "", reasoningText: "", segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [
+        { kind: "assistant", text: "I will inspect the files." },
+        { kind: "activity", event: { event: "tool_start", tool_call_id: "a", tool_name: "read_file" } },
+        { kind: "activity", event: { event: "tool_result", tool_call_id: "a", output: "source" } },
+        { kind: "assistant", text: "Now I will run the tests." },
+        { kind: "activity", event: { event: "tool_start", tool_call_id: "b", tool_name: "command_exec" } },
+      ],
+    });
+    expect(merged.segments?.map(segment => segment.kind)).toEqual(["assistant", "activity", "assistant", "activity"]);
+    expect(merged.segments?.[1]).toMatchObject({ events: [{ tool_name: "read_file", output: "source" }] });
+  });
+
+  it("attaches out-of-order parallel results to their original tool group", () => {
+    const existing = mergeLiveTurnBatch({ ...turn, segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [
+        { kind: "activity", event: { event: "tool_start", tool_call_id: "a" } },
+        { kind: "activity", event: { event: "tool_start", tool_call_id: "b" } },
+        { kind: "assistant", text: "An update." },
+      ],
+    });
+    const merged = mergeLiveTurnBatch(existing, {
+      ...emptyLiveTurnBatch(),
+      ordered: [
+        { kind: "activity", event: { event: "tool_result", tool_call_id: "b", output: "second" } },
+        { kind: "activity", event: { event: "tool_result", tool_call_id: "a", output: "first" } },
+      ],
+    });
+    expect(merged.segments).toMatchObject([
+      { kind: "activity", events: [{ tool_call_id: "a", output: "first" }, { tool_call_id: "b", output: "second" }] },
+      { kind: "assistant", text: "An update." },
+    ]);
+  });
   it("merges assistant and reasoning deltas without losing their order", () => {
     const merged = mergeLiveTurnBatch(turn, {
       assistantText: "BC",

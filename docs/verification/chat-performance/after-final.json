@@ -1,0 +1,87 @@
+{
+  "switches": [
+    {
+      "session": "Long",
+      "ms": 177.6999999999589,
+      "rows": 60
+    },
+    {
+      "session": "Small",
+      "ms": 59.37250000010863,
+      "rows": 2
+    },
+    {
+      "session": "Long",
+      "ms": 118.89939999991839,
+      "rows": 60
+    }
+  ],
+  "typing_ms": 15.622099999973216,
+  "long_tasks_ms": [
+    90,
+    76,
+    69
+  ],
+  "history_check": {
+    "rows_after_scroll": 120,
+    "anchor_shift_px": 0.0
+  },
+  "ipc": [
+    {
+      "action": "initialize",
+      "ms": 545.5817
+    },
+    {
+      "action": "getSession",
+      "ms": 1.3648000000000593
+    },
+    {
+      "action": "getState",
+      "ms": 81.39940000000001
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.6368000000002212
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.6725999999998749
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.8448000000003049
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.616399999999885
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.6026000000001659
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.631800000000112
+    },
+    {
+      "action": "getSession",
+      "ms": 36.114700000000084
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.5902000000005501
+    },
+    {
+      "action": "getSession",
+      "ms": 9.282600000000457
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.6741999999994732
+    },
+    {
+      "action": "getSession",
+      "ms": 21.678200000000288
+    }
+  ]
+}

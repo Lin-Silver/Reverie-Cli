@@ -44,6 +44,10 @@ class CommandExecTool(BaseTool):
 
     description = """Execute audited commands inside the active workspace.
 
+For native executables, run one command per call without shell operators such as &&.
+PowerShell cmdlet pipelines use the PowerShell executor.
+Commands are non-interactive; standard input is closed.
+
 Security rules:
 - Working directory must stay inside the active workspace
 - Custom environment overrides are disabled
@@ -303,6 +307,8 @@ Examples:
                 invocation["argv"],
                 cwd=str(work_dir),
                 env=self._build_process_env(invocation),
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -464,6 +470,11 @@ Examples:
 
         if self._should_use_powershell_invocation(executable):
             return self._build_powershell_invocation(tokens, original_command=command)
+
+        command_parts = shlex.shlex(command, posix=False, punctuation_chars=";&|<>")
+        command_parts.whitespace_split = True
+        if any(token in {"&&", "||", "|", ";", ">", ">>", "<"} for token in command_parts):
+            raise ValueError("Shell operators are not supported. Run each command separately.")
 
         env_overrides = self._build_toolchain_env(tokens, work_dir, executable_key)
         return {

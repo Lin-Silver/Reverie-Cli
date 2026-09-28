@@ -8,6 +8,7 @@ describe("desktop core request timeouts", () => {
 
   it("keeps prompt and indexing requests streaming without a transport deadline", () => {
     expect(coreRequestTimeoutMs("runPrompt")).toBe(0);
+    expect(coreRequestTimeoutMs("resumePrompt")).toBe(0);
     expect(coreRequestTimeoutMs("indexWorkspace")).toBe(0);
   });
 

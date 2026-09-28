@@ -523,6 +523,7 @@ def _build_batch_prompt_rules() -> str:
 - For code repair or implementation tasks, actually edit the workspace files with the available editing tools. Do not stop after describing the patch or saying you are about to edit.
 - After code edits, run the most relevant visible test, build, or lint command before finalizing. If the user provided a test file, run it.
 - Handle edge cases from the written requirements, not only the visible sample tests.
+- During multi-step work, briefly tell the user what was learned or what comes next between meaningful batches of tool calls.
 - Keep the final user-facing response compact. Prefer a short outcome-and-verification summary over long file inventories or repeated artifact descriptions.
 - For small bounded tasks, avoid extra files, checklists, or narrative detours beyond what the request needs.
 """.strip()
@@ -581,56 +582,10 @@ def _prompt_tool_usage_counts(ui_events: List[Dict[str, Any]]) -> Dict[str, int]
     return counts
 
 
-def _prompt_needs_requirement_coverage_pass(prompt_text: str) -> bool:
-    """Return true for coding prompts that spell out behavioral requirements."""
-    text = str(prompt_text or "")
-    if not _prompt_looks_like_code_task(text):
-        return False
-    lowered = text.lower()
-    requirement_markers = (
-        "requirements:",
-        "requirement:",
-        "must ",
-        "must support",
-        "must handle",
-        "raise ",
-        "return ",
-        "preserve ",
-        "do not ",
-        "hidden",
-        "edge",
-        "boundary",
-        "tie",
-        "deterministic",
-        "zero",
-        "non-positive",
-        "duplicate",
-        "missing",
-        "unreachable",
-        "negative",
-        "empty",
-    )
-    return any(marker in lowered for marker in requirement_markers)
-
-
-def _prompt_had_requirement_coverage_followup(ui_events: List[Dict[str, Any]]) -> bool:
-    """Detect whether the one-shot safety net already requested requirement-derived checks."""
-    needle = "requirement-derived edge-case checks"
-    for event in ui_events or []:
-        if not isinstance(event, dict):
-            continue
-        text = " ".join(str(event.get(key) or "") for key in ("message", "detail", "output"))
-        if needle in text.lower():
-            return True
-    return False
-
-
 def _build_prompt_completion_followup_message(
     mode: str,
     original_prompt: str,
-    latest_output: str,
     ui_events: List[Dict[str, Any]],
-    auto_followup_count: int = 0,
 ) -> Optional[str]:
     """Continue code tasks that ended without observable edits or verification."""
     if normalize_mode(mode) != "reverie":
@@ -645,19 +600,6 @@ def _build_prompt_completion_followup_message(
     if counts["verification"] <= 0:
         missing.append("a visible test/build/lint verification command")
     if not missing:
-        output_lower = str(latest_output or "").lower()
-        if (
-            int(auto_followup_count or 0) <= 0
-            and
-            _prompt_needs_requirement_coverage_pass(original_prompt)
-            and not _prompt_had_requirement_coverage_followup(ui_events)
-            and "requirement-derived edge-case checks" not in output_lower
-        ):
-            return (
-                "Continue once more before finalizing: visible tests are not enough for this requirements-style coding task. "
-                "Derive requirement-derived edge-case checks from every explicit requirement in the original prompt, especially boundary values, zero or negative values, missing inputs, duplicate/tie cases, ordering/determinism, unreachable cases, and any special operators or semantics. "
-                "Run those checks with command_exec or a temporary workspace-local test script, fix any failures, delete temporary files if you created them, and then finish with a concise summary that says the requirement-derived edge-case checks passed."
-            )
         return None
 
     missing_text = " and ".join(missing)
@@ -4197,6 +4139,7 @@ class ReverieInterface:
         self,
         message: str,
         *,
+        resume: bool = False,
         mode_override: Optional[str] = None,
         stream: Optional[bool] = None,
         no_index: bool = False,
@@ -4209,6 +4152,12 @@ class ReverieInterface:
     ) -> PromptRunResult:
         """Run one prompt non-interactively and return a structured result."""
         prompt_text = str(message or "").strip()
+        if resume:
+            existing_session = self.session_manager.get_current_session()
+            run_state = (existing_session.metadata.get("prompt_run") or {}) if existing_session else {}
+            if not isinstance(run_state, dict) or run_state.get("state") not in {"running", "interrupted"}:
+                raise ValueError("This session has no interrupted task to continue.")
+            prompt_text = str(run_state.get("prompt") or "").strip()
         started_at = datetime.now()
         self._captured_activity_events = []
 
@@ -4330,14 +4279,27 @@ class ReverieInterface:
             )
             self._sync_workspace_memory_message(session)
             self.agent.set_history(session.messages)
+            session.metadata["prompt_run"] = {
+                "state": "running", "prompt": prompt_text,
+                "started_at": started_at.isoformat(),
+            }
+            self.session_manager.save_session(session)
 
             context_initialized = self.ensure_context_engine(announce=False)
             thinking_parts: List[str] = []
             output_text = ""
             error_text = ""
             auto_followup_count = 0
+            persisted_message_count = len(self.agent.messages)
 
-            def _run_prompt_turn(turn_text: str) -> tuple[str, str, str]:
+            def _persist_history_if_changed() -> None:
+                nonlocal persisted_message_count
+                count = len(self.agent.messages)
+                if count != persisted_message_count:
+                    self.session_manager.update_messages(self.agent.get_history())
+                    persisted_message_count = count
+
+            def _run_prompt_turn(turn_text: str, *, continuing: bool = False) -> tuple[str, str, str]:
                 output_chunks: List[str] = []
                 thinking_chunks: List[str] = []
                 in_thinking_mode = False
@@ -4348,8 +4310,10 @@ class ReverieInterface:
                     stream=stream_enabled,
                     session_id=session.id,
                     user_display_text=turn_text,
+                    **({"resume": True} if continuing else {}),
                 )
                 for chunk in response_stream:
+                    _persist_history_if_changed()
                     if chunk == THINKING_START_MARKER:
                         in_thinking_mode = True
                         continue
@@ -4358,6 +4322,10 @@ class ReverieInterface:
                         continue
                     decoded_event = decode_stream_event(chunk) if chunk.startswith(STREAM_EVENT_MARKER) else None
                     if decoded_event is not None:
+                        task_list = decoded_event.get("task_list")
+                        if isinstance(task_list, list):
+                            session.metadata["task_list"] = task_list
+                            self.session_manager.save_session(session)
                         ui_events.append(decoded_event)
                         _emit({"type": "ui.event", "event": decoded_event})
                         continue
@@ -4368,6 +4336,7 @@ class ReverieInterface:
                         output_chunks.append(chunk)
                         _emit({"type": "assistant.delta", "text": chunk})
 
+                _persist_history_if_changed()
                 turn_thinking = "".join(thinking_chunks).strip()
                 streamed_output = "".join(output_chunks).strip()
                 final_assistant_output = ""
@@ -4388,7 +4357,7 @@ class ReverieInterface:
 
             active_prompt = prompt_text
             while True:
-                turn_output, turn_thinking, turn_error = _run_prompt_turn(active_prompt)
+                turn_output, turn_thinking, turn_error = _run_prompt_turn(active_prompt, continuing=resume and auto_followup_count == 0)
                 if turn_thinking:
                     thinking_parts.append(turn_thinking)
                 if turn_output:
@@ -4397,7 +4366,7 @@ class ReverieInterface:
                     error_text = turn_error
                     break
 
-                if auto_followup_count >= 3:
+                if resume or auto_followup_count >= 3:
                     break
 
                 followup_message = _build_prompt_followup_message(
@@ -4410,9 +4379,7 @@ class ReverieInterface:
                     followup_message = _build_prompt_completion_followup_message(
                         base_config.mode,
                         prompt_text,
-                        output_text,
                         ui_events,
-                        auto_followup_count,
                     )
                 if not followup_message:
                     break
@@ -4448,6 +4415,7 @@ class ReverieInterface:
                     )
 
             try:
+                session.metadata["prompt_run"]["state"] = "interrupted" if error_text else "completed"
                 self.session_manager.update_messages(self.agent.get_history())
                 self.session_manager.rename_current_session_from_prompt(prompt_text)
                 current_session = self.session_manager.get_current_session()

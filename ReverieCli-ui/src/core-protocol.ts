@@ -88,6 +88,10 @@ interface CoreRequestMap {
     payload: { prompt: string; sessionId: string; mode: string; stream: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
+  resumePrompt: {
+    payload: { sessionId: string; mode: string; stream: boolean };
+    response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
+  };
   compactContext: {
     payload: { sessionId: string; focus?: string; projectRoot?: string };
     response: Envelope<"context.compacted", { success: boolean; message: string; session: SessionState; sessions: SessionListState; recovery: RecoveryState; context_engine: NonNullable<WorkspaceState["context_engine"]> }>;

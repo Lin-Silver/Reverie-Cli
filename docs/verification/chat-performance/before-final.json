@@ -1,0 +1,123 @@
+{
+  "switches": [
+    {
+      "session": "Long",
+      "ms": 1422.4457999999913,
+      "rows": 1200
+    },
+    {
+      "session": "Small",
+      "ms": 116.94330000000264,
+      "rows": 2
+    },
+    {
+      "session": "Long",
+      "ms": 2215.907600000037,
+      "rows": 1200
+    }
+  ],
+  "typing_ms": 57.013999999981024,
+  "long_tasks_ms": [
+    924,
+    397,
+    62,
+    1183,
+    745,
+    200
+  ],
+  "history_check": null,
+  "ipc": [
+    {
+      "action": "initialize",
+      "ms": 468.2852999999999
+    },
+    {
+      "action": "getSession",
+      "ms": 2.1947000000000116
+    },
+    {
+      "action": "getState",
+      "ms": 94.79719999999998
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 6.384500000000116
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.7573999999999614
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.8369999999999891
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.7867000000001099
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.9819000000006781
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.6814999999996871
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.8528999999998632
+    },
+    {
+      "action": "getSession",
+      "ms": 45.90110000000004
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 4.606999999999971
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 3.9795999999987544
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.5784999999996217
+    },
+    {
+      "action": "getSession",
+      "ms": 10.236399999999776
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 5.3629000000000815
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 8.192799999998897
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.7330999999994674
+    },
+    {
+      "action": "getSession",
+      "ms": 30.751900000001115
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 4.3769999999985885
+    },
+    {
+      "action": "getContextUsage",
+      "ms": 5.077300000000832
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.0176999999985128
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 0.6228999999984808
+    }
+  ]
+}

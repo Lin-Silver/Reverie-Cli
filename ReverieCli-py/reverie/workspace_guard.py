@@ -101,11 +101,14 @@ class ShadowGitManager:
             ["git", *args],
             cwd=str(self.project_root),
             env=env,
+            stdin=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             check=False,
+            timeout=60,
         )
         if check and completed.returncode != 0:
             raise WorkspaceGuardError(completed.stderr.strip() or completed.stdout.strip() or "Git checkpoint failed")
@@ -198,14 +201,20 @@ class ShadowGitManager:
             self._require_usable_git_dir()
             self.git_dir.parent.mkdir(parents=True, exist_ok=True)
             if not (self.git_dir / "HEAD").is_file():
-                completed = subprocess.run(
-                    ["git", "init", "--bare", str(self.git_dir)],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    check=False,
-                )
+                try:
+                    completed = subprocess.run(
+                        ["git", "init", "--bare", str(self.git_dir)],
+                        stdin=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        check=False,
+                        timeout=15,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise WorkspaceGuardError("Shadow Git initialization timed out after 15 seconds") from exc
                 if completed.returncode != 0:
                     raise WorkspaceGuardError(completed.stderr.strip() or "Could not initialize shadow Git repository")
             self._git("config", "core.autocrlf", "false")

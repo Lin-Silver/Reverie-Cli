@@ -4,11 +4,12 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER
+from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER, encode_stream_event
 from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text, main
 from reverie.cli.interface import (
     PromptRunResult,
     ReverieInterface,
+    _build_prompt_completion_followup_message,
     _build_prompt_followup_message,
     _effective_stream_responses,
     _sanitize_prompt_output_text,
@@ -170,6 +171,39 @@ def test_prompt_error_is_detected_after_partial_assistant_output() -> None:
     assert error == "Error processing message: upstream provider rejected the continuation"
 
 
+def test_completed_requirements_task_does_not_force_another_model_turn():
+    events = [
+        {"event": "tool_result", "tool_name": "str_replace_editor", "success": True,
+         "arguments": {"command": "str_replace"}},
+        {"event": "tool_result", "tool_name": "command_exec", "success": True,
+         "arguments": {"command": "python -m unittest -v"}},
+    ]
+    assert _build_prompt_completion_followup_message(
+        "reverie", "Implement server.py. Requirements: reject empty and missing titles.", events
+    ) is None
+
+
+def test_completion_followup_keeps_missing_edit_and_verification_gates():
+    message = _build_prompt_completion_followup_message(
+        "reverie", "Implement server.py and test it.", []
+    )
+    assert "actual file edits" in message
+    assert "verification command" in message
+
+
+def test_failed_verification_does_not_satisfy_completion_gate():
+    events = [
+        {"event": "tool_result", "tool_name": "create_file", "success": True},
+        {"event": "tool_result", "tool_name": "command_exec", "success": False,
+         "arguments": {"command": "python -m unittest -v"}},
+    ]
+    message = _build_prompt_completion_followup_message(
+        "reverie", "Implement server.py and test it.", events
+    )
+    assert "verification command" in message
+    assert "actual file edits" not in message
+
+
 def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     interface = ReverieInterface(tmp_path, headless=True)
     config = Config(
@@ -222,6 +256,50 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     serialized = result.to_dict()
     assert serialized["auto_followup_count"] == 0
     assert "harness_report" in serialized
+
+
+def test_interrupted_prompt_resumes_without_another_user_message(tmp_path, monkeypatch):
+    interface = ReverieInterface(tmp_path, headless=True)
+    config = Config(models=[ModelConfig(model="fake-model", model_display_name="Fake Model", base_url="https://example.com/v1", api_key="test-key")], active_model_index=0)
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+    runs = []
+
+    class Agent(_FakeAgent):
+        def process_message(self, user_message, stream=True, session_id="default", user_display_text=None, resume=False):
+            runs.append({"resume": resume, "history": list(self.messages)})
+            if resume:
+                yield "Site complete."
+                self.messages.append({"role": "assistant", "content": "Site complete."})
+                return
+            self.messages.append({"role": "user", "content": user_message})
+            self.messages.append({"role": "assistant", "content": None, "tool_calls": [
+                {"id": "call-1", "type": "function", "function": {"name": "task_manager", "arguments": "{}"}},
+            ]})
+            self.messages.append({"role": "tool", "tool_call_id": "call-1", "content": "[/] Build site"})
+            yield encode_stream_event("tool_result", tool_name="task_manager", tool_call_id="call-1", success=True, task_list=[
+                {"id": "1", "name": "Build site", "state": "IN_PROGRESS", "indent": 0},
+            ])
+            yield "Error processing message: provider stream disconnected"
+
+    monkeypatch.setattr(interface, "_init_agent", lambda **_kwargs: setattr(interface, "agent", Agent()))
+    session = interface.session_manager.create_session()
+    first = interface.run_prompt_once("Build the site", fresh_session=False)
+    assert first.success is False
+    saved = interface.session_manager.load_session(session.id)
+    assert saved.metadata["prompt_run"]["state"] == "interrupted"
+    assert saved.metadata["task_list"][0]["name"] == "Build site"
+    assert [message["role"] for message in saved.messages] == ["user", "assistant", "tool"]
+
+    second = interface.run_prompt_once("", resume=True, fresh_session=False)
+    assert second.success is True
+    assert second.auto_followup_count == 0
+    assert runs[-1]["resume"] is True
+    assert [message["role"] for message in interface.session_manager.get_current_session().messages] == ["user", "assistant", "tool", "assistant"]
+    assert interface.session_manager.get_current_session().metadata["prompt_run"]["state"] == "completed"
 
 
 def test_init_agent_reuses_existing_agent_without_rescanning_plugins(tmp_path, monkeypatch):

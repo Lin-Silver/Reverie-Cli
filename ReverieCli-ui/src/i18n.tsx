@@ -9,6 +9,12 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "调用参数": "Arguments",
+  "工具调用步骤": "Tool steps",
+  "任务列表尚未建立": "No task checklist yet",
+  "正在处理任务": "Working on task",
+  "继续任务": "Continue task",
+  "加载更早的消息": "Load earlier messages",
   "改动": "Changes",
   "收起右侧栏": "Hide right sidebar",
   "AI 文件改动": "AI file changes",

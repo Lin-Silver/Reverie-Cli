@@ -13,7 +13,7 @@ describe("desktop UI preferences", () => {
     expect(DEFAULT_UI_PREFERENCES.startupMode).toBe("gui");
     expect(DEFAULT_UI_PREFERENCES.expandReasoning).toBe(true);
     expect(DEFAULT_UI_PREFERENCES.showToolCalls).toBe(true);
-    expect(DEFAULT_UI_PREFERENCES.showToolResults).toBe(false);
+    expect(DEFAULT_UI_PREFERENCES.showToolResults).toBe(true);
     // The RTP board opens scannable; the contract detail is opt-in per install.
     expect(DEFAULT_UI_PREFERENCES.rtpProviderDetails).toBe(false);
   });

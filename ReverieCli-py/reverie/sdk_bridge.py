@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 
-_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "compactContext", "workspaceMentions", "indexWorkspace"})
+_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "resumePrompt", "compactContext", "workspaceMentions", "indexWorkspace"})
 
 
 def _interactive_context_worker_limit(cpu_count: Optional[int] = None) -> int:
@@ -631,18 +631,37 @@ class ReverieSdkBridge:
             }
         if action == "getContextUsage":
             interface = self.ensure_interface()
+            session_id = str(payload.get("sessionId") or "").strip()
+            session = interface.session_manager.get_current_session()
+            # A delayed statistics request must never activate an old session.
+            if session_id and (session is None or session.id != session_id):
+                return {"id": request_id, "type": "context.usage", "usage": None}
+            # The composer asks for this on session open and between turns -- often
+            # before any turn has built the agent, which is created lazily on the
+            # first runPrompt, not at initialize. Without this the ring stayed empty
+            # on a freshly launched or restored session until the user sent a
+            # message. Initialize it here exactly as compactContext does; a usage
+            # read must never break the UI, so a failure leaves the ring absent.
+            if interface.agent is None and interface.config_manager.load().active_model is not None:
+                try:
+                    interface._init_agent(
+                        persist_config_changes=False,
+                        defer_runtime_enrichment=True,
+                    )
+                except Exception:
+                    from .diagnostics import report_suppressed_exception
+
+                    report_suppressed_exception("initialize agent for context usage")
             agent = interface.agent
             usage: Optional[Dict[str, Any]] = None
             if agent is not None:
                 # Reflect the session the composer is showing so the ring matches
                 # what the next turn would send. Safe when idle; the desktop only
                 # asks for this between turns and on session open.
-                session_id = str(payload.get("sessionId") or "").strip()
-                if session_id:
-                    session = interface.session_manager.load_session(session_id)
-                    if session is not None:
-                        interface._sync_workspace_memory_message(session)
-                        agent.set_history(session.messages)
+                # Memory is synchronized by prompt execution. Reading its budget
+                # must not index memory, rewrite transcripts, or change selection.
+                if session is not None:
+                    agent.set_history(session.messages)
                 try:
                     usage = agent.describe_context_usage()
                 except Exception:  # A usage read must never break the UI.
@@ -700,16 +719,19 @@ class ReverieSdkBridge:
                 waiter["message"] = message if decision == "message" else ""
                 waiter["event"].set()
             return {"id": request_id, "type": "approval.resolved", "approval_id": approval_id, "decision": decision}
-        if action == "runPrompt":
+        if action in {"runPrompt", "resumePrompt"}:
             interface = self.ensure_interface(
                 Path(str(payload.get("projectRoot") or self.project_root))
             )
             prompt = str(payload.get("prompt") or payload.get("message") or "")
             session_id = str(payload.get("sessionId") or "").strip()
+            if action == "resumePrompt" and not session_id:
+                raise ValueError("Continuing a task requires a session ID.")
             if session_id and interface.session_manager.load_session(session_id) is None:
                 raise ValueError(f"Session not found: {session_id}")
             result = interface.run_prompt_once(
                 prompt,
+                **({"resume": True} if action == "resumePrompt" else {}),
                 mode_override=str(payload.get("mode") or "").strip() or None,
                 stream=payload.get("stream") if isinstance(payload.get("stream"), bool) else None,
                 no_index=bool(payload.get("noIndex", False)),
@@ -966,6 +988,9 @@ class ReverieSdkBridge:
             session = self.active_session_payload(session_id)
             if session is None:
                 raise ValueError(f"Session not found: {session_id}")
+            session_path = self.ensure_interface().session_manager.sessions_dir / f"{session['id']}.json"
+            stat = session_path.stat()
+            session["revision"] = f"{stat.st_mtime_ns}:{stat.st_size}"
             return {"id": request_id, "type": "session", "session": session, "sessions": self.sessions_payload()}
         if action == "createSession":
             interface = self.ensure_interface()

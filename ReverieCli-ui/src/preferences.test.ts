@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { backgroundPresetUrl, DEFAULT_UI_PREFERENCES, effectiveBackgroundUrl, normalizeUiPreferences } from "./preferences";
 
 describe("renderer UI preferences", () => {
-  it("shows reasoning and tool calls by default, and keeps raw results off", () => {
+  it("shows reasoning, tool calls, and their expandable results by default", () => {
     const value = normalizeUiPreferences({});
     // The trace bar counts reasoning regardless of this flag, so hiding it by
     // default produced a transcript that reported thinking it never rendered.
@@ -11,7 +11,7 @@ describe("renderer UI preferences", () => {
     expect(value.startupMode).toBe("gui");
     expect(value.expandReasoning).toBe(true);
     expect(value.showToolCalls).toBe(true);
-    expect(value.showToolResults).toBe(false);
+    expect(value.showToolResults).toBe(true);
     expect(value.inspectorOpen).toBe(true);
     expect(value).toEqual(DEFAULT_UI_PREFERENCES);
   });

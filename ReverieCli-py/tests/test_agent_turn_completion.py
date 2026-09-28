@@ -46,9 +46,9 @@ def _delta(
     )
 
 
-def _tool_call_delta(call_id: str, name: str, arguments: str) -> SimpleNamespace:
+def _tool_call_delta(call_id: str, name: str, arguments: str, index: int = 0) -> SimpleNamespace:
     return SimpleNamespace(
-        index=0,
+        index=index,
         id=call_id,
         function=SimpleNamespace(name=name, arguments=arguments),
     )
@@ -229,6 +229,58 @@ def test_completed_turn_is_not_annotated_by_the_safety_net(monkeypatch, tmp_path
     assert _visible_text(chunks) == "All set."
     assert agent.messages[-1]["content"].strip() == "All set."
     assert sum(1 for message in agent.messages if message["role"] == "assistant") == 1
+
+
+def test_one_provider_response_executes_both_requested_tools_before_followup(monkeypatch, tmp_path) -> None:
+    turns = [
+        [
+            _chunk(_delta(tool_calls=[_tool_call_delta("call_1", "first_tool", "{}", 0)]), None),
+            _chunk(_delta(tool_calls=[_tool_call_delta("call_2", "second_tool", "{}", 1)]), "tool_calls"),
+        ],
+        [_chunk(_delta(content="Both checks complete. //END//"), "stop")],
+    ]
+    captured: list = []
+    _install_scripted_openai(monkeypatch, turns, captured)
+    agent = _agent(tmp_path, mode="reverie")
+    executed: list[str] = []
+
+    def execute_call(call, _messages, session_id="default"):
+        executed.append(call["function"]["name"])
+        agent.messages.append({"role": "tool", "tool_call_id": call["id"], "content": "ok"})
+        yield ""
+
+    agent._stream_execute_tool_call = execute_call
+    chunks = list(agent.process_message("Run both checks", stream=True, session_id="t"))
+
+    assert executed == ["first_tool", "second_tool"]
+    assert len(captured) == 2
+    assert {message["tool_call_id"] for message in captured[1]["messages"] if message["role"] == "tool"} == {"call_1", "call_2"}
+    assert "Both checks complete." in _visible_text(chunks)
+
+
+def test_resume_uses_existing_user_turn_and_records_uncertain_tool_result(tmp_path) -> None:
+    agent = _agent(tmp_path, mode="reverie")
+    agent.messages = [
+        {"role": "user", "content": "Build the site"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "done", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            {"id": "pending", "type": "function", "function": {"name": "command_exec", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "done", "content": "file contents"},
+    ]
+    requests = []
+
+    def resumed_stream(session_id="default"):
+        requests.append(agent.get_history())
+        agent.messages.append({"role": "assistant", "content": "Done."})
+        yield "Done."
+
+    agent._process_streaming = resumed_stream
+    list(agent.process_message("", stream=True, session_id="t", resume=True))
+
+    assert [message["content"] for message in agent.messages if message["role"] == "user"] == ["Build the site"]
+    assert len([message for message in requests[0] if message["role"] == "tool" and message["tool_call_id"] == "pending"]) == 1
+    assert "result is unknown" in requests[0][-1]["content"]
 
 
 def test_reasoning_prompt_echo_is_dropped_from_the_thinking_stream(monkeypatch, tmp_path) -> None:

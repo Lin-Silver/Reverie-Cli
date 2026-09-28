@@ -66,6 +66,39 @@ def test_shadow_git_is_internal_and_restores_blocked_deletion(tmp_path: Path) ->
     assert guard.git_dir.is_dir()
 
 
+def test_shadow_git_initialization_has_a_deadline(tmp_path: Path, monkeypatch) -> None:
+    import pytest
+
+    guard = _guard(tmp_path, tmp_path / "state")
+
+    def stalled_git(command, **kwargs):
+        assert kwargs["timeout"] == 15
+        assert kwargs["stdin"] is subprocess.DEVNULL
+        assert kwargs["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled_git)
+    with pytest.raises(WorkspaceGuardError, match="timed out after 15 seconds"):
+        guard.ensure_initialized()
+    assert not guard._ready
+
+
+def test_task_progress_does_not_checkpoint_workspace(tmp_path: Path) -> None:
+    from unittest.mock import Mock
+    from reverie.tools.ant_tools import TaskBoundaryTool
+
+    guard = Mock()
+    executor = ToolExecutor(tmp_path)
+    executor.update_context("shadow_git_manager", guard)
+    executor._register_tool_instance(TaskBoundaryTool(executor.context))
+    result = executor.execute("task_boundary", {
+        "TaskName": "Website", "Mode": "EXECUTION", "TaskSummary": "Building",
+        "TaskStatus": "Writing files", "PredictedTaskSize": 4,
+    })
+    assert result.success
+    guard.checkpoint.assert_not_called()
+
+
 def test_executor_restores_deletion_by_any_other_tool(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

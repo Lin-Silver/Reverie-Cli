@@ -445,6 +445,7 @@ export interface SessionMessage {
 }
 
 export interface SessionState {
+  revision?: string;
   id: string;
   name: string;
   created_at: string;
@@ -621,6 +622,10 @@ export interface PromptResult {
   activity_events: Array<Record<string, unknown>>;
 }
 
+export type TurnSegment =
+  | { kind: "assistant" | "reasoning"; text: string }
+  | { kind: "activity"; events: Array<Record<string, unknown>> };
+
 export interface LiveTurn {
   userText: string;
   assistantText: string;
@@ -628,6 +633,15 @@ export interface LiveTurn {
   events: Array<Record<string, unknown>>;
   error: string;
   startedAt?: number;
+  segments?: TurnSegment[];
+  resumed?: boolean;
+}
+
+export interface TaskListEntry {
+  id: string;
+  name: string;
+  state: string;
+  indent: number;
 }
 
 /** One category of the next request's token budget (system prompt, history, etc.). */

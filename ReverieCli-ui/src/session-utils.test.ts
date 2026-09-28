@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { messageReasoningText, previousTurnBoundary, resolveToolResultNames, sessionIsEmpty, toolCallNames, toolCallRecords, visibleSessionMessages } from "./session-utils";
+import { groupTranscriptMessages, messageReasoningText, previousTurnBoundary, resolveToolResultNames, sessionIsEmpty, toolCallNames, toolCallRecords, visibleSessionMessages } from "./session-utils";
 import type { SessionState } from "./types";
 
 const session = (messages: SessionState["messages"]): SessionState => ({
@@ -12,6 +12,23 @@ const session = (messages: SessionState["messages"]): SessionState => ({
 });
 
 describe("session interaction helpers", () => {
+  it("groups stored calls with matching results after their commentary", () => {
+    const rows = groupTranscriptMessages([
+      { role: "user", content: "Build it" },
+      { role: "assistant", content: "Inspect first", tool_calls: [
+        { id: "a", function: { name: "read_file", arguments: '{"path":"app.py"}' } },
+        { id: "b", function: { name: "read_file", arguments: '{"path":"tests.py"}' } },
+      ] },
+      { role: "tool", tool_call_id: "b", content: "tests source" },
+      { role: "tool", tool_call_id: "a", content: "app source" },
+      { role: "assistant", content: "Verified" },
+    ]);
+    expect(rows.map(row => row.kind)).toEqual(["message", "message", "activity", "message"]);
+    expect(rows[2]).toMatchObject({ events: [
+      { tool_call_id: "a", output: "app source" }, { tool_call_id: "b", output: "tests source" },
+    ] });
+    expect(rows[1]).toMatchObject({ message: { content: "Inspect first", tool_calls: [] } });
+  });
   it("does not treat hidden workspace memory as a visible conversation", () => {
     const messages = [{ role: "system", content: "memory" }];
     expect(visibleSessionMessages(messages)).toEqual([]);

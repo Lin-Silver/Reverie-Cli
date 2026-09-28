@@ -3,7 +3,7 @@
 const CORE_INITIALIZE_TIMEOUT_MS = 300_000;
 
 export function coreRequestTimeoutMs(action: string): number {
-  if (action === "runPrompt" || action === "indexWorkspace") return 0;
+  if (action === "runPrompt" || action === "resumePrompt" || action === "indexWorkspace") return 0;
   if (action === "initialize") return CORE_INITIALIZE_TIMEOUT_MS;
   if (action === "compactContext") return 180_000;
   if (action === "refreshModelSources") return 120_000;

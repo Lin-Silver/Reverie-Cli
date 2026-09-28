@@ -58,7 +58,7 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   showReasoning: true,
   expandReasoning: true,
   showToolCalls: true,
-  showToolResults: false,
+  showToolResults: true,
   expandToolResults: false,
   showLiveActivity: true,
   rtpProviderDetails: false,

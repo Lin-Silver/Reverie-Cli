@@ -72,6 +72,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -112,10 +113,12 @@ import type {
   SubagentRunRecord,
   SubagentSpecRecord,
   SubagentsState,
+  TaskListEntry,
   ToolRecord,
   ViewId,
 } from "./types";
 import {
+  groupTranscriptMessages,
   messageReasoningText,
   previousTurnBoundary,
   resolveToolResultNames,
@@ -363,7 +366,7 @@ function IconButton({
   );
 }
 
-function Markdown({ children }: { children: string }) {
+const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
     <div className="markdown">
       <ReactMarkdown
@@ -389,7 +392,7 @@ function Markdown({ children }: { children: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -1119,9 +1122,14 @@ function Topbar({
   );
 }
 
-function ActivityItem({ event }: { event: Record<string, unknown> }) {
+const ActivityItem = memo(function ActivityItem({ event }: { event: Record<string, unknown> }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   const item = eventLabel(event);
-  const longDetail = item.detail.length > 160 || item.detail.includes("\n");
+  const argumentsText = item.toolName.toLowerCase().startsWith("rats_") ? ""
+    : typeof event.arguments === "string" ? event.arguments : event.arguments ? JSON.stringify(event.arguments, null, 2) : "";
+  const output = messageText(event.output);
+  const error = String(event.error ?? "");
   const statusIcon = item.status === "success"
     ? <CheckCircle2 size={14} />
     : item.status === "error" || item.status === "warning"
@@ -1137,18 +1145,35 @@ function ActivityItem({ event }: { event: Record<string, unknown> }) {
         ? <Brain size={13} />
         : <Activity size={13} />;
   return (
-    <div className={`activity-item ${item.status}`}>
+    <details className={`activity-item ${item.status}`} open={expanded} onToggle={(toggle) => setExpanded(toggle.currentTarget.open)}>
+      <summary>
       <div className="activity-status">{statusIcon}</div>
       <div className="activity-copy">
         <div className="activity-heading"><strong>{item.title}</strong><small>{categoryIcon}{item.category}</small>{item.agentId && item.agentId !== "main" && <code>{item.agentId}</code>}</div>
-        {item.detail && (longDetail ? (
-          <details className="activity-detail"><summary>{item.detail.replace(/\s+/g, " ").slice(0, 150)}<ChevronDown size={12} /></summary><pre>{item.detail}</pre></details>
-        ) : <span className="activity-detail-inline">{item.detail}</span>)}
-        {item.meta && <small className="activity-meta">{item.meta}</small>}
       </div>
-    </div>
+      <ChevronDown size={12} />
+      </summary>
+      {expanded && <div className="activity-expanded">
+        {argumentsText && <><strong>{t("调用参数")}</strong><pre>{argumentsText}</pre></>}
+        {output && <><strong>{t("工具结果")}</strong><pre>{output}</pre></>}
+        {error && <pre className="error">{error}</pre>}
+        {item.detail && item.detail !== output && item.detail !== error && <pre>{item.detail}</pre>}
+        {item.meta && <small className="activity-meta">{item.meta}</small>}
+      </div>}
+    </details>
   );
-}
+});
+
+const ActivityGroup = memo(function ActivityGroup({ events, defaultExpanded = false }: { events: Array<Record<string, unknown>>; defaultExpanded?: boolean }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  useEffect(() => setExpanded(defaultExpanded), [defaultExpanded]);
+  const working = events.find(event => eventLabel(event).status === "working");
+  return <details className="activity-group" open={expanded} onToggle={(toggle) => setExpanded(toggle.currentTarget.open)}>
+    <summary><Wrench size={14} /><strong>{t("工具调用步骤")}</strong><span>{t("live.activityCount", { count: events.length })}</span>{working && <small>{eventLabel(working).title}</small>}<ChevronDown size={13} /></summary>
+    {expanded && <div className="inline-activities">{events.map((event, index) => <ActivityItem key={String(event.tool_call_id || event.activity_id || index)} event={event} />)}</div>}
+  </details>;
+});
 
 function ToolGlyph({ name, size = 14 }: { name: string; size?: number }) {
   const normalized = name.toLowerCase();
@@ -1314,45 +1339,32 @@ function InlineError({ detail }: { detail: string }) {
   );
 }
 
-function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: boolean; preferences: UiPreferences }) {
+const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: boolean; preferences: UiPreferences }) {
   const { t } = useI18n();
-  const [clock, setClock] = useState(() => Date.now());
-  useEffect(() => {
-    setClock(Date.now());
-    if (!running) return;
-    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [running, turn.startedAt]);
-  const elapsed = Math.max(0, Math.round((clock - (turn.startedAt ?? clock)) / 1000));
   const liveStatus = turn.error ? t("失败") : running ? t("正在处理") : t("已完成");
   const liveStatusClass = turn.error ? "error" : running ? "working" : "success";
   return (
     <>
-      <article className="message user">
+      {!turn.resumed && <article className="message user">
         <div className="message-heading"><div className="message-avatar">{t("你")}</div><strong>{t("你")}</strong></div>
         <div className="message-body"><div className="user-text">{turn.userText}</div></div>
-      </article>
+      </article>}
       <article className="message assistant live-message">
         <div className="message-heading"><div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div><strong>Reverie</strong><span className={`live-status ${liveStatusClass}`}>{liveStatus}</span></div>
         <div className="message-body">
-          {preferences.showReasoning && turn.reasoningText && <HistoryReasoning text={turn.reasoningText} defaultExpanded={preferences.expandReasoning} active={running} />}
-          {preferences.showLiveActivity && (running || turn.events.length > 0) && (
-            <details className="live-run-summary" open={running}>
-              <summary><Clock3 size={14} /><strong>{running ? t("live.elapsed", { seconds: elapsed }) : t("本轮活动")}</strong><span>{t("live.activityCount", { count: turn.events.length })}</span><ChevronDown size={13} /></summary>
-              <div className="inline-activities">
-                {turn.events.length
-                  ? turn.events.slice(-12).map((event, index) => <ActivityItem key={index} event={event} />)
-                  : <span className="activity-placeholder">{t("正在准备模型与上下文…")}</span>}
-              </div>
-            </details>
-          )}
-          {turn.assistantText ? <Markdown>{turn.assistantText}</Markdown> : running ? <div className="typing"><span /><span /><span /></div> : null}
+          {(turn.segments ?? []).map((segment, index) => segment.kind === "activity"
+            ? preferences.showLiveActivity && <ActivityGroup key={index} events={segment.events} />
+            : segment.kind === "reasoning"
+              ? preferences.showReasoning && <HistoryReasoning key={index} text={segment.text} defaultExpanded={preferences.expandReasoning} active={running && index === (turn.segments?.length ?? 0) - 1} />
+              : <Markdown key={index}>{segment.text}</Markdown>)}
+          {!turn.segments?.length && turn.assistantText && <Markdown>{turn.assistantText}</Markdown>}
+          {running && <div className="typing"><span /><span /><span /></div>}
           {turn.error && <InlineError detail={turn.error} />}
         </div>
       </article>
     </>
   );
-}
+});
 
 function EmptyChat({ setPrompt }: { setPrompt: (prompt: string) => void }) {
   const { t } = useI18n();
@@ -1513,6 +1525,42 @@ function ContextRing({ usage }: { usage: ContextUsage | null }) {
   );
 }
 
+function taskListEntries(value: unknown): TaskListEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const task = asRecord(item);
+    const name = String(task.name ?? "").trim();
+    return name ? [{ id: String(task.id ?? index), name, state: String(task.state ?? "NOT_STARTED"), indent: Number(task.indent) || 0 }] : [];
+  });
+}
+
+function TaskBar({ tasks, running, resumable, resume }: { tasks: TaskListEntry[]; running: boolean; resumable: boolean; resume: () => void }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  if (!tasks.length && !running && !resumable) return null;
+  const current = tasks.find(task => task.state === "IN_PROGRESS")
+    ?? tasks.find(task => task.state === "NOT_STARTED")
+    ?? tasks.at(-1);
+  const summary = current?.name ?? t("正在处理任务");
+  return <div className="task-bar">
+    <div className="task-bar-head">
+      <button type="button" className="task-bar-toggle" aria-expanded={expanded} aria-label={t("任务列表")} onClick={() => setExpanded(!expanded)}>
+        <ChevronDown size={14} className={expanded ? "task-bar-chevron expanded" : "task-bar-chevron"} />
+        {running ? <RefreshCw className="spin" size={13} /> : <List size={13} />}
+        <span>{summary}</span>
+        {tasks.length > 0 && <small>{tasks.filter(task => task.state === "COMPLETED").length}/{tasks.length}</small>}
+      </button>
+      {resumable && <button type="button" className="task-bar-resume" onClick={resume} disabled={running}><RotateCcw size={13} />{t("继续任务")}</button>}
+    </div>
+    {expanded && <div className="task-bar-list" role="list" aria-label={t("任务列表")}>
+      {tasks.length ? tasks.map((task) => <div key={task.id} className={`task-bar-task ${task.state.toLowerCase()}`} role="listitem" style={{ paddingLeft: `${10 + Math.min(8, Math.max(0, task.indent)) * 14}px` }}>
+        {task.state === "COMPLETED" ? <CheckCircle2 size={14} /> : task.state === "IN_PROGRESS" ? <RefreshCw size={14} /> : <Circle size={12} />}
+        <span>{task.name}</span>
+      </div>) : <div className="task-bar-empty">{t("任务列表尚未建立")}</div>}
+    </div>}
+  </div>;
+}
+
 function Composer({
   value,
   setValue,
@@ -1532,6 +1580,9 @@ function Composer({
   unpinSkill,
   modelName,
   contextUsage,
+  tasks,
+  resumable,
+  resume,
   disabled = false,
 }: {
   value: string;
@@ -1552,6 +1603,9 @@ function Composer({
   unpinSkill: (name: string) => void;
   modelName: string;
   contextUsage: ContextUsage | null;
+  tasks: TaskListEntry[];
+  resumable: boolean;
+  resume: () => void;
   disabled?: boolean;
 }) {
   const { t } = useI18n();
@@ -1575,6 +1629,7 @@ function Composer({
 
   return (
     <div className="composer-shell">
+      <TaskBar tasks={tasks} running={running} resumable={resumable && !disabled} resume={resume} />
       <MentionPicker items={mentionItems} choose={chooseMention} open={mentionOpen} loading={mentionLoading} />
       <div className="composer">
         {(pinnedSkills.length > 0 || unresolvedSkills.length > 0) && (
@@ -1717,6 +1772,48 @@ function ConversationTraceBar({
   );
 }
 
+const HISTORY_PAGE_SIZE = 60;
+
+const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript }: {
+  messages: SessionMessage[];
+  preferences: UiPreferences;
+  transcript: RefObject<HTMLDivElement | null>;
+}) {
+  const { t } = useI18n();
+  const [start, setStart] = useState(() => Math.max(0, messages.length - HISTORY_PAGE_SIZE));
+  const first = Math.min(start, Math.max(0, messages.length - HISTORY_PAGE_SIZE));
+  const rows = useMemo(() => groupTranscriptMessages(messages.slice(first)), [messages, first]);
+  const pendingScroll = useRef<{ height: number; top: number } | null>(null);
+  const loadEarlier = useCallback(() => {
+    const container = transcript.current;
+    if (container) pendingScroll.current = { height: container.scrollHeight, top: container.scrollTop };
+    setStart(Math.max(0, first - HISTORY_PAGE_SIZE));
+  }, [first, transcript]);
+  useLayoutEffect(() => {
+    const container = transcript.current;
+    const previous = pendingScroll.current;
+    if (container && previous) {
+      container.scrollTop = previous.top + container.scrollHeight - previous.height;
+      pendingScroll.current = null;
+    }
+  }, [start, transcript]);
+  useEffect(() => {
+    const container = transcript.current;
+    if (!container || first === 0) return;
+    const onScroll = () => {
+      if (container.scrollTop < 80 && !pendingScroll.current) loadEarlier();
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, [first, transcript, loadEarlier]);
+  return <>
+    {first > 0 && <button type="button" className="history-load-earlier" onClick={loadEarlier}>{t("加载更早的消息")}</button>}
+    {rows.map(row => row.kind === "activity"
+      ? (preferences.showToolCalls || preferences.showToolResults) && <ActivityGroup key={`activity-${first + row.index}`} events={row.events.map(event => ({ ...event, ...(!preferences.showToolCalls ? { arguments: undefined } : {}), ...(!preferences.showToolResults ? { output: undefined } : {}) }))} defaultExpanded={preferences.expandToolResults} />
+      : <Message key={`${row.message.role}-${first + row.index}`} message={row.message} preferences={preferences} />)}
+  </>;
+});
+
 function ChatView({
   session,
   liveTurn,
@@ -1725,6 +1822,7 @@ function ChatView({
   setPrompt,
   send,
   cancel,
+  resume,
   mentionItems,
   mentionOpen,
   mentionLoading,
@@ -1755,6 +1853,7 @@ function ChatView({
   setPrompt: (prompt: string) => void;
   send: () => void;
   cancel: () => void;
+  resume: () => void;
   mentionItems: Array<Record<string, unknown>>;
   mentionOpen: boolean;
   mentionLoading: boolean;
@@ -1785,9 +1884,28 @@ function ChatView({
     [session?.messages],
   );
   const canRewind = previousTurnBoundary(session?.messages ?? []) !== null;
+  const taskListEvent = [...(liveTurn?.events ?? [])].reverse().find(event => Array.isArray(event.task_list));
+  const tasks = taskListEntries(taskListEvent?.task_list ?? session?.metadata?.task_list);
+  const runState = asRecord(session?.metadata?.prompt_run).state;
+  const resumable = runState === "running" || runState === "interrupted";
+  const followOutput = useRef(true);
   useEffect(() => {
     const container = transcript.current;
     if (!container) return;
+    const onScroll = () => {
+      followOutput.current = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, []);
+  useLayoutEffect(() => {
+    followOutput.current = true;
+    const container = transcript.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [session?.id]);
+  useEffect(() => {
+    const container = transcript.current;
+    if (!container || !followOutput.current) return;
     container.scrollTop = container.scrollHeight;
   }, [session?.id, session?.messages.length, liveTurn?.assistantText, liveTurn?.reasoningText, liveTurn?.events.length]);
   return (
@@ -1812,7 +1930,7 @@ function ChatView({
           <EmptyChat setPrompt={setPrompt} />
         ) : (
           <div className="message-column">
-            {visibleMessages.map((message, index) => <Message key={`${message.role}-${index}`} message={message} preferences={preferences} />)}
+            <HistoryMessages key={session?.id} messages={visibleMessages} preferences={preferences} transcript={transcript} />
             {liveTurn && <LiveMessage turn={liveTurn} running={running} preferences={preferences} />}
           </div>
         )}
@@ -1837,6 +1955,9 @@ function ChatView({
         unpinSkill={unpinSkill}
         modelName={modelName}
         contextUsage={contextUsage}
+        tasks={tasks}
+        resumable={resumable}
+        resume={resume}
         disabled={sessionBusy}
       />
     </div>
@@ -4609,6 +4730,7 @@ export default function App() {
   const [view, setView] = useState<ViewId>("chat");
   const [session, setSession] = useState<SessionState | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
@@ -4665,6 +4787,7 @@ export default function App() {
   );
   const toastId = useRef(0);
   const sessionRequestSequence = useRef(0);
+  const pendingSessionId = useRef("");
   const mentionRequestSequence = useRef(0);
   const initializeSequence = useRef(0);
   const themeRequestSequence = useRef(0);
@@ -4829,6 +4952,10 @@ export default function App() {
 
   const initialize = useCallback(async (projectRoot?: string) => {
     const requestSequence = ++initializeSequence.current;
+    const sessionSequence = ++sessionRequestSequence.current;
+    pendingSessionId.current = "";
+    setSessionBusy(false);
+    setWorkspaceReady(false);
     setBootError("");
     // Transcripts are per project, and switching projects re-enters this path.
     sessionCache.current.clear();
@@ -4879,8 +5006,11 @@ export default function App() {
           toast(error instanceof Error ? error.message : String(error), "error");
         }
       }
-      setState(nextState);
-      setSession(nextSession);
+      setState((current) => current && sessionSequence !== sessionRequestSequence.current
+        ? { ...nextState, sessions: current.sessions }
+        : nextState);
+      if (sessionSequence === sessionRequestSequence.current) setSession(nextSession);
+      setWorkspaceReady(true);
     } catch (error) {
       if (requestSequence === initializeSequence.current) setBootError(error instanceof Error ? error.message : String(error));
     }
@@ -4952,8 +5082,16 @@ export default function App() {
       }
 
       const batch = pendingLiveBatch.current;
-      if (type === "assistant.delta") batch.assistantText += String(event.text ?? "");
-      else if (type === "reasoning.delta") batch.reasoningText += String(event.text ?? "");
+      if (type === "assistant.delta") {
+        const text = String(event.text ?? "");
+        batch.assistantText += text;
+        batch.ordered?.push({ kind: "assistant", text });
+      }
+      else if (type === "reasoning.delta") {
+        const text = String(event.text ?? "");
+        batch.reasoningText += text;
+        batch.ordered?.push({ kind: "reasoning", text });
+      }
       else if (type === "ui.event") {
         const inner = asRecord(event.event);
         // The Thinking Tool's deliberation arrives as a tool call's arguments, not
@@ -4967,10 +5105,19 @@ export default function App() {
         const thinking = innerType === "tool_start" && isThinkTool(inner.tool_name)
           ? thinkToolText(inner.arguments)
           : "";
-        if (thinking) batch.reasoningText += `${batch.reasoningText ? "\n\n" : ""}${thinking}`;
-        else batch.events.push(inner);
+        if (thinking) {
+          batch.reasoningText += `${batch.reasoningText ? "\n\n" : ""}${thinking}`;
+          batch.ordered?.push({ kind: "reasoning", text: thinking });
+        }
+        else {
+          batch.events.push(inner);
+          batch.ordered?.push({ kind: "activity", event: inner });
+        }
       }
-      else if (type === "run.auto_followup" || type === "approval.request") batch.events.push(event);
+      else if (type === "run.auto_followup" || type === "approval.request") {
+        batch.events.push(event);
+        batch.ordered?.push({ kind: "activity", event });
+      }
       else return;
 
       if (liveBatchTimer.current === null) {
@@ -5013,25 +5160,30 @@ export default function App() {
   // Pull the live context-window breakdown for the composer ring. Fired when the
   // conversation actually changes -- after a turn, on session open, after a
   // compact -- never mid-stream, since the backend reads the agent's live state.
-  const refreshContextUsage = useCallback(async (sessionId?: string) => {
-    try {
-      const response = await window.reverie.request("getContextUsage", sessionId ? { sessionId } : {});
-      setContextUsage(response.usage ?? null);
-    } catch {
-      setContextUsage(null);
-    }
-  }, []);
-
   // Keep the composer's context ring current without anyone having to click a
   // session. The reading reflects the payload the *next* turn would send, and
   // the core only answers between turns, so this fires when the active session
-  // changes or a turn finishes (running flips back to false) -- which also
-  // covers the restored session painted on startup, the case where the ring was
-  // silently empty because nothing ever asked for its usage.
+  // changes or a turn finishes (running flips back to false). With no session
+  // yet -- the fresh welcome screen -- we still ask (sessionId omitted) so the
+  // ring shows the fixed system-prompt + memory baseline the first turn carries,
+  // instead of staying invisible until the user opens a conversation.
   useEffect(() => {
-    if (running || !session?.id) return;
-    void refreshContextUsage(session.id);
-  }, [session?.id, running, refreshContextUsage]);
+    setContextUsage(null);
+  }, [projectRoot, session?.id, state?.workspace.active_model]);
+  useEffect(() => {
+    if (!workspaceReady || running || sessionBusy || !state?.workspace.active_model) return;
+    let cancelled = false;
+    // Session reads and rapid navigation take precedence over advisory stats.
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await window.reverie.request("getContextUsage", session?.id ? { sessionId: session.id } : {});
+        if (!cancelled) setContextUsage(response.usage ?? null);
+      } catch {
+        if (!cancelled) setContextUsage(null);
+      }
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [workspaceReady, projectRoot, session?.id, session?.messages, running, sessionBusy, state?.workspace.active_model]);
 
   const openSession = useCallback(async (id: string) => {
     // Re-selecting the conversation already in view is just a jump back to its
@@ -5039,11 +5191,12 @@ export default function App() {
     // double-clicking) the active conversation while parked on Settings or any
     // other view did nothing. Switching to a different session still waits for
     // the current turn, whose live output belongs to the session on screen.
-    if (id === session?.id) {
+    if ((id === session?.id && !pendingSessionId.current) || id === pendingSessionId.current) {
       setView("chat");
       return;
     }
     if (running) return;
+    pendingSessionId.current = id;
     if (session) drafts.current[session.id] = prompt;
     const requestSequence = ++sessionRequestSequence.current;
     // A transcript already read in this window cannot have changed unless this
@@ -5061,18 +5214,20 @@ export default function App() {
       setPrompt(drafts.current[id] ?? "");
       setAttachments([]);
       setMentionOpen(false);
+      setSessionBusy(false);
     } else {
       setSessionBusy(true);
     }
     try {
       const response = await window.reverie.request("getSession", { sessionId: id });
       if (requestSequence !== sessionRequestSequence.current) return;
-      const nextSession = response.session;
+      const nextSession = cached?.revision && cached.revision === response.session.revision
+        ? cached
+        : response.session;
       setSession(nextSession);
       setState((current) => current ? { ...current, sessions: response.sessions } : current);
       setView("chat");
       setLiveTurn(null);
-      void refreshContextUsage(nextSession.id);
       // The draft was already restored for the optimistic paint; re-applying it
       // here would discard anything typed while the request was in flight.
       if (!cached) {
@@ -5083,9 +5238,12 @@ export default function App() {
     } catch (error) {
       if (requestSequence === sessionRequestSequence.current) toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
-      if (requestSequence === sessionRequestSequence.current) setSessionBusy(false);
+      if (requestSequence === sessionRequestSequence.current) {
+        pendingSessionId.current = "";
+        setSessionBusy(false);
+      }
     }
-  }, [prompt, refreshContextUsage, running, session, toast]);
+  }, [prompt, running, session, toast]);
 
   const createSession = useCallback(async (force = false) => {
     if (running || sessionBusy) return;
@@ -5201,16 +5359,20 @@ export default function App() {
   // can reuse the exact same path after cancelling the in-flight turn. Assumes
   // the composer control commands (/skill, /compact) have already been handled
   // and the prompt slot cleared by the caller.
-  const runPromptText = useCallback(async (text: string) => {
+  const runPromptText = useCallback(async (text: string, resume = false) => {
     const activeState = state;
-    if (!activeState) return;
+    if (!activeState || (resume && !session)) return;
+    // A cached transcript is usable while its read reconciles. Once a turn
+    // starts, an older read must not clear that turn's live output.
+    sessionRequestSequence.current += 1;
+    pendingSessionId.current = "";
     setRunning(true);
     resetLiveBatch();
     acceptLiveEvents.current = true;
-    setLiveTurn({ userText: text, assistantText: "", reasoningText: "", events: [], error: "", startedAt: Date.now() });
+    setLiveTurn({ userText: resume ? "" : text, resumed: resume, assistantText: "", reasoningText: "", events: [], segments: [], error: "", startedAt: Date.now() });
     try {
       let activeSession = session;
-      if (!activeSession) {
+      if (!activeSession && !resume) {
         const created = await window.reverie.request("createSession", {});
         activeSession = created.session;
         setSession(activeSession);
@@ -5219,22 +5381,25 @@ export default function App() {
       // The prompt has been sent, so this conversation's draft is spent. Clear
       // both the saved slot and the pre-session placeholder that a brand-new
       // conversation was drafted under, so neither lingers to be restored.
-      drafts.current[activeSession.id] = "";
-      delete drafts.current[NEW_SESSION_DRAFT_ID];
-      if (projectRoot) {
-        clearDraft(projectRoot, activeSession.id);
-        clearDraft(projectRoot, NEW_SESSION_DRAFT_ID);
+      if (!activeSession) return;
+      if (!resume) {
+        drafts.current[activeSession.id] = "";
+        delete drafts.current[NEW_SESSION_DRAFT_ID];
+        if (projectRoot) {
+          clearDraft(projectRoot, activeSession.id);
+          clearDraft(projectRoot, NEW_SESSION_DRAFT_ID);
+        }
       }
-      const response = await window.reverie.request("runPrompt", {
-        prompt: text,
+      const response = await window.reverie.request(resume ? "resumePrompt" : "runPrompt", {
+        ...(!resume ? { prompt: text } : {}),
         sessionId: activeSession.id,
         mode: activeState.workspace.mode,
         stream: true,
       });
       const result = response.result;
       acceptLiveEvents.current = false;
-      // The final result is authoritative and already contains every emitted
-      // delta, so discard an unpainted tail before replacing the live text.
+      if (liveBatchTimer.current !== null) window.clearTimeout(liveBatchTimer.current);
+      flushLiveBatch();
       resetLiveBatch();
       setLiveTurn((current) => current ? {
         ...current,
@@ -5250,8 +5415,7 @@ export default function App() {
       const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id });
       setSession(refreshed.session);
       setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
-      setAttachments([]);
-      void refreshContextUsage(result.session_id || activeSession.id);
+      if (!resume) setAttachments([]);
       if (!result.success) {
         // The in-body error block carries the full humanized detail (e.g. the
         // 403 guidance) under the model output, and main.ts raises a native OS
@@ -5276,7 +5440,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [projectRoot, refreshContextUsage, resetLiveBatch, session, state, t]);
+  }, [flushLiveBatch, projectRoot, resetLiveBatch, session, state, t]);
 
   // Hard interrupt: cancel() kills and respawns the kernel, which reloads the
   // persisted session history, so the new prompt runs as a fresh turn against
@@ -6019,8 +6183,8 @@ export default function App() {
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} />;
-    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
-  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
+    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={(value) => { setPrompt((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value} `); setMentionOpen(false); }} attachments={attachments} selectAttachment={() => void selectAttachment()} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
+  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;

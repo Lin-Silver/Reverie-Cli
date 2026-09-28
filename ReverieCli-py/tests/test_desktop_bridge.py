@@ -1364,6 +1364,91 @@ def test_sdk_bridge_compacts_the_requested_desktop_session_with_shared_context_t
     assert manager.get_current_session().messages == response["session"]["messages"]
 
 
+def test_sdk_bridge_resume_prompt_dispatches_without_prompt_text(tmp_path: Path) -> None:
+    from reverie.sdk_bridge import ReverieSdkBridge, _BACKGROUND_DISPATCH_ACTIONS
+
+    captured = {}
+    session = SimpleNamespace(id="session-1")
+
+    def run_prompt_once(message, **kwargs):
+        captured.update(message=message, kwargs=kwargs)
+        return SimpleNamespace(to_dict=lambda: {"success": True, "session_id": session.id})
+
+    interface = SimpleNamespace(
+        session_manager=SimpleNamespace(load_session=lambda session_id: session if session_id == session.id else None),
+        run_prompt_once=run_prompt_once,
+    )
+    bridge = ReverieSdkBridge.__new__(ReverieSdkBridge)
+    bridge.project_root = tmp_path
+    bridge.ensure_interface = lambda project_root=None: interface
+    bridge.sessions_payload = lambda: {"current_session_id": session.id, "items": []}
+    bridge.recovery_payload = lambda: {"summary": {}, "checkpoints": [], "operations": []}
+    response = bridge.dispatch({"id": "continue", "action": "resumePrompt", "payload": {"sessionId": session.id}})
+
+    assert "resumePrompt" in _BACKGROUND_DISPATCH_ACTIONS
+    assert captured["message"] == ""
+    assert captured["kwargs"]["resume"] is True
+    assert response["type"] == "prompt.result"
+
+
+def test_get_context_usage_initializes_the_agent_before_reading(tmp_path: Path) -> None:
+    """The composer ring must populate on session open, before any turn runs.
+
+    The agent is built lazily on the first runPrompt, so a freshly launched or
+    restored session had no agent when the ring asked for usage: the reading
+    came back null and the ring stayed hidden. getContextUsage now initializes
+    the agent the same way compactContext does.
+    """
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    session = manager.create_session("Fresh session")
+    session.messages = [{"role": "user", "content": "hello"}]
+    manager.save_session(session)
+
+    captured = {}
+
+    class _Agent:
+        def __init__(self):
+            self.history = []
+
+        def set_history(self, messages):
+            self.history = list(messages)
+
+        def describe_context_usage(self):
+            return {"total_tokens": 6400, "max_tokens": 128000, "percentage": 5.0}
+
+    class _Interface:
+        session_manager = manager
+
+        def __init__(self):
+            # Starts without an agent, exactly like a just-launched desktop.
+            self.agent = None
+            self.config_manager = SimpleNamespace(load=lambda: SimpleNamespace(active_model=object()))
+
+        def _init_agent(self, **kwargs):
+            captured["init"] = kwargs
+            self.agent = _Agent()
+
+        def _sync_workspace_memory_message(self, session):
+            captured["synced"] = session.id
+
+    # __PLACEHOLDER_GET_CONTEXT_USAGE__
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path.resolve()
+    bridge.interface = _Interface()
+
+    response = bridge.dispatch(
+        {"id": "usage-1", "action": "getContextUsage", "payload": {"sessionId": session.id}}
+    )
+
+    assert captured["init"] == {"persist_config_changes": False, "defer_runtime_enrichment": True}
+    assert "synced" not in captured
+    assert response["type"] == "context.usage"
+    assert response["usage"] == {"total_tokens": 6400, "max_tokens": 128000, "percentage": 5.0}
+    assert bridge.interface.agent.history == session.messages
+
+
 def test_renaming_or_deleting_a_background_session_preserves_the_active_session(tmp_path: Path) -> None:
     from reverie.sdk_bridge import ReverieSdkBridge
 

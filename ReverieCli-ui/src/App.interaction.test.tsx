@@ -709,7 +709,7 @@ function installDesktopApi(options: {
         workspace: { ...desktopState.workspace, mode, active_model: activeModel },
       };
     }
-    if (action === "runPrompt") {
+    if (action === "runPrompt" || action === "resumePrompt") {
       promptFinished = true;
       if (options.approvalRequest) emitCoreEvent(options.approvalRequest);
       if (options.gatePrompt) await promptGate;
@@ -717,7 +717,7 @@ function installDesktopApi(options: {
         type: "prompt.result",
         result: {
           success: true,
-          prompt: String(payload.prompt),
+          prompt: String(payload.prompt ?? "Inspect the cache"),
           output_text: "Cache inspection complete",
           thinking_text: "",
           error: "",
@@ -2121,6 +2121,76 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("还没有自定义 Provider")).toBeTruthy();
   });
 
+  it("renders long history in batches while keeping every earlier record accessible", async () => {
+    const messages: SessionState["messages"] = Array.from({ length: 180 }, (_, index) => ({ role: "user", content: `History record ${index}` }));
+    installDesktopApi({ initialSession: { ...baseSession, messages } });
+    render(<App />);
+    await screen.findByText("History record 179");
+    expect(document.querySelectorAll(".transcript .message").length).toBe(60);
+    expect(screen.queryByText("History record 0")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "加载更早的消息" }));
+    expect(document.querySelectorAll(".transcript .message").length).toBe(120);
+    fireEvent.click(screen.getByRole("button", { name: "加载更早的消息" }));
+    expect(screen.getByText("History record 0")).toBeTruthy();
+    expect(document.querySelectorAll(".transcript .message").length).toBe(180);
+    expect(screen.queryByRole("button", { name: "加载更早的消息" })).toBeNull();
+  });
+
+  it("requests one context reading after bootstrap and one after a session switch", async () => {
+    const { request } = installDesktopApi();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    expect(request.mock.calls.filter(([action]) => action === "getContextUsage")).toEqual([
+      ["getContextUsage", { sessionId: baseSession.id }],
+    ]);
+    const row = [...document.querySelectorAll(".session-item")].find((item) => item.textContent?.includes(searchSession.name));
+    fireEvent.click(row!);
+    await screen.findByText("Investigate cache invalidation");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    expect(request.mock.calls.filter(([action]) => action === "getContextUsage")).toEqual([
+      ["getContextUsage", { sessionId: baseSession.id }],
+      ["getContextUsage", { sessionId: searchSession.id }],
+    ]);
+  });
+
+  it("ignores a context reading that finishes after navigation", async () => {
+    const { api } = installDesktopApi();
+    const original = api.request.getMockImplementation()!;
+    let release: (value: unknown) => void = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    api.request.mockImplementation(async (action, payload) => {
+      if (action === "getContextUsage" && payload.sessionId === baseSession.id) return await gate as never;
+      return original(action, payload);
+    });
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("getContextUsage", { sessionId: baseSession.id }));
+    const row = [...document.querySelectorAll(".session-item")].find((item) => item.textContent?.includes(searchSession.name));
+    fireEvent.click(row!);
+    await screen.findByText("Investigate cache invalidation");
+    await act(async () => release({ type: "context.usage", usage: {
+      total_tokens: 99, max_tokens: 100, percentage: 99, segments: [], tokenizer: { exact: true },
+    } }));
+    expect(screen.queryByRole("button", { name: /上下文窗口已用 99%/ })).toBeNull();
+  });
+
+  it("lets the user return to the current transcript while another session is loading", async () => {
+    const { request, releaseSession } = installDesktopApi({ gateSession: true });
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    const row = (name: string) => [...document.querySelectorAll(".session-item")].find((item) => item.textContent?.includes(name))!;
+    fireEvent.click(row(searchSession.name));
+    fireEvent.doubleClick(row(searchSession.name));
+    expect(request.mock.calls.filter(([action]) => action === "getSession").length).toBe(2);
+    expect(screen.getByText("正在切换会话")).toBeTruthy();
+    fireEvent.click(row(baseSession.name));
+    expect(document.querySelector(".transcript")?.getAttribute("aria-busy")).toBe("false");
+    await act(async () => releaseSession());
+    expect(document.querySelector(".conversation-header")?.textContent).toContain(baseSession.name);
+    expect(screen.queryByText("Investigate cache invalidation")).toBeNull();
+  });
+
   it("repaints an already-visited session immediately instead of waiting on the core", async () => {
     const { request, releaseSession } = installDesktopApi({ gateSession: true });
     const user = userEvent.setup();
@@ -2442,6 +2512,68 @@ describe("desktop GUI interactions", () => {
 
     expect(await screen.findByText("The one final reply.")).toBeTruthy();
     expect(screen.queryByText(provisional)).toBeNull();
+  });
+
+  it("places clickable tool steps beside the explanation that preceded them", async () => {
+    installDesktopApi({
+      initialSession: {
+        ...baseSession,
+        messages: [
+          { role: "user", content: "Check the project" },
+          { role: "assistant", content: "I will inspect the files.", tool_calls: [{ id: "read-1", function: { name: "read_file", arguments: '{"path":"app.py"}' } }] },
+          { role: "tool", tool_call_id: "read-1", content: "print('hello')" },
+          { role: "assistant", content: "The file is small. I will run tests.", tool_calls: [{ id: "test-1", function: { name: "command_exec", arguments: '{"command":"pytest"}' } }] },
+          { role: "tool", tool_call_id: "test-1", content: "1 passed" },
+        ],
+      },
+    });
+    const mounted = render(<App />);
+    expect(await screen.findByText("The file is small. I will run tests.")).toBeTruthy();
+    const rows = [...mounted.container.querySelectorAll(".message-column > .message, .message-column > .activity-group")];
+    expect(rows.map(row => row.textContent?.includes("工具调用步骤") ? "tools" : row.textContent?.includes("I will inspect") ? "explain-1" : row.textContent?.includes("The file is small") ? "explain-2" : "other")).toEqual(["other", "explain-1", "tools", "explain-2", "tools"]);
+    const group = rows[2] as HTMLElement;
+    await userEvent.setup().click(within(group).getByText("工具调用步骤"));
+    await userEvent.setup().click(within(group).getByText("read_file"));
+    expect(within(group).getByText(/"path":"app.py"/)).toBeTruthy();
+    expect(within(group).getByText("print('hello')")).toBeTruthy();
+  });
+
+  it("expands the task checklist and resumes without adding prompt text or clearing a draft", async () => {
+    const { request, releasePrompt } = installDesktopApi({
+      gatePrompt: true,
+      initialSession: {
+        ...baseSession,
+        messages: [{ role: "user", content: "Build the task board" }],
+        metadata: {
+          prompt_run: { state: "interrupted", prompt: "Build the task board" },
+          task_list: [
+            { id: "1", name: "Create server", state: "COMPLETED", indent: 0 },
+            { id: "2", name: "Test API", state: "IN_PROGRESS", indent: 0 },
+            { id: "3", name: "Verify browser", state: "NOT_STARTED", indent: 1 },
+          ],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Test API")).toBeTruthy();
+    expect(screen.queryByText("Verify browser")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "任务列表" }));
+    expect(screen.getByText("Create server")).toBeTruthy();
+    expect(screen.getByText("Verify browser")).toBeTruthy();
+    const composer = screen.getByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "my unsent draft");
+    await user.click(screen.getByRole("button", { name: "继续任务" }));
+
+    await waitFor(() => expect(request.mock.calls.some(([action]) => action === "resumePrompt")).toBe(true));
+    const resumeCall = request.mock.calls.find(([action]) => action === "resumePrompt");
+    expect(resumeCall?.[1]).toMatchObject({ sessionId: baseSession.id });
+    expect(resumeCall?.[1]).not.toHaveProperty("prompt");
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+    expect(composer.value).toBe("my unsent draft");
+    releasePrompt();
+    expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
   });
 
   it("translates the experimental badge in the Chinese interface", async () => {

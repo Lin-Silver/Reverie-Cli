@@ -1,0 +1,97 @@
+{
+  "switches": [
+    {
+      "session": "Long",
+      "ms": 443.73929999983375,
+      "rows": 60
+    },
+    {
+      "session": "Small",
+      "ms": 140.53659999990487,
+      "rows": 2
+    },
+    {
+      "session": "Long",
+      "ms": 776.5496000001804,
+      "rows": 60
+    }
+  ],
+  "typing_ms": 482.49759999998787,
+  "long_tasks_ms": [
+    207,
+    668,
+    55,
+    396,
+    103
+  ],
+  "history_check": {
+    "rows_after_scroll": 120,
+    "anchor_shift_px": 0.0
+  },
+  "ipc": [
+    {
+      "action": "initialize",
+      "ms": 749.8143999999998
+    },
+    {
+      "action": "getSession",
+      "ms": 2.667699999999968
+    },
+    {
+      "action": "getState",
+      "ms": 173.64540000000034
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.4221000000002277
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 2.485399999999572
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.2109000000000378
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.8033000000004904
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.4073000000007596
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 183.51620000000003
+    },
+    {
+      "action": "getSession",
+      "ms": 61.76860000000124
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 26.65519999999924
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.4425000000010186
+    },
+    {
+      "action": "getSession",
+      "ms": 15.21349999999984
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.9724000000005617
+    },
+    {
+      "action": "getSession",
+      "ms": 502.92379999999866
+    },
+    {
+      "action": "getContextStatus",
+      "ms": 1.5666000000001077
+    }
+  ]
+}

@@ -4905,20 +4905,6 @@ class ReverieAgent:
             except Exception:
                 logger.debug("Operation history tool logging failed", exc_info=True)
 
-        yield encode_stream_event(
-            "tool_result",
-            tool_name=tool_name,
-            message=exec_msg,
-            arguments=args,
-            tool_call_id=str(tool_call.get("id", "")).strip(),
-            success=bool(result.success),
-            output=str(result.output or ""),
-            error=str(result.error or ""),
-            status=str(getattr(result.status, "value", "success")),
-            agent_id=self.agent_id,
-            agent_color=self.agent_color,
-        )
-
         relay_tool_result_message = {
             "role": "tool",
             "tool_call_id": tool_call["id"],
@@ -4932,6 +4918,20 @@ class ReverieAgent:
             }
         )
         messages.append(relay_tool_result_message)
+        yield encode_stream_event(
+            "tool_result",
+            tool_name=tool_name,
+            message=exec_msg,
+            arguments=args,
+            tool_call_id=str(tool_call.get("id", "")).strip(),
+            success=bool(result.success),
+            output=str(result.output or ""),
+            error=str(result.error or ""),
+            status=str(getattr(result.status, "value", "success")),
+            task_list=result.data.get("tasks") if canonical_name == "task_manager" and isinstance(result.data, dict) else None,
+            agent_id=self.agent_id,
+            agent_color=self.agent_color,
+        )
 
     def _process_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> Generator[str, None, None]:
         """Process streaming responses for the native Codex provider."""
@@ -5439,6 +5439,7 @@ class ReverieAgent:
         stream: bool = True,
         session_id: str = "default",
         user_display_text: Optional[str] = None,
+        resume: bool = False,
     ) -> Generator[str, None, None]:
         """
         Process a user message and yield responses.
@@ -5458,44 +5459,53 @@ class ReverieAgent:
         if not display_text and isinstance(user_message, list):
             display_text = "[image attachment]"
 
-        self._record_memory_event(
-            "user_message",
-            {
-                "content": user_message,
-                "display_text": display_text,
-                "mode": self.mode,
-                "model": self.model,
-                "provider": self.provider,
-            },
-            actor="user",
-            session_id=session_id,
-            tags=["user", "message"],
-        )
-
-        # Create checkpoint before processing user question
-        if self.rollback_manager:
-            self.current_checkpoint_id = self.rollback_manager.create_pre_question_checkpoint(
+        if resume:
+            if not any(message.get("role") == "user" for message in self.messages):
+                raise ValueError("Cannot resume a session without a user request.")
+            # Keep the provider's tool-call protocol valid without replaying an
+            # operation whose side effects are uncertain after a hard stop.
+            completed = {str(message.get("tool_call_id") or "") for message in self.messages if message.get("role") == "tool"}
+            for message in list(self.messages):
+                if message.get("role") != "assistant":
+                    continue
+                for call in message.get("tool_calls") or []:
+                    call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+                    if call_id and call_id not in completed:
+                        self.messages.append({
+                            "role": "tool", "tool_call_id": call_id,
+                            "content": "Tool call was interrupted; its result is unknown. Check the workspace before retrying it.",
+                        })
+                        completed.add(call_id)
+        else:
+            self._record_memory_event(
+                "user_message",
+                {
+                    "content": user_message,
+                    "display_text": display_text,
+                    "mode": self.mode,
+                    "model": self.model,
+                    "provider": self.provider,
+                },
+                actor="user",
                 session_id=session_id,
-                messages=self.messages,
-                question=display_text
+                tags=["user", "message"],
             )
-        
-        # Add user message to history
-        self.messages.append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # Record user question in operation history
-        if self.operation_history:
-            self.operation_history.add_user_question(
-                question=display_text,
-                message_index=len(self.messages) - 1,
-                checkpoint_id=self.current_checkpoint_id
-            )
-        
-        # A new user turn always gets a fresh Thinking Tool budget.
-        self._reset_think_tool_budget()
+
+            # A resumed request uses the existing turn and its checkpoint.
+            if self.rollback_manager:
+                self.current_checkpoint_id = self.rollback_manager.create_pre_question_checkpoint(
+                    session_id=session_id,
+                    messages=self.messages,
+                    question=display_text
+                )
+            self.messages.append({"role": "user", "content": user_message})
+            if self.operation_history:
+                self.operation_history.add_user_question(
+                    question=display_text,
+                    message_index=len(self.messages) - 1,
+                    checkpoint_id=self.current_checkpoint_id
+                )
+            self._reset_think_tool_budget()
 
         # Check for context threshold and auto-rotate if the session is too large
         self._check_and_compress_context(session_id=session_id)

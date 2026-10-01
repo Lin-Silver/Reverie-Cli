@@ -686,6 +686,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.reorder_node",
             "project.list_files",
             "project.read_file",
+            "project.write_file",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -764,6 +765,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["scene.reorder_node"].get("permission") == "edit"
         assert definitions_by_name["project.list_files"].get("permission") == "read"
         assert definitions_by_name["project.read_file"].get("permission") == "read"
+        assert definitions_by_name["project.write_file"].get("permission") == "project"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -792,6 +794,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "scene.reorder_node",
             "project.list_files",
             "project.read_file",
+            "project.write_file",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1190,6 +1193,44 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"path": "../escape"},
         )
         assert rejected_read.success is False, rejected_read.data
+        # project.write_file closes the list -> read -> write trio on the same shared
+        # catalog: author a brand-new confined file over RTP, then read it straight
+        # back to prove the write reached the engine on the main thread byte-for-byte.
+        written = executor.execute(
+            dynamic_tools["project.write_file"],
+            {"path": "cli_authored/reverie_note.txt", "content": "authored by reverie-cli"},
+        )
+        assert (
+            written.success is True
+            and written.data.get("created") is True
+            and written.data.get("written") is True
+            and written.data.get("encoding") == "utf-8"
+            and written.data.get("execution_thread") == "main"
+            and written.data.get("size_bytes")
+            == len("authored by reverie-cli".encode("utf-8"))
+        ), written.error or written.data
+        readback = executor.execute(
+            dynamic_tools["project.read_file"],
+            {"path": "cli_authored/reverie_note.txt"},
+        )
+        assert (
+            readback.success is True
+            and readback.data.get("is_text") is True
+            and readback.data.get("content") == "authored by reverie-cli"
+        ), readback.error or readback.data
+        # Overwriting an existing file without opting in is refused, so an authored
+        # file is never silently clobbered from the client.
+        refused_write = executor.execute(
+            dynamic_tools["project.write_file"],
+            {"path": "cli_authored/reverie_note.txt", "content": "clobber"},
+        )
+        assert refused_write.success is False, refused_write.data
+        # A path escaping the project boundary is refused before any bytes are written.
+        rejected_write = executor.execute(
+            dynamic_tools["project.write_file"],
+            {"path": "../escape.txt", "content": "nope"},
+        )
+        assert rejected_write.success is False, rejected_write.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

@@ -1149,6 +1149,16 @@ class ToolExecutor:
             return result
         
         normalized_arguments = self._normalize_arguments(tool, arguments)
+        control = self.context.get("desktop_run_control")
+        if control is not None:
+            control.check_cancel()
+        if self.context.get("desktop_read_only_review"):
+            # Only audited built-in reading tools are exposed. A plugin's own
+            # read_only declaration is insufficient to grant review execution.
+            safe_readers = {"codebase-retrieval"}
+            reading = tool.name in safe_readers or (tool.name == "file_ops" and normalized_arguments.get("operation") in {"read", "list", "exists", "info"}) or (tool.name == "str_replace_editor" and normalized_arguments.get("command") == "view")
+            if not reading or not type(tool).__module__.startswith("reverie.tools."):
+                return ToolResult.fail("Read-only review forbids this tool. Shell, plugins, writes and Git publication are unavailable.")
         agent = self.context.get("agent")
         config = getattr(agent, "config", None) if agent is not None else None
         security = getattr(config, "security", {}) if config is not None else self.context.get("security", {})

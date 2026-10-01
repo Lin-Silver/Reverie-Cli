@@ -7,6 +7,8 @@ import {
   draftStorageKey,
   loadProjectDrafts,
   saveDraft,
+  loadStructuredDraft,
+  saveStructuredDraft,
 } from "./drafts";
 
 const PROJECT_A = "G:\\work\\alpha";
@@ -17,6 +19,20 @@ afterEach(() => {
 });
 
 describe("per-conversation composer drafts", () => {
+  it("restores structured attachments across normalized Windows roots and reads old drafts", () => {
+    saveDraft(PROJECT_A, "old", "old text");
+    expect(loadStructuredDraft(PROJECT_A, "old")).toEqual({ text: "old text", attachments: [] });
+    const draft = { text: "中文", attachments: [{ id: "a", name: "one.png", relativePath: ".reverie/attachments/one.png", size: 12, kind: "copy" as const, status: "ready" as const }] };
+    expect(saveStructuredDraft(PROJECT_A, "s1", draft)).toBe("");
+    expect(loadStructuredDraft("g:/work/ALPHA/", "s1")).toEqual(draft);
+    expect(loadStructuredDraft(PROJECT_B, "s1")).toEqual({ text: "", attachments: [] });
+    clearDraft(PROJECT_A, "s1");
+    expect(loadStructuredDraft(PROJECT_A, "s1").attachments).toEqual([]);
+  });
+  it("restores interrupted imports as cancelled without pretending they are ready", () => {
+    saveStructuredDraft(PROJECT_A, "s1", { text: "next", attachments: [{ name: "pending", relativePath: "", size: 0, status: "pending" }] });
+    expect(loadStructuredDraft(PROJECT_A, "s1").attachments[0].status).toBe("cancelled");
+  });
   it("keeps each conversation's draft in its own slot", () => {
     saveDraft(PROJECT_A, "20260101_000000_000001", "draft one");
     saveDraft(PROJECT_A, "20260101_000000_000002", "draft two");

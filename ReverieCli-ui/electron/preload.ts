@@ -1,5 +1,8 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { CoreActionName } from "./core-actions";
+import type { GitWorkspaceStatus } from "./git-workspace";
+import type { ComposerAttachment } from "./attachments";
+import type { FilePatch, GitSnapshot, Preview, PushPlan } from "./workbench";
 
 type JsonRecord = Record<string, unknown>;
 type EventListener = (message: JsonRecord) => void;
@@ -15,7 +18,7 @@ type UiPreferencesPayload = JsonRecord & {
 contextBridge.exposeInMainWorld("reverie", {
   request: (action: CoreActionName, payload: JsonRecord = {}) =>
     ipcRenderer.invoke("core:request", action, payload) as Promise<JsonRecord>,
-  cancel: () => ipcRenderer.invoke("core:cancel") as Promise<void>,
+  cancel: (owner?: {projectRoot:string;sessionId:string}) => ipcRenderer.invoke("core:cancel", owner) as Promise<void>,
   notify: (payload: { title: string; body: string }) =>
     ipcRenderer.invoke("desktop:notify", payload) as Promise<void>,
   onEvent: (listener: EventListener) => {
@@ -33,12 +36,16 @@ contextBridge.exposeInMainWorld("reverie", {
       deletedSessions: number;
       preferences: UiPreferencesPayload;
     } | null>,
-  selectAttachment: () =>
-    ipcRenderer.invoke("desktop:select-attachment") as Promise<{
-      name: string;
-      relativePath: string;
-      size: number;
-    } | null>,
+  selectAttachment: (projectRoot?: string) => ipcRenderer.invoke("desktop:select-attachment", projectRoot) as Promise<ComposerAttachment | null>,
+  importDroppedFiles: (files: File[], projectRoot?: string) => ipcRenderer.invoke("desktop:import-dropped-files", files.map((file) => webUtils.getPathForFile(file)), projectRoot) as Promise<ComposerAttachment[]>,
+  pasteImage: (projectRoot: string) => ipcRenderer.invoke("desktop:paste-image", projectRoot) as Promise<ComposerAttachment>,
+  retryAttachment: (projectRoot: string, item: ComposerAttachment, copy = false) => ipcRenderer.invoke("desktop:retry-attachment", projectRoot, item, copy) as Promise<ComposerAttachment>,
+  gitStatus: () => ipcRenderer.invoke("desktop:git-status") as Promise<GitWorkspaceStatus | null>,
+  workbench: (operation: string, payload: JsonRecord = {}) => ipcRenderer.invoke("desktop:workbench", operation, payload) as Promise<GitSnapshot | FilePatch | Preview | PushPlan | JsonRecord>,
+  switchGitBranch: (name: string, remote: boolean) =>
+    ipcRenderer.invoke("desktop:git-switch-branch", name, remote) as Promise<GitWorkspaceStatus>,
+  createGitBranch: (name: string) =>
+    ipcRenderer.invoke("desktop:git-create-branch", name) as Promise<GitWorkspaceStatus>,
   selectCoreData: () =>
     ipcRenderer.invoke("desktop:select-core-data") as Promise<string | null>,
   paths: () =>

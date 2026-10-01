@@ -4,6 +4,12 @@ Reverie Desktop is the Electron GUI for the existing Reverie CLI. It does not re
 
 Current stable version: `v2.5.0` (released 2026-07-17).
 
+The 2026-09-30 desktop workflow changes are implemented in the working tree; see the [S01–S21 implementation and acceptance report](../docs/REVERIE_CLI_IMPLEMENTATION_REPORT_2026-09-30.md) for packaged evidence and remaining model, authorization and native-IME checks. This working-tree update has not been committed or published.
+
+The composer supports structured attachment drafts, image clipboard input, file references, Queue/Steer/Stop and a goal summary. The Workbench contains full Git scopes, guarded file/hunk operations, whole-index commit, reviewed ordinary push, read-only review, local previews (including locally rendered PDF pages), session-owned real PTYs, explicit project actions, durable run records, notifications and effective capabilities. Managed local worktrees use detached HEAD and recoverable byte-preserving archive/restore; independent core processes coordinate writers in the same checkout. No Local/Cloud selector is added.
+
+Project initialization commands run only after explicit action confirmation. Closing the app with active runs or terminals explains which processes will end. A prior incomplete run is shown for review and never automatically replays unknown writes. Worktree archive defaults to preserving ignored files; inspect every choice before removal.
+
 ## Development
 
 Requirements:
@@ -70,7 +76,10 @@ The desktop appearance supports **Follow system**, **Dark**, and **Light** theme
 In the composer, the two file controls have distinct roles:
 
 - `@` asks Context Engine for the most likely workspace files and symbols using the current draft, recent conversation, semantic index, Git state, and file recency.
-- The paperclip opens the native file chooser for any file, copies it to `<project>/.reverie/attachments`, and inserts a removable attachment reference into the draft.
+- The paperclip opens the native file chooser and adds ordered attachment cards. Workspace files retain references; external files and clipboard images get fixed copies in `<project>/.reverie/attachments`. Cards show the source version, preview, reorder, remove, and retry controls.
+- Dropping up to 20 local files uses the same structured attachment path. The input surface shows the drop target; native image paste and photo-only messages are supported when the selected model accepts images. Unsent text and attachments persist together per conversation, including failed sends. Sent local images retain preview buttons in the transcript.
+
+**Settings → Conversation display → User display name** changes the name shown above user messages, including existing conversation history. Empty restores the default label. For Git workspaces, a branch control at the bottom of the conversation lists local and fetched remote-only branches, shows the current branch and uncommitted file count, and can switch or create a branch. Branch switching is unavailable while a session is running, and Git itself decides whether working-tree changes permit a switch.
 
 Project changes reuse the existing `reverie.exe --sdk-bridge` child process. Only workspace-scoped Python services are replaced, avoiding a visible kernel disconnect/reconnect cycle.
 

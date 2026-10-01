@@ -1383,6 +1383,7 @@ def test_sdk_bridge_resume_prompt_dispatches_without_prompt_text(tmp_path: Path)
     bridge.ensure_interface = lambda project_root=None: interface
     bridge.sessions_payload = lambda: {"current_session_id": session.id, "items": []}
     bridge.recovery_payload = lambda: {"summary": {}, "checkpoints": [], "operations": []}
+    bridge._run_lock = threading.Lock()
     response = bridge.dispatch({"id": "continue", "action": "resumePrompt", "payload": {"sessionId": session.id}})
 
     assert "resumePrompt" in _BACKGROUND_DISPATCH_ACTIONS

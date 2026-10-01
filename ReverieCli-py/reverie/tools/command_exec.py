@@ -336,7 +336,26 @@ Examples:
             stdout_thread.start()
             stderr_thread.start()
             try:
-                returncode = process.wait(timeout=timeout)
+                control = self.context.get("desktop_run_control")
+                deadline = start_time + timeout
+                while process.poll() is None:
+                    if control is not None and control.cancelled.is_set():
+                        if os.name == "nt":
+                            subprocess.run(["taskkill", "/pid", str(process.pid), "/t", "/f"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        else:
+                            process.terminate()
+                        process.wait(timeout=5)
+                        stdout_thread.join(timeout=1)
+                        stderr_thread.join(timeout=1)
+                        return ToolResult.fail("Command stopped by user.\n" + "".join(stdout_lines + stderr_lines))
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(invocation["argv"], timeout)
+                    try:
+                        process.wait(timeout=min(0.1, remaining))
+                    except subprocess.TimeoutExpired:
+                        pass
+                returncode = process.returncode
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout_thread.join(timeout=0.5)

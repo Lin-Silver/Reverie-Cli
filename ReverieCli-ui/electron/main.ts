@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, shell } from "electron";
 import { assertCoreAction, assertCoreResponse, normalizeCorePayload } from "./core-actions";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { appendFile, copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
   findRepositoryCoreRoot,
@@ -17,6 +18,12 @@ import { resolveKernelSelection, TRUSTED_KERNELS_FILENAME } from "./kernel-resol
 import { parseDesktopLaunchOptions, resolveDesktopStartupMode } from "./launch-options";
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
 import { coreRequestTimeoutMs } from "./core-timeouts";
+import { createGitBranch, getGitWorkspaceStatus, switchGitBranch } from "./git-workspace";
+import { importAttachments, saveClipboardImage, validateAttachments, type ComposerAttachment } from "./attachments";
+import { gitSnapshot, gitPatch, gitMutate, gitCommit, gitPushPlan, gitPush, gitOutput, readPreview, type DiffScope, type PushPlan } from "./workbench";
+import { TerminalManager, RunJournal, actions, saveActions, loadGoal, saveGoal, readJson, atomicJson, type ProjectAction, type Goal, type LocalNotification } from "./session-workspace";
+import { ExecutionCoordinator } from "./execution-coordinator";
+import { createManaged, listManaged, copyPlan, archivePlan, archiveManaged, restoreManaged, workingSnapshot } from "./isolated-workspaces";
 import {
   activateWorkspaceInPlace,
   isWorkspaceDirectory,
@@ -87,6 +94,7 @@ function internalKernelPath(): string {
 }
 
 let activeKernelPath = internalKernelPath();
+const knownWorkspaceRoots = new Set<string>();
 
 async function selectKernelPath(preferExternal = true): Promise<string> {
   if (!app.isPackaged) return internalKernelPath();
@@ -183,11 +191,21 @@ function attachmentDirectory(projectRoot: string): string {
   return path.join(path.resolve(projectRoot), ".reverie", "attachments");
 }
 
-function safeAttachmentName(filePath: string): string {
-  const parsed = path.parse(filePath);
-  const stem = parsed.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim() || "attachment";
-  const extension = parsed.ext.replace(/[^.A-Za-z0-9_-]/g, "");
-  return `${Date.now()}-${stem}${extension}`;
+function attachmentRoot(requested?: string): string {
+  if (!bridge) throw new Error("Reverie core bridge is not initialized.");
+  const root = path.resolve(requested || bridge.getProjectRoot());
+  if (!samePath(root, bridge.getProjectRoot()) && !knownWorkspaceRoots.has(root.toLowerCase())) throw new Error("Select this workspace before accessing its files.");
+  return root;
+}
+
+function attachmentDetails(projectRoot: string, items: ComposerAttachment[]): ComposerAttachment[] {
+  return items.map(item => {
+    if (item.status !== "ready" || !/\.(png|jpe?g|gif|bmp|webp)$/i.test(item.relativePath)) return item;
+    const image = nativeImage.createFromPath(path.join(projectRoot, item.relativePath));
+    if (image.isEmpty()) return item;
+    const { width, height } = image.getSize();
+    return { ...item, width, height, thumbnail: image.resize({ width: 96 }).toDataURL() };
+  });
 }
 
 function uiPreferencesPayload(preferences: StoredUiPreferences): JsonRecord {
@@ -234,6 +252,7 @@ class CoreBridge {
       resolve: (value: JsonRecord) => void;
       reject: (reason: Error) => void;
       timer: ReturnType<typeof setTimeout> | null;
+      action: string;
     }
   >();
 
@@ -251,6 +270,9 @@ class CoreBridge {
   getProjectRoot(): string {
     return this.projectRoot;
   }
+
+  hasActivePrompt(): boolean { return [...this.pending.values()].some(item => ["runPrompt", "resumePrompt"].includes(item.action)); }
+  getPid(): number | undefined { return this.child?.pid; }
 
   setCoreAppRoot(coreAppRoot: string): void {
     this.coreAppRoot = path.resolve(coreAppRoot);
@@ -357,7 +379,7 @@ class CoreBridge {
             reject(new Error(`Reverie core request timed out: ${action}`));
           }, timeoutMs)
         : null;
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, action });
       child.stdin.write(`${JSON.stringify({ id, action, payload })}\n`, "utf8", (error) => {
         if (error) {
           this.pending.delete(id);
@@ -402,6 +424,32 @@ class CoreBridge {
 
 let mainWindow: BrowserWindow | null = null;
 let bridge: CoreBridge | null = null;
+const terminals = new TerminalManager(message => mainWindow?.webContents.send("core:event", message));
+const journal = new RunJournal();
+const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string }>();
+const approvalOwners = new Map<string, string>();
+const stopBeforeStart = new Set<string>();
+const coordinator = new ExecutionCoordinator(entries => mainWindow?.webContents.send("core:event", { type: "executors.changed", entries, maximum: 4 }));
+const notificationFile = path.join(runtimeRoot, "notifications.json");
+let notifications: LocalNotification[] = [];
+let notificationMuted = false;
+async function publishNotification(projectRoot: string, sessionId: string, runId: string, kind: string, title: string, body: string): Promise<void> {
+  const id = `${runId}:${kind}`;
+  if (notifications.some(item => item.id === id)) return;
+  const item: LocalNotification = { id, projectRoot, sessionId, runId, kind, title, body, createdAt: new Date().toISOString(), read: false, osState: notificationMuted ? "muted" : "not requested" };
+  notifications.unshift(item); await atomicJson(notificationFile, notifications);
+  mainWindow?.webContents.send("core:event", { type: "notification.changed", notification: item });
+  if (notificationMuted || (mainWindow?.isFocused() && !mainWindow.isMinimized())) return;
+  if (!Notification.isSupported()) { item.osState = "unsupported"; await atomicJson(notificationFile, notifications); return; }
+  try {
+    const notification = new Notification({ title, body: body.slice(0, 220) });
+    item.osState = "requested; OS delivery unconfirmed";
+    notification.on("show", () => { item.osState = "shown"; void atomicJson(notificationFile, notifications); });
+    notification.on("failed", (_event, error) => { item.osState = `failed: ${error}`; void atomicJson(notificationFile, notifications); });
+    notification.on("click", () => { focusMainWindow(); mainWindow?.webContents.send("core:event", { type: "notification.open", notification: item }); });
+    notification.show(); await atomicJson(notificationFile, notifications);
+  } catch (error) { item.osState = `failed: ${String(error)}`; await atomicJson(notificationFile, notifications); }
+}
 
 if (!launchOptions.tui) {
   app.on("second-instance", (_event, argv, workingDirectory) => {
@@ -428,6 +476,7 @@ function localizedUiText(language: StoredUiPreferences["language"], chinese: str
 async function activateWorkspace(projectRoot: string): Promise<string> {
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
   const resolved = await activateWorkspaceInPlace(bridge, projectRoot, async (nextProjectRoot) => {
+    knownWorkspaceRoots.add(path.resolve(nextProjectRoot).toLowerCase());
     await mutateDesktopSettings((settings) => ({
       ...settings,
       projectRoot: nextProjectRoot,
@@ -488,6 +537,7 @@ async function createWindow(): Promise<void> {
     },
   });
 
+  knownWorkspaceRoots.add(path.resolve(projectRoot).toLowerCase());
   bridge = new CoreBridge(projectRoot, coreAppRoot, executable, (message) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("core:event", message);
@@ -507,6 +557,18 @@ async function createWindow(): Promise<void> {
     }
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
+  let closeConfirmed = false;
+  let closeDialogOpen = false;
+  mainWindow.on("close", event => {
+    const active = coordinator.list(); const manual = terminals.active();
+    if (coreStoppedForQuit || closeConfirmed || !active.length && !manual.length) return;
+    event.preventDefault(); if (closeDialogOpen) return; closeDialogOpen = true;
+    void (async () => {
+      const preferences=normalizeUiPreferences((await readDesktopSettings()).ui);
+      const result=await dialog.showMessageBox(mainWindow!,{type:"warning",title:"Reverie",message:localizedUiText(preferences.language,"退出会结束后台任务和用户终端。","Quitting ends background tasks and user terminals."),detail:[...active.map(item=>`${item.projectRoot}\n${item.sessionId} · ${item.state} · PID ${item.pid || "?"}`),...manual.map(item=>`${item.cwd}\n${item.sessionId} · PID ${item.pid}`)].join("\n\n"),buttons:[localizedUiText(preferences.language,"保留运行","Keep running"),localizedUiText(preferences.language,"退出并结束进程","Quit and end processes")],defaultId:0,cancelId:0});
+      if(result.response===1){closeConfirmed=true;mainWindow?.close();}
+    })().catch(error=>void log(`Close confirmation failed: ${String(error)}`)).finally(()=>{closeDialogOpen=false;});
+  });
   applyWindowAppearance();
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
@@ -521,6 +583,54 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
   const action = assertCoreAction(rawAction);
   const payload = normalizeCorePayload(rawPayload);
+  if (["runPrompt", "resumePrompt"].includes(action)) {
+    const admin = bridge; const root = attachmentRoot(String(payload.projectRoot || admin.getProjectRoot())); const sessionId = String(payload.sessionId || "");
+    const state = (await admin.request("getState")).state as JsonRecord; const models = state.models as JsonRecord;
+    const selectedModel=models.active_model as JsonRecord | null;
+    if (!payload.source && selectedModel?.id) payload.source=models.active_source;
+    if (!payload.model && selectedModel?.id) payload.model=selectedModel.id;
+    const record = await journal.start(root, sessionId, payload, JSON.stringify(models.active_model || {})); payload.runId = record.id; payload.projectRoot = root;
+    let leaseId = ""; let worker: CoreBridge | null = null;
+    try {
+      const lease = await coordinator.acquire(root, sessionId, payload.runType === "review"); leaseId = lease.id;
+      worker = new CoreBridge(root, admin.getCoreAppRoot(), activeKernelPath, message => {
+        const event: JsonRecord = { ...(message.event as JsonRecord), project_root: root, session_id: sessionId, run_id: record.id };
+        journal.event(record.id, event);
+        if (event.type === "approval.request") { approvalOwners.set(String(event.approval_id), lease.id); void publishNotification(root, sessionId, record.id, `approval:${event.approval_id}`, "Reverie 需要审批 / Approval needed", String(event.command || event.tool || event.message || "")); }
+        if (event.type === "run.control") void journal.update(record.id, { state: String(event.state) });
+        mainWindow?.webContents.send("core:event", { ...message, event });
+      });
+      executors.set(lease.id, { worker, root, sessionId, runId: record.id });
+      await worker.request("initialize", { projectRoot: root, deferPayloads: true });
+      coordinator.pid(lease.id, worker.getPid() || 0); await journal.update(record.id, { state: "running", pid: worker.getPid() });
+      try { await workingSnapshot(root, `refs/reverie/runs/${record.id}/before`); await journal.update(record.id,{beforeRef:`refs/reverie/runs/${record.id}/before`}); } catch (error) { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }
+      if (stopBeforeStart.has(lease.id)) throw new Error("Run stopped before tools started.");
+      const response = await worker.request(action, payload); const result = response.result as JsonRecord;
+      try { await workingSnapshot(root, `refs/reverie/runs/${record.id}/after`); await journal.update(record.id,{afterRef:`refs/reverie/runs/${record.id}/after`}); } catch (error) { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }
+      await journal.finish(record.id, result, result.success ? "completed" : stopBeforeStart.has(lease.id) ? "cancelled" : "failed");
+      await publishNotification(root, sessionId, record.id, result.success ? "completed" : "failed", result.success ? "Reverie 已完成 / Completed" : "Reverie 运行失败 / Failed", String(result.error || result.output_text || "").slice(0,220));
+      return assertCoreResponse(action, response);
+    } catch (error) { await journal.finish(record.id, {error:String(error)}, String(error).includes("Queued run cancelled") || (leaseId && stopBeforeStart.has(leaseId)) ? "cancelled" : "interrupted"); await publishNotification(root, sessionId, record.id, "recovery", "Reverie 需要核对 / Needs review", String(error)); throw error; }
+    finally { if (worker) await worker.stop("Session run ended."); if (leaseId) { executors.delete(leaseId); stopBeforeStart.delete(leaseId); coordinator.release(leaseId); for (const [id, owner] of approvalOwners) if (owner === leaseId) approvalOwners.delete(id); } }
+  }
+  if (["stopPrompt", "steerPrompt", "pausePrompt", "continuePrompt"].includes(action)) {
+    const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot())); const sessionId = String(payload.sessionId || "");
+    if (action === "stopPrompt" && coordinator.cancelQueued(root, sessionId)) return { type: "run.control", state: "cancelled", run_id: "" };
+    const entry = coordinator.find(root, sessionId); const executor = entry ? executors.get(entry.id) : undefined;
+    if (!entry || !executor) throw new Error("No active run belongs to this project and conversation.");
+    if (action === "stopPrompt") { stopBeforeStart.add(entry.id); if (!executor.worker.hasActivePrompt()) return { type:"run.control",state:"stopping",run_id:executor.runId }; }
+    return assertCoreResponse(action, await executor.worker.request(action,payload));
+  }
+  if (action === "resolveApproval") {
+    const owner = approvalOwners.get(String(payload.approvalId)); const executor = owner ? executors.get(owner) : undefined;
+    if (!executor || stopBeforeStart.has(owner!)) throw new Error("Approval expired or its run stopped.");
+    if (payload.sessionId && payload.sessionId !== executor.sessionId || payload.projectRoot && !samePath(String(payload.projectRoot),executor.root)) throw new Error("Approval belongs to a different run.");
+    approvalOwners.delete(String(payload.approvalId)); return assertCoreResponse(action, await executor.worker.request(action,payload));
+  }
+  if (["deleteSession", "rewindSession", "rollbackCheckpoint", "deleteProjectData"].includes(action)) {
+    const root=String(payload.projectRoot || bridge.getProjectRoot()); const sessionId=String(payload.sessionId || "");
+    if (coordinator.list().some(item=>samePath(item.projectRoot,root) && (!sessionId || item.sessionId===sessionId)) || terminals.active(root).some(item=>!sessionId || item.sessionId===sessionId)) throw new Error("Stop the affected session runs and terminals before removing or restoring records.");
+  }
   const response = await bridge.request(action, payload);
   if (action === "initialize") {
     void log(`Desktop initialized in ${Date.now() - desktopStartedAt} ms`);
@@ -528,9 +638,11 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   return assertCoreResponse(action, response);
 });
 
-ipcMain.handle("core:cancel", async () => {
+ipcMain.handle("core:cancel", async (_event, owner?: {projectRoot:string;sessionId:string}) => {
   if (!bridge) return;
-  await bridge.restart();
+  const active = [...executors.values()].filter(item => samePath(item.root, owner?.projectRoot || bridge!.getProjectRoot()) && (!owner || item.sessionId === owner.sessionId));
+  if (active.length > 1) throw new Error("Select a specific session run for forced termination.");
+  if (active[0]) await active[0].worker.stop("Forced stop requested; verify incomplete effects."); else await bridge.restart();
 });
 
 // Bring the window to the front: restore it if minimized, show it if hidden,
@@ -549,7 +661,7 @@ function focusMainWindow(): void {
 // Clicking the toast pulls Reverie to the foreground.
 function notifyDesktop(title: string, body: string): void {
   if (!Notification.isSupported()) return;
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return;
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused() && !mainWindow.isMinimized()) return;
   const icon = app.isPackaged
     ? undefined
     : path.resolve(uiRoot, "..", "ReverieCli-py", "reverie.ico");
@@ -592,6 +704,7 @@ ipcMain.handle("desktop:delete-workspace", async (_event, projectRoot: string) =
   const requestedProject = String(projectRoot ?? "").trim();
   if (!requestedProject) throw new Error("Project path is required.");
   const target = path.resolve(requestedProject);
+  if (coordinator.list().some(item=>samePath(item.projectRoot,target)) || terminals.active(target).length) throw new Error("Stop this project's runs and terminals before deleting its records.");
   const current = path.resolve(bridge.getProjectRoot());
   const settings = await readDesktopSettings();
   const preferences = normalizeUiPreferences(settings.ui);
@@ -643,9 +756,9 @@ ipcMain.handle("desktop:delete-workspace", async (_event, projectRoot: string) =
   };
 });
 
-ipcMain.handle("desktop:select-attachment", async () => {
+ipcMain.handle("desktop:select-attachment", async (_event, requestedRoot?: string) => {
   if (!mainWindow || !bridge) return null;
-  const projectRoot = path.resolve(bridge.getProjectRoot());
+  const projectRoot = attachmentRoot(requestedRoot);
   const preferences = normalizeUiPreferences((await readDesktopSettings()).ui);
   const result = await dialog.showOpenDialog(mainWindow, {
     title: localizedUiText(preferences.language, "选择要提供给 Reverie 的文件", "Choose a file to provide to Reverie"),
@@ -653,17 +766,89 @@ ipcMain.handle("desktop:select-attachment", async () => {
     properties: ["openFile"],
   });
   if (result.canceled || !result.filePaths[0]) return null;
-  const sourcePath = path.resolve(result.filePaths[0]);
-  const destinationDirectory = attachmentDirectory(projectRoot);
-  awaitDirectory(destinationDirectory);
-  const destinationPath = path.join(destinationDirectory, safeAttachmentName(sourcePath));
-  await copyFile(sourcePath, destinationPath);
-  const info = await stat(destinationPath);
-  return {
-    name: path.basename(sourcePath),
-    relativePath: path.relative(projectRoot, destinationPath).replaceAll("\\", "/"),
-    size: info.size,
-  };
+  return attachmentDetails(projectRoot, await importAttachments(projectRoot, [result.filePaths[0]]))[0];
+});
+
+ipcMain.handle("desktop:import-dropped-files", async (_event, paths: unknown, requestedRoot?: string, copy = false) => {
+  if (!bridge || !Array.isArray(paths) || paths.length > 20 || !paths.every((item) => typeof item === "string")) {
+    throw new Error("Select up to 20 local files to attach.");
+  }
+  const projectRoot = attachmentRoot(requestedRoot);
+  return attachmentDetails(projectRoot, await importAttachments(projectRoot, paths, copy));
+});
+
+ipcMain.handle("desktop:paste-image", async (_event, requestedRoot: string) => {
+  const root = attachmentRoot(requestedRoot);
+  const item = await saveClipboardImage(root, clipboard.readImage().toPNG());
+  return attachmentDetails(root, [item])[0];
+});
+
+ipcMain.handle("desktop:retry-attachment", async (_event, requestedRoot: string, item: ComposerAttachment, copy = false) => {
+  const root = attachmentRoot(requestedRoot);
+  if (!item.sourcePath) throw new Error("请选择文件重新导入 / Select the file again.");
+  return attachmentDetails(root, await importAttachments(root, [item.sourcePath], copy))[0];
+});
+
+ipcMain.handle("desktop:git-status", async () => bridge ? getGitWorkspaceStatus(bridge.getProjectRoot()) : null);
+ipcMain.handle("desktop:workbench", async (_event, operation: string, payload: JsonRecord = {}) => {
+  if (!bridge) throw new Error("Core is not initialized.");
+  const root = attachmentRoot(String(payload.projectRoot || bridge.getProjectRoot()));
+  const sessionId = String(payload.sessionId || "");
+  if (["mutate", "commit", "push", "fetch"].includes(operation) && (coordinator.list().some(item=>samePath(item.projectRoot,root)) || terminals.active(root).length)) throw new Error("Wait for the active run and user terminals before changing this repository.");
+  if (operation === "executors") return { entries: coordinator.list(), maximum: coordinator.maximum };
+  if (operation === "validate-input") return { attachments: await validateAttachments(root,payload.attachments as ComposerAttachment[] || []) };
+  if (operation === "worktrees") return { worktrees: await listManaged(root) };
+  if (operation === "worktree-copy-plan") return copyPlan(root);
+  if (operation === "worktree-create") { if (coordinator.busy(root)) throw new Error("Wait for this checkout's writer before copying or creating a worktree."); return createManaged(root, String(payload.name || ""), String(payload.base || "HEAD"), payload.files as string[] || [], String(payload.version || "")); }
+  if (operation === "worktree-archive-plan") return archivePlan(root, String(payload.id || ""));
+  if (operation === "worktree-archive") { const plan = await archivePlan(root, String(payload.id || "")); if (coordinator.list().some(item=>samePath(item.projectRoot,plan.workspace.path)) || terminals.active(plan.workspace.path).length) throw new Error("Stop this worktree's runs and terminals before archiving."); if (payload.confirmed !== true) throw new Error("Confirm archive scope first."); return archiveManaged(root, String(payload.id || ""), String(payload.version || ""), payload.preserveIgnored as string[] || [], payload.discardIgnored as string[] || []); }
+  if (operation === "worktree-restore") return restoreManaged(root, String(payload.id || ""));
+  if (operation === "terminals") return { terminals: await terminals.load(root, sessionId), active: terminals.active().length };
+  if (operation === "terminal-create") return terminals.create(root, sessionId, String(payload.cwd || "."));
+  if (operation === "terminal-write") { terminals.write(String(payload.id || ""), root, sessionId, String(payload.data || "")); return { written: true }; }
+  if (operation === "terminal-resize") { terminals.resize(String(payload.id || ""), root, sessionId, Number(payload.cols), Number(payload.rows)); return { resized: true }; }
+  if (operation === "terminal-read") return terminals.read(String(payload.id || ""), root, sessionId);
+  if (operation === "terminal-close") { if (payload.confirmed !== true) throw new Error("Confirm ending the selected terminal and its children."); await terminals.close(String(payload.id || ""), root, sessionId); return { closed: true }; }
+  if (operation === "actions") return { actions: await actions(root) };
+  if (operation === "save-actions") { await saveActions(root, payload.actions as ProjectAction[]); return { saved: true }; }
+  if (operation === "action-run") { if (payload.confirmed !== true) throw new Error("Inspect and confirm the action command before running."); const action = (await actions(root)).find(item => item.id === payload.id); if (!action) throw new Error("Action no longer exists."); return terminals.create(root, sessionId, action.cwd, action); }
+  if (operation === "goal") return { goal: await loadGoal(root, sessionId) };
+  if (operation === "save-goal") { await saveGoal(root, sessionId, payload.goal as Goal | null); return { saved: true }; }
+  if (operation === "runs") return { runs: await journal.list(root) };
+  if (operation === "run-detail") return journal.detail(root, String(payload.id || ""));
+  if (operation === "run-export") return { path: await journal.export(root, String(payload.id || "")) };
+  if (operation === "notifications") return { notifications, muted: notificationMuted, supported: Notification.isSupported() };
+  if (operation === "notification-read") { notifications = notifications.map(item => item.id === payload.id || payload.all === true ? { ...item, read: true } : item); await atomicJson(notificationFile, notifications); return { notifications }; }
+  if (operation === "notification-mute") { notificationMuted = payload.muted === true; await atomicJson(path.join(runtimeRoot,"notification-preferences.json"), {muted:notificationMuted}); return {muted:notificationMuted}; }
+  if (operation === "snapshot") return gitSnapshot(root, payload.scope as DiffScope, String(payload.base || ""), String(payload.before || ""), String(payload.after || ""));
+  if (operation === "patch") return gitPatch(root, payload as unknown as Parameters<typeof gitPatch>[1]);
+  if (operation === "mutate") return gitMutate(root, payload as unknown as Parameters<typeof gitMutate>[1]);
+  if (operation === "commit") return gitCommit(root, String(payload.message || ""), String(payload.version || ""));
+  if (operation === "push-plan") return gitPushPlan(root, String(payload.remote || ""), String(payload.target || ""));
+  if (operation === "push") return gitPush(root, payload.plan as PushPlan, payload.confirmed === true);
+  if (operation === "fetch") return { output: await gitOutput(root, ["fetch", "--all", "--prune"]) };
+  if (operation === "preview") return readPreview(root, String(payload.file || ""), Number(payload.offset || 0));
+  if (operation === "open-editor") { const preview = await readPreview(root, String(payload.file || "")); return { error: await shell.openPath(preview.path) }; }
+  if (operation === "reviews" || operation === "save-reviews") {
+    const owner = createHash("sha256").update(String(payload.sessionId || "new")).digest("hex");
+    const directory = path.join(root, ".reverie", "desktop", "reviews"); const file = path.join(directory, `${owner}.json`);
+    if (operation === "reviews") { try { return { reviews: JSON.parse(await readFile(file, "utf8")) }; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { reviews: [] }; throw error; } }
+    if (!Array.isArray(payload.reviews)) throw new Error("Invalid review records.");
+    awaitDirectory(directory); await writeFile(file, JSON.stringify(payload.reviews, null, 2), "utf8"); return { saved: true };
+  }
+  throw new Error("Unknown workspace operation.");
+});
+ipcMain.handle("desktop:git-switch-branch", async (_event, name: unknown, remote: unknown) => {
+  if (!bridge || typeof name !== "string" || typeof remote !== "boolean") throw new Error("Invalid branch selection.");
+  if (coordinator.list().some(item=>samePath(item.projectRoot,bridge!.getProjectRoot()))) throw new Error("Wait for the active run before switching branches.");
+  if (terminals.active(bridge.getProjectRoot()).length) throw new Error("End the workspace terminals before switching branches.");
+  return switchGitBranch(bridge.getProjectRoot(), name, remote);
+});
+ipcMain.handle("desktop:git-create-branch", async (_event, name: unknown) => {
+  if (!bridge || typeof name !== "string") throw new Error("Invalid branch name.");
+  if (coordinator.list().some(item=>samePath(item.projectRoot,bridge!.getProjectRoot()))) throw new Error("Wait for the active run before switching branches.");
+  if (terminals.active(bridge.getProjectRoot()).length) throw new Error("End the workspace terminals before switching branches.");
+  return createGitBranch(bridge.getProjectRoot(), name);
 });
 
 ipcMain.handle("desktop:select-core-data", async () => {
@@ -885,6 +1070,8 @@ app.whenReady().then(async () => {
     launchOptions,
     normalizeUiPreferences(settings.ui).startupMode,
   );
+  notifications = await readJson(notificationFile, []);
+  notificationMuted = (await readJson(path.join(runtimeRoot,"notification-preferences.json"), {muted:false})).muted;
   if (startupMode === "tui") {
     await runTuiFromDesktop(settings);
     return;
@@ -910,7 +1097,8 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   const activeBridge = bridge;
   bridge = null;
-  void activeBridge?.stop("Application is closing.").finally(() => {
+  for (const entry of coordinator.list()) if (entry.state === "queued") coordinator.cancelQueued(entry.projectRoot, entry.sessionId);
+  void Promise.all([activeBridge?.stop("Application is closing."), terminals.closeAll(), ...[...executors.values()].map(item=>item.worker.stop("Application is closing; check incomplete effects."))]).finally(() => {
     coreStoppedForQuit = true;
     app.quit();
   });

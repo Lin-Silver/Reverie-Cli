@@ -15,6 +15,34 @@
 
 /** Prefix for every draft entry, so a project sweep can find them by scan. */
 const DRAFT_KEY_PREFIX = "reverie.draft.v1:";
+const STRUCTURED_PREFIX = "reverie.draft.v2:";
+import type { ComposerAttachment } from "../electron/attachments";
+
+export interface StructuredDraft { text: string; attachments: ComposerAttachment[] }
+export function normalizeProjectRoot(root: string): string {
+  const normalized = root.replaceAll("\\", "/").replace(/\/+$/, "");
+  return /^[A-Za-z]:/.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+function structuredKey(root: string, id: string): string {
+  return `${STRUCTURED_PREFIX}${encodeSegment(normalizeProjectRoot(root))}:${encodeSegment(id)}`;
+}
+export function saveStructuredDraft(root: string, id: string, draft: StructuredDraft): string {
+  try {
+    if (draft.text || draft.attachments.length) localStorage.setItem(structuredKey(root, id), JSON.stringify(draft));
+    else localStorage.removeItem(structuredKey(root, id));
+    return "";
+  } catch (error) { return error instanceof Error ? error.message : String(error); }
+}
+export function loadStructuredDraft(root: string, id: string): StructuredDraft {
+  try {
+    const stored = localStorage.getItem(structuredKey(root, id));
+    if (stored) {
+      const draft = JSON.parse(stored) as StructuredDraft;
+      if (typeof draft.text === "string" && Array.isArray(draft.attachments)) return { text: draft.text, attachments: draft.attachments.map(item => item.status === "pending" ? { ...item, status: "cancelled", error: "导入被中断 / Import interrupted" } : item) };
+    }
+    return { text: localStorage.getItem(draftStorageKey(root, id)) ?? "", attachments: [] };
+  } catch { return { text: "", attachments: [] }; }
+}
 
 /**
  * Placeholder session id for text typed before a conversation exists yet. The
@@ -58,6 +86,7 @@ export function clearDraft(projectRoot: string, sessionId: string): void {
   if (!sessionId) return;
   try {
     localStorage.removeItem(draftStorageKey(projectRoot, sessionId));
+    localStorage.removeItem(structuredKey(projectRoot, sessionId));
   } catch {
     // Non-fatal.
   }
@@ -94,11 +123,12 @@ export function loadProjectDrafts(projectRoot: string): Record<string, string> {
 /** Remove every stored draft for a project, e.g. when the project is deleted. */
 export function clearProjectDrafts(projectRoot: string): void {
   const prefix = projectKeyPrefix(projectRoot);
+  const structured = `${STRUCTURED_PREFIX}${encodeSegment(normalizeProjectRoot(projectRoot))}:`;
   try {
     const doomed: string[] = [];
     for (let index = 0; index < localStorage.length; index += 1) {
       const key = localStorage.key(index);
-      if (key && key.startsWith(prefix)) doomed.push(key);
+      if (key && (key.startsWith(prefix) || key.startsWith(structured))) doomed.push(key);
     }
     doomed.forEach((key) => localStorage.removeItem(key));
   } catch {

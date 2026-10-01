@@ -11,6 +11,7 @@ This is the main agent class that:
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Callable, Tuple
 from pathlib import Path
+from urllib.parse import urlsplit
 import json
 import hashlib
 import time
@@ -2274,6 +2275,8 @@ class ReverieAgent:
         import httpx
         config = getattr(self, "config", None)
         configured_proxy = getattr(config, "api_proxy", "") if config is not None else ""
+        if not normalize_proxy_url(configured_proxy) and urlsplit(str(getattr(self, "base_url", "") or "")).hostname in {"localhost", "127.0.0.1", "::1"}:
+            return httpx.Client(trust_env=False)
         proxy_val = resolve_proxy_url(configured_proxy)
         if proxy_val:
             proxy_val = self._fix_proxy_url(proxy_val)
@@ -2853,6 +2856,8 @@ class ReverieAgent:
         if effective_mode == "writer" and self._writer_should_hide_tools_for_direct_prose():
             return []
         schemas = tool_executor.get_tool_schemas(mode=effective_mode)
+        if tool_executor.context.get("desktop_read_only_review"):
+            schemas = [schema for schema in schemas if str((schema.get("function") or {}).get("name")) in {"file_ops", "read_file", "list_dir", "str_replace_editor", "codebase-retrieval"}]
         if not schemas:
             return []
 
@@ -4413,6 +4418,9 @@ class ReverieAgent:
         event: Dict[str, Any],
     ) -> Generator[str, None, None]:
         """Apply one normalized stream event to the shared turn state."""
+        control = getattr(self, "desktop_control", None)
+        if control is not None:
+            control.check_cancel()
         if not isinstance(event, dict):
             return
 
@@ -4827,6 +4835,9 @@ class ReverieAgent:
         session_id: str = "default",
     ) -> Generator[str, None, None]:
         """Execute one tool call and emit structured UI events."""
+        control = getattr(self, "desktop_control", None)
+        if control is not None:
+            control.safe_point(self, receive=False)
         tool_name = str((tool_call.get("function") or {}).get("name", "")).strip()
         tool = self.tool_executor.get_tool(tool_name)
         args = parse_tool_arguments((tool_call.get("function") or {}).get("arguments", ""))
@@ -5395,6 +5406,9 @@ class ReverieAgent:
         resolve_local_images: bool = False,
     ) -> List[Dict]:
         """Build message list for API calls, optionally resolving local multimodal parts."""
+        control = getattr(self, "desktop_control", None)
+        if control is not None:
+            control.safe_point(self)
         messages = [{"role": "system", "content": self.system_prompt}]
         memory_context = self._memory_context_package_message()
         if memory_context:

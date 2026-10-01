@@ -2,6 +2,8 @@ export type JsonRecord = Record<string, unknown>;
 
 export const CORE_RESPONSE_CONTRACT = {
   listTools: { type: "tools", required: ["tools"] },
+  listSkills: { type: "skills", required: ["skills"] },
+  listPlugins: { type: "plugins", required: ["plugins"] },
   ratsState: { type: "rats.state", required: ["rats"] },
   ratsStateCached: { type: "rats.state", required: ["rats"] },
   ratsDefineCustomProvider: { type: "rats.state", required: ["rats"] },
@@ -30,6 +32,10 @@ export const CORE_RESPONSE_CONTRACT = {
   getSubagentRunLog: { type: "subagent.log", required: ["run_id", "log"] },
   createSession: { type: "session.created", required: ["session", "sessions"] },
   runPrompt: { type: "prompt.result", required: ["result", "sessions", "recovery"] },
+  steerPrompt: { type: "run.control", required: ["state", "run_id"] },
+  stopPrompt: { type: "run.control", required: ["state", "run_id"] },
+  pausePrompt: { type: "run.control", required: ["state", "run_id"] },
+  continuePrompt: { type: "run.control", required: ["state", "run_id"] },
   resumePrompt: { type: "prompt.result", required: ["result", "sessions", "recovery"] },
   compactContext: { type: "context.compacted", required: ["success", "message", "session", "sessions", "recovery", "context_engine"] },
   renameSession: { type: "session.updated", required: ["session", "sessions"] },

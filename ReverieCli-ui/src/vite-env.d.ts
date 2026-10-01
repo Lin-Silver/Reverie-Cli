@@ -2,18 +2,28 @@
 
 import type { CoreAction, CorePayload, CoreResponse } from "./core-protocol";
 import type { UiPreferences } from "./preferences";
+import type { GitWorkspaceStatus } from "../electron/git-workspace";
+import type { ComposerAttachment } from "../electron/attachments";
+import type { FilePatch, GitSnapshot, Preview, PushPlan } from "../electron/workbench";
 
 type JsonRecord = Record<string, unknown>;
 
 interface ReverieDesktopApi {
   request<Action extends CoreAction>(action: Action, payload: CorePayload<Action>): Promise<CoreResponse<Action>>;
-  cancel(): Promise<void>;
+  cancel(owner?: {projectRoot:string;sessionId:string}): Promise<void>;
   notify(payload: { title: string; body: string }): Promise<void>;
   onEvent(listener: (message: JsonRecord) => void): () => void;
   selectWorkspace(): Promise<string | null>;
   switchWorkspace(projectRoot: string): Promise<string | null>;
   deleteWorkspace(projectRoot: string): Promise<{ projectRoot: string; deletedSessions: number; preferences: UiPreferences } | null>;
-  selectAttachment(): Promise<{ name: string; relativePath: string; size: number } | null>;
+  selectAttachment(projectRoot?: string): Promise<ComposerAttachment | null>;
+  importDroppedFiles(files: File[], projectRoot?: string): Promise<ComposerAttachment[]>;
+  pasteImage(projectRoot: string): Promise<ComposerAttachment>;
+  retryAttachment(projectRoot: string, item: ComposerAttachment, copy?: boolean): Promise<ComposerAttachment>;
+  gitStatus(): Promise<GitWorkspaceStatus | null>;
+  workbench(operation: string, payload?: JsonRecord): Promise<GitSnapshot | FilePatch | Preview | PushPlan | JsonRecord>;
+  switchGitBranch(name: string, remote: boolean): Promise<GitWorkspaceStatus>;
+  createGitBranch(name: string): Promise<GitWorkspaceStatus>;
   selectCoreData(): Promise<string | null>;
   paths(): Promise<{ projectRoot: string; kernelPath: string; coreAppRoot: string; runtimeRoot: string }>;
   appearance(): Promise<{ theme: "system" | "dark" | "light"; resolved: "dark" | "light" }>;

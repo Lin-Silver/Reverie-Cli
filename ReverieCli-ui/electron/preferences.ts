@@ -7,6 +7,7 @@ export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "emb
 
 export interface StoredUiPreferences {
   language: UiLanguage;
+  userDisplayName: string;
   startupMode: StartupModePreference;
   accent: AccentPreference;
   fontSize: FontSizePreference;
@@ -44,6 +45,7 @@ const INSPECTOR_MAX_WIDTH = 620;
 
 export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   language: "zh-CN",
+  userDisplayName: "",
   startupMode: "gui",
   accent: "violet",
   fontSize: "comfortable",
@@ -62,7 +64,7 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   expandToolResults: false,
   showLiveActivity: true,
   rtpProviderDetails: false,
-  inspectorOpen: true,
+  inspectorOpen: false,
   sidebarWidth: 268,
   inspectorWidth: 316,
   recentProjects: [],
@@ -103,6 +105,7 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     : {};
   return {
     language: enumValue(source.language, ["zh-CN", "en-US"] as const, DEFAULT_UI_PREFERENCES.language),
+    userDisplayName: String(source.userDisplayName ?? "").trim().slice(0, 32),
     startupMode: enumValue(source.startupMode, ["gui", "tui"] as const, DEFAULT_UI_PREFERENCES.startupMode),
     accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"] as const, DEFAULT_UI_PREFERENCES.accent),
     fontSize: enumValue(source.fontSize, ["compact", "comfortable", "large"] as const, DEFAULT_UI_PREFERENCES.fontSize),

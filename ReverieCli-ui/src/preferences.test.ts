@@ -12,7 +12,7 @@ describe("renderer UI preferences", () => {
     expect(value.expandReasoning).toBe(true);
     expect(value.showToolCalls).toBe(true);
     expect(value.showToolResults).toBe(true);
-    expect(value.inspectorOpen).toBe(true);
+    expect(value.inspectorOpen).toBe(false);
     expect(value).toEqual(DEFAULT_UI_PREFERENCES);
   });
 
@@ -41,6 +41,12 @@ describe("renderer UI preferences", () => {
     expect(value.backgroundPreset).toBe("aurora-archive");
     expect(value.backgroundOpacity).toBe(0.4);
     expect(value.archivedSessions["G:\\Reverie"]).toEqual(["session-1"]);
+  });
+
+  it("normalizes the optional user label", () => {
+    expect(normalizeUiPreferences({ userDisplayName: "  Lin  " }).userDisplayName).toBe("Lin");
+    expect(normalizeUiPreferences({ userDisplayName: " " }).userDisplayName).toBe("");
+    expect(normalizeUiPreferences({ userDisplayName: "x".repeat(40) }).userDisplayName).toHaveLength(32);
   });
 
   it("resolves built-in and custom background URLs", () => {

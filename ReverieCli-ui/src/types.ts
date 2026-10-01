@@ -628,6 +628,7 @@ export type TurnSegment =
 
 export interface LiveTurn {
   userText: string;
+  attachments?: Array<{ name: string; relativePath: string; size: number }>;
   assistantText: string;
   reasoningText: string;
   events: Array<Record<string, unknown>>;

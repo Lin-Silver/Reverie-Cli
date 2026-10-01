@@ -359,3 +359,35 @@ def test_request_provider_includes_reverie_client_identity(tmp_path) -> None:
     )
 
     assert agent._build_request_headers(stream=False)[REVERIE_CLIENT_HEADER] == REVERIE_CLIENT_IDENTITY
+
+
+@pytest.mark.parametrize("explicit_proxy", [False, True])
+def test_local_photo_transport_uses_direct_loopback_or_explicit_proxy(monkeypatch, explicit_proxy):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    import reverie.agent.agent as agent_module
+    paths = []
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+        def do_GET(self):
+            paths.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"local transport")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"http://127.0.0.1:{server.server_port}"
+    agent = ReverieAgent.__new__(ReverieAgent)
+    agent.base_url = endpoint + "/v1"
+    agent.config = SimpleNamespace(api_proxy=endpoint if explicit_proxy else "")
+    monkeypatch.setattr(agent_module, "resolve_proxy_url", lambda configured: configured or "http://127.0.0.1:1")
+    try:
+        with agent._build_proxied_http_client() as client:
+            assert client.get(endpoint + "/photo").content == b"local transport"
+        assert paths == [endpoint + "/photo" if explicit_proxy else "/photo"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

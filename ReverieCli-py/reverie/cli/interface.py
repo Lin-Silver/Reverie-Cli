@@ -4149,6 +4149,9 @@ class ReverieInterface:
         source_override: Optional[str] = None,
         model_override: Optional[str] = None,
         reasoning_override: Optional[str] = None,
+        desktop_attachments: Optional[List[Dict[str, Any]]] = None,
+        run_control: Any = None,
+        read_only_review: bool = False,
     ) -> PromptRunResult:
         """Run one prompt non-interactively and return a structured result."""
         prompt_text = str(message or "").strip()
@@ -4161,7 +4164,7 @@ class ReverieInterface:
         started_at = datetime.now()
         self._captured_activity_events = []
 
-        if not prompt_text:
+        if not prompt_text and not desktop_attachments:
             return PromptRunResult(
                 success=False,
                 prompt=prompt_text,
@@ -4258,6 +4261,11 @@ class ReverieInterface:
             self.agent.tool_executor.update_context('resume_stream_input_capture', lambda: None)
             if approval_callback is not None:
                 self.agent.tool_executor.update_context('tool_approval_handler', approval_callback)
+            self.agent.desktop_control = run_control
+            self.agent.tool_executor.update_context('desktop_run_control', run_control)
+            self.agent.tool_executor.update_context('desktop_read_only_review', read_only_review)
+            from ..desktop_input import prepare_desktop_input
+            outbound_message, attachment_records = prepare_desktop_input(self, base_config, prompt_text, desktop_attachments or [])
 
             if fresh_session:
                 session = self.session_manager.create_session(
@@ -4282,6 +4290,8 @@ class ReverieInterface:
             session.metadata["prompt_run"] = {
                 "state": "running", "prompt": prompt_text,
                 "started_at": started_at.isoformat(),
+                "attachments": attachment_records,
+                "run_type": "review" if read_only_review else "prompt",
             }
             self.session_manager.save_session(session)
 
@@ -4306,7 +4316,7 @@ class ReverieInterface:
                 stream_enabled = _effective_stream_responses(base_config)
 
                 response_stream = self.agent.process_message(
-                    turn_text,
+                    outbound_message if auto_followup_count == 0 and not continuing else turn_text,
                     stream=stream_enabled,
                     session_id=session.id,
                     user_display_text=turn_text,
@@ -4488,6 +4498,10 @@ class ReverieInterface:
                 workspace_audit["history_summary"] = history_summary
             return result
         finally:
+            if self.agent is not None:
+                self.agent.desktop_control = None
+                self.agent.tool_executor.update_context('desktop_run_control', None)
+                self.agent.tool_executor.update_context('desktop_read_only_review', False)
             self._runtime_config_override = previous_override
 
     def _build_additional_rules_with_tti(

@@ -14,6 +14,7 @@ export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "emb
 
 export interface UiPreferences {
   language: UiLanguage;
+  userDisplayName: string;
   startupMode: StartupModePreference;
   accent: AccentPreference;
   fontSize: FontSizePreference;
@@ -41,6 +42,7 @@ export interface UiPreferences {
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   language: "zh-CN",
+  userDisplayName: "",
   startupMode: "gui",
   accent: "violet",
   fontSize: "comfortable",
@@ -62,7 +64,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   // Off by default: the board's job is to be scannable at a glance, and the
   // per-service contract detail is several screens of it.
   rtpProviderDetails: false,
-  inspectorOpen: true,
+  inspectorOpen: false,
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
   recentProjects: [],
@@ -92,6 +94,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     : {};
   return {
     language: normalizeUiLanguage(source.language),
+    userDisplayName: String(source.userDisplayName ?? "").trim().slice(0, 32),
     startupMode: enumValue(source.startupMode, ["gui", "tui"] as const, DEFAULT_UI_PREFERENCES.startupMode),
     accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"] as const, DEFAULT_UI_PREFERENCES.accent),
     fontSize: enumValue(source.fontSize, ["compact", "comfortable", "large"] as const, DEFAULT_UI_PREFERENCES.fontSize),

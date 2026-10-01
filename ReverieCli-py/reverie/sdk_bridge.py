@@ -111,6 +111,9 @@ class ReverieSdkBridge:
         self.event_writer = event_writer
         self._approval_waiters: Dict[str, Dict[str, Any]] = {}
         self._approval_lock = threading.Lock()
+        self._run_lock = threading.Lock()
+        self._run_control = None
+        self._run_identity: Dict[str, Any] = {}
         self._workspace_index_lock = threading.Lock()
         self._workspace_index_completed_at = 0.0
         self._workspace_index_result = None
@@ -320,7 +323,7 @@ class ReverieSdkBridge:
             {
                 "id": request_id,
                 "type": "prompt.event",
-                "event": _json_safe(event),
+                "event": _json_safe({**getattr(self, "_run_identity", {}), **event}),
             }
         )
 
@@ -353,9 +356,24 @@ class ReverieSdkBridge:
                 "concerns": list(info.get("concerns") or []),
                 "review_source": str(info.get("review_source") or ""),
                 "read_only": bool(info.get("read_only", False)),
+                "arguments": _json_safe(arguments),
+                "project_root": str(self.project_root),
+                "session_id": self._run_identity.get("session_id", ""),
+                "run_id": self._run_identity.get("run_id", ""),
+                "command": str(arguments.get("command") or ""),
+                "cwd": str(arguments.get("cwd") or self.project_root),
+                "paths": [str(arguments[key]) for key in ("path", "file_path", "target") if arguments.get(key)],
+                "network": "unknown / tool declaration",
+                "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+                "scopes": ["once", "session"],
             },
         )
-        waiter["event"].wait(timeout=300)
+        deadline = time.monotonic() + 300
+        while not waiter["event"].wait(timeout=0.2):
+            if self._run_control is not None and self._run_control.cancelled.is_set():
+                break
+            if time.monotonic() >= deadline:
+                break
         with self._approval_lock:
             resolved = self._approval_waiters.pop(approval_id, waiter)
         decision = str(resolved.get("decision") or "deny").strip().lower()
@@ -595,6 +613,35 @@ class ReverieSdkBridge:
             "recovery": {"summary": {}, "checkpoints": [], "operations": []},
         }
 
+    def _dispatch_prompt(self, request_id: Any, action: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        from .desktop_control import RunControl
+        interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
+        session_id = str(payload.get("sessionId") or "").strip()
+        if action == "resumePrompt" and not session_id:
+            raise ValueError("Continuing a task requires a session ID.")
+        if session_id and interface.session_manager.load_session(session_id) is None:
+            raise ValueError(f"Session not found: {session_id}")
+        self._run_identity = {"session_id": session_id, "project_root": str(self.project_root), "run_id": str(payload.get("runId") or uuid.uuid4().hex)}
+        control = RunControl(lambda event: self._emit_request_event(request_id, {**event, **self._run_identity}))
+        self._run_control = control
+        result = interface.run_prompt_once(
+            str(payload.get("prompt") or payload.get("message") or ""),
+            **({"resume": True} if action == "resumePrompt" else {}),
+            mode_override=str(payload.get("mode") or "").strip() or None,
+            stream=payload.get("stream") if isinstance(payload.get("stream"), bool) else None,
+            no_index=bool(payload.get("noIndex", False)),
+            fresh_session=bool(payload.get("freshSession", False)),
+            event_callback=lambda event: self._emit_request_event(request_id, {**event, **self._run_identity}),
+            approval_callback=lambda tool, arguments, denial, details=None: self._request_tool_approval(request_id, tool, arguments, denial, details),
+            source_override=str(payload.get("source") or "").strip() or None,
+            model_override=str(payload.get("model") or "").strip() or None,
+            reasoning_override=str(payload.get("reasoning") or "").strip() or None,
+            desktop_attachments=payload.get("attachments") or [],
+            run_control=control,
+            read_only_review=payload.get("runType") == "review",
+        )
+        return {"id": request_id, "type": "prompt.result", "result": _json_safe(result.to_dict()), "sessions": self.sessions_payload(), "recovery": self.recovery_payload(), **self._run_identity}
+
     def dispatch(self, message: Dict[str, Any]) -> Dict[str, Any]:
         action = str(message.get("action") or "").strip()
         payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
@@ -713,48 +760,41 @@ class ReverieSdkBridge:
                 raise ValueError("A 'message' decision requires message text for the model.")
             with self._approval_lock:
                 waiter = self._approval_waiters.get(approval_id)
-                if waiter is None:
+                if waiter is None or waiter["event"].is_set():
                     raise ValueError(f"Approval request is no longer active: {approval_id}")
                 waiter["decision"] = decision
                 waiter["message"] = message if decision == "message" else ""
                 waiter["event"].set()
             return {"id": request_id, "type": "approval.resolved", "approval_id": approval_id, "decision": decision}
+        if action in {"steerPrompt", "stopPrompt", "pausePrompt", "continuePrompt"}:
+            control = self._run_control
+            if control is None or str(payload.get("sessionId") or "") != self._run_identity.get("session_id"):
+                raise ValueError("The selected run is no longer active.")
+            result = {"id": request_id, "type": "run.control", **self._run_identity}
+            if action == "steerPrompt":
+                from .desktop_input import prepare_desktop_input
+                text = str(payload.get("prompt") or "").strip()
+                attachments = payload.get("attachments") or []
+                if not text and not attachments:
+                    raise ValueError("Steering message is empty.")
+                content, records = prepare_desktop_input(self.interface, self.interface.agent.config, text, attachments)
+                result.update(message_id=control.steer(content, text), state="waiting", attachments=records)
+            elif action == "stopPrompt":
+                control.stop()
+                result["state"] = "stopping"
+            else:
+                control.pause(action == "pausePrompt")
+                result["state"] = "waiting_pause" if action == "pausePrompt" else "running"
+            return result
         if action in {"runPrompt", "resumePrompt"}:
-            interface = self.ensure_interface(
-                Path(str(payload.get("projectRoot") or self.project_root))
-            )
-            prompt = str(payload.get("prompt") or payload.get("message") or "")
-            session_id = str(payload.get("sessionId") or "").strip()
-            if action == "resumePrompt" and not session_id:
-                raise ValueError("Continuing a task requires a session ID.")
-            if session_id and interface.session_manager.load_session(session_id) is None:
-                raise ValueError(f"Session not found: {session_id}")
-            result = interface.run_prompt_once(
-                prompt,
-                **({"resume": True} if action == "resumePrompt" else {}),
-                mode_override=str(payload.get("mode") or "").strip() or None,
-                stream=payload.get("stream") if isinstance(payload.get("stream"), bool) else None,
-                no_index=bool(payload.get("noIndex", False)),
-                fresh_session=bool(payload.get("freshSession", False)),
-                event_callback=lambda event: self._emit_request_event(request_id, event),
-                approval_callback=lambda tool, arguments, denial, details=None: self._request_tool_approval(
-                    request_id,
-                    tool,
-                    arguments,
-                    denial,
-                    details,
-                ),
-                source_override=str(payload.get("source") or "").strip() or None,
-                model_override=str(payload.get("model") or "").strip() or None,
-                reasoning_override=str(payload.get("reasoning") or "").strip() or None,
-            )
-            return {
-                "id": request_id,
-                "type": "prompt.result",
-                "result": _json_safe(result.to_dict()),
-                "sessions": self.sessions_payload(),
-                "recovery": self.recovery_payload(),
-            }
+            if not self._run_lock.acquire(blocking=False):
+                raise ValueError("A run is already active in this executor.")
+            try:
+                return self._dispatch_prompt(request_id, action, payload)
+            finally:
+                self._run_control = None
+                self._run_identity = {}
+                self._run_lock.release()
         if action == "compactContext":
             from .tools.context_management import ContextManagementTool
 

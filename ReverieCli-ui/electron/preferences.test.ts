@@ -78,4 +78,10 @@ describe("desktop UI preferences", () => {
     expect(value.inspectorWidth).toBe(620);
     expect(mergeUiPreferences({ sidebarWidth: 12 }, {}).sidebarWidth).toBe(208);
   });
+
+  it("persists a trimmed user label without changing other UI settings", () => {
+    const value = mergeUiPreferences({ accent: "blue" }, { userDisplayName: "  Lin  " });
+    expect(value.userDisplayName).toBe("Lin");
+    expect(value.accent).toBe("blue");
+  });
 });

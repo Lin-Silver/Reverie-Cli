@@ -1,4 +1,5 @@
 import type { CoreActionName } from "../electron/core-actions";
+import type { ComposerAttachment } from "../electron/attachments";
 import type {
   ContextUsage,
   CustomProviderRecord,
@@ -55,7 +56,13 @@ export interface WorkspaceMention extends Record<string, unknown> {
 }
 
 interface CoreRequestMap {
+  steerPrompt: { payload: { sessionId: string; projectRoot?: string; prompt: string; attachments?: ComposerAttachment[] }; response: Envelope<"run.control", { state: string; run_id: string; message_id?: string }> };
+  stopPrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
+  pausePrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
+  continuePrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
   listTools: { payload: { mode: string }; response: Envelope<"tools", { mode: string; tools: ToolRecord[] }> };
+  listSkills: { payload: EmptyPayload; response: Envelope<"skills", { skills: SkillsState }> };
+  listPlugins: { payload: EmptyPayload; response: Envelope<"plugins", { plugins: PluginsState }> };
   ratsState: { payload: EmptyPayload; response: Envelope<"rats.state", { rats: RatsState }> };
   /** The last scan, without walking the discovery roots again. `ratsState` is the rescan. */
   ratsStateCached: { payload: EmptyPayload; response: Envelope<"rats.state", { rats: RatsState }> };
@@ -85,7 +92,7 @@ interface CoreRequestMap {
   getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };
   createSession: { payload: { name?: string }; response: Envelope<"session.created", { session: SessionState; sessions: SessionListState }> };
   runPrompt: {
-    payload: { prompt: string; sessionId: string; mode: string; stream: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string };
+    payload: { prompt: string; sessionId: string; mode: string; stream: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string; attachments?: ComposerAttachment[]; runId?: string; runType?: "prompt" | "review" };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   resumePrompt: {
@@ -101,7 +108,7 @@ interface CoreRequestMap {
   rewindSession: { payload: { sessionId: string; messageCount: number; confirmed: true }; response: Envelope<"session.updated", { session: SessionState; sessions: SessionListState }> };
   deleteSession: { payload: { sessionId: string; confirmed: true }; response: Envelope<"session.updated", { session: SessionState | null; sessions: SessionListState }> };
   deleteSessions: { payload: { sessionIds: string[]; confirmed: true }; response: Envelope<"sessions.deleted", { deleted_session_ids: string[]; session: SessionState | null; sessions: SessionListState }> };
-  resolveApproval: { payload: { approvalId: unknown; decision: ApprovalDecision; message?: string }; response: Envelope<"approval.resolved", { approval_id: string; decision: ApprovalDecision }> };
+  resolveApproval: { payload: { approvalId: unknown; sessionId?: string; projectRoot?: string; decision: ApprovalDecision; message?: string }; response: Envelope<"approval.resolved", { approval_id: string; decision: ApprovalDecision }> };
   getModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   selectModel: { payload: { source: string; modelId: string; reasoning?: string }; response: Envelope<"model.selected", { selected: Record<string, unknown>; models: ModelSourcesState; workspace: WorkspaceState }> };

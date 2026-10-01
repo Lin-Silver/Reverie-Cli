@@ -780,9 +780,13 @@ function installDesktopApi(options: {
       };
     }),
     selectWorkspace: vi.fn(async () => null),
-    switchWorkspace: vi.fn(async () => null),
+    switchWorkspace: vi.fn(async (_root: string) => null as string | null),
     deleteWorkspace: vi.fn(async () => null),
     selectAttachment: vi.fn(async () => null),
+    importDroppedFiles: vi.fn(async () => [] as Array<{ name: string; relativePath: string; size: number }>),
+    gitStatus: vi.fn(async () => null as null | { repositoryRoot: string; currentBranch: string; dirtyCount: number; localBranches: string[]; remoteBranches: string[] }),
+    switchGitBranch: vi.fn(async () => ({ repositoryRoot: "C:/workspace", currentBranch: "feature/ui", dirtyCount: 0, localBranches: ["main", "feature/ui"], remoteBranches: [] })),
+    createGitBranch: vi.fn(async (name: string) => ({ repositoryRoot: "C:/workspace", currentBranch: name, dirtyCount: 0, localBranches: ["main", name], remoteBranches: [] })),
     selectCoreData: vi.fn(async () => null),
     paths: vi.fn(async () => ({ projectRoot: "C:/workspace", kernelPath: "C:/reverie.exe", coreAppRoot: "C:/core", runtimeRoot: "C:/runtime" })),
     appearance: vi.fn(async () => ({ theme: "dark" as const, resolved: "dark" as const })),
@@ -841,6 +845,68 @@ afterEach(() => {
 });
 
 describe("desktop GUI interactions", () => {
+  it("persists a custom user label and renders it on existing messages", async () => {
+    const { api } = installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "user", content: "Hello from me" }] } });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Hello from me");
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(screen.getByRole("button", { name: "对话显示" }));
+    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
+    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "  Lin  ");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ userDisplayName: "  Lin  " }));
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByText("Lin")).toBeTruthy();
+  });
+
+  it("shows Git branches and switches to a selected branch", async () => {
+    const { api } = installDesktopApi();
+    api.gitStatus.mockResolvedValue({ repositoryRoot: "C:/workspace", currentBranch: "main", dirtyCount: 2, localBranches: ["main", "feature/ui"], remoteBranches: ["origin/remote-only"] });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /main.*2 项改动/ }));
+    const menu = screen.getByRole("dialog", { name: "Git 分支" });
+    expect(within(menu).getByText("远端分支")).toBeTruthy();
+    await user.click(within(menu).getByRole("button", { name: "feature/ui" }));
+    await waitFor(() => expect(api.switchGitBranch).toHaveBeenCalledWith("feature/ui", false));
+  });
+
+  it("imports dropped files into structured cards without changing the text", async () => {
+    const { api } = installDesktopApi();
+    api.importDroppedFiles.mockResolvedValue([{ name: "notes.txt", relativePath: ".reverie/attachments/notes.txt", size: 5 }]);
+    render(<App />);
+    await screen.findByRole("button", { name: "选择任意文件作为附件" });
+    const composer = document.querySelector(".composer") as HTMLElement;
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    const dataTransfer = { types: ["Files"], files: [file], dropEffect: "none" };
+    fireEvent.dragEnter(composer, { dataTransfer });
+    expect(screen.getByText("拖放文件以添加附件")).toBeTruthy();
+    fireEvent.drop(composer, { dataTransfer });
+    await waitFor(() => expect(api.importDroppedFiles).toHaveBeenCalledWith([file], "C:/workspace"));
+    await waitFor(() => expect(document.querySelector(".attachment-card")?.textContent).toContain("notes.txt"));
+    expect((screen.getByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "发送" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("keeps files dropped for the next draft when the current turn finishes", async () => {
+    const { api, request, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    api.importDroppedFiles.mockResolvedValue([{ name: "next.txt", relativePath: ".reverie/attachments/next.txt", size: 4 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "first question{Enter}");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.objectContaining({ prompt: "first question" })));
+
+    const file = new File(["next"], "next.txt", { type: "text/plain" });
+    fireEvent.drop(document.querySelector(".composer") as HTMLElement, { dataTransfer: { types: ["Files"], files: [file] } });
+    await waitFor(() => expect(document.querySelector(".attachment-card")?.textContent).toContain("next.txt"));
+    releasePrompt();
+    expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
+    expect(composer.value).toBe("");
+    expect(document.querySelector(".attachment-card")?.textContent).toContain("next.txt");
+  });
+
   it("paints from a compact bootstrap before hydrating the complete desktop state", async () => {
     const { request } = installDesktopApi();
     render(<App />);
@@ -951,6 +1017,70 @@ describe("desktop GUI interactions", () => {
     expect(screen.getAllByText("Cache investigation").length).toBeGreaterThan(0);
   });
 
+  it.each([true, false])("uses the selected catalog entry for manual-model photo capability (%s)", async vision => {
+    const source = desktopState.models.sources[0];
+    const initialState: DesktopState = { ...desktopState,
+      workspace: { ...desktopState.workspace, active_source: "standard" },
+      models: { ...desktopState.models, active_source: "standard", active_model: { id: "provider-model-id", display_name: "Test Model", provider: "openai-chat" }, sources: [{ ...source, id: "standard", selected_model_id: "0", models: [{ ...source.models[0], id: "0", model: "provider-model-id", vision }] }] },
+    };
+    const { api } = installDesktopApi({ initialState }); render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    api.importDroppedFiles.mockResolvedValue([{ name: "photo.png", relativePath: "photo.png", size: 12 }]);
+    fireEvent.drop(document.querySelector(".composer")!, { dataTransfer: { types: ["Files"], files: [new File(["photo"], "photo.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "移除附件 photo.png" });
+    expect(screen.queryByText("图片输入能力未知，请选择明确支持图片的模型")).toBeNull();
+    expect(Boolean(screen.queryByText("当前模型不支持图片，请切换模型或移除图片"))).toBe(!vision);
+  });
+
+  it("retains photo identity in the user message while the request is running", async () => {
+    const { api } = installDesktopApi({ gatePrompt: true });
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    api.importDroppedFiles.mockResolvedValue([{ name: "running.png", relativePath: "running.png", size: 12 }]);
+    fireEvent.drop(document.querySelector(".composer")!, { dataTransfer: { types: ["Files"], files: [new File(["photo"], "running.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "移除附件 running.png" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByRole("button", { name: "打开文件预览 running.png" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  });
+
+  it("shows a pure local photo in history and opens its workspace preview", async () => {
+    installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "user", content: [{ type: "local_image", file_path: "photos/中文.png", file_name: "中文.png", file_size: 1024 }] }] } });
+    const opened = vi.fn();
+    window.addEventListener("reverie:file-open", opened);
+    try {
+      render(<App />);
+      await userEvent.setup().click(await screen.findByRole("button", { name: "打开文件预览 中文.png" }));
+      expect(opened.mock.calls[0][0].detail).toEqual({ path: "photos/中文.png" });
+    } finally { window.removeEventListener("reverie:file-open", opened); }
+  });
+
+  it("keeps text and local photos in transcript content order", async () => {
+    installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "user", content: [
+      { type: "text", text: "before photo" }, { type: "local_image", file_path: "first.png", file_name: "first.png" },
+      { type: "text", text: "between photos" }, { type: "local_image", file_path: "second.png", file_name: "second.png" },
+    ] }] } });
+    const mounted = render(<App />);
+    await screen.findByRole("button", { name: "打开文件预览 second.png" });
+    expect([...mounted.container.querySelectorAll(".message.user .message-body > *")].map(node => node.textContent)).toEqual(["before photo", "first.png", "between photos", "second.png"]);
+  });
+
+  it("opens a fresh conversation when an empty transcript has an unsent photo draft", async () => {
+    const { request, api } = installDesktopApi(); const user = userEvent.setup(); render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "unsent photo draft");
+    api.importDroppedFiles.mockResolvedValue([{ name: "draft.png", relativePath: "draft.png", size: 12 }]);
+    const file = new File(["photo"], "draft.png", { type: "image/png" });
+    fireEvent.drop(document.querySelector(".composer")!, { dataTransfer: { types: ["Files"], files: [file] } });
+    await screen.findByRole("button", { name: "移除附件 draft.png" });
+    await user.click(screen.getAllByRole("button", { name: /新对话/ })[0]);
+    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {}));
+    expect(composer.value).toBe(""); expect(screen.queryByRole("button", { name: "移除附件 draft.png" })).toBeNull();
+    await user.click(screen.getAllByRole("button", { name: /Initial session/ })[0]);
+    await waitFor(() => expect(composer.value).toBe("unsent photo draft"));
+    expect(screen.getByRole("button", { name: "移除附件 draft.png" })).toBeTruthy();
+  });
+
   it("sends a prompt through the typed bridge and renders the refreshed response", async () => {
     const { request } = installDesktopApi();
     const user = userEvent.setup();
@@ -964,11 +1094,54 @@ describe("desktop GUI interactions", () => {
       sessionId: baseSession.id,
       mode: "reverie",
       stream: true,
+      attachments: [],
+      projectRoot: "C:/workspace",
     }));
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
   });
 
-  it("interrupts the streaming turn and enqueues a new one when the user submits mid-stream", async () => {
+  it("keeps a queued conversation running in the background without clearing another draft", async()=>{
+    const {request,releasePrompt}=installDesktopApi({gatePrompt:true});const user=userEvent.setup();render(<App />);
+    const composer=await screen.findByRole("textbox",{name:/向 Test Model 提问/}) as HTMLTextAreaElement;
+    await user.type(composer,"first background turn{Enter}");await waitFor(()=>expect(request).toHaveBeenCalledWith("runPrompt",expect.objectContaining({prompt:"first background turn"})));
+    await user.type(composer,"background queued turn{Enter}");
+    await user.click(screen.getAllByRole("button",{name:/Cache investigation/})[0]);
+    await waitFor(()=>expect(request).toHaveBeenCalledWith("getSession",{sessionId:"session-2"}));
+    await user.type(composer,"other session draft");releasePrompt();
+    await waitFor(()=>expect(request).toHaveBeenCalledWith("runPrompt",expect.objectContaining({prompt:"background queued turn",sessionId:"session-1"})));
+    expect(composer.value).toBe("other session draft");expect(screen.getByText("Cache investigation",{selector:"strong"})).toBeTruthy();
+  });
+
+  it("keeps queued attachments bound to their original workspace after switching projects", async () => {
+    const options = { gatePrompt: true, initialState: { ...desktopState } };
+    const { request, api, releasePrompt } = installDesktopApi(options);
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "first project turn{Enter}");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.objectContaining({ prompt: "first project turn" })));
+    api.importDroppedFiles.mockResolvedValue([{ name: "photo.png", relativePath: "photo.png", size: 12 }]);
+    const file = new File(["photo bytes"], "photo.png", { type: "image/png" });
+    fireEvent.drop(document.querySelector(".composer")!, { dataTransfer: { types: ["Files"], files: [file] } });
+    await screen.findByRole("button", { name: "移除附件 photo.png" });
+    await user.type(composer, "queued photo{Enter}");
+    api.switchWorkspace.mockImplementation(async root => {
+      options.initialState = { ...desktopState, workspace: { ...desktopState.workspace, project_root: root, project_name: "other" } };
+      return root;
+    });
+    act(() => window.dispatchEvent(new CustomEvent("reverie:workspace-open", { detail: { root: "C:/other" } })));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {}));
+    await screen.findAllByText("New session");
+    await user.type(composer, "other project draft");
+    releasePrompt();
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.objectContaining({
+      prompt: "queued photo", sessionId: "session-1", projectRoot: "C:/workspace",
+      attachments: [expect.objectContaining({ relativePath: "photo.png" })],
+    })));
+    expect(composer.value).toBe("other project draft");
+  });
+
+  it("queues without restarting the core and runs the next message after completion", async () => {
     const { request, api, releasePrompt } = installDesktopApi({ gatePrompt: true });
     const user = userEvent.setup();
     render(<App />);
@@ -986,16 +1159,16 @@ describe("desktop GUI interactions", () => {
     await user.type(composer, "drafted while streaming");
     expect(composer.value).toContain("drafted while streaming");
 
-    // Submitting mid-stream interrupts the current turn (a hard cancel) and then
-    // sends the typed text as a new turn -- the user's "stop and add this".
     await user.type(composer, "{Enter}");
-    await waitFor(() => expect(api.cancel).toHaveBeenCalled());
+    await screen.findByText("drafted while streaming");
+    expect(api.cancel).not.toHaveBeenCalled();
+    expect(request.mock.calls.filter(call => call[0] === "runPrompt")).toHaveLength(1);
+    releasePrompt();
     await waitFor(() => expect(request).toHaveBeenCalledWith(
       "runPrompt",
       expect.objectContaining({ prompt: "drafted while streaming" }),
     ));
 
-    releasePrompt();
   });
 
   it("jumps back into the active conversation when its title is double-clicked from another view", async () => {
@@ -1084,6 +1257,8 @@ describe("desktop GUI interactions", () => {
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("resolveApproval", {
       approvalId: "approval-1",
+      projectRoot: "C:/workspace",
+      sessionId: "session-1",
       decision: "message",
       message: "先解释清楚再执行",
     }));
@@ -1118,6 +1293,8 @@ describe("desktop GUI interactions", () => {
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("resolveApproval", {
       approvalId: "approval-2",
+      projectRoot: "C:/workspace",
+      sessionId: "session-1",
       decision: "deny",
     }));
   });
@@ -1128,6 +1305,7 @@ describe("desktop GUI interactions", () => {
     render(<App />);
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
 
+    await user.click(screen.getByRole("button", { name: "打开检查器" }));
     await user.click(screen.getByRole("button", { name: "上下文" }));
     expect(await screen.findByTitle("压缩上下文")).toBeTruthy();
     await user.type(composer, "/compact preserve provider failures{Enter}");
@@ -1148,6 +1326,7 @@ describe("desktop GUI interactions", () => {
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
     await user.type(composer, "unfinished draft");
 
+    await user.click(screen.getByRole("button", { name: "打开检查器" }));
     await user.click(screen.getByRole("button", { name: "上下文" }));
     await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
 
@@ -1281,6 +1460,7 @@ describe("desktop GUI interactions", () => {
 
     expect(await screen.findByRole("button", { name: /Computer/ })).toBeTruthy();
     expect(container.querySelector(".model-trigger")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "打开检查器" }));
     fireEvent.click(screen.getByRole("button", { name: "上下文" }));
     expect(screen.getByText("Muse Glimmer 30B")).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "模型来源" })).toBeNull();
@@ -2426,8 +2606,11 @@ describe("desktop GUI interactions", () => {
     await screen.findByRole("button", { name: "命令面板" });
     const shell = container.querySelector(".app-shell");
 
-    expect(shell?.classList.contains("with-inspector")).toBe(true);
+    expect(shell?.classList.contains("with-inspector")).toBe(false);
     expect(container.querySelector(".inspector")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "打开检查器" }));
+    await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
 
     await user.click(screen.getByRole("button", { name: "关闭检查器" }));
 

@@ -687,6 +687,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "project.list_files",
             "project.read_file",
             "project.write_file",
+            "project.search_files",
             "animation.play",
             "animation.status",
             "world.create_region",
@@ -766,6 +767,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
         assert definitions_by_name["project.list_files"].get("permission") == "read"
         assert definitions_by_name["project.read_file"].get("permission") == "read"
         assert definitions_by_name["project.write_file"].get("permission") == "project"
+        assert definitions_by_name["project.search_files"].get("permission") == "read"
 
         # Scene-editing working set: everything exercised against the
         # animation_runtime scene below (animation, object CRUD, prefab, group and
@@ -795,6 +797,7 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             "project.list_files",
             "project.read_file",
             "project.write_file",
+            "project.search_files",
         ]
         schemas = _load_working_set(scene_editing_tools)
         assert schemas[dynamic_tools["animation.status"]].get("additionalProperties") is False
@@ -1231,6 +1234,55 @@ def test_cli_consumes_real_engine_rtp_task_lifecycle() -> None:
             {"path": "../escape.txt", "content": "nope"},
         )
         assert rejected_write.success is False, rejected_write.data
+        # project.search_files is the discovery primitive that closes the file family:
+        # locate the file the write above authored by its contents over the same live
+        # session, proving the search runs on the engine main thread and reports an
+        # exact path/line/text hit rather than an opaque count.
+        found = executor.execute(
+            dynamic_tools["project.search_files"],
+            {"query": "authored by reverie-cli", "directory": "cli_authored"},
+        )
+        assert (
+            found.success is True
+            and found.data.get("execution_thread") == "main"
+            and found.data.get("names_only") is False
+            and found.data.get("truncated") is False
+            and found.data.get("count") == 1
+            and found.data.get("files_matched") == 1
+            and [
+                (item.get("path"), item.get("line"), item.get("text"))
+                for item in found.data.get("matches", [])
+            ]
+            == [("cli_authored/reverie_note.txt", 1, "authored by reverie-cli")]
+        ), found.error or found.data
+        # names_only finds the same file by path without reading a single byte of it,
+        # which is how a binary asset is located by name.
+        by_name = executor.execute(
+            dynamic_tools["project.search_files"],
+            {"query": "reverie_note", "directory": "cli_authored", "names_only": True},
+        )
+        assert (
+            by_name.success is True
+            and by_name.data.get("names_only") is True
+            and [item.get("path") for item in by_name.data.get("matches", [])]
+            == ["cli_authored/reverie_note.txt"]
+        ), by_name.error or by_name.data
+        # A needle that matches nothing is an empty success, not a failure.
+        absent = executor.execute(
+            dynamic_tools["project.search_files"],
+            {"query": "no_such_needle_in_this_project", "directory": "cli_authored"},
+        )
+        assert (
+            absent.success is True
+            and absent.data.get("count") == 0
+            and absent.data.get("matches") == []
+        ), absent.error or absent.data
+        # A directory escaping the project boundary is refused before any walk.
+        rejected_search = executor.execute(
+            dynamic_tools["project.search_files"],
+            {"query": "authored", "directory": "../escape"},
+        )
+        assert rejected_search.success is False, rejected_search.data
         # World-streaming working set: the largest single-task tool group the
         # engine publishes. Re-describe it here (plus scene.open, which this flow
         # reuses to swap in the streaming scene) as its own coherent set, proving

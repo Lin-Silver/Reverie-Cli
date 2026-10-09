@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/emilkowalski/skills",
+  "revision": "e8a175de22ae1e49370fc144c1f3bb9aeedf988d",
+  "license": "MIT",
+  "license_file": "EMILKOWALSKI_LICENSE",
+  "adaptation": "Unmodified upstream skill bodies and resources. Read through Reverie skill_lookup.",
+  "files": {
+    "animate/RECIPES.md": "7b835d46748f13e05048ef1a7f3b49587a1b7fee4a72854c788992e184af9cf5",
+    "animate/SKILL.md": "6e7a0d28864bd9cb658913049df6944ce320a3646ac0e339ba8c7d99a9e764e5",
+    "animate-expo/RECIPES.md": "c8ffbd6233744e045ec67b7f80b15a2b67303a23ad45c0b40d823ecc87c68d03",
+    "animate-expo/SKILL.md": "7a3dd553e23e15959ce8b3ec8cd4c1605c0d2e576c3a484a13b989e0700a48dc",
+    "animation-vocabulary/SKILL.md": "bd473dae686e85f6f82799aa7ef2aa11d357ddf3625de000fd8f28ea747562a4",
+    "apple-design/SKILL.md": "bcab965ec01d05101b817714f8ccaf68632d1697b822f65718e811119a77c049",
+    "ask-sonner/API.md": "5d85db5cbd0d4f3b0c68259e897b8d6d3c6518bdadaca0b0fb830176a44f4038",
+    "ask-sonner/SKILL.md": "bc59ef252d11095cb7722be0ed6c0b882dcd4ae06cd64b3842709a89ab868c1a",
+    "break-ui/CATALOG.md": "437fb3047e3e1f8620583744e5e48298764a5ce8cc762b647f056ba22d8aa23c",
+    "break-ui/SKILL.md": "c162e1a2f0ce720cc774b336089c7c4af01bb141bdca8dd7491b8727193ad11c",
+    "emil-design-eng/SKILL.md": "a2ee9da0840c23b509a27e742edbc8f8fdb4416ca7d6ffde67d79023bfb8a5bf",
+    "find-animation-opportunities/SKILL.md": "59646cf5cde38dd146334ae791501d335d049a57c436c0eb8b895b68db96fb70",
+    "improve-animations/AUDIT.md": "4c7e350c639564b4e572c9f0e20bab2d427f5c9c469daa8aa9b7ac5275728ea1",
+    "improve-animations/PLAN-TEMPLATE.md": "886e54b73ac550749b434eebe928df7be0683684f5a66a1bf0cf8326e09fe50b",
+    "improve-animations/SKILL.md": "4c57bd88188834434022b8ea0ea47f361963db5746198a7ce752eaef9ac221db",
+    "mobile-native/SKILL.md": "0952ba031c849ba11dcefa4755f178457b9bca6a794e9bb6fc725aa1c1cc0dea",
+    "pick-ui-library/SKILL.md": "6a3532136cf7f2a82dcfd8f7edd84787739749d8a9c1a8081534ee549d284de4",
+    "prototype/PICKER.md": "e04b8ceb7686888f05eefc301dc1197963cfa699189c95966e5a39b1f1cf6c24",
+    "prototype/SKILL.md": "c7e70974979da914e45040a3ce31865fb94e7faef09c2cf188d19881a46eda42",
+    "review-animations/SKILL.md": "5b2a8f5986d19514abef830d178ead49f21d254fee137b45aa0ca7cad4f80efd",
+    "review-animations/STANDARDS.md": "ca2b681e825638ea78cb8b6adc76234d849663cc3774eb2ad8d47181bad3098f",
+    "write-swift/SKILL.md": "7ff7bdc61fe95535b2be82af72e5e948599b72ccf189a6ac9038c6297bd934f5"
+  }
+}

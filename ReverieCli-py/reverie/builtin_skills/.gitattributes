@@ -1,0 +1,16 @@
+# Preserve the exact bundled bytes recorded in emilkowalski-source.json,
+# including upstream line endings and whitespace.
+animate/** -text -whitespace
+animate-expo/** -text -whitespace
+animation-vocabulary/** -text -whitespace
+apple-design/** -text -whitespace
+ask-sonner/** -text -whitespace
+break-ui/** -text -whitespace
+emil-design-eng/** -text -whitespace
+find-animation-opportunities/** -text -whitespace
+improve-animations/** -text -whitespace
+mobile-native/** -text -whitespace
+pick-ui-library/** -text -whitespace
+prototype/** -text -whitespace
+review-animations/** -text -whitespace
+write-swift/** -text -whitespace

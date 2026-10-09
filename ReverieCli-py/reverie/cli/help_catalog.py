@@ -34,7 +34,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/status",
         "section": "Core",
         "summary": "Show the active model, provider source, session, runtime health, and the full token budget.",
-        "detail": "This is the fast health check for the current session, active model selection, indexing state, and token accounting. The token rows come from the same counter and the same context window the agent's auto-compaction uses, so what is shown is what is enforced: context usage against the real model window, remaining headroom, which tokenizer produced the count, the auto-compact and auto-rotate gates with the distance to each, a per-segment prompt breakdown, the heaviest single message, reasoning held off-prompt, and cumulative session, workspace, and per-model totals.",
+        "detail": "This is the fast health check for the current session, active model selection, indexing state, and token accounting. The upcoming-request context rows use the local tokenizer and the context window enforced by auto-compaction. Cumulative usage prefers the API's token counts and estimates only missing counts with the local tokenizer. The snapshot includes: context usage against the real model window, remaining headroom, which tokenizer produced the count, the auto-compact and auto-rotate gates with the distance to each, a per-segment prompt breakdown, the heaviest single message, reasoning held off-prompt, and cumulative session, workspace, and per-model totals.",
         "overview": "status snapshot",
         "subcommands": [
             {"usage": "/status", "description": "Show the current model, endpoint, source, session, index, uptime, and token budget."},

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import hashlib
+import base64
 import json
 import logging
 import os
@@ -421,6 +422,7 @@ def format_mcp_call_result(result: Any) -> Tuple[str, Dict[str, Any], bool]:
         return text, {"raw_result": result}, False
 
     text_parts: List[str] = []
+    message_parts: List[Dict[str, Any]] = []
     content = result.get("content", [])
     if isinstance(content, list):
         for item in content:
@@ -431,12 +433,46 @@ def format_mcp_call_result(result: Any) -> Tuple[str, Dict[str, Any], bool]:
                 text_value = str(item.get("text", "") or "").strip()
                 if text_value:
                     text_parts.append(text_value)
-            elif item_type == "resource":
-                uri = str(item.get("uri", "") or "").strip()
-                mime_type = str(item.get("mimeType", "") or "").strip()
+                    if "assistant" in item.get("annotations", {}).get("audience", ["assistant"]):
+                        message_parts.append({"type": "text", "text": text_value})
+            elif item_type in {"resource", "resource_link"}:
+                resource = item.get("resource", {}) if item_type == "resource" else item
+                if not isinstance(resource, dict):
+                    continue
+                uri = str(resource.get("uri", "") or "").strip()
+                mime_type = str(resource.get("mimeType", "") or "").strip()
                 if uri:
                     label = uri if not mime_type else f"{uri} ({mime_type})"
                     text_parts.append(label)
+                    message_parts.append({"type": "text", "text": label})
+                text_value = resource.get("text")
+                if isinstance(text_value, str) and text_value:
+                    text_parts.append(text_value)
+                    message_parts.append({"type": "text", "text": text_value})
+                if resource.get("blob"):
+                    text_parts.append("Embedded binary resource; read its URI with read_mcp_resource.")
+            elif item_type in {"image", "audio"}:
+                mime_type = str(item.get("mimeType") or "")
+                label = f"MCP {item_type} ({mime_type or 'unspecified MIME type'})"
+                text_parts.append(label)
+                data = item.get("data")
+                audience = item.get("annotations", {}).get("audience", ["assistant"])
+                valid = isinstance(data, str) and 0 < len(data) <= 12 * 1024 * 1024
+                if valid:
+                    try:
+                        base64.b64decode(data, validate=True)
+                    except ValueError:
+                        valid = False
+                if "assistant" not in audience:
+                    continue
+                if valid and item_type == "image" and mime_type in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+                    message_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{data}"}})
+                elif valid and item_type == "audio" and mime_type in {"audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp3"}:
+                    message_parts.append({"type": "input_audio", "input_audio": {"data": data, "format": "wav" if "wav" in mime_type else "mp3"}})
+                else:
+                    message_parts.append({"type": "text", "text": label + ": invalid, oversized or unsupported media payload."})
+            else:
+                text_parts.append(f"MCP content: {item_type or 'unknown'}")
 
     structured = result.get("structuredContent")
     output = "\n\n".join(part for part in text_parts if part)
@@ -445,6 +481,8 @@ def format_mcp_call_result(result: Any) -> Tuple[str, Dict[str, Any], bool]:
             output = json.dumps(structured, ensure_ascii=False, indent=2)
         except Exception:
             output = str(structured)
+    if structured is not None:
+        message_parts.append({"type": "text", "text": json.dumps(structured, ensure_ascii=False)})
     if not output:
         try:
             output = json.dumps(result, ensure_ascii=False, indent=2)
@@ -457,6 +495,7 @@ def format_mcp_call_result(result: Any) -> Tuple[str, Dict[str, Any], bool]:
         "structured_content": structured,
         "is_error": is_error,
         "raw_result": result,
+        "message_content": message_parts,
     }
     return output, metadata, is_error
 
@@ -696,6 +735,27 @@ class BaseMCPClient:
             self.request("notifications/initialized", {}, timeout_ms=timeout_ms, expect_response=False)
             self._initialized = True
 
+    def _list_pages(self, method: str, field: str, timeout_ms: Optional[int]) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        cursor = None
+        seen: set[str] = set()
+        budget = self._request_timeout_ms(timeout_ms if timeout_ms is not None else MCP_DEFAULT_DISCOVERY_TIMEOUT_MS)
+        deadline = time.monotonic() + budget / 1000
+        while True:
+            remaining = int((deadline - time.monotonic()) * 1000)
+            if remaining <= 0:
+                raise MCPClientError(f"{method} pagination exceeded its discovery timeout")
+            page = self.request(method, {"cursor": cursor} if cursor else {}, timeout_ms=remaining, expect_response=True)
+            if not isinstance(page, dict) or not isinstance(page.get(field, []), list):
+                raise MCPClientError(f"{method} returned an invalid page")
+            items.extend(item for item in page.get(field, []) if isinstance(item, dict))
+            cursor = page.get("nextCursor")
+            if cursor is None or cursor == "":
+                return items
+            if not isinstance(cursor, str) or cursor in seen:
+                raise MCPClientError(f"{method} returned an invalid or repeated cursor")
+            seen.add(cursor)
+
     def discover(self, force: bool = False, timeout_ms: Optional[int] = None) -> Dict[str, Any]:
         with self._lock:
             if self._discovery_cache is not None and not force and not self.catalog_dirty:
@@ -721,23 +781,17 @@ class BaseMCPClient:
                 return dict(self._discovery_cache)
 
             try:
-                tools_result = self.request("tools/list", {}, timeout_ms=timeout_ms, expect_response=True)
-                if isinstance(tools_result, dict) and isinstance(tools_result.get("tools"), list):
-                    tools = [item for item in tools_result.get("tools", []) if isinstance(item, dict)]
+                tools = self._list_pages("tools/list", "tools", timeout_ms)
             except Exception as exc:
                 errors.append(f"tools/list: {exc}")
 
             try:
-                resources_result = self.request("resources/list", {}, timeout_ms=timeout_ms, expect_response=True)
-                if isinstance(resources_result, dict) and isinstance(resources_result.get("resources"), list):
-                    resources = [item for item in resources_result.get("resources", []) if isinstance(item, dict)]
+                resources = self._list_pages("resources/list", "resources", timeout_ms)
             except Exception as exc:
                 errors.append(f"resources/list: {exc}")
 
             try:
-                prompts_result = self.request("prompts/list", {}, timeout_ms=timeout_ms, expect_response=True)
-                if isinstance(prompts_result, dict) and isinstance(prompts_result.get("prompts"), list):
-                    prompts = [item for item in prompts_result.get("prompts", []) if isinstance(item, dict)]
+                prompts = self._list_pages("prompts/list", "prompts", timeout_ms)
             except Exception as exc:
                 errors.append(f"prompts/list: {exc}")
 

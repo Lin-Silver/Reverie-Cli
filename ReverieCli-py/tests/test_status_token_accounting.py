@@ -90,6 +90,83 @@ def test_per_message_costs_sum_to_the_conversation_total() -> None:
     assert per_message + 2 == WorkspaceStatsManager.count_messages_tokens(messages)
 
 
+def test_api_context_measurement_keeps_live_edits_local_and_ignores_system_prompt_drift() -> None:
+    payload = _payload()
+    initial = _agent(payload=payload).describe_context_usage()
+    baseline = {"tokens": 424, "estimated_tokens": initial["estimated_history_tokens"]}
+    payload[0]["content"] = "Different desktop prompt " * 100
+    payload.append({"role": "user", "content": "A pending draft 中文 " * 15})
+    updated = _agent(payload=payload).describe_context_usage()
+    delta = updated["estimated_history_tokens"] - baseline["estimated_tokens"]
+    ReverieAgent._apply_api_context_baseline(updated, baseline)
+    assert updated["total_tokens"] == 424 + delta
+    assert updated["usage_source"] == "mixed"
+    assert sum(segment["tokens"] for segment in updated["segments"]) == updated["total_tokens"]
+    assert updated["remaining_tokens"] == 200000 - updated["total_tokens"]
+
+
+def test_zero_api_context_is_authoritative_and_shortened_history_invalidates_measurement() -> None:
+    report = _agent().describe_context_usage()
+    baseline = {"tokens": 0, "estimated_tokens": report["estimated_history_tokens"]}
+    ReverieAgent._apply_api_context_baseline(report, baseline)
+    assert report["total_tokens"] == 0
+    assert report["usage_source"] == "api"
+    shortened = _agent(payload=[{"role": "user", "content": "short"}]).describe_context_usage()
+    local_total = shortened["total_tokens"]
+    ReverieAgent._apply_api_context_baseline(shortened, baseline)
+    assert shortened["total_tokens"] == local_total
+    assert "usage_source" not in shortened
+
+
+def test_context_snapshots_do_not_pollute_runtime_cache_or_consume_control_safe_points() -> None:
+    from unittest.mock import Mock
+
+    agent = _agent()
+    agent._token_estimate_cache_value = 99
+    agent.describe_context_usage(request_messages=[{"role": "user", "content": "pending draft"}])
+    assert agent._token_estimate_cache_value == 99
+    agent.desktop_control = SimpleNamespace(safe_point=Mock())
+    agent._memory_context_package_message = lambda: None
+    agent._is_active_model_source = lambda source: False
+    agent._select_prompt_history = lambda: [{"role": "user", "content": "actual"}]
+    ReverieAgent._build_messages(agent, read_only=True)
+    agent.desktop_control.safe_point.assert_not_called()
+    ReverieAgent._build_messages(agent)
+    agent.desktop_control.safe_point.assert_called_once_with(agent)
+
+
+def test_api_context_baseline_rejects_replaced_history_even_with_a_larger_draft() -> None:
+    initial = _agent(payload=_payload()).describe_context_usage()
+    baseline = {"tokens": 424, "estimated_tokens": initial["estimated_history_tokens"], "history_hashes": initial.get("history_hashes", [])}
+    updated = _agent(payload=[{"role": "user", "content": "replaced conversation"}, {"role": "user", "content": "large pending draft " * 2000}]).describe_context_usage()
+    local_total = updated["total_tokens"]
+    ReverieAgent._apply_api_context_baseline(updated, baseline)
+    assert updated["total_tokens"] == local_total
+    assert "usage_source" not in updated
+
+
+def test_context_baseline_marks_partial_api_usage_as_mixed() -> None:
+    initial = _agent().describe_context_usage()
+    baseline = {"tokens": 424, "api_tokens": 400, "estimated_tokens": initial["estimated_history_tokens"]}
+    ReverieAgent._apply_api_context_baseline(initial, baseline)
+    assert initial["usage_source"] == "mixed"
+    assert [(item["key"], item["tokens"]) for item in initial["segments"]] == [("api_context", 400), ("local_delta", 24)]
+
+
+def test_context_widget_failure_does_not_disrupt_model_accounting() -> None:
+    from unittest.mock import Mock
+
+    agent = _agent()
+    ledger = Mock()
+    agent.tool_executor = SimpleNamespace(context={"workspace_stats_manager": ledger, "context_usage_handler": Mock(side_effect=RuntimeError("widget unavailable"))})
+    agent._current_session_details = lambda session_id: (session_id, "Session")
+    agent._record_memory_event = Mock()
+    agent.provider, agent.model, agent.model_display_name = "openai-chat", "test", "Test"
+    agent._record_model_usage(request_messages=_payload(), assistant_text="response", usage={"input_tokens": 12, "output_tokens": 7})
+    ledger.record_model_usage.assert_called_once()
+    agent._record_memory_event.assert_called_once()
+
+
 def test_non_dict_messages_cost_nothing_and_do_not_raise() -> None:
     assert WorkspaceStatsManager.count_message_tokens("not a message") == 0
     assert WorkspaceStatsManager.count_messages_tokens([None, "x"]) == 2

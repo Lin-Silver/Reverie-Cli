@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 import json
+import hashlib
 import os
 import re
 import time
@@ -794,6 +795,14 @@ class SkillsManager:
         self._pinned.clear()
         return released
 
+    def restore_pinned_skills(self, names: list[str]) -> None:
+        """Restore a session's instructions, retaining missing skills as unresolved."""
+        self._pinned = {
+            _normalize_skill_key(name): name.strip()
+            for name in names[:_MAX_PINNED_SKILLS]
+            if isinstance(name, str) and _normalize_skill_key(name)
+        }
+
     def pinned_records(self, *, force_refresh: bool = False) -> list[SkillRecord]:
         """Resolve pinned keys against the current scan, refreshing stored names."""
         if not self._pinned:
@@ -836,12 +845,10 @@ class SkillsManager:
             lines.append(self.get_mode_notice())
         if records:
             lines.append(
-                "The user pinned these skills. Switch out of Writer before inspecting them; "
-                "read every returned body chunk and follow their workflows on every turn until unpinned."
-                if self.active_mode == "writer" else
-                "The user pinned these skills. Call `skill_lookup(operation=\"inspect\")` on each one "
-                "before taking any task action in this turn, read every returned body chunk, and follow "
-                "its workflow. A pinned skill applies to every turn until the user unpins it."
+                "The runtime loads the complete instructions of these user-pinned skills for every turn, "
+                "before taking any task action. "
+                "Follow their workflows until unpinned. Mode and tool permissions still apply; "
+                "read any referenced resources on demand using the tools available in this mode."
             )
             for record in records:
                 description = _trim_text(record.description, limit=1024)
@@ -854,6 +861,26 @@ class SkillsManager:
         for name in unresolved:
             lines.append(f"- {name}: pinned but no longer present on disk; tell the user the pin is stale.")
         return "\n".join(lines)
+
+    def load_pinned_instructions(self) -> dict[str, Any]:
+        """Read the complete explicitly required bodies before a model turn."""
+        if not self.has_pinned_skills:
+            return {"instructions": "", "records": []}
+        state = self.pinned_state(force_refresh=True)
+        if state["unresolved"]:
+            raise ValueError("Required Skill is unavailable: " + ", ".join(state["unresolved"]) + ". Restore or unpin it before running.")
+        blocks = []
+        records = []
+        for record in state["records"]:
+            body = str(record.body or "").strip()
+            if not body:
+                raise ValueError(f"Required Skill '{record.name}' has no instructions. Restore or unpin it before running.")
+            blocks.append(f"### Required Skill: {record.name}\nSource: {record.source_uri or record.path_to_skill_md}\n{body}")
+            records.append({"name": record.name, "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(), "characters": len(body), "complete": True})
+        instructions = "## Required Skill instructions loaded by the runtime\nFollow these user-selected workflows. Mode/tool permissions still apply.\n\n" + "\n\n".join(blocks)
+        if len(instructions) > 128000:
+            raise ValueError("Required Skill instructions exceed the turn budget. Unpin some Skills or shorten their bodies.")
+        return {"instructions": instructions, "records": records}
 
     def describe_for_prompt(
         self,
@@ -893,8 +920,11 @@ class SkillsManager:
             if (record.allow_implicit_invocation or record.lookup_key in pinned_keys)
             and str(record.path_to_skill_md).lower() not in hidden_paths
         ]
+        # Explicit pins stay visible even when a larger built-in catalog fills
+        # the metadata budget. Full descriptions remain available via inspect.
+        implicit_records.sort(key=lambda record: record.lookup_key not in pinned_keys)
         for record in implicit_records:
-            description = _trim_text(record.description, limit=1024)
+            description = _trim_text(record.description, limit=240)
             marker = " [PINNED]" if record.lookup_key in pinned_keys else ""
             line = f"- {record.name}{marker}: {description} (file: {record.source_uri or record.path_to_skill_md})"
             if used + len(line) + 1 > budget:

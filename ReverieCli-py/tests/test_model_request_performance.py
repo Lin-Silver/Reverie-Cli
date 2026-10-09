@@ -20,7 +20,7 @@ def test_http_retry_limit_and_backoff_are_honored(monkeypatch, retries):
     def fail(*args, **kwargs):
         calls.append(kwargs)
         raise requests.ConnectionError("offline")
-    monkeypatch.setattr(requests, "post", fail)
+    monkeypatch.setattr("reverie.agent.agent.provider_post", fail)
     monkeypatch.setattr("reverie.agent.agent.time.sleep", sleeps.append)
     with pytest.raises(requests.ConnectionError):
         make_api_request_with_retry("https://example.test/v1", {}, {"model": "fixture", "messages": [{"role": "user", "content": "hello"}]}, max_retries=retries, initial_backoff=0.01)
@@ -66,7 +66,7 @@ def test_streaming_chat_assembles_context_once_per_request(tmp_path, monkeypatch
     assert any("memory evidence" in str(message["content"]) for message in captured[0]["messages"])
 
 
-@pytest.mark.parametrize("provider,expected_retries", [("openai-chat", 0), ("openai-responses", 1)])
+@pytest.mark.parametrize("provider,expected_retries", [("openai-chat", 0), ("openai-responses", 0)])
 def test_openai_client_keeps_one_retry_owner(tmp_path, monkeypatch, provider, expected_retries):
     import sys
     import types

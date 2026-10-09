@@ -5169,6 +5169,7 @@ class CommandHandler:
             self._format_token_ledger(dashboard),
         )
         self._add_model_token_row(table, dashboard)
+        table.add_row("Usage Accounting", "API usage first; local tokenizer for missing counts")
 
     def _format_token_ledger(self, row: Dict[str, Any]) -> str:
         """Format an input/output/call ledger from either a session or a workspace row."""
@@ -5185,6 +5186,7 @@ class CommandHandler:
         inbound = value("input_tokens", "total_input_tokens")
         outbound = value("output_tokens", "total_output_tokens")
         calls = value("calls", "total_calls")
+        total = value("total_tokens") if row.get("total_tokens") is not None else inbound + outbound
         return (
             f"[{self.theme.BLUE_SOFT}]{inbound:,}[/{self.theme.BLUE_SOFT}]"
             f"[{self.theme.TEXT_DIM}] in[/{self.theme.TEXT_DIM}]"
@@ -5192,7 +5194,7 @@ class CommandHandler:
             f"[{self.theme.PURPLE_SOFT}]{outbound:,}[/{self.theme.PURPLE_SOFT}]"
             f"[{self.theme.TEXT_DIM}] out[/{self.theme.TEXT_DIM}]"
             f" [{self.theme.TEXT_MUTED}]{self.deco.DOT_MEDIUM}[/{self.theme.TEXT_MUTED}] "
-            f"[bold {self.theme.MINT_SOFT}]{inbound + outbound:,}[/bold {self.theme.MINT_SOFT}]"
+            f"[bold {self.theme.MINT_SOFT}]{total:,}[/bold {self.theme.MINT_SOFT}]"
             f"[{self.theme.TEXT_DIM}] total across {calls:,} call(s)[/{self.theme.TEXT_DIM}]"
         )
 
@@ -5202,17 +5204,20 @@ class CommandHandler:
         if not rows:
             return
         # The dashboard orders by input tokens; "top" here means the largest total.
+        def total_tokens(item: Dict[str, Any]) -> int:
+            total = item.get("total_tokens")
+            if total is not None:
+                return max(int(total), 0)
+            return max(int(item.get("input_tokens") or 0), 0) + max(int(item.get("output_tokens") or 0), 0)
+
         top = max(
             rows,
-            key=lambda item: max(int(item.get("input_tokens") or 0), 0)
-            + max(int(item.get("output_tokens") or 0), 0),
+            key=total_tokens,
         )
         label = str(top.get("model_display_name") or top.get("model") or "unknown")
-        inbound = max(int(top.get("input_tokens") or 0), 0)
-        outbound = max(int(top.get("output_tokens") or 0), 0)
         detail = (
             f"[{self.theme.TEXT_SECONDARY}]{escape(label)}[/{self.theme.TEXT_SECONDARY}]"
-            f"[{self.theme.TEXT_DIM}] {self.deco.DOT_MEDIUM} {inbound + outbound:,} tokens"
+            f"[{self.theme.TEXT_DIM}] {self.deco.DOT_MEDIUM} {total_tokens(top):,} tokens"
             f" over {max(int(top.get('calls') or 0), 0):,} call(s)[/{self.theme.TEXT_DIM}]"
         )
         if len(rows) > 1:
@@ -5911,6 +5916,12 @@ class CommandHandler:
 
     def _after_pinned_skills_changed(self) -> None:
         """Rebuild the system prompt so the pin takes effect on the next turn."""
+        manager = self.app.get('session_manager')
+        skills = self.app.get('skills_manager')
+        if manager and skills:
+            session, _ = manager.ensure_session()
+            session.metadata['pinned_skills'] = skills.pinned_names()
+            manager.save_session(session)
         refresh = self.app.get('refresh_agent_prompt_guidance')
         if callable(refresh):
             try:
@@ -13141,6 +13152,9 @@ class CommandHandler:
                 session = session_manager.create_session(name or None)
                 if agent:
                     agent.set_history(session.messages)
+                restore_skills = self.app.get('restore_session_skill_pins')
+                if callable(restore_skills):
+                    restore_skills()
                 if workspace_stats_manager:
                     workspace_stats_manager.update_session_snapshot(
                         session.id,
@@ -13174,6 +13188,9 @@ class CommandHandler:
                                     replacement = session_manager.create_session()
                                 if agent:
                                     agent.set_history(replacement.messages)
+                                restore_skills = self.app.get('restore_session_skill_pins')
+                                if callable(restore_skills):
+                                    restore_skills()
                                 if workspace_stats_manager:
                                     workspace_stats_manager.update_session_snapshot(
                                         replacement.id,
@@ -13208,6 +13225,9 @@ class CommandHandler:
                         )
                         if agent:
                             agent.set_history(session.messages)
+                        restore_skills = self.app.get('restore_session_skill_pins')
+                        if callable(restore_skills):
+                            restore_skills()
                         if workspace_stats_manager:
                             workspace_stats_manager.update_session_snapshot(
                                 session.id,
@@ -13666,6 +13686,7 @@ class CommandHandler:
         summary.add_row("Input Tokens", f"[{self.theme.BLUE_SOFT}]{dashboard.get('total_input_tokens', 0):,}[/{self.theme.BLUE_SOFT}]")
         summary.add_row("Output Tokens", f"[{self.theme.PINK_SOFT}]{dashboard.get('total_output_tokens', 0):,}[/{self.theme.PINK_SOFT}]")
         summary.add_row("Total Tokens", f"[bold {self.theme.MINT_SOFT}]{dashboard.get('total_tokens', 0):,}[/bold {self.theme.MINT_SOFT}]")
+        summary.add_row("Usage Accounting", "API usage first; local tokenizer for missing counts")
         summary.add_row("AI Tool Calls", f"[{self.theme.BLUE_SOFT}]{dashboard.get('total_tool_calls', 0):,}[/{self.theme.BLUE_SOFT}]")
         summary.add_row("Plugin Tool Calls", f"[{self.theme.PURPLE_SOFT}]{dashboard.get('total_plugin_tool_calls', 0):,}[/{self.theme.PURPLE_SOFT}]")
         summary.add_row("Skill Activations", f"[{self.theme.AMBER_GLOW}]{dashboard.get('total_skill_activations', 0):,}[/{self.theme.AMBER_GLOW}]")
@@ -14497,6 +14518,8 @@ class CommandHandler:
             return self._cmd_setting_tool_output_style(value)
         if action in ("thinking-tool", "think-tool", "deep-think"):
             return self._cmd_setting_thinking_tool(value)
+        if action == "api-compatibility":
+            return self._cmd_setting_bool("api_compatibility", "Broad API Compatibility", value)
         if action in ("thinking", "thinking-output", "reasoning", "reasoning-output"):
             return self._cmd_setting_thinking_output_style(value)
         if action == "stream":
@@ -15424,7 +15447,7 @@ class CommandHandler:
         if parsed is None:
             parsed = Confirm.ask(f"{label}", default=current)
         setattr(config, attr, parsed)
-        return self._setting_save_and_reinit(config, f"{label} set to {'ON' if parsed else 'OFF'}.", reinit=False)
+        return self._setting_save_and_reinit(config, f"{label} set to {'ON' if parsed else 'OFF'}.", reinit=attr == "api_compatibility")
 
     def _cmd_setting_int(self, attr: str, label: str, value: str, min_value: int, max_value: int) -> bool:
         """Set a numeric config value with validation."""

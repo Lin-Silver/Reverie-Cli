@@ -9,6 +9,7 @@ This is the main agent class that:
 """
 
 from dataclasses import dataclass, field
+from contextlib import contextmanager, ExitStack
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator, Callable, Tuple
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -38,8 +39,10 @@ from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
 from ..config import model_source_display_name, normalize_model_provider
 from ..request_identity import apply_reverie_client_identity
+from ..provider_transport import provider_client, provider_post, check_cancel, interruptible_sleep, on_cancel
 from ..proxy import normalize_proxy_url, requests_proxy_dict, resolve_proxy_url
 from ..thinking_tool import is_think_tool
+from ..api_compatibility import build_compatibility_messages, parse_compatibility_reply
 from ..stream_protocol import (
     HIDDEN_STREAM_TOKEN,
     STREAM_EVENT_MARKER,
@@ -187,7 +190,7 @@ def _wait_for_nvidia_rate_limit() -> None:
         now = time.monotonic()
         elapsed = now - _NVIDIA_LAST_REQUEST_AT
         if elapsed < NVIDIA_MIN_REQUEST_INTERVAL_SECONDS:
-            time.sleep(NVIDIA_MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+            interruptible_sleep(NVIDIA_MIN_REQUEST_INTERVAL_SECONDS - elapsed)
             now = time.monotonic()
         _NVIDIA_LAST_REQUEST_AT = now
 
@@ -288,6 +291,11 @@ def _normalize_message_content_for_relay(content: Any) -> Any:
             if url:
                 normalized_parts.append({"type": "image_url", "image_url": {"url": url}})
                 has_media = True
+            continue
+
+        if part_type == "input_audio" and isinstance(part.get("input_audio"), dict):
+            normalized_parts.append({"type": "input_audio", "input_audio": dict(part["input_audio"])})
+            has_media = True
             continue
 
         if part_type == "video_url":
@@ -518,7 +526,7 @@ def _build_anthropic_tool_result_block(tool_call_id: str, result: ToolResult) ->
     return {
         "type": "tool_result",
         "tool_use_id": str(tool_call_id or ""),
-        "content": str(_coerce_text_fragments(_tool_result_content(result)) or ""),
+        "content": _convert_messages_to_anthropic_format([{"role": "user", "content": _tool_result_content(result)}])[1][0]["content"],
         "is_error": not bool(result.success),
     }
 
@@ -562,6 +570,7 @@ class _StreamingTurnState:
     collected_content: str = ""
     collected_thinking: str = ""
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    usage: Dict[str, int] = field(default_factory=dict)
     finish_reason: Optional[str] = None
     thinking_started: bool = False
     stream_buffer: str = ""
@@ -859,6 +868,8 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
                     continue
                 if part_type in {"image", "input_image"} and isinstance(part.get("source"), dict):
                     blocks.append({"type": "image", "source": dict(part["source"])})
+                if part_type == "input_audio":
+                    blocks.append({"type": "text", "text": "MCP audio was returned; this provider does not accept audio input."})
             anthropic_content = blocks or content_text
 
         if role == "system":
@@ -867,6 +878,7 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
 
         if role == "assistant":
             tool_calls = msg.get("tool_calls", [])
+            thinking = msg.get("anthropic_thinking", [])
             if isinstance(tool_calls, list) and tool_calls:
                 anthropic_messages.append(
                     {
@@ -876,6 +888,10 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
                 )
             else:
                 anthropic_messages.append({"role": "assistant", "content": anthropic_content})
+            if isinstance(thinking, list) and thinking:
+                content = anthropic_messages[-1]["content"]
+                blocks = content if isinstance(content, list) else ([{"type": "text", "text": content}] if content else [])
+                anthropic_messages[-1]["content"] = [*thinking, *blocks]
             continue
 
         if role == "tool":
@@ -886,7 +902,7 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
                         {
                             "type": "tool_result",
                             "tool_use_id": str(msg.get("tool_call_id", "") or ""),
-                            "content": content_text,
+                            "content": anthropic_content,
                             "is_error": content_text.startswith("Error:"),
                         }
                     ],
@@ -1725,6 +1741,17 @@ def _compact_payload_for_plain_chat(payload: Dict[str, Any]) -> Dict[str, Any]:
     return compact_payload
 
 
+def _is_stream_usage_rejection(error: BaseException) -> bool:
+    response = getattr(error, "response", None)
+    status = getattr(error, "status_code", None) or getattr(response, "status_code", None)
+    if status not in {400, 422} and not isinstance(error, TypeError):
+        return False
+    message = (str(error) + " " + _extract_safe_http_error_message(response)).lower()
+    return any(key in message for key in ("stream_options", "include_usage")) and any(
+        marker in message for marker in ("unsupported", "not supported", "unknown", "unrecognized", "unexpected", "not permitted", "not allowed", "extra inputs")
+    )
+
+
 def _extract_safe_http_error_message(response: Any) -> str:
     """Extract a concise provider error message without dumping full payloads."""
     if response is None:
@@ -1810,6 +1837,7 @@ def make_api_request_with_retry(
     )
     attempts = max(0, int(max_retries))
     for attempt in range(attempts + 1):
+        check_cancel()
         try:
             if is_nvidia_request:
                 _wait_for_nvidia_rate_limit()
@@ -1829,7 +1857,7 @@ def make_api_request_with_retry(
                 }
                 if proxies:
                     request_kwargs["proxies"] = proxies
-                return requests.post(url, **request_kwargs)
+                return provider_post(url, **request_kwargs)
 
             response = post_request(sanitized_payload)
             
@@ -1844,6 +1872,21 @@ def make_api_request_with_retry(
             last_error = e
             status_code = e.response.status_code if e.response is not None else "unknown"
             safe_error_message = _extract_safe_http_error_message(getattr(e, "response", None))
+
+            if sanitized_payload.get("stream_options") and _is_stream_usage_rejection(e):
+                compatibility_payload = dict(sanitized_payload)
+                compatibility_payload.pop("stream_options")
+                logger.warning("Provider rejected streaming usage options; retrying without them")
+                try:
+                    fallback_response = post_request(compatibility_payload)
+                    fallback_response.raise_for_status()
+                    return fallback_response
+                except requests.exceptions.RequestException as fallback_error:
+                    last_error = fallback_error
+                    sanitized_payload = compatibility_payload
+                    e = fallback_error
+                    status_code = getattr(getattr(e, "response", None), "status_code", "unknown")
+                    safe_error_message = _extract_safe_http_error_message(getattr(e, "response", None))
 
             if has_prompt_cache_hints(sanitized_payload) and is_prompt_cache_rejection(e):
                 compatibility_payload = without_prompt_cache(sanitized_payload)
@@ -1934,7 +1977,7 @@ def make_api_request_with_retry(
                 except Exception:
                     logger.debug("Retry callback failed", exc_info=True)
             logger.debug(f"Waiting {backoff}s before retry...")
-            time.sleep(backoff)
+            interruptible_sleep(backoff)
     
     # All retries failed
     logger.error(f"All {attempts} retry attempts failed")
@@ -1944,11 +1987,12 @@ def make_api_request_with_retry(
 class _CurlResponse:
     """Small requests-like wrapper around a system curl invocation."""
 
-    def __init__(self, process: Any = None, *, stdout: str = "", stderr: str = "", returncode: int = 0):
+    def __init__(self, process: Any = None, *, stdout: str = "", stderr: str = "", returncode: int = 0, cancel_release=None):
         self._process = process
         self._stdout = stdout
         self._stderr = stderr
         self._returncode = int(returncode)
+        self._cancel_release = cancel_release or (lambda: None)
 
     def json(self) -> Any:
         if self._returncode != 0:
@@ -1966,18 +2010,22 @@ class _CurlResponse:
             yield text if decode_unicode else text.encode("utf-8")
         stderr = self._process.stderr.read() if self._process.stderr is not None else ""
         returncode = self._process.wait()
+        check_cancel()
         if returncode != 0:
             raise RuntimeError(str(stderr or "").strip() or f"curl exited with code {returncode}")
 
     def close(self) -> None:
         if self._process is None:
             return
-        if self._process.stdout is not None and not self._process.stdout.closed:
-            self._process.stdout.close()
-        stderr = self._process.stderr.read() if self._process.stderr is not None and not self._process.stderr.closed else ""
-        returncode = self._process.wait()
-        if returncode != 0:
-            raise RuntimeError(str(stderr or "").strip() or f"curl exited with code {returncode}")
+        try:
+            if self._process.poll() is None:
+                self._process.terminate()
+            self._process.wait(timeout=5)
+        finally:
+            self._cancel_release()
+            for pipe in (self._process.stdout, self._process.stderr):
+                if pipe is not None:
+                    pipe.close()
 
 
 def _invoke_system_curl(
@@ -2013,34 +2061,53 @@ def _invoke_system_curl(
         command.append("--no-buffer")
     if proxy:
         command.extend(["--proxy", str(proxy)])
+    elif urlsplit(str(url)).hostname in {"localhost", "127.0.0.1", "::1"}:
+        command.extend(["--noproxy", "*"])
     for name, value in headers.items():
         command.extend(["--header", f"{name}: {value}"])
-    command.extend(["--data-binary", json.dumps(payload, ensure_ascii=False, separators=(",", ":"))])
+    command.extend(["--data-binary", "@-"])
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
-    if stream:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        return _CurlResponse(process)
-
-    completed = subprocess.run(
+    check_cancel()
+    process = subprocess.Popen(
         command,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=max(int(timeout or 60), 1) + 5,
-        check=False,
     )
+    def terminate():
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    release = on_cancel(terminate)
+    if stream:
+        try:
+            process.stdin.write(body)
+            process.stdin.close()
+        except BaseException:
+            terminate()
+            process.wait()
+            release()
+            raise
+        return _CurlResponse(process, cancel_release=release)
+    try:
+        stdout, stderr = process.communicate(input=body, timeout=max(int(timeout or 60), 1) + 5)
+        check_cancel()
+    except BaseException:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        raise
+    finally:
+        release()
     return _CurlResponse(
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-        returncode=completed.returncode,
+        stdout=stdout,
+        stderr=stderr,
+        returncode=process.returncode,
     )
 
 
@@ -2272,19 +2339,18 @@ class ReverieAgent:
         return url_str
 
     def _build_proxied_http_client(self) -> Any:
-        import httpx
         config = getattr(self, "config", None)
         configured_proxy = getattr(config, "api_proxy", "") if config is not None else ""
         if not normalize_proxy_url(configured_proxy) and urlsplit(str(getattr(self, "base_url", "") or "")).hostname in {"localhost", "127.0.0.1", "::1"}:
-            return httpx.Client(trust_env=False)
+            return provider_client()
         proxy_val = resolve_proxy_url(configured_proxy)
         if proxy_val:
             proxy_val = self._fix_proxy_url(proxy_val)
             try:
-                return httpx.Client(proxy=proxy_val, trust_env=False)
+                return provider_client(proxy=proxy_val)
             except Exception:
                 report_suppressed_exception("create provider proxy client", logger=logger)
-        return None
+        return provider_client()
 
     def _init_client(self) -> None:
         """Initialize client based on provider"""
@@ -2299,7 +2365,7 @@ class ReverieAgent:
                     "base_url": sdk_base_url,
                     "api_key": self.api_key,
                     "timeout": self._resolve_provider_timeout(),
-                    "max_retries": 0 if self.provider == "openai-chat" else self.api_max_retries,
+                    "max_retries": 0,
                 }
                 http_client = self._build_proxied_http_client()
                 if http_client is not None:
@@ -2331,6 +2397,8 @@ class ReverieAgent:
                 client_kwargs: Dict[str, Any] = {
                     "base_url": self.base_url if self.base_url else None,
                     "timeout": self._resolve_provider_timeout(),
+                    "http_client": self._build_proxied_http_client(),
+                    "max_retries": 0,
                 }
                 if self._is_active_model_source("sensenova"):
                     client_kwargs["auth_token"] = self.api_key
@@ -2673,6 +2741,8 @@ class ReverieAgent:
     def _prepare_request_payload(self, payload: Dict[str, Any], session_id: str = "default") -> Dict[str, Any]:
         """Prepare request-provider payload for the generic request or NVIDIA direct API."""
         prepared = dict(payload)
+        if prepared.get("stream"):
+            prepared["stream_options"] = {**(prepared.get("stream_options") or {}), "include_usage": True}
         if isinstance(prepared.get("messages"), list):
             prepared["messages"] = _coalesce_system_messages_to_front(
                 _sanitize_messages_for_relay(prepared["messages"])
@@ -2697,6 +2767,8 @@ class ReverieAgent:
                 if nvidia_model_requires_system_message_first(prepared.get("model")):
                     prepared["messages"] = _coalesce_system_messages_to_front(prepared.get("messages", []))
             prepared = self._clamp_nvidia_request_max_tokens(prepared)
+            if prepared.get("stream"):
+                prepared["stream_options"] = {**(prepared.get("stream_options") or {}), "include_usage": True}
             return apply_openai_prompt_cache(
                 prepared,
                 namespace="agent-chat",
@@ -3722,9 +3794,18 @@ class ReverieAgent:
             if not isinstance(message, dict):
                 continue
             normalized = dict(message)
+            if self.provider != "anthropic":
+                normalized.pop("anthropic_thinking", None)
             content = normalized.get("content")
             if isinstance(content, list):
                 normalized["content"] = resolve_inline_image_content_for_request(content, self.project_root)
+                if normalized.get("role") == "tool" and self.provider != "anthropic":
+                    media = [part for part in normalized["content"] if isinstance(part, dict) and part.get("type") in {"image_url", "input_audio"}]
+                    if media:
+                        normalized["content"] = _coerce_text_fragments(normalized["content"])
+                        resolved_messages.append(normalized)
+                        resolved_messages.append({"role": "user", "content": [{"type": "text", "text": f"Media returned by tool {normalized.get('tool_call_id', '')}:"}, *media]})
+                        continue
             resolved_messages.append(normalized)
         return resolved_messages
 
@@ -3829,6 +3910,8 @@ class ReverieAgent:
         retries = self.api_max_retries
         last_error: Optional[Exception] = None
         call_kwargs = apply_openai_prompt_cache(kwargs, namespace="agent-chat")
+        if call_kwargs.get("stream"):
+            call_kwargs["stream_options"] = {**(call_kwargs.get("stream_options") or {}), "include_usage": True}
         fresh_user_query_retry_used = False
         prompt_cache_fallback_used = False
         thinking_tiers_dropped = 0
@@ -3841,7 +3924,12 @@ class ReverieAgent:
                 return self._call_openai_chat_completion_once(call_kwargs)
             except Exception as exc:
                 last_error = exc
+                check_cancel()
                 status_code = getattr(exc, "status_code", None)
+                if call_kwargs.get("stream_options") and _is_stream_usage_rejection(exc):
+                    call_kwargs.pop("stream_options")
+                    logger.warning("Provider rejected streaming usage options; retrying without them")
+                    continue
                 if (
                     not prompt_cache_fallback_used
                     and has_prompt_cache_hints(call_kwargs)
@@ -3916,7 +4004,7 @@ class ReverieAgent:
                     exc,
                 )
                 attempt += 1
-                time.sleep(backoff)
+                interruptible_sleep(backoff)
 
         if last_error:
             raise last_error
@@ -4381,6 +4469,8 @@ class ReverieAgent:
 
     def _emit_tool_stream_event(self, event_type: str, **payload: Any) -> None:
         """Forward non-streaming tool lifecycle events to the same UI surface."""
+        if event_type == "tool_start":
+            self._persist_history_to_session()
         handler = None
         try:
             handler = self.tool_executor.context.get("ui_event_handler")
@@ -4429,6 +4519,12 @@ class ReverieAgent:
             connected_event = self._model_stream_connected_event()
             if connected_event:
                 yield connected_event
+        if event_type == "usage":
+            from ..session.workspace_stats import WorkspaceStatsManager
+
+            # Streaming usage events are cumulative snapshots, not increments.
+            state.usage.update(WorkspaceStatsManager._usage_dict(event.get("usage")))
+            return
         if event_type == "reasoning":
             for chunk in state.add_reasoning(event.get("text", "")):
                 yield chunk
@@ -4463,6 +4559,8 @@ class ReverieAgent:
     def _iter_openai_sdk_stream_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI SDK streaming chunks into normalized events."""
         for chunk in response:
+            if getattr(chunk, "usage", None) is not None:
+                yield {"type": "usage", "usage": chunk.usage}
             choice = chunk.choices[0] if chunk.choices else None
             if choice is None:
                 continue
@@ -4515,6 +4613,8 @@ class ReverieAgent:
 
             _raise_for_wrapped_api_error(chunk_data, provider_label=provider_label)
             normalized_chunk = _unwrap_openai_compatible_payload(chunk_data) or chunk_data
+            if isinstance(normalized_chunk.get("usage"), dict):
+                yield {"type": "usage", "usage": normalized_chunk["usage"]}
 
             choices = normalized_chunk.get("choices", [])
             if not choices:
@@ -4586,6 +4686,14 @@ class ReverieAgent:
         usage: Any = None,
     ) -> tuple[str, str]:
         """Store the finalized turn and report which follow-up path to take."""
+        self._record_model_usage(
+            request_messages=request_messages,
+            assistant_text=state.cleaned_content(),
+            reasoning_text=state.collected_thinking,
+            tool_calls=state.tool_calls,
+            usage=usage if usage is not None else state.usage,
+            session_id=session_id,
+        )
         self._promote_writer_json_tool_call(state)
         self._promote_writer_direct_prose_commit(state)
         retry_instruction = self._writer_retry_instruction_for_invalid_commit_tool_call(state.tool_calls)
@@ -4621,14 +4729,6 @@ class ReverieAgent:
             )
             self.messages.append(assistant_message)
             messages.append(assistant_message)
-            self._record_model_usage(
-                request_messages=request_messages,
-                assistant_text=history_content,
-                reasoning_text=state.collected_thinking,
-                tool_calls=history_tool_calls,
-                usage=usage,
-                session_id=session_id,
-            )
             return "tool_calls", history_content
 
         if clean_content:
@@ -4637,13 +4737,6 @@ class ReverieAgent:
                     clean_content,
                     reasoning_content=state.collected_thinking,
                 )
-            )
-            self._record_model_usage(
-                request_messages=request_messages,
-                assistant_text=clean_content,
-                reasoning_text=state.collected_thinking,
-                usage=usage,
-                session_id=session_id,
             )
             return "content", clean_content
 
@@ -5082,7 +5175,6 @@ class ReverieAgent:
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -5091,11 +5183,28 @@ class ReverieAgent:
 
     def _process_non_streaming_native_provider(self, provider_name: str, session_id: str = "default") -> str:
         """Fallback non-streaming path for native providers via streaming aggregation."""
+        return self._collect_non_streaming_output(
+            self._process_streaming_native_provider(provider_name=provider_name, session_id=session_id)
+        )
+
+    def _collect_non_streaming_output(self, stream: Generator[str, None, None]) -> str:
+        """Buffer answer text while preserving the native stream's tool events."""
         chunks: List[str] = []
-        for chunk in self._process_streaming_native_provider(provider_name=provider_name, session_id=session_id):
-            if chunk in (THINKING_START_MARKER, THINKING_END_MARKER):
+        in_thinking = False
+        for chunk in stream:
+            if chunk == THINKING_START_MARKER:
+                in_thinking = True
                 continue
-            chunks.append(chunk)
+            if chunk == THINKING_END_MARKER:
+                in_thinking = False
+                continue
+            event = decode_stream_event(chunk)
+            if event is not None:
+                self._emit_tool_stream_event(str(event.pop("event", "")), **event)
+                continue
+            # The provider stores reasoning_content separately in history.
+            if not in_thinking:
+                chunks.append(chunk)
         return "".join(chunks)
 
     def _process_streaming_webgemini(self, session_id: str = "default") -> Generator[str, None, None]:
@@ -5213,7 +5322,6 @@ class ReverieAgent:
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -5222,14 +5330,9 @@ class ReverieAgent:
 
     def _process_non_streaming_webgemini(self, session_id: str = "default") -> str:
         """Fallback non-streaming WebGemini path via streaming aggregation."""
-        chunks: List[str] = []
-        for chunk in self._process_streaming_webgemini(session_id=session_id):
-            if chunk in (THINKING_START_MARKER, THINKING_END_MARKER):
-                continue
-            if decode_stream_event(chunk) is not None:
-                continue
-            chunks.append(chunk)
-        return "".join(chunks)
+        return self._collect_non_streaming_output(
+            self._process_streaming_webgemini(session_id=session_id)
+        )
 
     def _openai_extra_body_for_thinking(self) -> Optional[Dict[str, Any]]:
         """Build `extra_body` (OpenAI SDK) to enable/disable thinking for compatible models.
@@ -5400,16 +5503,22 @@ class ReverieAgent:
             return None
         return {"role": "system", "content": content}
     
+    def _request_system_prompt(self) -> str:
+        return "\n\n".join(part for part in (
+            self.system_prompt, getattr(self, "_pinned_turn_guidance", ""), getattr(self, "goal_context", "")
+        ) if part)
+
     def _build_messages(
         self,
         include_reasoning: bool = False,
         resolve_local_images: bool = False,
+        read_only: bool = False,
     ) -> List[Dict]:
         """Build message list for API calls, optionally resolving local multimodal parts."""
         control = getattr(self, "desktop_control", None)
-        if control is not None:
+        if control is not None and not read_only:
             control.safe_point(self)
-        messages = [{"role": "system", "content": self.system_prompt}]
+        messages = [{"role": "system", "content": self._request_system_prompt()}]
         memory_context = self._memory_context_package_message()
         if memory_context:
             messages.append(memory_context)
@@ -5467,6 +5576,15 @@ class ReverieAgent:
         Yields:
             Response chunks (or full response if not streaming)
         """
+        self._pinned_turn_guidance = ""
+        skills = self.tool_executor.context.get("skills_manager")
+        if skills is not None:
+            loaded = skills.load_pinned_instructions()
+            self._pinned_turn_guidance = loaded["instructions"]
+            if loaded["records"]:
+                self._emit_ui_event(category="Skills", message="Required Skills loaded for this turn",
+                                    detail=", ".join(item["name"] for item in loaded["records"]),
+                                    meta=json.dumps(loaded["records"], ensure_ascii=False))
         display_text = str(user_display_text or "").strip()
         if not display_text:
             display_text = _coerce_text_fragments(user_message).strip()
@@ -5521,11 +5639,9 @@ class ReverieAgent:
                 )
             self._reset_think_tool_budget()
 
-        # Check for context threshold and auto-rotate if the session is too large
-        self._check_and_compress_context(session_id=session_id)
-
         # Call model with tools
         try:
+            self._check_and_compress_context(session_id=session_id)
             if stream:
                 yield from self._process_streaming(session_id=session_id)
                 # Safety net: no provider path may end a turn whose last history
@@ -5537,11 +5653,17 @@ class ReverieAgent:
                     yield notice
             else:
                 response = self._process_non_streaming(session_id=session_id)
+                control = getattr(self, "desktop_control", None)
+                if control is not None:
+                    control.check_cancel()
                 notice = self._record_unsummarized_turn(session_id=session_id)
                 if notice:
                     response = f"{response}\n{notice}" if response else notice
                 yield response
         except Exception as e:
+            control = getattr(self, "desktop_control", None)
+            if control is not None and control.cancelled.is_set():
+                e = RuntimeError("Run stopped by user; check completed actions before continuing.")
             humanized = self._humanize_turn_error(e)
             error_msg = f"Error processing message: {humanized or str(e)}"
             self._record_memory_event(
@@ -5573,6 +5695,9 @@ class ReverieAgent:
     
     def _process_streaming(self, session_id: str = "default") -> Generator[str, None, None]:
         """Process with streaming response"""
+        if self._api_compatibility_enabled():
+            yield from self._process_api_compatibility(session_id=session_id)
+            return
         if self.provider == "openai-chat":
             if self._should_use_openai_http_fallback():
                 yield from self._process_streaming_openai_http_fallback(session_id=session_id)
@@ -5605,7 +5730,7 @@ class ReverieAgent:
         tools = self.get_visible_tool_schemas()
         converted = build_codex_request_payload(
             model_name=self.model,
-            messages=messages if messages is not None else self._build_messages(resolve_local_images=True),
+            messages=self._resolve_messages_for_request(messages if messages is not None else self._build_messages()),
             tools=tools or None,
             stream=stream,
         )
@@ -5656,11 +5781,29 @@ class ReverieAgent:
     def _create_openai_response(self, payload: Dict[str, Any]) -> Any:
         """Create an OpenAI Responses call with a cache-hint compatibility fallback."""
         client = self._ensure_client()
-        return call_with_prompt_cache_fallback(
-            client.responses.create,
-            payload,
-            log=logger,
-        )
+        return self._retry_provider_call(lambda: call_with_prompt_cache_fallback(
+            client.responses.create, payload, log=logger,
+        ))
+
+    def _retry_provider_call(self, call):
+        """One interruptible retry policy for SDK calls before output begins."""
+        for attempt in range(self.api_max_retries + 1):
+            check_cancel()
+            try:
+                return call()
+            except Exception as exc:
+                check_cancel()
+                status = getattr(exc, "status_code", None)
+                transient = status == 429 or isinstance(status, int) and status >= 500
+                if attempt == self.api_max_retries or not (transient or _is_recoverable_stream_exception(exc)):
+                    raise
+                interruptible_sleep(_api_retry_delay(attempt, self.api_initial_backoff))
+
+    @contextmanager
+    def _provider_stream_context(self, factory):
+        with ExitStack() as stack:
+            stream = self._retry_provider_call(lambda: stack.enter_context(factory()))
+            yield stream
 
     def _response_json_with_prompt_cache_fallback(
         self,
@@ -5793,7 +5936,6 @@ class ReverieAgent:
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -5983,7 +6125,6 @@ class ReverieAgent:
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -6110,7 +6251,6 @@ class ReverieAgent:
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -6154,11 +6294,9 @@ class ReverieAgent:
             
             # Make request
             client = self._ensure_client()
-            with anthropic_stream_with_prompt_cache_fallback(
-                client.messages.stream,
-                kwargs,
-                log=logger,
-            ) as stream:
+            with self._provider_stream_context(lambda: anthropic_stream_with_prompt_cache_fallback(
+                client.messages.stream, kwargs, log=logger,
+            )) as stream:
                 state = self._new_turn_state()
 
                 for event in stream:
@@ -6201,6 +6339,9 @@ class ReverieAgent:
                     session_id=session_id,
                     usage=getattr(final_message, "usage", None),
                 )
+                thinking_blocks = [block.model_dump(include={"type", "thinking", "signature", "data"}, exclude_none=True) for block in final_message.content if block.type in {"thinking", "redacted_thinking"}]
+                if thinking_blocks and outcome in {"tool_calls", "content"}:
+                    self.messages[-1]["anthropic_thinking"] = thinking_blocks
 
                 if outcome == "tool_calls":
                     yield from self._execute_streamed_tool_calls(
@@ -6236,7 +6377,6 @@ class ReverieAgent:
                     continue
 
                 notice = self._record_unsummarized_turn(
-                    request_messages=request_messages,
                     session_id=session_id,
                 )
                 if notice:
@@ -6246,6 +6386,8 @@ class ReverieAgent:
 
     def _process_non_streaming(self, session_id: str = "default") -> str:
         """Process without streaming"""
+        if self._api_compatibility_enabled():
+            return self._collect_non_streaming_output(self._process_api_compatibility(session_id=session_id))
         if self.provider == "openai-chat":
             if self._should_use_openai_http_fallback():
                 return self._process_non_streaming_openai_http_fallback(session_id=session_id)
@@ -6266,6 +6408,94 @@ class ReverieAgent:
             return self._process_non_streaming_webgemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
+
+    def _api_compatibility_enabled(self) -> bool:
+        return bool(getattr(getattr(self, "config", None), "api_compatibility", False)) and self.provider in {
+            "openai-chat", "openai-responses", "anthropic", "request", "curl",
+        }
+
+    def _process_api_compatibility(self, session_id: str = "default") -> Generator[str, None, None]:
+        """Use text-only non-streaming requests and the normal reviewed tool executor."""
+        continuation_count = 0
+        while True:
+            check_cancel()
+            self._check_and_compress_context(session_id=session_id)
+            tools = self.get_visible_tool_schemas()
+            messages = self._build_messages()
+            request_messages = build_compatibility_messages(messages, tools)
+            payload = {"model": self.model, "stream": False, "messages": request_messages,
+                       "max_tokens": self._resolve_anthropic_max_tokens()}
+            self._emit_ui_event(category="Model", message=f"Waiting for {self._request_provider_label()} response",
+                                status="working", detail=f"{self.model} | non-stream")
+            responses_format = self.provider == "openai-responses" or (self.provider == "curl" and self._curl_uses_responses())
+            if responses_format:
+                payload["input"] = payload.pop("messages")
+                payload["max_output_tokens"] = payload.pop("max_tokens")
+            if self.provider == "openai-chat" and self._should_use_openai_http_fallback():
+                original_base_url = self.base_url
+                try:
+                    self.base_url = self._resolve_openai_request_url()
+                    response = self._make_direct_request(payload, stream=False, session_id=session_id)
+                finally:
+                    self.base_url = original_base_url
+                try:
+                    data = response.json()
+                finally:
+                    self._close_stream_response(response)
+            elif self.provider in {"request", "curl"}:
+                response = self._make_direct_request(payload, stream=False, session_id=session_id)
+                try:
+                    data = response.json()
+                finally:
+                    self._close_stream_response(response)
+            else:
+                client = self._ensure_client()
+                if self.provider == "anthropic":
+                    response = self._retry_provider_call(lambda: client.messages.create(**payload))
+                elif responses_format:
+                    response = self._retry_provider_call(lambda: client.responses.create(**payload))
+                else:
+                    if self._is_active_model_source("nvidia"):
+                        _wait_for_nvidia_rate_limit()
+                    response = self._retry_provider_call(lambda: self._call_openai_chat_completion_once(payload))
+                data = response.model_dump()
+            usage = data.get("usage")
+            if self.provider == "anthropic":
+                raw = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
+                truncated = data.get("stop_reason") == "max_tokens"
+            elif responses_format:
+                state, _ = self._responses_result_state(data)
+                raw = state.cleaned_content()
+                truncated = data.get("status") == "incomplete"
+            else:
+                choice = (data.get("choices") or [{}])[0]
+                raw = _coerce_text_fragments((choice.get("message") or {}).get("content"))
+                truncated = choice.get("finish_reason") == "length"
+            try:
+                if truncated:
+                    raise ValueError("API compatibility response was truncated; no tool actions were executed.")
+                content, calls = parse_compatibility_reply(raw, tools)
+            except ValueError:
+                self._record_model_usage(request_messages=request_messages, assistant_text=raw,
+                                         usage=usage, session_id=session_id)
+                raise
+            state = self._new_turn_state()
+            state.collected_content = content
+            state.tool_calls = calls
+            outcome, content = self._commit_stream_state(state=state, request_messages=request_messages,
+                                                         messages=messages, session_id=session_id, usage=usage)
+            if content:
+                yield content
+            if outcome == "tool_calls":
+                yield from self._execute_streamed_tool_calls(state.tool_calls, messages, session_id=session_id)
+                self._persist_history_to_session()
+                continue
+            if outcome == "retry_direct_prose":
+                continuation_count += 1
+                if continuation_count >= self._completion_continuation_limit():
+                    break
+                continue
+            break
 
     def _responses_result_state(self, result: Any) -> tuple[_StreamingTurnState, Any]:
         """Extract text, tool calls, and usage from one non-streaming Responses result."""
@@ -6353,7 +6583,6 @@ class ReverieAgent:
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -6587,6 +6816,7 @@ class ReverieAgent:
                         "content": _tool_result_history_content(result),
                     })
                     messages.append(relay_tool_result_message)
+                    self._persist_history_to_session()
                 
                 # Continue to get response to tool results
                 self._guard_think_tool_spin(message.tool_calls, messages)
@@ -6639,13 +6869,18 @@ class ReverieAgent:
                 messages = self._build_messages(resolve_local_images=True)
                 continue
 
+            self._record_model_usage(
+                request_messages=request_messages,
+                assistant_text="",
+                usage=getattr(response, "usage", None),
+                session_id=session_id,
+            )
             empty_turn_count += 1
             if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
                 messages = self._build_messages(resolve_local_images=True)
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -6800,6 +7035,7 @@ class ReverieAgent:
                         "content": _tool_result_history_content(result),
                     })
                     messages.append(relay_tool_result_message)
+                    self._persist_history_to_session()
 
                 self._guard_think_tool_spin(tool_calls, messages)
                 continue
@@ -6847,13 +7083,18 @@ class ReverieAgent:
                 messages = self._build_messages(resolve_local_images=True)
                 continue
 
+            self._record_model_usage(
+                request_messages=request_messages,
+                assistant_text="",
+                usage=usage_payload,
+                session_id=session_id,
+            )
             empty_turn_count += 1
             if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
                 messages = self._build_messages(resolve_local_images=True)
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -6866,6 +7107,7 @@ class ReverieAgent:
         """Process without streaming using Anthropic SDK"""
         all_content = []
         empty_turn_count = 0
+        continuation_count = 0
 
         while True:
             self._check_and_compress_context(session_id=session_id)
@@ -6877,6 +7119,7 @@ class ReverieAgent:
             # Build kwargs for Anthropic API
             kwargs = {
                 "model": self.model,
+                "stream": False,
                 "messages": anthropic_messages,
                 "max_tokens": self._resolve_anthropic_max_tokens(),
             }
@@ -6898,16 +7141,22 @@ class ReverieAgent:
             
             # Make request
             client = self._ensure_client()
-            response = call_with_prompt_cache_fallback(client.messages.create, kwargs, log=logger)
+            response = self._retry_provider_call(lambda: call_with_prompt_cache_fallback(client.messages.create, kwargs, log=logger))
             
             # Extract content
             content_blocks = response.content
             collected_content = ""
+            collected_thinking = ""
+            thinking_blocks = []
             collected_tool_calls = []
             
             for block in content_blocks:
                 if block.type == "text":
                     collected_content += block.text
+                elif block.type in {"thinking", "redacted_thinking"}:
+                    thinking_blocks.append(block.model_dump(include={"type", "thinking", "signature", "data"}, exclude_none=True))
+                    if block.type == "thinking":
+                        collected_thinking += block.thinking
                 elif block.type == "tool_use":
                     collected_tool_calls.append({
                         "id": block.id,
@@ -6926,11 +7175,15 @@ class ReverieAgent:
                 assistant_message = _build_assistant_history_message(
                     collected_content or None,
                     tool_calls=history_tool_calls,
+                    reasoning_content=collected_thinking,
                 )
+                if thinking_blocks:
+                    assistant_message["anthropic_thinking"] = thinking_blocks
                 self.messages.append(assistant_message)
                 self._record_model_usage(
                     request_messages=request_messages,
                     assistant_text=collected_content,
+                    reasoning_text=collected_thinking,
                     tool_calls=history_tool_calls,
                     usage=getattr(response, "usage", None),
                     session_id=session_id,
@@ -6997,6 +7250,7 @@ class ReverieAgent:
                         "content": _tool_result_history_content(result)
                     }
                     self.messages.append(tool_result_message)
+                    self._persist_history_to_session()
                     tool_result_blocks.append(_build_anthropic_tool_result_block(tool_call["id"], result))
 
                 if tool_result_blocks:
@@ -7009,41 +7263,60 @@ class ReverieAgent:
             
             # No tool calls, final response check
             if collected_content:
-                if self._should_end_generation(collected_content, None):
+                finish_reason = getattr(response, "stop_reason", None)
+                if self._should_end_generation(collected_content, "end_turn" if finish_reason == "stop_sequence" else finish_reason):
                     clean_content = collected_content.replace("//END//", "").strip()
-                    self.messages.append(_build_assistant_history_message(clean_content))
+                    assistant_message = _build_assistant_history_message(clean_content, reasoning_content=collected_thinking)
+                    if thinking_blocks:
+                        assistant_message["anthropic_thinking"] = thinking_blocks
+                    self.messages.append(assistant_message)
                     self._record_model_usage(
                         request_messages=request_messages,
                         assistant_text=clean_content,
+                        reasoning_text=collected_thinking,
                         usage=getattr(response, "usage", None),
                         session_id=session_id,
                     )
                     all_content.append(clean_content)
                     break
                 
-                if self.messages and self.messages[-1].get("role") == "assistant" and "tool_calls" not in self.messages[-1]:
-                    self.messages[-1]["content"] += collected_content
-                else:
-                    self.messages.append(_build_assistant_history_message(collected_content))
+                assistant_message = _build_assistant_history_message(collected_content, reasoning_content=collected_thinking)
+                if thinking_blocks:
+                    assistant_message["anthropic_thinking"] = thinking_blocks
+                self.messages.append(assistant_message)
                 
                 self._record_model_usage(
                     request_messages=request_messages,
                     assistant_text=collected_content,
+                    reasoning_text=collected_thinking,
                     usage=getattr(response, "usage", None),
                     session_id=session_id,
                 )
                 
                 all_content.append(collected_content)
-                system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
+                continuation_count += 1
+                if continuation_count >= self._completion_continuation_limit():
+                    break
                 continue
 
+            self._record_model_usage(
+                request_messages=request_messages,
+                assistant_text="",
+                reasoning_text=collected_thinking,
+                usage=getattr(response, "usage", None),
+                session_id=session_id,
+            )
+            if collected_thinking:
+                self.messages.append(_build_assistant_history_message(None, reasoning_content=collected_thinking))
+                self._persist_history_to_session()
+            if self._is_active_model_source("custom") and int(getattr(getattr(response, "usage", None), "output_tokens", 0) or 0) > 0:
+                raise RuntimeError("The provider reported output tokens but returned no text or client tool calls. Check its /v1/messages response; no automatic retry was sent.")
             empty_turn_count += 1
             if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
                 system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
                 continue
 
             notice = self._record_unsummarized_turn(
-                request_messages=request_messages,
                 session_id=session_id,
             )
             if notice:
@@ -7074,7 +7347,7 @@ class ReverieAgent:
             first = history[0]
             if (
                 str(first.get("role", "") or "").strip().lower() == "system"
-                and _coerce_text_fragments(first.get("content")) == self.system_prompt
+                and _coerce_text_fragments(first.get("content")) in (self.system_prompt, self._request_system_prompt())
             ):
                 history = history[1:]
         history = [
@@ -7123,7 +7396,7 @@ class ReverieAgent:
             )
         return (
             len(messages),
-            len(self.system_prompt),
+            len(self._request_system_prompt()),
             tuple(tail_signature),
         )
 
@@ -7164,6 +7437,25 @@ class ReverieAgent:
         """Record workspace-level token usage for one model call."""
         workspace_stats_manager = self.tool_executor.context.get("workspace_stats_manager")
         resolved_session_id, session_name = self._current_session_details(session_id)
+        context_handler = self.tool_executor.context.get("context_usage_handler")
+        if callable(context_handler):
+            try:
+                from ..session.workspace_stats import WorkspaceStatsManager
+
+                response_message = {"role": "assistant", "content": assistant_text, "tool_calls": tool_calls or []}
+                report = self.describe_context_usage(request_messages=[*request_messages, response_message])
+                api_usage = WorkspaceStatsManager._usage_dict(usage)
+                if api_usage:
+                    input_tokens = api_usage.get("input_tokens")
+                    output_tokens = api_usage.get("output_tokens")
+                    total_tokens = api_usage.get("total_tokens")
+                    api_tokens = total_tokens if total_tokens is not None else (input_tokens or 0) + (output_tokens or 0)
+                    known_tokens = total_tokens if total_tokens is not None else (input_tokens if input_tokens is not None else self._count_request_tokens(request_messages)) + (output_tokens if output_tokens is not None else WorkspaceStatsManager.count_message_tokens(response_message))
+                    report["api_baseline"] = {"tokens": known_tokens, "api_tokens": api_tokens, "estimated_tokens": report["estimated_history_tokens"], "history_hashes": report["history_hashes"]}
+                    self._apply_api_context_baseline(report, report["api_baseline"])
+                context_handler(report)
+            except Exception:
+                logger.debug("Failed to publish context usage", exc_info=True)
         if workspace_stats_manager:
             try:
                 workspace_stats_manager.record_model_usage(
@@ -7365,7 +7657,7 @@ class ReverieAgent:
 
     def _quick_context_char_estimate(self) -> int:
         """Fast lower-cost estimate for deciding whether a full token count is needed."""
-        total = len(str(getattr(self, "system_prompt", "") or ""))
+        total = len(self._request_system_prompt())
         for message in self.messages if isinstance(self.messages, list) else []:
             if not isinstance(message, dict):
                 total += len(str(message))
@@ -7466,6 +7758,7 @@ class ReverieAgent:
                     model_display_name=self.model_display_name,
                 )
             except Exception:
+                check_cancel()
                 logger.debug(
                     "Automatic handoff generation failed; skipping session rotation until retry window",
                     exc_info=True,
@@ -7542,7 +7835,7 @@ class ReverieAgent:
     #: global memory note (interface._sync_workspace_memory_message).
     _MEMORY_CONTEXT_MARKERS = (MEMORY_CONTEXT_PROMPT_HEADER, "[WORKSPACE GLOBAL MEMORY]")
 
-    def describe_context_usage(self) -> Dict[str, Any]:
+    def describe_context_usage(self, request_messages: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Break the live request payload into an auditable token budget.
 
         Every figure below comes from one counter and one build of the payload the
@@ -7556,11 +7849,13 @@ class ReverieAgent:
 
             count_one = WorkspaceStatsManager.count_message_tokens
 
-        request_messages = self._build_messages()
+        cache_estimate = request_messages is None
+        request_messages = self._build_messages(read_only=True) if cache_estimate else request_messages
         total_tokens = self._count_request_tokens(request_messages)
-        self._token_estimate_cache_key = self._token_estimate_signature()
-        self._token_estimate_cache_value = total_tokens
-        self._token_estimate_cache_time = time.monotonic()
+        if cache_estimate:
+            self._token_estimate_cache_key = self._token_estimate_signature()
+            self._token_estimate_cache_value = total_tokens
+            self._token_estimate_cache_time = time.monotonic()
 
         buckets: Dict[str, Dict[str, int]] = {}
         heaviest = {"role": "", "index": -1, "tokens": 0, "preview": ""}
@@ -7595,6 +7890,26 @@ class ReverieAgent:
                 }
 
         return self._context_usage_report(request_messages, total_tokens, buckets, heaviest)
+
+    @staticmethod
+    def _apply_api_context_baseline(report: Dict[str, Any], baseline: Dict[str, Any]) -> None:
+        """Use provider usage for the measured payload and count subsequent edits locally."""
+        estimated = max(int(baseline.get("estimated_tokens", 0)), 0)
+        current = report.get("estimated_history_tokens", report["total_tokens"])
+        history_hashes = baseline.get("history_hashes")
+        if history_hashes is not None and report.get("history_hashes", [])[:len(history_hashes)] != history_hashes:
+            return
+        if current < estimated:
+            return  # A shortened/compacted history no longer matches this measurement.
+        measured_tokens = max(int(baseline.get("tokens", 0)), 0)
+        api_tokens = min(max(int(baseline.get("api_tokens", measured_tokens)), 0), measured_tokens)
+        delta = measured_tokens - api_tokens + current - estimated
+        total = api_tokens + delta
+        report.update(total_tokens=total, remaining_tokens=max(report["max_tokens"] - total, 0), percentage=total / report["max_tokens"] * 100 if report["max_tokens"] else 0, overhead_tokens=0, usage_source="api" if not delta else "mixed")
+        report["segments"] = [
+            {"key": key, "tokens": tokens, "messages": 0, "share": tokens / total * 100 if total else 0}
+            for key, tokens in (("api_context", api_tokens), ("local_delta", delta)) if tokens
+        ]
 
     #: Fractions of the context window at which the agent compacts, then rotates.
     CONTEXT_COMPACTION_RATIO = 0.7
@@ -7637,6 +7952,8 @@ class ReverieAgent:
         return {
             "tokenizer": WorkspaceStatsManager.describe_tokenizer(),
             "total_tokens": total_tokens,
+            "estimated_history_tokens": sum(item["tokens"] for item in segments if item["key"] in {"user", "assistant", "tool"}) + max(total_tokens - counted, 0),
+            "history_hashes": [hashlib.sha256(json.dumps({key: value for key, value in message.items() if key in {"role", "content", "tool_calls", "tool_call_id", "name"} and value not in (None, [], "")}, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest() for message in request_messages if isinstance(message, dict) and message.get("role") != "system"],
             "max_tokens": max_tokens,
             "remaining_tokens": max(max_tokens - total_tokens, 0) if max_tokens else 0,
             "percentage": percentage,

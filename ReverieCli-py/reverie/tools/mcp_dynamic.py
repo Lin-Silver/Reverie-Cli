@@ -72,7 +72,9 @@ class MCPDynamicTool(BaseTool):
         payload = response.get("data", {}) if isinstance(response.get("data"), dict) else {}
         if response.get("success", True):
             return ToolResult.ok(output or "MCP tool completed successfully.", data=payload)
-        return ToolResult.fail(output or "MCP tool reported an error.")
+        result = ToolResult.fail(output or "MCP tool reported an error.")
+        result.data = payload
+        return result
 
     def get_execution_message(self, **kwargs) -> str:
         qualified_name = str(self.metadata.get("qualified_name", "") or self.name).strip()

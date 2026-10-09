@@ -198,6 +198,7 @@ and scripts without granting access outside that skill package.
         mode_notice = manager.get_mode_notice()
 
         if operation == "list":
+            records.sort(key=lambda record: record.lookup_key not in pinned_keys)
             visible = records[:max_results]
             lines = [f"Discovered skills: {len(records)} valid, {len(snapshot.errors)} invalid"]
             if mode_notice:

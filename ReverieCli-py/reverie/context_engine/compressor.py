@@ -14,6 +14,7 @@ from ..nvidia import (
 )
 from ..sse import iter_sse_data_strings
 from ..request_identity import apply_reverie_client_identity
+from ..provider_transport import provider_post, check_cancel, interruptible_sleep
 from ..prompt_cache import (
     apply_anthropic_prompt_cache,
     apply_openai_prompt_cache,
@@ -715,10 +716,11 @@ def make_compression_request_with_retry(
     last_error = None
     attempts = max(0, min(int(max_retries or 0), REQUEST_RETRY_ATTEMPTS))
     for attempt in range(attempts + 1):
+        check_cancel()
         try:
             logger.debug(f"Compression request attempt {attempt + 1}/{attempts + 1}")
             
-            response = requests.post(
+            response = provider_post(
                 url,
                 headers=headers,
                 json=payload,
@@ -734,7 +736,7 @@ def make_compression_request_with_retry(
                 logger.warning("Provider rejected compression prompt-cache hints; retrying once without them")
                 payload = without_prompt_cache(payload)
                 try:
-                    response = requests.post(
+                    response = provider_post(
                         url,
                         headers=headers,
                         json=payload,
@@ -752,8 +754,7 @@ def make_compression_request_with_retry(
             )
             
             if attempt < attempts:
-                import time
-                time.sleep(REQUEST_RETRY_DELAYS_SECONDS[attempt])
+                interruptible_sleep(REQUEST_RETRY_DELAYS_SECONDS[attempt])
     
     raise last_error or requests.RequestException("All compression retry attempts failed")
 
@@ -1047,7 +1048,7 @@ class ContextCompressor:
                     stream=True,
                     request_url=request_url,
                 )
-                response = requests.post(
+                response = provider_post(
                     request_url,
                     headers=headers,
                     json=payload,
@@ -1076,6 +1077,7 @@ class ContextCompressor:
             return compact_with_summary(str(summary or "").strip(), "Post-compression optimized summary")
             
         except Exception as e:
+            check_cancel()
             logger.warning("Provider compression failed; using deterministic local fallback: %s", e)
             return compact_with_summary(get_fallback_summary(), "Post-compression deterministic fallback")
 

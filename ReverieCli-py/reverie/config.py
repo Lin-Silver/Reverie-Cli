@@ -884,6 +884,7 @@ class Config:
     # Experimental: expose the deep_think tool so models without a usable
     # reasoning channel can still deliberate in tool arguments.
     thinking_tool: bool = False
+    api_compatibility: bool = False
     config_version: str = CONFIG_VERSION  # Config file version for migration
     
     # Workspace isolation settings
@@ -1101,6 +1102,7 @@ class Config:
             'tool_output_style': normalize_tool_output_style(self.tool_output_style),
             'thinking_output_style': normalize_thinking_output_style(self.thinking_output_style),
             'thinking_tool': bool(self.thinking_tool),
+            'api_compatibility': bool(self.api_compatibility),
             'writer_mode': normalize_writer_mode_config(self.writer_mode),
             'gamer_mode': normalize_gamer_mode_config(self.gamer_mode),
             'config_version': self.config_version,
@@ -1221,6 +1223,7 @@ class Config:
             tool_output_style=normalize_tool_output_style(data.get('tool_output_style', 'compact')),
             thinking_output_style=normalize_thinking_output_style(data.get('thinking_output_style', 'full')),
             thinking_tool=bool(data.get('thinking_tool', False)),
+            api_compatibility=bool(data.get('api_compatibility', False)),
             writer_mode=normalize_writer_mode_config(data.get('writer_mode', {})),
             gamer_mode=normalize_gamer_mode_config(data.get('gamer_mode', {})),
             config_version=data.get('config_version', CONFIG_VERSION),

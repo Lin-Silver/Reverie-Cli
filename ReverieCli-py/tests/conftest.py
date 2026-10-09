@@ -19,12 +19,29 @@ from __future__ import annotations
 from pathlib import Path
 import hashlib
 import shutil
+import os
 
 import pytest
 
 # The repository `dist/` depot: the only tree tests are allowed to write into.
 _DIST_ROOT = Path(__file__).resolve().parent.parent.parent / "dist"
 _SANDBOX_ROOT = _DIST_ROOT / ".reverie" / "test-temp" / "roots"
+
+
+def pytest_configure(config):
+    if config.option.basetemp is None:
+        root = _DIST_ROOT.parent / ".runtime" / f"pytest-{os.getpid()}"
+        if root.exists():
+            raise RuntimeError(f"Refusing to reuse pytest temporary directory: {root}")
+        config.option.basetemp = str(root)
+
+
+@pytest.fixture(autouse=True)
+def isolated_skill_home(request, tmp_path, monkeypatch):
+    if request.node.path.name in {"test_skill_modes.py", "test_skill_pinning.py", "test_skill_shadowing.py"} or request.node.name == "test_skills_manager_uses_header_metadata_for_discovery_without_auto_injection":
+        home = tmp_path / "test-home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
 
 
 @pytest.fixture(autouse=True)

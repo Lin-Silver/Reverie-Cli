@@ -8,6 +8,7 @@ from rich.console import Console
 
 from reverie.cli.input_handler import InputHandler
 from reverie.cli.theme import DECO, THEME
+from reverie.session.manager import SessionManager
 from reverie.sdk_bridge import ReverieSdkBridge
 from reverie.skills_manager import SkillsManager
 from reverie.tools.skill_lookup import SkillLookupTool
@@ -55,7 +56,7 @@ def test_pinning_promotes_one_skill_into_a_mandatory_prompt_block(tmp_path: Path
     block = manager.describe_pinned_for_prompt()
     assert "### Pinned skills (mandatory)" in block
     assert "mesh-drafting: Rebuild a photographed subject as Three.js code." in block
-    assert "skill_lookup" in block
+    assert "complete instructions" in block
     # A pin must not drag the other skills' bodies into the prompt.
     assert "release-notes" not in block
 
@@ -142,7 +143,8 @@ def test_skill_lookup_marks_pinned_skills_in_list_and_inspect(tmp_path: Path) ->
     manager.pin_skill("mesh-drafting")
     tool = SkillLookupTool({"skills_manager": manager, "project_root": tmp_path / "project"})
 
-    listing = tool.execute(operation="list")
+    assert "mesh-drafting [PINNED]" in tool.execute(operation="list").output
+    listing = tool.execute(operation="list", max_results=20)
     assert listing.success is True
     assert "mesh-drafting [PINNED]" in listing.output
     assert "release-notes [PINNED]" not in listing.output
@@ -171,7 +173,7 @@ def test_bridge_reports_and_mutates_the_pin_set_for_the_desktop(tmp_path: Path) 
     )
     bridge = ReverieSdkBridge()
     bridge.project_root = tmp_path.resolve()
-    bridge.interface = SimpleNamespace(skills_manager=manager, agent=None)
+    bridge.interface = SimpleNamespace(skills_manager=manager, agent=None, session_manager=SessionManager(tmp_path / "data"), project_data_dir=tmp_path / "data")
 
     listing = bridge.dispatch({"id": "list", "action": "listSkills", "payload": {}})
     assert listing["type"] == "skills"
@@ -210,7 +212,7 @@ def test_bridge_unpin_needs_a_name_and_reports_an_unknown_one(tmp_path: Path) ->
     manager = _manager(tmp_path, ("mesh-drafting", "Rebuild a photographed subject as Three.js code."))
     bridge = ReverieSdkBridge()
     bridge.project_root = tmp_path.resolve()
-    bridge.interface = SimpleNamespace(skills_manager=manager, agent=None)
+    bridge.interface = SimpleNamespace(skills_manager=manager, agent=None, session_manager=SessionManager(tmp_path / "data"), project_data_dir=tmp_path / "data")
 
     bridge.dispatch({"id": "pin", "action": "pinSkill", "payload": {"skill": "mesh-drafting"}})
 
@@ -235,6 +237,8 @@ def test_bridge_pin_rebuilds_the_prompt_so_the_next_turn_carries_it(tmp_path: Pa
     bridge.project_root = tmp_path.resolve()
     bridge.interface = SimpleNamespace(
         skills_manager=manager,
+        session_manager=SessionManager(tmp_path / "data"),
+        project_data_dir=tmp_path / "data",
         agent=object(),
         _refresh_agent_prompt_guidance=lambda: refreshes.append("refreshed"),
     )
@@ -244,6 +248,43 @@ def test_bridge_pin_rebuilds_the_prompt_so_the_next_turn_carries_it(tmp_path: Pa
 
     # Both mutations have to reach the live agent; a pin the model never sees is a no-op.
     assert refreshes == ["refreshed", "refreshed"]
+
+
+def test_desktop_pins_survive_restart_and_belong_to_their_session(tmp_path: Path) -> None:
+    def reopen():
+        bridge = ReverieSdkBridge()
+        bridge.project_root = tmp_path.resolve()
+        bridge.interface = SimpleNamespace(
+            skills_manager=_manager(tmp_path, ("mesh-drafting", "Draft meshes.")),
+            session_manager=SessionManager(tmp_path / "data"),
+            project_data_dir=tmp_path / "data", agent=None, rats_runtime=None,
+        )
+        return bridge
+
+    first = reopen()
+    first.dispatch({"action": "pinSkill", "payload": {"skill": "mesh-drafting"}})
+    second = reopen()
+    assert second.skills_payload()["pinned"]["names"] == ["mesh-drafting"]
+    created = second.dispatch({"action": "createSession"})
+    session_id = created["session"]["id"]
+    assert created["skills"]["pinned"]["names"] == ["mesh-drafting"]
+    assert not (tmp_path / "data" / "desktop" / "draft-skills.json").exists()
+
+    third = reopen()
+    assert third.skills_payload()["pinned"]["names"] == ["mesh-drafting"]
+    other = third.dispatch({"action": "createSession"})
+    assert other["skills"]["pinned"]["names"] == []
+    third.interface.session_manager.load_session(session_id)
+    assert third.skills_payload()["pinned"]["names"] == ["mesh-drafting"]
+    third.dispatch({"action": "clearPinnedSkills"})
+    assert reopen().skills_payload()["pinned"]["names"] == []
+
+
+def test_restoring_missing_pins_keeps_the_required_instruction(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    manager.restore_pinned_skills(["no-longer-installed"])
+    assert manager.pinned_state()["unresolved"] == ["no-longer-installed"]
+    assert "no longer present" in manager.describe_pinned_for_prompt()
 
 
 def _handler() -> tuple[InputHandler, io.StringIO]:
@@ -283,3 +324,21 @@ def test_prompt_tags_are_deduped_trimmed_and_clearable() -> None:
     assert handler._prompt_tag_labels() == []
     # With nothing pinned the prompt stays a plain string, exactly as before the feature.
     assert handler._prompt_toolkit_message("reverie> ") == handler._plain_prompt_text("reverie> ")
+
+
+def test_fork_rotation_and_cli_changes_persist_required_skills(tmp_path):
+    from reverie.cli.commands import CommandHandler
+    manager = _manager(tmp_path, ("required", "Mandatory workflow."))
+    sessions = SessionManager(tmp_path / "state", project_root=manager.project_root)
+    source = sessions.create_session("Source")
+    manager.pin_skill("required")
+    handler = CommandHandler(Console(file=io.StringIO()), {"session_manager": sessions, "skills_manager": manager})
+    handler._after_pinned_skills_changed()
+    assert source.metadata["pinned_skills"] == ["required"]
+    forked = sessions.fork_current_session()
+    assert forked.metadata["pinned_skills"] == ["required"]
+    rotated = sessions.rotate_session("Keep working.")
+    assert rotated.metadata["pinned_skills"] == ["required"]
+    restarted = SessionManager(tmp_path / "state", project_root=manager.project_root)
+    assert restarted.load_session(rotated.id).metadata["pinned_skills"] == ["required"]
+    assert sessions.create_session("Independent").metadata.get("pinned_skills", []) == []

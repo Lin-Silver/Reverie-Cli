@@ -92,6 +92,7 @@ class SessionUsageSummary:
     output_tokens: int = 0
     message_count: int = 0
     updated_at: str = ""
+    total_tokens: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -102,6 +103,7 @@ class SessionUsageSummary:
             "output_tokens": self.output_tokens,
             "message_count": self.message_count,
             "updated_at": self.updated_at,
+            "total_tokens": self.total_tokens,
         }
 
     @classmethod
@@ -114,6 +116,10 @@ class SessionUsageSummary:
             output_tokens=_coerce_nonnegative_int(data.get("output_tokens")),
             message_count=_coerce_nonnegative_int(data.get("message_count")),
             updated_at=_clean_text(data.get("updated_at")),
+            total_tokens=_coerce_nonnegative_int(data.get(
+                "total_tokens",
+                _coerce_nonnegative_int(data.get("input_tokens")) + _coerce_nonnegative_int(data.get("output_tokens")),
+            )),
         )
 
 
@@ -128,6 +134,7 @@ class ModelUsageSummary:
     input_tokens: int = 0
     output_tokens: int = 0
     last_used_at: str = ""
+    total_tokens: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -140,6 +147,7 @@ class ModelUsageSummary:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "last_used_at": self.last_used_at,
+            "total_tokens": self.total_tokens,
         }
 
     @classmethod
@@ -154,6 +162,10 @@ class ModelUsageSummary:
             input_tokens=_coerce_nonnegative_int(data.get("input_tokens")),
             output_tokens=_coerce_nonnegative_int(data.get("output_tokens")),
             last_used_at=_clean_text(data.get("last_used_at")),
+            total_tokens=_coerce_nonnegative_int(data.get(
+                "total_tokens",
+                _coerce_nonnegative_int(data.get("input_tokens")) + _coerce_nonnegative_int(data.get("output_tokens")),
+            )),
         )
 
 
@@ -390,20 +402,27 @@ class WorkspaceStatsManager:
             get_value = usage.get
         else:
             get_value = lambda key, default=None: getattr(usage, key, default)
-        input_tokens = get_value("prompt_tokens")
-        if input_tokens is None:
-            input_tokens = get_value("input_tokens")
-        output_tokens = get_value("completion_tokens")
-        if output_tokens is None:
-            output_tokens = get_value("output_tokens")
-        total_tokens = get_value("total_tokens")
         result: Dict[str, int] = {}
-        if input_tokens is not None:
-            result["input_tokens"] = _coerce_nonnegative_int(input_tokens)
-        if output_tokens is not None:
-            result["output_tokens"] = _coerce_nonnegative_int(output_tokens)
-        if total_tokens is not None:
-            result["total_tokens"] = _coerce_nonnegative_int(total_tokens)
+        for field, aliases in (
+            ("input_tokens", ("prompt_tokens", "input_tokens")),
+            ("output_tokens", ("completion_tokens", "output_tokens")),
+            ("total_tokens", ("total_tokens",)),
+        ):
+            for alias in aliases:
+                value = get_value(alias)
+                try:
+                    parsed = int(value)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if isinstance(value, bool) or parsed < 0 or (isinstance(value, float) and value != parsed):
+                    continue
+                result[field] = parsed
+                break
+        # Anthropic excludes cache reads/writes from input_tokens. OpenAI's
+        # nested cached_tokens is already included in prompt_tokens.
+        if "input_tokens" in result and get_value("prompt_tokens") is None:
+            for field in ("cache_creation_input_tokens", "cache_read_input_tokens"):
+                result["input_tokens"] += _coerce_nonnegative_int(get_value(field))
         return result
 
     @staticmethod
@@ -527,6 +546,14 @@ class WorkspaceStatsManager:
         output_tokens = usage_payload.get("output_tokens")
         total_tokens = usage_payload.get("total_tokens")
 
+        if total_tokens is not None:
+            if input_tokens is not None and output_tokens is None:
+                output_tokens = max(total_tokens - input_tokens, 0)
+            elif output_tokens is not None and input_tokens is None:
+                input_tokens = max(total_tokens - output_tokens, 0)
+            elif input_tokens is None and output_tokens is None:
+                input_tokens = min(self.count_messages_tokens(request_messages), total_tokens) if total_tokens else 0
+                output_tokens = total_tokens - input_tokens
         if input_tokens is None:
             input_tokens = self.count_messages_tokens(request_messages)
         if output_tokens is None:
@@ -550,15 +577,8 @@ class WorkspaceStatsManager:
                     )
                 except Exception:
                     output_tokens += self.count_text_tokens(str(tool_calls))
-        if total_tokens is not None:
-            if "input_tokens" in usage_payload and "output_tokens" not in usage_payload:
-                output_tokens = max(_coerce_nonnegative_int(total_tokens) - _coerce_nonnegative_int(input_tokens), 0)
-            elif "output_tokens" in usage_payload and "input_tokens" not in usage_payload:
-                input_tokens = max(_coerce_nonnegative_int(total_tokens) - _coerce_nonnegative_int(output_tokens), 0)
-            elif "input_tokens" not in usage_payload and "output_tokens" not in usage_payload:
-                estimated_input = min(_coerce_nonnegative_int(input_tokens), _coerce_nonnegative_int(total_tokens))
-                input_tokens = estimated_input
-                output_tokens = max(_coerce_nonnegative_int(total_tokens) - estimated_input, 0)
+        if total_tokens is None:
+            total_tokens = input_tokens + output_tokens
 
         usage_key = self._usage_key(provider, source, model, model_display_name)
         summary = self.state.model_usage.get(usage_key)
@@ -573,6 +593,7 @@ class WorkspaceStatsManager:
         summary.calls += 1
         summary.input_tokens += _coerce_nonnegative_int(input_tokens)
         summary.output_tokens += _coerce_nonnegative_int(output_tokens)
+        summary.total_tokens += total_tokens
         summary.last_used_at = _now_iso()
         self.state.model_usage[usage_key] = summary
 
@@ -586,6 +607,7 @@ class WorkspaceStatsManager:
             session_summary.calls += 1
             session_summary.input_tokens += _coerce_nonnegative_int(input_tokens)
             session_summary.output_tokens += _coerce_nonnegative_int(output_tokens)
+            session_summary.total_tokens += total_tokens
             session_summary.updated_at = _now_iso()
             self.state.session_usage[cleaned_session_id] = session_summary
 
@@ -675,6 +697,7 @@ class WorkspaceStatsManager:
                     "calls": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
+                    "total_tokens": 0,
                     "models": set(),
                     "providers": set(),
                 },
@@ -682,6 +705,7 @@ class WorkspaceStatsManager:
             bucket["calls"] += _coerce_nonnegative_int(row.get("calls"))
             bucket["input_tokens"] += _coerce_nonnegative_int(row.get("input_tokens"))
             bucket["output_tokens"] += _coerce_nonnegative_int(row.get("output_tokens"))
+            bucket["total_tokens"] += _coerce_nonnegative_int(row.get("total_tokens"))
             model_name = _clean_text(row.get("model_display_name")) or _clean_text(row.get("model"))
             provider_name = _clean_text(row.get("provider")) or "unknown"
             if model_name:
@@ -696,6 +720,7 @@ class WorkspaceStatsManager:
                     "calls": value["calls"],
                     "input_tokens": value["input_tokens"],
                     "output_tokens": value["output_tokens"],
+                    "total_tokens": value["total_tokens"],
                     "model_count": len(value["models"]),
                     "provider_count": len(value["providers"]),
                     "models": sorted(value["models"]),
@@ -719,7 +744,7 @@ class WorkspaceStatsManager:
             "total_active_seconds": self.state.total_active_seconds,
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
-            "total_tokens": total_input + total_output,
+            "total_tokens": sum(row["total_tokens"] for row in model_rows),
             "total_calls": total_calls,
             "model_usage": model_rows,
             "source_usage": source_rows,

@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import time
+from .provider_transport import interruptible_sleep
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple
@@ -339,14 +340,14 @@ def resolve_webgemini_proxy(webgemini_config: Any) -> Tuple[str, str]:
 
 def _webgemini_httpx_client(cfg: Dict[str, Any]):
     import httpx
+    from .provider_transport import provider_client
 
     proxy, _source = resolve_webgemini_proxy(cfg)
     timeout = httpx.Timeout(
         timeout=float(cfg.get("timeout", WEBGEMINI_DEFAULT_TIMEOUT) or WEBGEMINI_DEFAULT_TIMEOUT),
         connect=10.0,
     )
-    transport = httpx.HTTPTransport(proxy=proxy) if proxy else httpx.HTTPTransport()
-    return httpx.Client(transport=transport, timeout=timeout, verify=True, trust_env=False)
+    return provider_client(proxy=proxy, timeout=timeout)
 
 
 def _extract_texts_from_web_line(line: str) -> List[str]:
@@ -500,7 +501,7 @@ def iter_webgemini_text_deltas(
                 raise
             last_error = exc
             if attempt < attempts - 1:
-                time.sleep(max(0, int(cfg.get("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY) or 0)))
+                interruptible_sleep(max(0, int(cfg.get("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY) or 0)))
     if last_error:
         raise last_error
 
@@ -538,7 +539,7 @@ def generate_webgemini_message(
         except Exception as exc:
             last_error = exc
         if attempt < attempts - 1:
-            time.sleep(max(0, int(cfg.get("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY) or 0)))
+            interruptible_sleep(max(0, int(cfg.get("retry_delay", WEBGEMINI_DEFAULT_RETRY_DELAY) or 0)))
     if not text and last_error and not isinstance(last_error, RuntimeError):
         raise last_error
     if tools:

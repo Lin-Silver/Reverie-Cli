@@ -141,6 +141,7 @@ class ReverieSdkBridge:
                 self._dispose_interface()
             self.project_root = root
             self.interface = ReverieInterface(root, headless=True, runtime_surface="desktop")
+            self._skill_pin_owner = None
             self.interface._context_worker_limit = _interactive_context_worker_limit()
             self.interface.rats_runtime = self.rats_runtime
         elif self.interface is not None:
@@ -252,7 +253,9 @@ class ReverieSdkBridge:
 
     def skills_payload(self, *, force_refresh: bool = False) -> Dict[str, Any]:
         """Describe every discovered skill plus the session pin set for the desktop."""
-        manager = self.ensure_interface().skills_manager
+        interface = self.ensure_interface()
+        self._sync_skill_pins(interface)
+        manager = interface.skills_manager
         snapshot = manager.get_snapshot(force_refresh=force_refresh)
         state = manager.pinned_state(force_refresh=False)
         pinned_keys = frozenset(getattr(manager, "pinned_keys", ()) or ())
@@ -274,6 +277,38 @@ class ReverieSdkBridge:
             "errors": _json_safe(manager.list_error_rows(force_refresh=False)),
             "shadowed": _json_safe(manager.list_shadow_rows(force_refresh=False)),
         }
+
+    def _sync_skill_pins(self, interface) -> None:
+        session = interface.session_manager.get_current_session() or interface.session_manager.restore_last_session()
+        owner = (str(self.project_root), session.id if session else "draft")
+        if getattr(self, "_skill_pin_owner", None) == owner:
+            return
+        if session:
+            names = session.metadata.get("pinned_skills", [])
+            draft = interface.project_data_dir / "desktop" / "draft-skills.json"
+            draft.unlink(missing_ok=True)
+        else:
+            target = interface.project_data_dir / "desktop" / "draft-skills.json"
+            try:
+                names = json.loads(target.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                names = []
+        previous = interface.skills_manager.pinned_names()
+        interface.skills_manager.restore_pinned_skills(names if isinstance(names, list) else [])
+        self._skill_pin_owner = owner
+        if interface.agent is not None and previous != interface.skills_manager.pinned_names():
+            interface._refresh_agent_prompt_guidance()
+
+    def _save_skill_pins(self, interface) -> None:
+        names = interface.skills_manager.pinned_names()
+        session = interface.session_manager.get_current_session()
+        if session:
+            session.metadata["pinned_skills"] = names
+            interface.session_manager.save_session(session)
+        else:
+            target = interface.project_data_dir / "desktop" / "draft-skills.json"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            interface.session_manager._write_json_atomic(target, names)
 
     def _refresh_pinned_skills(self) -> None:
         """Rebuild the system prompt so a pin change lands on the next desktop turn."""
@@ -422,6 +457,7 @@ class ReverieSdkBridge:
         session = manager.load_session(session_id) if session_id else manager.get_current_session()
         if session is None:
             return None
+        self._sync_skill_pins(self.interface)
         if self.interface.agent is not None:
             self.interface.agent.set_history(session.messages)
         return _json_safe(session.to_wire_dict())
@@ -621,25 +657,31 @@ class ReverieSdkBridge:
             raise ValueError("Continuing a task requires a session ID.")
         if session_id and interface.session_manager.load_session(session_id) is None:
             raise ValueError(f"Session not found: {session_id}")
+        self._sync_skill_pins(interface)
         self._run_identity = {"session_id": session_id, "project_root": str(self.project_root), "run_id": str(payload.get("runId") or uuid.uuid4().hex)}
         control = RunControl(lambda event: self._emit_request_event(request_id, {**event, **self._run_identity}))
         self._run_control = control
-        result = interface.run_prompt_once(
-            str(payload.get("prompt") or payload.get("message") or ""),
-            **({"resume": True} if action == "resumePrompt" else {}),
-            mode_override=str(payload.get("mode") or "").strip() or None,
-            stream=payload.get("stream") if isinstance(payload.get("stream"), bool) else None,
-            no_index=bool(payload.get("noIndex", False)),
-            fresh_session=bool(payload.get("freshSession", False)),
-            event_callback=lambda event: self._emit_request_event(request_id, {**event, **self._run_identity}),
-            approval_callback=lambda tool, arguments, denial, details=None: self._request_tool_approval(request_id, tool, arguments, denial, details),
-            source_override=str(payload.get("source") or "").strip() or None,
-            model_override=str(payload.get("model") or "").strip() or None,
-            reasoning_override=str(payload.get("reasoning") or "").strip() or None,
-            desktop_attachments=payload.get("attachments") or [],
-            run_control=control,
-            read_only_review=payload.get("runType") == "review",
-        )
+        current_session = interface.session_manager.get_current_session()
+        history_message_count = len(current_session.messages) if current_session and not payload.get("freshSession") else 0
+        from .provider_transport import request_scope
+        with request_scope(control):
+            result = interface.run_prompt_once(
+                str(payload.get("prompt") or payload.get("message") or ""),
+                **({"resume": True} if action == "resumePrompt" else {}),
+                mode_override=str(payload.get("mode") or "").strip() or None,
+                stream=payload.get("stream") if isinstance(payload.get("stream"), bool) else None,
+                no_index=bool(payload.get("noIndex", False)),
+                fresh_session=bool(payload.get("freshSession", False)),
+                event_callback=lambda event: self._emit_request_event(request_id, {**event, **({"history_message_count": history_message_count} if event.get("type") == "run.started" else {}), **self._run_identity}),
+                approval_callback=lambda tool, arguments, denial, details=None: self._request_tool_approval(request_id, tool, arguments, denial, details),
+                source_override=str(payload.get("source") or "").strip() or None,
+                model_override=str(payload.get("model") or "").strip() or None,
+                reasoning_override=str(payload.get("reasoning") or "").strip() or None,
+                desktop_attachments=payload.get("attachments") or [],
+                run_control=control,
+                read_only_review=payload.get("runType") == "review",
+                goal_context=str(payload.get("goalContext") or ""),
+            )
         return {"id": request_id, "type": "prompt.result", "result": _json_safe(result.to_dict()), "sessions": self.sessions_payload(), "recovery": self.recovery_payload(), **self._run_identity}
 
     def dispatch(self, message: Dict[str, Any]) -> Dict[str, Any]:
@@ -657,6 +699,18 @@ class ReverieSdkBridge:
         if action == "initialize":
             interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
             interface._prime_context_engine_background()
+            if payload.get("prepareModel") and interface.config_manager.load().active_model is not None:
+                interface._init_agent(persist_config_changes=False, defer_runtime_enrichment=True)
+                if interface.agent is not None:
+                    client = interface.agent._ensure_client()
+                    # SDK resources use lazy imports too. Resolve the active surface
+                    # during idle preparation; accessing it performs no HTTP request.
+                    if interface.agent.provider == "openai-chat":
+                        _ = client.chat.completions
+                    elif interface.agent.provider == "openai-responses":
+                        _ = client.responses
+                    elif interface.agent.provider == "anthropic":
+                        _ = client.messages
             defer_payloads = bool(payload.get("deferPayloads", False))
             return {
                 "id": request_id,
@@ -680,6 +734,7 @@ class ReverieSdkBridge:
             interface = self.ensure_interface()
             session_id = str(payload.get("sessionId") or "").strip()
             session = interface.session_manager.get_current_session()
+            live_read = self._run_control is not None
             # A delayed statistics request must never activate an old session.
             if session_id and (session is None or session.id != session_id):
                 return {"id": request_id, "type": "context.usage", "usage": None}
@@ -689,7 +744,7 @@ class ReverieSdkBridge:
             # on a freshly launched or restored session until the user sent a
             # message. Initialize it here exactly as compactContext does; a usage
             # read must never break the UI, so a failure leaves the ring absent.
-            if interface.agent is None and interface.config_manager.load().active_model is not None:
+            if interface.agent is None and not live_read and interface.config_manager.load().active_model is not None:
                 try:
                     interface._init_agent(
                         persist_config_changes=False,
@@ -702,15 +757,32 @@ class ReverieSdkBridge:
             agent = interface.agent
             usage: Optional[Dict[str, Any]] = None
             if agent is not None:
-                # Reflect the session the composer is showing so the ring matches
-                # what the next turn would send. Safe when idle; the desktop only
-                # asks for this between turns and on session open.
-                # Memory is synchronized by prompt execution. Reading its budget
-                # must not index memory, rewrite transcripts, or change selection.
-                if session is not None:
+                # The worker owns live history; an advisory read must never replace
+                # it or consume a steer/pause safe point during an API stream.
+                if session is not None and not live_read:
                     agent.set_history(session.messages)
                 try:
-                    usage = agent.describe_context_usage()
+                    draft = str(payload.get("draftText") or "")
+                    attachments = payload.get("attachments") or []
+                    request_messages = None
+                    if live_read:
+                        request_messages = agent._build_messages(read_only=True)
+                        assistant_text = str(payload.get("liveAssistantText") or "")
+                        last_user = max((index for index, message in enumerate(request_messages) if message.get("role") == "user"), default=-1)
+                        retained = "".join(str(message.get("content") or "") for message in request_messages[last_user + 1:] if message.get("role") == "assistant")
+                        tail = assistant_text[len(retained):] if assistant_text.startswith(retained) else ""
+                        if tail:
+                            request_messages.append({"role": "assistant", "content": tail})
+                    if draft or attachments:
+                        from .desktop_input import prepare_desktop_input
+
+                        content, _ = prepare_desktop_input(interface, interface.config_manager.load(), draft, attachments)
+                        usage = agent.describe_context_usage(request_messages=[*(request_messages if request_messages is not None else agent._build_messages(read_only=True)), {"role": "user", "content": content}])
+                    else:
+                        usage = agent.describe_context_usage(request_messages=request_messages) if request_messages is not None else agent.describe_context_usage()
+                    baseline = payload.get("apiBaseline")
+                    if isinstance(baseline, dict):
+                        agent._apply_api_context_baseline(usage, baseline)
                 except Exception:  # A usage read must never break the UI.
                     usage = None
             return {
@@ -1031,11 +1103,16 @@ class ReverieSdkBridge:
             session_path = self.ensure_interface().session_manager.sessions_dir / f"{session['id']}.json"
             stat = session_path.stat()
             session["revision"] = f"{stat.st_mtime_ns}:{stat.st_size}"
-            return {"id": request_id, "type": "session", "session": session, "sessions": self.sessions_payload()}
+            return {"id": request_id, "type": "session", "session": session, "sessions": self.sessions_payload(), "skills": self.skills_payload()}
         if action == "createSession":
             interface = self.ensure_interface()
+            self._sync_skill_pins(interface)
+            draft_pins = interface.skills_manager.pinned_names() if interface.session_manager.get_current_session() is None else []
             name = str(payload.get("name") or "").strip() or None
             session = interface.session_manager.create_session(name)
+            if draft_pins:
+                session.metadata["pinned_skills"] = draft_pins
+                interface.session_manager.save_session(session)
             if interface.agent is not None:
                 interface.agent.set_history(session.messages)
             return {
@@ -1043,6 +1120,7 @@ class ReverieSdkBridge:
                 "type": "session.created",
                 "session": _json_safe(session.to_wire_dict()),
                 "sessions": self.sessions_payload(),
+                "skills": self.skills_payload(),
             }
         if action == "deleteSessions":
             if not bool(payload.get("confirmed", False)):
@@ -1232,18 +1310,20 @@ class ReverieSdkBridge:
             if success and not str(payload.get("key") or "").startswith("plugin_enabled:"):
                 interface.config_manager.save(config)
             if success:
-                self._refresh_plugin_dependents()
+                if str(payload.get("key") or "") != "stream_responses":
+                    self._refresh_plugin_dependents()
                 if reinit and interface.agent is not None:
                     interface._init_agent(config_override=interface.config_manager.load(), persist_config_changes=False)
-            return {
+            response = {
                 "id": request_id,
                 "type": "setting.updated",
                 "success": success,
                 "message": detail,
                 "settings": self.settings_payload(),
-                "models": self.model_sources_payload(),
-                "workspace": self.workspace_payload(),
             }
+            if str(payload.get("key") or "") != "stream_responses":
+                response.update(models=self.model_sources_payload(), workspace=self.workspace_payload())
+            return response
         if action in {"listPlugins", "refreshPlugins"}:
             return {
                 "id": request_id,
@@ -1292,7 +1372,9 @@ class ReverieSdkBridge:
                 "skills": self.skills_payload(force_refresh=action == "refreshSkills"),
             }
         if action in {"pinSkill", "unpinSkill", "clearPinnedSkills"}:
-            manager = self.ensure_interface().skills_manager
+            interface = self.ensure_interface()
+            self._sync_skill_pins(interface)
+            manager = interface.skills_manager
             wanted = str(payload.get("skill") or payload.get("name") or payload.get("key") or "").strip()
             if action == "clearPinnedSkills":
                 released = manager.clear_pinned_skills()
@@ -1311,6 +1393,7 @@ class ReverieSdkBridge:
                 }
             # A pin is an instruction for the next turn, so the system prompt has
             # to be rebuilt now rather than at the next agent re-init.
+            self._save_skill_pins(interface)
             self._refresh_pinned_skills()
             return {
                 "id": request_id,

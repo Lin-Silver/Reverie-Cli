@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from reverie.session.manager import SessionManager
 from reverie.sdk_bridge import ReverieSdkBridge
 from reverie.skills_manager import SkillsManager
 from reverie.tools.skill_lookup import SkillLookupTool
@@ -114,7 +115,7 @@ def test_skill_lookup_does_not_list_the_unreachable_copy(
     manager, _ = _manager(tmp_path, (BUNDLED_NAME, REPO_DESCRIPTION))
     tool = SkillLookupTool({"skills_manager": manager, "project_root": tmp_path / "project"})
 
-    listing = tool.execute(operation="list")
+    listing = tool.execute(operation="list", max_results=20)
     assert listing.success is True
     assert [row["name"] for row in listing.data["items"]].count(BUNDLED_NAME) == 1
     assert REPO_DESCRIPTION not in listing.output
@@ -129,7 +130,7 @@ def test_the_bridge_flags_shadowed_skills_for_the_desktop(
     manager, hidden_path = _manager(tmp_path, (BUNDLED_NAME, REPO_DESCRIPTION))
     bridge = ReverieSdkBridge()
     bridge.project_root = tmp_path.resolve()
-    bridge.interface = SimpleNamespace(skills_manager=manager, agent=None)
+    bridge.interface = SimpleNamespace(skills_manager=manager, agent=None, session_manager=SessionManager(tmp_path / "data"), project_data_dir=tmp_path / "data")
 
     payload = bridge.dispatch({"id": "list", "action": "listSkills", "payload": {}})["skills"]
 

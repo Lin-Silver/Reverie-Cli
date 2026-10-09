@@ -13,6 +13,7 @@ class RunControl:
         self._condition = threading.Condition()
         self._paused = False
         self._messages: deque[dict] = deque()
+        self._cancel_callbacks: set[Callable[[], None]] = set()
         self.emit = emit
 
     def steer(self, content: Any, display: str) -> str:
@@ -23,10 +24,26 @@ class RunControl:
         return identity
 
     def stop(self) -> None:
-        self.cancelled.set()
         with self._condition:
+            self.cancelled.set()
+            callbacks = tuple(self._cancel_callbacks)
+            self._cancel_callbacks.clear()
             self._condition.notify_all()
+        for callback in callbacks:
+            callback()
         self.emit({"type": "run.control", "state": "stopping"})
+
+    def on_cancel(self, callback: Callable[[], None]) -> Callable[[], None]:
+        with self._condition:
+            cancelled = self.cancelled.is_set()
+            if not cancelled:
+                self._cancel_callbacks.add(callback)
+        if cancelled:
+            callback()
+        def release() -> None:
+            with self._condition:
+                self._cancel_callbacks.discard(callback)
+        return release
 
     def pause(self, paused: bool) -> None:
         with self._condition:

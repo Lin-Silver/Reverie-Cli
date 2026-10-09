@@ -62,6 +62,7 @@ _SETTING_SECTIONS: Dict[str, str] = {
     "active_model_index": "Model",
     "thinking_output_style": "Reasoning",
     "thinking_tool": "Reasoning",
+    "api_compatibility": "Reasoning",
     "theme": "Appearance",
     "show_status_line": "Appearance",
     "tool_output_style": "Appearance",
@@ -205,6 +206,17 @@ def get_setting_items(
                 "thinking rather than as a tool result."
             ),
             "command": "/setting thinking-tool on|off",
+        },
+        {
+            "name": "Broad API Compatibility",
+            "key": "api_compatibility",
+            "kind": "bool",
+            "experimental": True,
+            "description": (
+                "Experimental. Use non-streaming text instructions for gateways that ignore native tools. "
+                "CLI tools keep their normal permissions. Text only; select the provider's working API format."
+            ),
+            "command": "/setting api-compatibility on|off",
         },
         {
             "name": "Stream Responses",
@@ -374,7 +386,7 @@ def apply_workspace_mode_setting(config_manager: Any, enabled: bool) -> Tuple[bo
 
 # Boolean settings that change how the running agent is wired, not just how it
 # renders: flipping one has to rebuild the system prompt and tool schemas.
-_BOOL_KEYS_REQUIRING_REINIT = frozenset({"thinking_tool"})
+_BOOL_KEYS_REQUIRING_REINIT = frozenset({"thinking_tool", "api_compatibility"})
 
 
 def _coerce_choice(value: Any, choices: Iterable[Any]) -> Tuple[bool, Any]:

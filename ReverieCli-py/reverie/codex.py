@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 from .diagnostics import report_suppressed_exception
 from .prompt_cache import apply_openai_prompt_cache
+from .provider_transport import provider_post
 from .security_utils import write_json_secure
 from .version import __version__
 
@@ -837,9 +838,7 @@ def refresh_codex_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        import requests
-
-        response = requests.post(
+        response = provider_post(
             CODEX_TOKEN_URL,
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -1045,6 +1044,9 @@ def _codex_content_parts(content: Any, *, role: str) -> List[Dict[str, Any]]:
             if text:
                 parts.append({"type": text_type, "text": text})
             continue
+        if part_type == "input_audio":
+            parts.append({"type": text_type, "text": "MCP audio was returned; this Responses transport does not accept audio input."})
+            continue
         if part_type != "image_url" or role == "assistant":
             continue
         image_payload = part.get("image_url")
@@ -1166,6 +1168,10 @@ def parse_codex_sse_event(data_str: str, state: Optional[Dict[str, Any]] = None)
     event_type = str(payload.get("type", "")).strip()
     events: List[Dict[str, Any]] = []
 
+    response_usage = (payload.get("response") or {}).get("usage")
+    if isinstance(response_usage, dict):
+        events.append({"type": "usage", "usage": response_usage})
+
     if event_type == "response.created":
         response = payload.get("response") or {}
         state["response_id"] = str(response.get("id", "")).strip()
@@ -1188,10 +1194,6 @@ def parse_codex_sse_event(data_str: str, state: Optional[Dict[str, Any]] = None)
         reason = _safe_string(details.get("reason") if isinstance(details, dict) else details)
         events.append({"type": "finish", "reason": reason or "incomplete", "response": response})
         return events, state
-
-    response_usage = payload.get("response", {}).get("usage")
-    if isinstance(response_usage, dict):
-        events.append({"type": "usage", "usage": response_usage})
 
     if event_type in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
         # Codex streams a summary; other Responses gateways stream the raw

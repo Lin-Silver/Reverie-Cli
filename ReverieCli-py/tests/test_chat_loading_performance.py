@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 from reverie.sdk_bridge import ReverieSdkBridge
 from reverie.session.manager import SessionManager
+from reverie.skills_manager import SkillsManager
 
 
 def make_bridge(tmp_path: Path):
@@ -14,6 +15,9 @@ def make_bridge(tmp_path: Path):
     interface = SimpleNamespace(
         agent=agent, session_manager=manager, _sync_workspace_memory_message=Mock(),
         config_manager=SimpleNamespace(load=lambda: SimpleNamespace(active_model=None)), _init_agent=Mock(),
+        project_data_dir=tmp_path / "state",
+        skills_manager=SkillsManager(project_root=tmp_path, app_root=tmp_path / "app"),
+        _refresh_agent_prompt_guidance=Mock(),
     )
     bridge = ReverieSdkBridge()
     bridge.project_root = tmp_path.resolve()

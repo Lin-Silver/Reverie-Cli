@@ -268,6 +268,12 @@ def _reasoning_metadata(source: str, model: Dict[str, Any], provider_config: Dic
 
 def _normalized_model(source: str, raw_model: Dict[str, Any], provider_config: Dict[str, Any]) -> Dict[str, Any]:
     model = dict(raw_model)
+    if source == "custom":
+        from .custom_providers import get_custom_provider_model_context_limit
+
+        saved_limit = get_custom_provider_model_context_limit(provider_config, model.get("id"))
+        if saved_limit:
+            model["context_length"] = saved_limit
     model.setdefault("display_name", str(model.get("id") or model.get("model") or "Model"))
     model.setdefault("description", "")
     model.setdefault("context_length", None)

@@ -511,8 +511,15 @@ def _json_safe_value(value: Any) -> Any:
     return str(value)
 
 
-def _build_batch_prompt_rules() -> str:
+def _build_batch_prompt_rules(*, read_only_review: bool = False) -> str:
     """Runtime-only rules for one-shot `-p/--prompt` execution."""
+    if read_only_review:
+        return """
+## Read-Only Review
+- Inspect the supplied diff and return the requested review format in this run.
+- Do not modify files, run commands, or continue into implementation or document generation.
+- Report missing evidence as a review limitation. File edits and test execution are not completion requirements for this review.
+""".strip()
     return """
 ## Non-Interactive Prompt Mode
 - This run was started through Reverie's one-shot prompt mode. There will be no follow-up turn.
@@ -2308,7 +2315,7 @@ class ReverieInterface:
         if active_source == "codex":
             return True, ""
 
-        if active_source in {"standard", "aihubmix", "agnes", "sensenova"}:
+        if active_source in {"standard", "custom", "aihubmix", "agnes", "sensenova"}:
             if bool(getattr(active_model, "supports_vision", False)):
                 return True, ""
             return False, f"{model_name} is not configured with supports_vision=true."
@@ -2335,7 +2342,7 @@ class ReverieInterface:
             if selected:
                 return get_nvidia_model_vision_modalities(selected.get("id"))
             return []
-        if active_source in {"codex", "standard", "aihubmix", "agnes", "sensenova"}:
+        if active_source in {"codex", "standard", "custom", "aihubmix", "agnes", "sensenova"}:
             active_model = getattr(config, "active_model", None)
             if active_model is None:
                 models = list(getattr(config, "models", []) or [])
@@ -4152,6 +4159,7 @@ class ReverieInterface:
         desktop_attachments: Optional[List[Dict[str, Any]]] = None,
         run_control: Any = None,
         read_only_review: bool = False,
+        goal_context: str = "",
     ) -> PromptRunResult:
         """Run one prompt non-interactively and return a structured result."""
         prompt_text = str(message or "").strip()
@@ -4216,6 +4224,10 @@ class ReverieInterface:
         )
 
         try:
+            if not fresh_session and (
+                self.session_manager.get_current_session() or self.session_manager.restore_last_session()
+            ):
+                self._restore_session_skill_pins()
             self._init_agent(config_override=base_config, persist_config_changes=False)
             if not self.agent:
                 return PromptRunResult(
@@ -4231,8 +4243,9 @@ class ReverieInterface:
                 )
 
             self.agent.additional_rules = "\n\n".join(
-                part for part in [self.agent.additional_rules, _build_batch_prompt_rules()] if str(part).strip()
+                part for part in [self.agent.additional_rules, _build_batch_prompt_rules(read_only_review=read_only_review)] if str(part).strip()
             )
+            self.agent.goal_context = goal_context
             self.agent.system_prompt = self._build_system_prompt(
                 model_name=self.agent.model_display_name,
                 additional_rules=self.agent.additional_rules,
@@ -4256,6 +4269,7 @@ class ReverieInterface:
                 _emit({"type": "ui.event", "event": dict(event)})
 
             self.agent.tool_executor.update_context('ui_event_handler', _capture_ui_event)
+            self.agent.tool_executor.update_context('context_usage_handler', lambda usage: _emit({"type": "context.usage", "usage": usage}))
             self.agent.tool_executor.update_context('get_status_live', lambda: None)
             self.agent.tool_executor.update_context('pause_stream_input_capture', lambda: None)
             self.agent.tool_executor.update_context('resume_stream_input_capture', lambda: None)
@@ -4287,6 +4301,7 @@ class ReverieInterface:
             )
             self._sync_workspace_memory_message(session)
             self.agent.set_history(session.messages)
+            session.metadata["pinned_skills"] = self.skills_manager.pinned_names()
             session.metadata["prompt_run"] = {
                 "state": "running", "prompt": prompt_text,
                 "started_at": started_at.isoformat(),
@@ -4344,7 +4359,8 @@ class ReverieInterface:
                         _emit({"type": "reasoning.delta", "text": chunk})
                     else:
                         output_chunks.append(chunk)
-                        _emit({"type": "assistant.delta", "text": chunk})
+                        if not chunk.startswith("Error processing message:"):
+                            _emit({"type": "assistant.delta", "text": chunk})
 
                 _persist_history_if_changed()
                 turn_thinking = "".join(thinking_chunks).strip()
@@ -4376,7 +4392,7 @@ class ReverieInterface:
                     error_text = turn_error
                     break
 
-                if resume or auto_followup_count >= 3:
+                if read_only_review or resume or auto_followup_count >= 3:
                     break
 
                 followup_message = _build_prompt_followup_message(
@@ -4412,7 +4428,7 @@ class ReverieInterface:
 
             thinking_text = "\n\n".join(part for part in thinking_parts if part).strip()
 
-            if not error_text and normalize_mode(base_config.mode) == "writer":
+            if not error_text and not read_only_review and normalize_mode(base_config.mode) == "writer":
                 writer_progress = _writer_project_progress(self.project_root, prompt_text)
                 if writer_progress and (
                     not writer_progress.get("exists")
@@ -4499,8 +4515,10 @@ class ReverieInterface:
             return result
         finally:
             if self.agent is not None:
+                self.agent.goal_context = ""
                 self.agent.desktop_control = None
                 self.agent.tool_executor.update_context('desktop_run_control', None)
+                self.agent.tool_executor.update_context('context_usage_handler', None)
                 self.agent.tool_executor.update_context('desktop_read_only_review', False)
             self._runtime_config_override = previous_override
 
@@ -4658,6 +4676,7 @@ class ReverieInterface:
 
     def _init_session(self) -> None:
         session, resumed = self.session_manager.ensure_session()
+        self._restore_session_skill_pins()
         self._sync_workspace_memory_message(session)
         try:
             self.workspace_stats_manager.update_session_snapshot(
@@ -4696,6 +4715,12 @@ class ReverieInterface:
             )
         self._refresh_command_context()
 
+    def _restore_session_skill_pins(self) -> None:
+        session = self.session_manager.get_current_session()
+        names = (session.metadata or {}).get('pinned_skills', []) if session else []
+        self.skills_manager.restore_pinned_skills(names if isinstance(names, list) else [])
+        self._refresh_agent_prompt_guidance()
+
     def _get_app_context(self) -> dict:
         return {
             'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
@@ -4722,6 +4747,7 @@ class ReverieInterface:
             'reinit_agent': self._init_agent,
             'apply_display_preferences': self._apply_display_preferences,
             'refresh_agent_prompt_guidance': self._refresh_agent_prompt_guidance,
+            'restore_session_skill_pins': self._restore_session_skill_pins,
             'start_mcp_background_discovery': self._start_background_agent_enrichment,
             'ensure_context_engine': self.ensure_context_engine,
             'run_full_index': self._run_context_indexing_with_progress,

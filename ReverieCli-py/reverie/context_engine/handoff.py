@@ -7,8 +7,6 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-import requests
-
 from ..diagnostics import report_suppressed_exception
 from ..prompt_cache import (
     apply_anthropic_prompt_cache,
@@ -16,6 +14,7 @@ from ..prompt_cache import (
     call_with_prompt_cache_fallback,
 )
 from ..request_identity import apply_reverie_client_identity
+from ..provider_transport import provider_post
 from .compressor import (
     _apply_nvidia_request_payload_defaults,
     _collect_codex_summary_text,
@@ -624,7 +623,7 @@ def _request_handoff_summary_text(
             stream=True,
             request_url=request_url,
         )
-        response = requests.post(
+        response = provider_post(
             request_url,
             headers=headers,
             json=payload,

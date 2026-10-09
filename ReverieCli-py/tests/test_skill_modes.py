@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from reverie.session.manager import SessionManager
 from reverie.sdk_bridge import ReverieSdkBridge
 from reverie.skills_manager import SkillsManager
 from reverie.tools.mode_switch import ModeSwitchTool
@@ -26,7 +27,11 @@ def test_restricted_modes_keep_discovery_pins_and_actionable_guidance(tmp_path, 
         assert "switch_mode" in text and "/mode reverie" in text
     assert manager.pinned_names() == ["photo-to-3d"]
     bridge = ReverieSdkBridge()
-    bridge.interface = SimpleNamespace(skills_manager=manager)
+    sessions = SessionManager(tmp_path / "data")
+    session = sessions.create_session()
+    session.metadata["pinned_skills"] = manager.pinned_names()
+    sessions.save_session(session)
+    bridge.interface = SimpleNamespace(skills_manager=manager, session_manager=sessions, project_data_dir=tmp_path / "data", agent=None)
     assert bridge.skills_payload()["mode"] == mode
     assert bridge.skills_payload()["pinned"]["names"] == ["photo-to-3d"]
     if mode == "writer":

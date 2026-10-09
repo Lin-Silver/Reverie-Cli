@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..diagnostics import report_suppressed_exception
+from .search import SessionSearchIndex
 from .roles import (
     STORED_ASSISTANT_ROLE,
     from_stored_messages,
@@ -139,6 +140,7 @@ class SessionManager:
 
         self._ensure_dirs()
         self._current_session: Optional[Session] = None
+        self._current_session_mtime = 0
         self._session_index: Dict[str, Dict[str, Any]] = self._load_session_index()
         self._session_index_dirty = False
         # Session file id -> mtime already reflected in `self._session_index`.
@@ -534,11 +536,16 @@ class SessionManager:
         session_path = self.sessions_dir / f"{session.id}.json"
         payload = session.to_dict()
         self._write_json_atomic(session_path, payload)
-        self._stamp_session_file_mtime(session.id)
+        written_mtime = self._stamp_session_file_mtime(session.id)
+        if self._current_session is not None and self._current_session.id == session.id:
+            self._current_session_mtime = written_mtime if self._current_session is session else 0
         self._session_index[session.id] = self._session_index_entry(session)
         # Deferred: the transcript itself is already durable above, and the index
         # entry is reconstructible from it. Flushed by the observable operations.
         self._save_session_index(force=False)
+        search_index = getattr(self, "_search_index", None)
+        if search_index is not None:
+            search_index.update(session.id, payload, self._scanned_session_files[session.id])
         # Returned so a live memory-index refresh can reuse this exact payload
         # instead of reading the file back off disk and re-parsing it.
         return payload
@@ -732,7 +739,9 @@ class SessionManager:
             # Already active. Re-reading and re-parsing the transcript would only
             # matter if another process wrote to it since, and the mtime settles
             # that without touching the contents.
-            known_mtime = int(self._scanned_session_files.get(session_id) or 0)
+            # Directory/index scans observe external writes without refreshing
+            # the active transcript object. Its revision must stay independent.
+            known_mtime = self._current_session_mtime
             try:
                 on_disk_mtime = session_path.stat().st_mtime_ns
             except OSError:
@@ -760,6 +769,7 @@ class SessionManager:
             refreshed_index_entry = self._session_index_entry(session)
 
             self._current_session = session
+            self._current_session_mtime = self._scanned_session_files.get(session_id, 0)
             self._save_state(session.id)
             if self._session_index.get(session.id) != refreshed_index_entry:
                 self._session_index[session.id] = refreshed_index_entry
@@ -783,6 +793,9 @@ class SessionManager:
             self._name_upgrade_scanned.pop(session_id, None)
             self._save_session_index()
             self._refresh_memory_index_for_session(session_id)
+            search_index = getattr(self, "_search_index", None)
+            if search_index is not None:
+                search_index.update(session_id, None)
 
             if self._current_session and self._current_session.id == session_id:
                 self._current_session = None
@@ -850,6 +863,7 @@ class SessionManager:
         """Set the current session"""
         session.metadata = self._merge_scope_metadata(session.metadata)
         self._current_session = session
+        self._current_session_mtime = 0
         self._save_state(session.id)
 
     def update_messages(self, messages: List[Dict]) -> None:
@@ -877,6 +891,8 @@ class SessionManager:
             messages = messages[:max(0, min(int(message_count), len(messages)))]
         forked = self.create_session(name or f"{source.name} (fork)")
         forked.messages = messages
+        if "pinned_skills" in source.metadata:
+            forked.metadata["pinned_skills"] = list(source.metadata["pinned_skills"])
         forked.metadata.update({"forked_from": source.id, "forked_message_count": len(messages)})
         self.save_session(forked)
         return forked
@@ -896,43 +912,29 @@ class SessionManager:
     def search_sessions(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Search message text across workspace sessions."""
         needle = str(query or "").strip().lower()
-        if not needle:
+        if not needle or limit <= 0:
             return []
-        results: List[Dict[str, Any]] = []
-        for info in self.list_sessions():
-            if needle in info.name.lower():
-                results.append({
-                    "session_id": info.id,
-                    "session_name": info.name,
-                    "message_index": -1,
-                    "role": "session",
-                    "text": info.name,
-                })
-                if len(results) >= limit:
-                    return results
-            path = self.sessions_dir / f"{info.id}.json"
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            for index, message in enumerate(data.get("messages", []) or []):
-                if not isinstance(message, dict):
+        if not hasattr(self, "_search_index"):
+            self._search_index = SessionSearchIndex(self.base_dir / f"session_search_{self.workspace_id}.sqlite3")
+        stamps = self._search_index.stamps()
+        def changes():
+            live = set()
+            for info in self.list_sessions():
+                live.add(info.id)
+                mtime = self._scanned_session_files.get(info.id, 0)
+                if stamps.get(info.id) == mtime:
                     continue
-                content = message.get("content", "")
-                content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
-                reasoning_text = str(message.get("reasoning_content") or "")
-                call_names = " ".join(
-                    str((call.get("function") or {}).get("name") or "")
-                    for call in (message.get("tool_calls") or [])
-                    if isinstance(call, dict)
-                )
-                searchable = "\n".join(part for part in (content_text, reasoning_text, call_names) if part)
-                if needle in searchable.lower():
-                    preview = content_text or reasoning_text or call_names
-                    results.append({"session_id": info.id, "session_name": info.name, "message_index": index, "role": from_stored_role(message.get("role", "")), "text": preview[:500]})
-                    if len(results) >= limit:
-                        return results
-        return results
+                path = self.sessions_dir / f"{info.id}.json"
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if isinstance(data, dict) and self._belongs_to_workspace(data):
+                    yield info.id, data, mtime
+            for session_id in stamps.keys() - live:
+                yield session_id, None, 0
+        self._search_index.update_many(changes())
+        return self._search_index.search(needle, min(200, int(limit)))
 
     def export_current_session(self, output_path: Path, format_name: str = "markdown") -> Path:
         """Export the active session to Markdown or JSON."""
@@ -1009,7 +1011,9 @@ class SessionManager:
             metadata=self._merge_scope_metadata({
                 'rotated_from': self._current_session.id if self._current_session else None,
                 'rotation_reason': reason,
-                'has_working_memory': bool(working_memory)
+                'has_working_memory': bool(working_memory),
+                **({'pinned_skills': list(self._current_session.metadata['pinned_skills'])}
+                   if self._current_session and 'pinned_skills' in self._current_session.metadata else {}),
             })
         )
 

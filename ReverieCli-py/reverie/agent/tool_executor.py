@@ -1196,7 +1196,15 @@ class ToolExecutor:
                         "Writer project files under novels/ and novel/ are transaction-managed. "
                         "Use serial_novel actions instead of generic file editing."
                     )
-        before_snapshots = self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))
+        # Mixed-operation built-ins must not snapshot the entire workspace just
+        # to list a directory or view a file. Keep all write operations guarded.
+        read_only_call = bool(getattr(tool, "read_only", False)) or (
+            type(tool).__module__.startswith("reverie.tools.") and (
+                tool.name == "file_ops" and normalized_arguments.get("operation") in {"read", "list", "exists", "info"}
+                or tool.name == "str_replace_editor" and normalized_arguments.get("command") == "view"
+            )
+        )
+        before_snapshots = {} if read_only_call else self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))
         self._record_memory_event(
             "tool_call",
             {
@@ -1261,7 +1269,7 @@ class ToolExecutor:
         if (
             isinstance(shadow_guard, ShadowGitManager)
             and needs_workspace_checkpoint
-            and not bool(getattr(tool, "read_only", False))
+            and not read_only_call
         ):
             for raw_path in self._path_like_argument_values(normalized_arguments):
                 try:
@@ -1311,7 +1319,7 @@ class ToolExecutor:
             if (
                 isinstance(shadow_guard, ShadowGitManager)
                 and needs_workspace_checkpoint
-                and not bool(getattr(tool, "read_only", False))
+                and not read_only_call
             ):
                 try:
                     before_checkpoint = shadow_guard.checkpoint(

@@ -4,6 +4,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from reverie.agent.agent import THINKING_END_MARKER, THINKING_START_MARKER, encode_stream_event
 from reverie.__main__ import _decode_prompt_bytes, _resolve_prompt_text, main
 from reverie.cli.interface import (
@@ -258,6 +260,40 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     assert "harness_report" in serialized
 
 
+@pytest.mark.parametrize("mode", ["reverie", "reverie-atlas", "writer"])
+def test_read_only_review_does_not_require_edits_or_generate_followups(tmp_path, monkeypatch, mode):
+    interface = ReverieInterface(tmp_path, headless=True)
+    config = Config(models=[ModelConfig(model="fake-model", model_display_name="Fake Model", base_url="https://example.com/v1", api_key="test-key")], active_model_index=0, mode=mode)
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+    monkeypatch.setattr("reverie.cli.interface._writer_project_progress", lambda *args: pytest.fail("A review must not require a completed Writer project."))
+    calls = []
+
+    class ReviewAgent(_FakeAgent):
+        def process_message(self, user_message, **kwargs):
+            calls.append(user_message)
+            assert self.tool_executor.context["desktop_read_only_review"] is True
+            assert "## Read-Only Review" in self.additional_rules
+            assert "actually edit the workspace files" not in self.additional_rules
+            self.messages.extend([{"role": "user", "content": user_message}, {"role": "assistant", "content": "[]"}])
+            yield "[]"
+
+    monkeypatch.setattr(interface, "_init_agent", lambda **kwargs: setattr(interface, "agent", ReviewAgent()))
+    events = []
+    result = interface.run_prompt_once("Read-only review of README.md. Return only JSON findings.", mode_override=mode, read_only_review=True, no_index=True, event_callback=events.append)
+
+    assert result.success is True
+    assert result.output_text == "[]"
+    assert result.auto_followup_count == 0
+    assert len(calls) == 1
+    assert not any(event["type"] == "run.auto_followup" for event in events)
+    assert interface.session_manager.get_current_session().metadata["prompt_run"]["run_type"] == "review"
+    assert interface.agent.tool_executor.context["desktop_read_only_review"] is False
+
+
 def test_interrupted_prompt_resumes_without_another_user_message(tmp_path, monkeypatch):
     interface = ReverieInterface(tmp_path, headless=True)
     config = Config(models=[ModelConfig(model="fake-model", model_display_name="Fake Model", base_url="https://example.com/v1", api_key="test-key")], active_model_index=0)
@@ -287,8 +323,11 @@ def test_interrupted_prompt_resumes_without_another_user_message(tmp_path, monke
 
     monkeypatch.setattr(interface, "_init_agent", lambda **_kwargs: setattr(interface, "agent", Agent()))
     session = interface.session_manager.create_session()
-    first = interface.run_prompt_once("Build the site", fresh_session=False)
+    events = []
+    first = interface.run_prompt_once("Build the site", fresh_session=False, event_callback=events.append)
     assert first.success is False
+    assert first.error == "Error processing message: provider stream disconnected"
+    assert not any(event.get("type") == "assistant.delta" for event in events)
     saved = interface.session_manager.load_session(session.id)
     assert saved.metadata["prompt_run"]["state"] == "interrupted"
     assert saved.metadata["task_list"][0]["name"] == "Build site"

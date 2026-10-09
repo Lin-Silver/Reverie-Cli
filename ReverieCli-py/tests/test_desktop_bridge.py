@@ -44,6 +44,28 @@ def test_kernel_info_uses_build_arch_when_windows_machine_is_empty(monkeypatch, 
     assert json.loads(capsys.readouterr().out)["arch"] == expected
 
 
+@pytest.mark.parametrize("provider,surface", [("openai-chat", "chat"), ("openai-responses", "responses"), ("anthropic", "messages")])
+def test_worker_preparation_initializes_sdk_without_sending_a_prompt(tmp_path, provider, surface):
+    from reverie.sdk_bridge import ReverieSdkBridge
+    calls = []
+    class Client:
+        def __getattr__(self, name):
+            calls.append(name)
+            return SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: pytest.fail("preparation sent a request")))
+    interface = SimpleNamespace(
+        _prime_context_engine_background=lambda: None,
+        config_manager=SimpleNamespace(load=lambda: SimpleNamespace(active_model=object())),
+        _init_agent=lambda **kwargs: calls.append(kwargs),
+        agent=SimpleNamespace(provider=provider, _ensure_client=lambda: Client()),
+    )
+    bridge = ReverieSdkBridge.__new__(ReverieSdkBridge)
+    bridge.project_root = tmp_path
+    bridge.ensure_interface = lambda root: interface
+    bridge.desktop_bootstrap_payload = lambda: {}
+    bridge.dispatch({"action": "initialize", "payload": {"deferPayloads": True, "prepareModel": True}})
+    assert calls == [{"persist_config_changes": False, "defer_runtime_enrichment": True}, surface]
+
+
 def test_sdk_bridge_deferred_initialize_skips_heavy_desktop_payloads(tmp_path: Path) -> None:
     from reverie.sdk_bridge import ReverieSdkBridge
 
@@ -110,6 +132,30 @@ def test_desktop_bootstrap_payload_keeps_a_complete_safe_state_shape() -> None:
     assert state["skills"]["pinned"]["max"] == 4
     assert state["commands"]["items"] == []
     assert state["recovery"]["operations"] == []
+
+
+def test_output_mode_setting_saves_without_refreshing_heavy_desktop_payloads(tmp_path: Path) -> None:
+    from reverie.config import ConfigManager
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    manager = ConfigManager(tmp_path)
+    manager.save(Config(stream_responses=True))
+    interface = SimpleNamespace(config_manager=manager, rules_manager=SimpleNamespace(get_rules=lambda: []), runtime_plugin_manager=None, agent=None)
+    bridge = ReverieSdkBridge.__new__(ReverieSdkBridge)
+    bridge.ensure_interface = lambda: interface
+    bridge._refresh_plugin_dependents = lambda: pytest.fail("output mode must not refresh plugins")
+    bridge.model_sources_payload = lambda: pytest.fail("output mode must not reload model catalogs")
+    bridge.workspace_payload = lambda: pytest.fail("output mode must not reload workspace context")
+
+    response = bridge.dispatch({"id": "output-mode", "action": "setSetting", "payload": {"key": "stream_responses", "value": False}})
+    assert response["success"] is True
+    assert manager.load().stream_responses is False
+    assert next(item for item in response["settings"]["items"] if item["key"] == "stream_responses")["value"] is False
+    assert "models" not in response and "workspace" not in response
+
+    rejected = bridge.dispatch({"id": "invalid-mode", "action": "setSetting", "payload": {"key": "stream_responses", "value": "invalid"}})
+    assert rejected["success"] is False
+    assert manager.load().stream_responses is False
 
 
 def _source(payload: dict, source_id: str) -> dict:
@@ -345,6 +391,10 @@ def test_model_selection_updates_model_specific_reasoning(monkeypatch) -> None:
         return [dict(item) for item in catalog]
 
     monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", offline_catalog)
+
+    monkeypatch.setattr("reverie.codex.get_codex_model_catalog", lambda: [{
+        "id": "gpt-5.6-sol", "display_name": "Test Codex model", "reasoning_levels": ["low", "medium", "high"],
+    }])
 
     config = Config()
     selected = apply_model_selection(config, "codex", "gpt-5.6-sol", "high")
@@ -778,6 +828,9 @@ def test_desktop_payload_reports_which_models_still_owe_a_context_limit() -> Non
     assert provider["model_context_limits"] == {"kiro-pro": 256000}
     models = {item["id"]: item for item in provider["models"]}
     assert models["kiro-pro"]["context_limit"] == 256000
+    assert models["kiro-pro"]["context_length"] == config.active_model.max_context_tokens
+    active_catalog = _source(build_model_sources_payload(config), "custom")["models"]
+    assert next(item for item in active_catalog if item["id"] == "kiro-pro")["context_length"] == 256000
     assert models["kiro-pro"]["needs_context_limit"] is False
     # Never chosen, so the desktop knows to ask once before using it.
     assert models["kiro-mini"]["context_limit"] == 0
@@ -1368,28 +1421,33 @@ def test_sdk_bridge_resume_prompt_dispatches_without_prompt_text(tmp_path: Path)
     from reverie.sdk_bridge import ReverieSdkBridge, _BACKGROUND_DISPATCH_ACTIONS
 
     captured = {}
-    session = SimpleNamespace(id="session-1")
+    session = SimpleNamespace(id="session-1", messages=[{"role": "user", "content": "Existing turn"}])
 
     def run_prompt_once(message, **kwargs):
         captured.update(message=message, kwargs=kwargs)
+        kwargs["event_callback"]({"type": "run.started"})
         return SimpleNamespace(to_dict=lambda: {"success": True, "session_id": session.id})
 
     interface = SimpleNamespace(
-        session_manager=SimpleNamespace(load_session=lambda session_id: session if session_id == session.id else None),
+        session_manager=SimpleNamespace(load_session=lambda session_id: session if session_id == session.id else None, get_current_session=lambda: session),
         run_prompt_once=run_prompt_once,
     )
     bridge = ReverieSdkBridge.__new__(ReverieSdkBridge)
+    bridge._sync_skill_pins = lambda interface: None
     bridge.project_root = tmp_path
     bridge.ensure_interface = lambda project_root=None: interface
     bridge.sessions_payload = lambda: {"current_session_id": session.id, "items": []}
     bridge.recovery_payload = lambda: {"summary": {}, "checkpoints": [], "operations": []}
     bridge._run_lock = threading.Lock()
+    emitted = []
+    bridge._emit_request_event = lambda request_id, event: emitted.append(event)
     response = bridge.dispatch({"id": "continue", "action": "resumePrompt", "payload": {"sessionId": session.id}})
 
     assert "resumePrompt" in _BACKGROUND_DISPATCH_ACTIONS
     assert captured["message"] == ""
     assert captured["kwargs"]["resume"] is True
     assert response["type"] == "prompt.result"
+    assert emitted[0]["history_message_count"] == 1
 
 
 def test_get_context_usage_initializes_the_agent_before_reading(tmp_path: Path) -> None:
@@ -1448,6 +1506,84 @@ def test_get_context_usage_initializes_the_agent_before_reading(tmp_path: Path) 
     assert response["type"] == "context.usage"
     assert response["usage"] == {"total_tokens": 6400, "max_tokens": 128000, "percentage": 5.0}
     assert bridge.interface.agent.history == session.messages
+
+
+def test_context_usage_counts_pending_input_without_adding_it_to_session_history(tmp_path, monkeypatch):
+    from reverie.sdk_bridge import ReverieSdkBridge
+    from reverie import desktop_input
+
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    session = manager.create_session("Draft usage")
+    session.messages = [{"role": "user", "content": "saved"}]
+    manager.save_session(session)
+    captured = {}
+
+    class Agent:
+        def set_history(self, messages):
+            self.history = messages
+
+        def _build_messages(self, read_only=False):
+            assert read_only
+            return [{"role": "system", "content": "prompt"}, *self.history]
+
+        def describe_context_usage(self, request_messages=None):
+            captured["messages"] = request_messages
+            return {"max_tokens": 200000, "total_tokens": 123}
+
+    def prepare(interface, config, text, attachments):
+        captured["input"] = (text, attachments)
+        return "draft with real file content", []
+
+    monkeypatch.setattr(desktop_input, "prepare_desktop_input", prepare)
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path.resolve()
+    bridge.interface = SimpleNamespace(session_manager=manager, agent=Agent(), config_manager=SimpleNamespace(load=lambda: Config()))
+    response = bridge.dispatch({"action": "getContextUsage", "payload": {"sessionId": session.id, "history": [{"role": "user", "content": "truncated UI snapshot"}], "draftText": "draft", "attachments": [{"relativePath": "file.txt"}]}})
+    assert response["usage"]["total_tokens"] == 123
+    assert captured["input"] == ("draft", [{"relativePath": "file.txt"}])
+    assert captured["messages"][-1] == {"role": "user", "content": "draft with real file content"}
+    assert captured["messages"][1] == {"role": "user", "content": "saved"}
+    assert manager.get_current_session().messages == [{"role": "user", "content": "saved"}]
+
+
+@pytest.mark.parametrize("live_flag", [True, False])
+def test_live_context_reads_worker_tool_results_without_replacing_history(tmp_path, live_flag):
+    from reverie.sdk_bridge import ReverieSdkBridge
+
+    manager = SessionManager(tmp_path / "state", project_root=tmp_path)
+    session = manager.create_session("Live usage")
+    captured = {}
+
+    class Agent:
+        def set_history(self, messages):
+            raise AssertionError("A live statistics read must not replace worker history")
+
+        def _build_messages(self, read_only=False):
+            assert read_only
+            return [{"role": "user", "content": "actual request"}, {"role": "tool", "content": "full real tool result"}]
+
+        def describe_context_usage(self, request_messages=None):
+            captured["messages"] = request_messages
+            return {"max_tokens": 200000, "total_tokens": 123}
+
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path.resolve()
+    bridge._run_control = object()
+    bridge.interface = SimpleNamespace(session_manager=manager, agent=Agent(), config_manager=SimpleNamespace(load=lambda: Config()))
+    bridge.dispatch({"action": "getContextUsage", "payload": {"sessionId": session.id, "liveRead": live_flag, "history": [{"role": "user", "content": "stale UI snapshot"}], "liveAssistantText": "stream tail"}})
+    assert captured["messages"] == [{"role": "user", "content": "actual request"}, {"role": "tool", "content": "full real tool result"}, {"role": "assistant", "content": "stream tail"}]
+
+
+@pytest.mark.parametrize("vision", [True, False])
+def test_custom_provider_visual_input_matches_the_declared_runtime_capability(vision):
+    from reverie.cli.interface import ReverieInterface
+
+    interface = ReverieInterface.__new__(ReverieInterface)
+    config = SimpleNamespace(active_model_source="custom", active_model=SimpleNamespace(model="claude-opus-4-8", model_display_name="Claude", supports_vision=vision))
+    allowed, reason = interface._can_attach_inline_images(config)
+    assert allowed is vision
+    assert interface._current_inline_media_modalities(config) == (["image"] if vision else [])
+    assert bool(reason) is not vision
 
 
 def test_renaming_or_deleting_a_background_session_preserves_the_active_session(tmp_path: Path) -> None:
@@ -1956,11 +2092,15 @@ def test_reloading_the_active_session_skips_a_redundant_parse(tmp_path: Path) ->
 
         # An outside write invalidates the fingerprint, so the transcript is
         # re-read rather than served stale.
-        manager._scanned_session_files[session.id] = 0
+        session_path = manager.sessions_dir / f"{session.id}.json"
+        changed = session.to_dict()
+        changed["messages"].append({"role": "assistant", "content": "External worker reply"})
+        session_path.write_text(json.dumps(changed), encoding="utf-8")
+        manager.list_sessions()
         reloaded = manager.load_session(session.id)
     finally:
         json.load = original
 
     assert reloaded is not None
-    assert [message["content"] for message in reloaded.messages] == ["Ask", "Answer"]
+    assert [message["content"] for message in reloaded.messages] == ["Ask", "Answer", "External worker reply"]
     assert any(str(session.id) in name for name in loads)

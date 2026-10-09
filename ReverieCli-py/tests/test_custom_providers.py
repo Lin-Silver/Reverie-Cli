@@ -1099,7 +1099,11 @@ def test_the_chat_probe_sends_the_smallest_valid_body_for_each_format(
 
     def fake_post(url, *, headers, json, timeout):
         captured.append({"url": url, "headers": dict(headers), "json": json})
-        return FakeResponse({"ok": True})
+        return FakeResponse({
+            "openai-chat": {"choices": [{"message": {"content": "Hi"}}]},
+            "openai-responses": {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Hi"}]}]},
+            "anthropic": {"content": [{"type": "text", "text": "Hi"}]},
+        }[provider_format])
 
     monkeypatch.setattr(cp.requests, "post", fake_post)
 
@@ -1111,6 +1115,21 @@ def test_the_chat_probe_sends_the_smallest_valid_body_for_each_format(
     assert set(captured[0]["json"]) == expected_keys
     assert captured[0]["json"]["model"] == "kiro-pro"
     assert captured[0]["headers"]["Content-Type"] == "application/json"
+
+
+@pytest.mark.parametrize("provider_format,body", [
+    ("openai-chat", {"choices": []}),
+    ("openai-chat", {"choices": [{"message": {"content": "   "}}]}),
+    ("openai-chat", {"choices": [{"message": {"content": [{"type": "text", "text": 123}]}}]}),
+    ("anthropic", {"content": [{"type": "thinking", "thinking": "hidden"}]}),
+    ("openai-responses", {"output": []}),
+    ("openai-responses", {"output_text": 123}),
+])
+def test_chat_probe_rejects_empty_or_malformed_success_responses(monkeypatch, provider_format, body):
+    monkeypatch.setattr(cp.requests, "post", lambda *args, **kwargs: FakeResponse(body))
+    result = probe_custom_provider_chat(_xkiro_record(format=provider_format))
+    assert result.status == "error"
+    assert "no valid text answer" in result.detail
 
 
 def test_the_chat_probe_requires_a_model_selection(monkeypatch) -> None:

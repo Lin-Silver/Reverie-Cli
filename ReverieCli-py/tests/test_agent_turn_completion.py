@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import sys
 import types
+import pytest
 from types import SimpleNamespace
+from reverie.skills_manager import SkillsManager
 
 from reverie.agent.agent import (
     THINKING_END_MARKER,
@@ -231,6 +233,40 @@ def test_completed_turn_is_not_annotated_by_the_safety_net(monkeypatch, tmp_path
     assert sum(1 for message in agent.messages if message["role"] == "assistant") == 1
 
 
+def test_buffered_turn_honors_stop_received_while_waiting_for_the_reply(tmp_path) -> None:
+    from reverie.desktop_control import RunControl
+
+    agent = _agent(tmp_path, mode="reverie")
+    events = []
+    agent.desktop_control = RunControl(events.append)
+
+    def buffered_reply(session_id="default"):
+        agent.desktop_control.stop()
+        agent.messages.append({"role": "assistant", "content": "Reply that arrived after Stop."})
+        return "Reply that arrived after Stop."
+
+    agent._process_non_streaming = buffered_reply
+    chunks = list(agent.process_message("Wait for the reply", stream=False, session_id="t"))
+
+    assert events[-1] == {"type": "run.control", "state": "stopping"}
+    assert "Run stopped by user;" in _visible_text(chunks)
+    assert "Reply that arrived after Stop." not in _visible_text(chunks)
+
+
+def test_buffered_turn_without_stop_publishes_the_complete_reply(tmp_path) -> None:
+    from reverie.desktop_control import RunControl
+
+    agent = _agent(tmp_path, mode="reverie")
+    agent.desktop_control = RunControl(lambda event: None)
+    def buffered_reply(session_id="default"):
+        agent.messages.append({"role": "assistant", "content": "Complete reply."})
+        return "Complete reply."
+
+    agent._process_non_streaming = buffered_reply
+
+    assert _visible_text(list(agent.process_message("Wait for the reply", stream=False, session_id="t"))) == "Complete reply."
+
+
 def test_one_provider_response_executes_both_requested_tools_before_followup(monkeypatch, tmp_path) -> None:
     turns = [
         [
@@ -361,3 +397,41 @@ def test_short_prompts_are_never_treated_as_a_reasoning_echo(tmp_path) -> None:
 
     assert agent._reasoning_echo_guard() == ""
     assert agent._strip_reasoning_prompt_echo("hi there") == "hi there"
+
+
+def test_required_skills_are_loaded_in_full_on_each_turn_and_goal_stays_out_of_history(monkeypatch, tmp_path):
+    skill_dir = tmp_path / ".agents" / "skills" / "required"
+    skill_dir.mkdir(parents=True)
+    skill_md = skill_dir / "SKILL.md"
+    body = "Required instructions.\n" * 2500 + "FINAL_REQUIRED_INSTRUCTION"
+    skill_md.write_text(f"---\nname: required\ndescription: Test workflow.\n---\n{body}", encoding="utf-8")
+    manager = SkillsManager(project_root=tmp_path, app_root=tmp_path / "app")
+    manager.pin_skill("required")
+    captured = []
+    _install_scripted_openai(monkeypatch, [[_chunk(_delta(content="Completed. //END//"), "stop")]], captured)
+    agent = _agent(tmp_path, mode="reverie")
+    agent.tool_executor.context["skills_manager"] = manager
+    agent.goal_context = "Acceptance conditions: All target tests pass."
+    list(agent.process_message("Perform the task."))
+    system = captured[0]["messages"][0]["content"]
+    assert body in system
+    assert agent.goal_context in system
+    # Compaction consumes the core request messages, before provider adapters merge system notes.
+    history = agent._history_from_request_messages(agent._build_messages(read_only=True))
+    assert not any(message.get("role") == "system" for message in history)
+    assert body not in str(agent.messages)
+    assert agent.goal_context not in str(agent.messages)
+    skill_md.write_text("---\nname: required\ndescription: Test workflow.\n---\nUPDATED_REQUIRED_INSTRUCTION", encoding="utf-8")
+    list(agent.process_message("Next task."))
+    assert "UPDATED_REQUIRED_INSTRUCTION" in captured[-1]["messages"][0]["content"]
+    assert "FINAL_REQUIRED_INSTRUCTION" not in captured[-1]["messages"][0]["content"]
+
+
+def test_missing_required_skill_blocks_before_model_and_history_changes(tmp_path):
+    manager = SkillsManager(project_root=tmp_path, app_root=tmp_path / "app")
+    manager.restore_pinned_skills(["missing-required"])
+    agent = _agent(tmp_path, mode="reverie")
+    agent.tool_executor.context["skills_manager"] = manager
+    with pytest.raises(ValueError, match="Required Skill is unavailable"):
+        list(agent.process_message("Do the work."))
+    assert agent.messages == []

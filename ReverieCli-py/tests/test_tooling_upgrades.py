@@ -1047,7 +1047,10 @@ def test_skill_lookup_lists_and_inspects_discovered_skills(tmp_path: Path) -> No
 
     list_result = tool.execute(operation="list")
     assert list_result.success is True
-    assert "openai-docs" in list_result.output
+    assert "Discovered skills:" in list_result.output
+    search_result = tool.execute(operation="search", query="openai-docs")
+    assert search_result.success is True
+    assert "openai-docs" in search_result.output
 
     inspect_result = tool.execute(operation="inspect", skill_name="openai-docs", max_body_chars=40)
     assert inspect_result.success is True

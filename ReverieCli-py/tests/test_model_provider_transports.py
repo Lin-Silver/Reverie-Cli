@@ -321,10 +321,10 @@ def test_system_curl_uses_argument_list_without_shell(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["kwargs"] = kwargs
-        return SimpleNamespace(stdout='{"choices": []}', stderr="", returncode=0)
+        return SimpleNamespace(communicate=lambda **kw: ('{"choices": []}', ""), returncode=0)
 
     monkeypatch.setattr("shutil.which", lambda name: "curl.exe")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("subprocess.Popen", fake_run)
     response = _invoke_system_curl(
         url="https://example.test/v1/chat/completions",
         headers={"Authorization": "Bearer secret", "Content-Type": "application/json"},
@@ -335,7 +335,7 @@ def test_system_curl_uses_argument_list_without_shell(monkeypatch) -> None:
 
     assert response.json() == {"choices": []}
     assert captured["command"][0] == "curl.exe"
-    assert captured["kwargs"]["check"] is False
+    assert captured["kwargs"]["stdout"] is not None
     assert "shell" not in captured["kwargs"]
 
 

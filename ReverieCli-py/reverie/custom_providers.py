@@ -1589,8 +1589,30 @@ def probe_custom_provider_chat(
             if body:
                 result.detail = f"{result.detail} {body}".strip()
             return result
-        result.status = "online"
-        result.detail = f"{wanted_model} answered in {result.latency_ms} ms."
+        body = response.json()
+        text = ""
+        if isinstance(body, dict) and not body.get("error"):
+            if record.get("format") == "anthropic":
+                text = "".join(block["text"] for block in body.get("content", [])
+                               if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str))
+            elif record.get("format") == "openai-responses":
+                text = (body.get("output_text") if isinstance(body.get("output_text"), str) else "") or "".join(
+                    block["text"] for item in body.get("output", [])
+                    if isinstance(item, dict) and item.get("type") == "message"
+                    for block in item.get("content", [])
+                    if isinstance(block, dict) and block.get("type") == "output_text" and isinstance(block.get("text"), str)
+                )
+            else:
+                choices = body.get("choices") or []
+                message = choices[0].get("message", {}) if choices and isinstance(choices[0], dict) else {}
+                content = message.get("content") if isinstance(message, dict) else None
+                text = content if isinstance(content, str) else "".join(
+                    block["text"] for block in content or []
+                    if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+                )
+        result.status = "online" if text.strip() else "error"
+        result.detail = (f"{wanted_model} answered in {result.latency_ms} ms." if text.strip()
+                         else "HTTP request succeeded, but the response contained no valid text answer.")
         return result
     except requests.Timeout:
         result.latency_ms = int((time.monotonic() - started) * 1000)

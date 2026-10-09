@@ -13,13 +13,6 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from ..diagnostics import report_suppressed_exception
 
 try:
-    import pyglet
-    from pyglet import gl
-except ImportError:  # pragma: no cover - optional dependency
-    pyglet = None
-    gl = None
-
-try:
     import moderngl
 except ImportError:  # pragma: no cover - optional dependency
     moderngl = None
@@ -343,6 +336,7 @@ class RenderingServer:
         *,
         headless: bool = True,
         asset_root: str | Path | None = None,
+        window_context: bool = False,
     ) -> None:
         self.mode = mode
         self.viewport = Viewport()
@@ -351,6 +345,7 @@ class RenderingServer:
         self.asset_root = Path(asset_root).resolve() if asset_root is not None else Path.cwd()
         self.active_camera: Optional[Camera] = None
         self.ctx: Optional[Any] = None
+        self.window_context = window_context
         self._framebuffer: Optional[Any] = None
         self._color_target: Optional[Any] = None
         self._depth_target: Optional[Any] = None
@@ -383,7 +378,7 @@ class RenderingServer:
             return True
 
         try:
-            self.ctx = moderngl.create_standalone_context()
+            self.ctx = moderngl.create_context(require=330) if self.window_context else moderngl.create_standalone_context()
             self._program = self.ctx.program(
                 vertex_shader="""
                     #version 330
@@ -606,6 +601,13 @@ class RenderingServer:
         self._release_native_resources()
         self._initialized = False
         self.begin_frame()
+
+    def present(self) -> None:
+        if self.ctx is None or self._framebuffer is None or not self.window_context:
+            raise RuntimeError("The native window renderer is not ready.")
+        self.ctx.screen.viewport = (0, 0, self.viewport.width, self.viewport.height)
+        self.ctx.copy_framebuffer(self.ctx.screen, self._framebuffer)
+        self.ctx.screen.use()
 
     def _pipeline_order(self, pipeline: str) -> int:
         if self.mode == RenderMode.RENDER_3D:
@@ -833,9 +835,10 @@ class Renderer:
         *,
         headless: bool = True,
         asset_root: str | Path | None = None,
+        window_context: bool = False,
     ):
         self.mode = mode
-        self.server = RenderingServer(mode, headless=headless, asset_root=asset_root)
+        self.server = RenderingServer(mode, headless=headless, asset_root=asset_root, window_context=window_context)
         self.viewport = self.server.viewport
         self.mesh_library = self.server.mesh_library
 

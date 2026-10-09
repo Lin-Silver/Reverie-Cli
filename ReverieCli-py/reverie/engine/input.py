@@ -6,15 +6,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Set, Optional, Tuple
 
-try:
-    import pyglet
-    from pyglet.window import key, mouse
-except ImportError:
-    pyglet = None
-    key = None
-    mouse = None
-
-
 class InputAction(Enum):
     """Common input actions."""
     MOVE_UP = "move_up"
@@ -35,6 +26,12 @@ class InputMap:
     mouse_map: Dict[int, str] = field(default_factory=dict)
     
     def __post_init__(self):
+        # Importing pyglet.window creates a graphics context. Only real engine
+        # input needs it; loading terminal tool metadata must stay window-free.
+        try:
+            from pyglet.window import key, mouse
+        except ImportError:
+            key = mouse = None
         if not self.keyboard_map and key:
             # Default keyboard mappings
             self.keyboard_map = {

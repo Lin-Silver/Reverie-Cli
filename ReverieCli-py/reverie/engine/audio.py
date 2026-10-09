@@ -8,11 +8,11 @@ from typing import Any, Dict, Optional
 
 try:
     import pyglet
-    from pyglet.media import Player, load as load_audio
 except ImportError:  # pragma: no cover - optional dependency
     pyglet = None
-    Player = None
-    load_audio = None
+
+Player = None
+load_audio = None
 
 
 def _clamp_volume(value: float) -> float:
@@ -119,6 +119,13 @@ class AudioManager:
     )
 
     def __init__(self, project_root: Path):
+        # The media package initializes graphics/audio backends. Tool discovery
+        # only needs this class; defer that work until an engine uses audio.
+        global Player, load_audio
+        try:
+            from pyglet.media import Player, load as load_audio
+        except ImportError:  # pragma: no cover - optional dependency
+            Player = load_audio = None
         self.project_root = Path(project_root)
         self.streams: Dict[str, AudioStream] = {}
         self.players: Dict[str, AudioPlayer] = {}

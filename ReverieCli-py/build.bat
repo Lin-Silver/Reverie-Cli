@@ -40,6 +40,7 @@ set "TMPDIR=%LOCAL_TEMP_DIR%"
 set "PIP_CACHE_DIR=%LOCAL_PIP_CACHE%"
 set "PYINSTALLER_CONFIG_DIR=%PYI_CONFIG_DIR%"
 set "BUILD_EXIT_CODE=0"
+if not defined REVERIE_PYINSTALLER_MODE set "REVERIE_PYINSTALLER_MODE=onedir"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -300,16 +301,28 @@ if %ERRORLEVEL% neq 0 (
     goto finish
 )
 
-if not exist "%PYI_STAGE_DIR%\%EXE_NAME%.exe" (
-    echo [ERROR] Staged executable not found at %PYI_STAGE_DIR%\%EXE_NAME%.exe
+set "STAGED_EXE=%PYI_STAGE_DIR%\%EXE_NAME%.exe"
+if "%REVERIE_PYINSTALLER_MODE%"=="onedir" set "STAGED_EXE=%PYI_STAGE_DIR%\%EXE_NAME%\%EXE_NAME%.exe"
+if "%REVERIE_PYINSTALLER_MODE%"=="ui-onedir" set "STAGED_EXE=%PYI_STAGE_DIR%\%EXE_NAME%\%EXE_NAME%.exe"
+if not exist "%STAGED_EXE%" (
+    echo [ERROR] Staged executable not found at %STAGED_EXE%
     set "BUILD_EXIT_CODE=1"
     goto finish
+)
+
+if not "%REVERIE_PYINSTALLER_MODE%"=="onefile" (
+    robocopy "%PYI_STAGE_DIR%\%EXE_NAME%\reverie-runtime" "%PYI_DIST_DIR%\reverie-runtime" /E /NFL /NDL /NJH /NJS /NP >nul
+    if errorlevel 8 (
+        echo [ERROR] Unable to publish the terminal runtime directory.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
 )
 
 set "COPY_ATTEMPT=0"
 :copy_staged_executable
 set /a COPY_ATTEMPT+=1
-copy /B /Y "%PYI_STAGE_DIR%\%EXE_NAME%.exe" "%PYI_DIST_DIR%\%EXE_NAME%.exe" >nul 2>&1
+copy /B /Y "%STAGED_EXE%" "%PYI_DIST_DIR%\%EXE_NAME%.exe" >nul 2>&1
 if errorlevel 1 (
     if !COPY_ATTEMPT! lss 6 (
         echo       dist\%EXE_NAME%.exe is busy; retrying replacement [attempt !COPY_ATTEMPT! of 5]...
@@ -317,7 +330,7 @@ if errorlevel 1 (
         goto copy_staged_executable
     )
     echo [ERROR] Unable to replace %PYI_DIST_DIR%\%EXE_NAME%.exe. Close every running Reverie instance and retry.
-    echo         The completed staged executable remains at %PYI_STAGE_DIR%\%EXE_NAME%.exe.
+    echo         The completed staged executable remains at %STAGED_EXE%.
     set "BUILD_EXIT_CODE=1"
     goto finish
 )
@@ -330,6 +343,7 @@ echo ===============================================================
 echo   BUILD SUCCESSFUL
 echo ===============================================================
 echo   Output: %PYI_DIST_DIR%\%EXE_NAME%.exe
+if not "%REVERIE_PYINSTALLER_MODE%"=="onefile" echo   Runtime: %PYI_DIST_DIR%\reverie-runtime
 echo   Work:   %PYI_WORK_DIR%
 echo   Temp:   %LOCAL_TEMP_DIR%
 echo   Size:   ~%SIZE_MB% MB

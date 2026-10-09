@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from pathlib import Path
 import os
 
-build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
+build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onedir' if os.name == 'nt' else 'onefile').strip().lower()
 datas = [('README.md', '.')]
 binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 
@@ -14,6 +14,8 @@ hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.synta
                  'reverie.engine', 'reverie.engine.video', 'reverie.engine.renpy_import', 'reverie.engine.migration', 'reverie.engine.procedural_assets', 'reverie.engine.blender_modeling',
                  'reverie.computer_use', 'reverie.tools.open_computer_use',
                  'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
+# tiktoken discovers encodings dynamically; include the default encoding plugin.
+hiddenimports.append('tiktoken_ext.openai_public')
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -154,7 +156,7 @@ if build_mode in {'onedir', 'ui-onedir'}:
         a.scripts,
         [],
         exclude_binaries=True,
-        contents_directory='reverie-runtime' if build_mode == 'ui-onedir' else '.',
+        contents_directory='reverie-runtime',
         **common_exe_options,
     )
     coll = COLLECT(

@@ -24,9 +24,9 @@ export function resolveSidebarCollapsed(
 export const SIDEBAR_MIN_WIDTH = 208;
 export const SIDEBAR_MAX_WIDTH = 460;
 export const SIDEBAR_DEFAULT_WIDTH = 268;
-export const INSPECTOR_MIN_WIDTH = 264;
-export const INSPECTOR_MAX_WIDTH = 620;
-export const INSPECTOR_DEFAULT_WIDTH = 316;
+export const INSPECTOR_MIN_WIDTH = 380;
+export const INSPECTOR_MAX_WIDTH = 1100;
+export const INSPECTOR_DEFAULT_WIDTH = 620;
 
 /** Space the centre column keeps for itself no matter where the handles are. */
 export const MAIN_AREA_MIN_WIDTH = 420;

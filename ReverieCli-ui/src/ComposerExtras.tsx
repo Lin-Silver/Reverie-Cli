@@ -1,16 +1,29 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, Copy, RefreshCw, X } from "lucide-react";
 import type { ComposerAttachment } from "../electron/attachments";
 import type { QueuedMessage } from "./execution-state";
 import { useI18n } from "./i18n";
 import type { Goal } from "../electron/session-workspace";
 import type { Preview } from "../electron/workbench";
+import type { CommandRecord, SkillsState } from "./types";
 
 export interface InputControls {
+  mode?: string;
+  setMode?: (mode: string) => void;
+  commands?: CommandRecord[];
+  skills?: SkillsState;
+  pinSkill?: (name: string) => Promise<boolean>;
+  mentionError?: string;
   projectRoot: string;
   sessionId: string;
   behavior: "queue" | "steer";
   setBehavior: (value: "queue" | "steer") => void;
+  streaming: boolean;
+  streamReady: boolean;
+  streamSettingBusy: boolean;
+  streamRequired: boolean;
+  toggleStreaming: () => void;
   paste: () => void;
   moveAttachment: (index: number, direction: number) => void;
   retryAttachment: (item: ComposerAttachment, copy?: boolean) => void;
@@ -35,9 +48,9 @@ export const useInputControls = () => useContext(InputContext);
 
 export function GoalSummary() {
   const controls=useInputControls();const {t}=useI18n();const [goal,setGoal]=useState<Goal|null>(null);const [error,setError]=useState("");
-  useEffect(()=>{let active=true;const refresh=()=>{if(!controls?.sessionId || !window.reverie.workbench){setGoal(null);return;}void window.reverie.workbench("goal",{projectRoot:controls.projectRoot,sessionId:controls.sessionId}).then(value=>{if(active){setGoal((value as {goal:Goal|null}).goal);setError("");}}).catch(e=>{if(active)setError(String(e));});};refresh();window.addEventListener("reverie:goal-changed",refresh);return()=>{active=false;window.removeEventListener("reverie:goal-changed",refresh);};},[controls?.projectRoot,controls?.sessionId]);
+  useEffect(()=>{let active=true;setGoal(null);setError("");const refresh=()=>{if(!controls?.sessionId || !window.reverie.workbench)return;void window.reverie.workbench("goal",{projectRoot:controls.projectRoot,sessionId:controls.sessionId}).then(value=>{if(active){setGoal((value as {goal:Goal|null}).goal);setError("");}}).catch(e=>{if(active)setError(String(e));});};refresh();window.addEventListener("reverie:goal-changed",refresh);return()=>{active=false;window.removeEventListener("reverie:goal-changed",refresh);};},[controls?.projectRoot,controls?.sessionId]);
   if(!goal && !error)return null;
-  return <div className="goal-summary">{error?<span role="alert">{error}</span>:<><strong>{goal!.title}</strong><span>{goal!.steps.filter(step=>step.state==="verified").length}/{goal!.steps.length} {t("验证通过")}</span><small>{goal!.steps.find(step=>step.state!=="verified")?.text}</small></>}<button type="button" onClick={()=>window.dispatchEvent(new CustomEvent("reverie:workbench",{detail:{tab:"session",sessionTab:"goal"}}))}>{t("目标与计划")}</button></div>;
+  return <div className="goal-summary">{error?<span role="alert">{error}</span>:<><strong>{goal!.title}</strong>{goal!.steps.length>0 && <span>{goal!.steps.filter(step=>step.state==="verified").length}/{goal!.steps.length} {t("验证通过")}</span>}<small>{goal!.steps.find(step=>step.state!=="verified")?.text}</small></>}<button type="button" onClick={()=>window.dispatchEvent(new CustomEvent("reverie:workbench",{detail:{tab:"session",sessionTab:"goal"}}))}>{t("目标与计划")}</button></div>;
 }
 
 export function QueueStrip() {
@@ -105,7 +118,7 @@ export function AttachmentCards({ items, remove }: { items: ComposerAttachment[]
         </div>
       </div>)}
     </div>
-    {preview && <div className="modal-backdrop" onClick={() => setPreview(null)}><section ref={dialog} className="modal attachment-dialog" role="dialog" aria-modal="true" aria-label={t("附件预览")} onClick={event => event.stopPropagation()} onKeyDown={event => {
+    {preview && createPortal(<div className="modal-backdrop" onClick={() => setPreview(null)}><section ref={dialog} className="modal attachment-dialog" role="dialog" aria-modal="true" aria-label={t("附件预览")} onClick={event => event.stopPropagation()} onKeyDown={event => {
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setPreview(null); }
       if (event.key === "Tab") {
@@ -114,13 +127,13 @@ export function AttachmentCards({ items, remove }: { items: ComposerAttachment[]
         if (document.activeElement === (event.shiftKey ? buttons[0] : buttons[buttons.length - 1])) { event.preventDefault(); target?.focus(); }
       }
     }}>
-      <header><strong>{preview.name}</strong><button autoFocus type="button" aria-label={t("关闭")} onClick={() => setPreview(null)}><X size={16} /></button></header>
+      <header><strong>{preview.name}</strong><button autoFocus type="button" className="icon-button" aria-label={t("关闭")} onClick={() => setPreview(null)}><X size={16} /></button></header>
       {previewLoading && <p role="status">{t("正在加载")}</p>}
       {previewError && <p className="persistent-error" role="alert">{previewError}</p>}
       {preview.thumbnail && !previewError && <img src={previewImage?.url || preview.thumbnail} alt={preview.name} />}
       <p>{preview.relativePath || preview.sourcePath}</p><p>{t(preview.kind === "reference" ? "发送时读取当前文件" : "保留导入版本")}</p>
       {(previewImage?.version || preview.version) && <code>SHA256 {previewImage?.version || preview.version}</code>}
-      <button type="button" onClick={() => { window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: { path: preview.relativePath, line: preview.line } })); setPreview(null); }}>{t("打开文件预览")}</button>
-    </section></div>}
+      <button type="button" className="secondary-button" onClick={() => { window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: { path: preview.relativePath, line: preview.line } })); setPreview(null); }}>{t("打开文件预览")}</button>
+    </section></div>, document.body)}
   </>;
 }

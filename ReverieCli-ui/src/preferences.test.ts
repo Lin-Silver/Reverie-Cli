@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { backgroundPresetUrl, DEFAULT_UI_PREFERENCES, effectiveBackgroundUrl, normalizeUiPreferences } from "./preferences";
+import { normalizeUiPreferences as normalizeStored } from "../electron/preferences";
 
 describe("renderer UI preferences", () => {
+  it("persists only a bounded raster avatar in both preference layers", () => {
+    for (const normalize of [normalizeUiPreferences, normalizeStored]) {
+      expect(normalize({ userAvatarUrl: "data:image/png;base64,YQ==" }).userAvatarUrl).toBe("data:image/png;base64,YQ==");
+      for (const value of ["https://example.test/avatar.png", "data:image/svg+xml;base64,YQ==", "data:image/png;base64," + "a".repeat(512 * 1024)]) {
+        expect(normalize({ userAvatarUrl: value }).userAvatarUrl).toBe("");
+      }
+    }
+  });
   it("shows reasoning, tool calls, and their expandable results by default", () => {
     const value = normalizeUiPreferences({});
     // The trace bar counts reasoning regardless of this flag, so hiding it by

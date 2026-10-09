@@ -15,6 +15,7 @@ export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "emb
 export interface UiPreferences {
   language: UiLanguage;
   userDisplayName: string;
+  userAvatarUrl: string;
   startupMode: StartupModePreference;
   accent: AccentPreference;
   fontSize: FontSizePreference;
@@ -43,6 +44,7 @@ export interface UiPreferences {
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   language: "zh-CN",
   userDisplayName: "",
+  userAvatarUrl: "",
   startupMode: "gui",
   accent: "violet",
   fontSize: "comfortable",
@@ -53,8 +55,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   backgroundOpacity: 0.9,
   backgroundBlur: 0,
   backgroundDim: 0.12,
-  // Reasoning is shown by default: the trace bar counts it either way, so
-  // hiding it produced a transcript that reported thinking it never rendered.
+  // Default to all content; transcript display presets can hide categories.
   showReasoning: true,
   expandReasoning: true,
   showToolCalls: true,
@@ -95,6 +96,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
   return {
     language: normalizeUiLanguage(source.language),
     userDisplayName: String(source.userDisplayName ?? "").trim().slice(0, 32),
+    userAvatarUrl: typeof source.userAvatarUrl === "string" && source.userAvatarUrl.length <= 512 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(source.userAvatarUrl) ? source.userAvatarUrl : "",
     startupMode: enumValue(source.startupMode, ["gui", "tui"] as const, DEFAULT_UI_PREFERENCES.startupMode),
     accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"] as const, DEFAULT_UI_PREFERENCES.accent),
     fontSize: enumValue(source.fontSize, ["compact", "comfortable", "large"] as const, DEFAULT_UI_PREFERENCES.fontSize),

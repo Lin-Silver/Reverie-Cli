@@ -162,7 +162,7 @@ const desktopState: DesktopState = {
     }],
   },
   settings: {
-    items: [{ name: "Permission", key: "permission_level", kind: "choice", description: "", value: "workspace_write" }],
+    items: [{ name: "Permission", key: "permission_level", kind: "choice", description: "", value: "workspace_write" }, { name: "Stream Responses", key: "stream_responses", kind: "bool", description: "", value: true }],
     config_path: "C:/workspace/.reverie/config.json",
     workspace_mode: true,
   },
@@ -241,6 +241,7 @@ function installDesktopApi(options: {
   gatePrompt?: boolean;
   gateSession?: boolean;
   initialSession?: SessionState;
+  initialPreferences?: Partial<UiPreferences>;
   contextUsage?: ContextUsage | null;
   revealedSecret?: string;
 } = {}) {
@@ -322,8 +323,9 @@ function installDesktopApi(options: {
     models: models(),
     workspace: desktopState.workspace,
   });
-  const settings = (): DesktopState["settings"] => options.settingItems
-    ? { ...desktopState.settings, items: options.settingItems }
+  let settingItems = options.settingItems;
+  const settings = (): DesktopState["settings"] => settingItems
+    ? { ...desktopState.settings, items: settingItems }
     : desktopState.settings;
   const probeFor = (key: string): ProviderProbe => {
     const provider = providers.find((record) => `custom:${record.id}` === key);
@@ -696,6 +698,14 @@ function installDesktopApi(options: {
       };
     }
     if (action === "setSetting") {
+      if (payload.key === "api_compatibility") {
+        settingItems = (settingItems ?? desktopState.settings.items).map(item => item.key === payload.key ? { ...item, value: payload.value } : item);
+        return { type: "setting.updated", success: true, message: "saved", settings: settings(), models: models(), workspace: desktopState.workspace };
+      }
+      if (payload.key === "stream_responses") {
+        settingItems = [...(settingItems ?? desktopState.settings.items).filter(item => item.key !== "stream_responses"), { name: "Stream Responses", key: "stream_responses", kind: "bool", description: "", value: payload.value }];
+        return { type: "setting.updated", success: true, message: "saved", settings: settings(), models: models(), workspace: desktopState.workspace };
+      }
       const mode = String(payload.value);
       const activeModel = mode === "computer-controller"
         ? { id: "meta/muse-glimmer-30b", display_name: "Muse Glimmer 30B", provider: "openai-chat" }
@@ -768,9 +778,17 @@ function installDesktopApi(options: {
   });
   // Stateful, like the Electron main process: a toggle that reads its own value
   // back from a constant would snap straight back to the default.
-  let preferences: UiPreferences = DEFAULT_UI_PREFERENCES;
+  let preferences = normalizeUiPreferences({ ...DEFAULT_UI_PREFERENCES, ...options.initialPreferences });
   const api = {
     request,
+    workbench: vi.fn(async (operation: string, payload: Record<string, unknown>) => {
+      if (operation === "validate-input") return { attachments: payload.attachments };
+      if (operation === "reviews") return { reviews: [] };
+      if (operation === "runs") return { runs: [] };
+      if (operation === "list-directory") return { directory: ".", entries: [], truncated: false };
+      if (operation === "snapshot") return { root: "C:/workspace", version: "v1", indexVersion: "i1", head: "head", branch: "main", files: [], conflicts: [], scope: "working", base: "" };
+      return {};
+    }),
     cancel: vi.fn(async () => undefined),
     notify: vi.fn(async () => undefined),
     onEvent: vi.fn((listener: (message: { event: unknown }) => void) => {
@@ -823,6 +841,7 @@ function installDesktopApi(options: {
 
 beforeEach(() => {
   localStorage.clear();
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn((query: string) => ({
@@ -842,9 +861,462 @@ afterEach(() => {
   vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("desktop GUI interactions", () => {
+  it("dispatches parameterized desktop settings and retains terminal-only commands", async () => {
+    const {request}=installDesktopApi();const user=userEvent.setup();render(<App/>);
+    const composer=await screen.findByRole("textbox",{name:/向 Test Model 提问/});
+    for(const [text,key,value] of [["/mode writer","mode","writer"],["/permission mode strict","permission_mode","strict"]]){
+      fireEvent.change(composer,{target:{value:text}});await user.click(screen.getByRole("button",{name:"发送"}));
+      await waitFor(()=>expect(request).toHaveBeenCalledWith("setSetting",{key,value}));
+      await waitFor(()=>expect((composer as HTMLTextAreaElement).value).toBe(""));
+    }
+    fireEvent.change(composer,{target:{value:"/session fork Current copy"}});await user.click(screen.getByRole("button",{name:"发送"}));
+    expect((composer as HTMLTextAreaElement).value).toBe("/session fork Current copy");
+    expect(screen.getByText("此终端指令不能在桌面输入框执行，请使用对应页面或 Reverie TUI。")).toBeTruthy();
+    expect(request.mock.calls.some(([action])=>action==="runPrompt")).toBe(false);
+  });
+
+  it("passes quoted review paths and scope to the review panel without sending a model turn", async () => {
+    const {api,request}=installDesktopApi();const user=userEvent.setup();
+    Object.assign(api,{workbench:vi.fn(async(operation:string)=>operation==="reviews"?{reviews:[]}:operation==="runs"?{runs:[]}:{files:[],conflicts:[],remotes:[],branches:[],scope:"staged"})});
+    const show=vi.fn();window.addEventListener("reverie:workbench",show);
+    try{
+      render(<App/>);const composer=await screen.findByRole("textbox",{name:/向 Test Model 提问/});
+      fireEvent.change(composer,{target:{value:'/review "src/two words.ts" --scope staged --base "origin/main"'}});
+      await user.click(screen.getByRole("button",{name:"发送"}));
+      expect((show.mock.calls.at(-1)![0] as CustomEvent).detail).toEqual({tab:"review",reviewFile:"src/two words.ts",scope:"staged",base:"origin/main"});
+      expect(request.mock.calls.some(([action])=>action==="runPrompt")).toBe(false);
+    }finally{window.removeEventListener("reverie:workbench",show);}
+  });
+
+  it("selects command results with arrows and Enter while ignoring IME composition", async () => {
+    const {request}=installDesktopApi();const user=userEvent.setup();render(<App/>);
+    await user.click(await screen.findByRole("button",{name:"命令面板"}));
+    const dialog=await screen.findByRole("dialog",{name:"命令面板"});const search=within(dialog).getByRole("combobox");
+    const results=within(dialog).getAllByRole("option");expect(results[0].getAttribute("aria-selected")).toBe("true");
+    await user.keyboard("{ArrowDown}");expect(results[1].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(search,{key:"Enter",isComposing:true});expect(screen.getByRole("dialog",{name:"命令面板"})).toBeTruthy();
+    await user.keyboard("{Enter}");expect(screen.queryByRole("dialog",{name:"命令面板"})).toBeNull();
+    expect(request.mock.calls.some(([action])=>action==="compactContext" || action==="runPrompt")).toBe(false);
+    const composer=screen.getByRole("textbox",{name:/向 Test Model 提问/});expect((composer as HTMLTextAreaElement).value.trim()).toBe("/compact");
+  });
+
+  it("opens slash suggestions outside the clipped input stack and inserts without sending", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "/");
+    const menu = screen.getByRole("listbox", { name: "指令与 Skills" });
+    expect(document.querySelector(".chat-input-stack")?.contains(menu)).toBe(false);
+    expect(within(menu).getAllByRole("option").map(option => option.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("/skill"), expect.stringContaining("/compact")]));
+    await user.keyboard("{ArrowDown}{ArrowDown}{Tab}");
+    expect((composer as HTMLTextAreaElement).value).toBe("/compact ");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(request.mock.calls.some(([action]) => action === "runPrompt" || action === "compactContext")).toBe(false);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(request.mock.calls.some(([action]) => action === "compactContext")).toBe(true));
+  });
+
+  it("pins a slash skill only after the backend acknowledges it and never sends a model turn", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => action === "pinSkill" ? {
+      type: "skill.pinned", status: "pinned", name: "photo-to-3d",
+      skills: { ...desktopState.skills, pinned: { max: 4, keys: ["photo-to-3d"], names: ["photo-to-3d"], unresolved: [] }, records: desktopState.skills.records.map(record => ({ ...record, pinned: record.name === "photo-to-3d" })) },
+    } as never : original(action, payload));
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "/");
+    await user.keyboard("{Enter}");
+    expect((composer as HTMLTextAreaElement).value).toBe("/skill ");
+    await user.click(await screen.findByRole("option", { name: /photo-to-3d/ }));
+    await waitFor(() => expect(document.querySelector(".composer .skill-chip")?.textContent).toContain("photo-to-3d"));
+    expect(request).toHaveBeenCalledWith("pinSkill", { skill: "photo-to-3d" });
+    expect((composer as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByText("必须使用")).toBeTruthy();
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+  });
+
+  it("preserves a failed pin draft, empty-search Enter, and IME composition", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => { if (action === "pinSkill") throw new Error("Pin failed"); return original(action, payload); });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "/skill photo");
+    fireEvent.keyDown(composer, { key: "Enter", isComposing: true });
+    expect(request.mock.calls.some(([action]) => action === "pinSkill")).toBe(false);
+    await user.keyboard("{Enter}");
+    await screen.findByText("Pin failed");
+    expect((composer as HTMLTextAreaElement).value).toBe("/skill photo");
+    expect(document.querySelector(".composer .skill-chip")).toBeNull();
+    await user.clear(composer);
+    await user.type(composer, "/nothing-matches{Enter}");
+    expect((composer as HTMLTextAreaElement).value).toBe("/nothing-matches");
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("selects the thirteenth file, preserves text around the caret, and refocuses the composer", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => action === "workspaceMentions" ? {
+      type: "workspace.mentions", items: Array.from({ length: 24 }, (_, index) => ({ path: `目录/文件 ${index}.txt`, name: `文件 ${index}.txt` })), context_engine: desktopState.workspace.context_engine,
+    } as never : original(action, payload));
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "Compare @file then explain");
+    act(() => { composer.setSelectionRange(13, 13); fireEvent.select(composer); });
+    await screen.findByRole("option", { name: /文件 23.txt/ });
+    expect(request).toHaveBeenCalledWith("workspaceMentions", { query: "file", limit: 24 });
+    await user.keyboard("{ArrowDown>12}{Enter}");
+    await waitFor(() => expect(document.querySelector(".attachment-card")?.textContent).toContain("文件 12.txt"));
+    expect(composer.value).toBe("Compare  then explain");
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+  });
+
+  it("does not reopen a dismissed mention on late completion or keep files after changing to slash", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    let resolve!: (value: unknown) => void;
+    request.mockImplementation(async (action, payload) => action === "workspaceMentions" ? await new Promise<unknown>(done => { resolve = done; }) as never : original(action, payload));
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "@");
+    await waitFor(() => expect(resolve).toBeTypeOf("function"));
+    await user.keyboard("{Escape}");
+    await act(async () => resolve({ items: [{ path: "late.txt" }], context_engine: desktopState.workspace.context_engine }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    await user.clear(composer);
+    await user.type(composer, "/");
+    expect(screen.getByRole("listbox", { name: "指令与 Skills" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /late.txt/ })).toBeNull();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("shows a failed mention lookup instead of an endless spinner and prevents accidental send", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => { if (action === "workspaceMentions") throw new Error("Workspace lookup failed"); return original(action, payload); });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "@");
+    await screen.findByText("Workspace lookup failed");
+    expect(screen.queryByText("正在查找…")).toBeNull();
+    await user.keyboard("{Enter}");
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+  });
+
+  it("keeps the welcome composer mounted and focused when a starter becomes the first turn", async () => {
+    const { request, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.click(screen.getByRole("button", { name: /理解代码库/ }));
+    expect((composer as HTMLTextAreaElement).value).toBe("分析这个项目的架构、入口和关键模块，并指出最值得关注的技术风险。");
+    expect(document.activeElement).toBe(composer);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.anything()));
+    expect(container.querySelector(".welcome-header")).toBeNull();
+    expect(container.querySelector(".composer textarea")).toBe(composer);
+    expect(document.activeElement).toBe(composer);
+    await user.type(composer, "继续检查这个想法");
+    expect((composer as HTMLTextAreaElement).value).toBe("继续检查这个想法");
+    await act(async () => releasePrompt());
+  });
+
+  it("updates context during continuous draft edits and streaming before the turn ends", async () => {
+    const { request, emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "draft context");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getContextUsage", expect.objectContaining({ draftText: "draft context" })));
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.anything()));
+    for (let index = 0; index < 8; index += 1) {
+      act(() => emitCoreEvent({ type: "assistant.delta", text: `stream ${index} ` }));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
+    }
+    expect(request.mock.calls.some(([action, payload]) => action === "getContextUsage" && String(payload.liveAssistantText || "").includes("stream 0"))).toBe(true);
+    expect(request.mock.calls.filter(([action]) => action === "getContextUsage").every(([, payload]) => !("history" in payload) && !("liveAttachments" in payload))).toBe(true);
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+    await act(async () => releasePrompt());
+  });
+
+  it("removes manual conversation ordering and its sidebar filter", async () => {
+    installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /管理会话 Initial session/ }));
+    expect(screen.queryByRole("button", { name: "上移会话" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "下移会话" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "会话状态过滤" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^置顶$/ })).toBeTruthy();
+  });
+
+  it("removes message context summary and keeps the composer editable", async () => {
+    installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    expect(screen.queryByRole("button", { name: "本条上下文" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "本条上下文" })).toBeNull();
+    await user.type(composer, "existing input remains usable");
+    expect((composer as HTMLTextAreaElement).value).toBe("existing input remains usable");
+  });
+
+  it("switches running send behavior by keyboard without sending or discarding the pending draft", async () => {
+    const { request, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "start this turn{Enter}");
+    const modes = await screen.findByRole("radiogroup", { name: "运行中发送方式" });
+    const queue = within(modes).getByRole("radio", { name: "排队下一轮" });
+    const steer = within(modes).getByRole("radio", { name: "补充当前任务" });
+    expect(queue.getAttribute("aria-checked")).toBe("true");
+    await user.type(composer, "下一轮草稿");
+    act(() => queue.focus());
+    await user.keyboard("{ArrowRight}");
+    expect(steer.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(steer);
+    expect(screen.getByRole("button", { name: "补充当前任务" })).toBeTruthy();
+    fireEvent.keyDown(steer, { key: "ArrowLeft", isComposing: true });
+    expect(steer.getAttribute("aria-checked")).toBe("true");
+    await user.keyboard("{Enter}{ArrowLeft}");
+    expect(queue.getAttribute("aria-checked")).toBe("true");
+    expect((composer as HTMLTextAreaElement).value).toBe("下一轮草稿");
+    expect(request.mock.calls.filter(([action]) => action === "runPrompt")).toHaveLength(1);
+    await act(async () => releasePrompt());
+    expect((composer as HTMLTextAreaElement).value).toBe("下一轮草稿");
+  });
+
+  it("keeps the latest message visible on resize while preserving an earlier reading position", async () => {
+    let resized = () => {};
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class { constructor(private callback: () => void) {} observe(element: Element) { if (element.classList.contains("transcript")) resized = this.callback; } disconnect = disconnect; });
+    installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "assistant", content: "Existing conversation" }] } });
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
+    Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 220 }, scrollHeight: { configurable: true, value: 800 } });
+    act(() => resized());
+    expect(transcript.style.getPropertyValue("--transcript-height")).toBe("220px");
+    expect(transcript.scrollTop).toBe(800);
+    transcript.scrollTop = 100;
+    fireEvent.scroll(transcript);
+    act(() => resized());
+    expect(transcript.scrollTop).toBe(100);
+    cleanup();
+    expect(disconnect).toHaveBeenCalled();
+  });
+
+  it("follows a new user prompt but preserves older reading when queueing during a run", async () => {
+    let resize = () => {};
+    vi.stubGlobal("ResizeObserver", class { constructor(private callback: () => void) {} observe(element: Element) { if (element.classList.contains("transcript")) resize = this.callback; } disconnect() {} });
+    const { request, releasePrompt } = installDesktopApi({ gatePrompt: true, initialSession: { ...baseSession, messages: [{ role: "assistant", content: "An older reply" }] }, initialState: { ...desktopState, sessions: { ...desktopState.sessions, current_session_id: baseSession.id } } });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
+    let height = 800;
+    Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, get: () => height } });
+    act(() => resize());
+    transcript.scrollTop = 100; fireEvent.scroll(transcript);
+    await user.type(composer, "new question");
+    expect(transcript.scrollTop).toBe(100);
+    await user.keyboard("{Enter}");
+    height = 1200; act(() => resize());
+    expect(transcript.scrollTop).toBe(1200);
+    transcript.scrollTop = 100; fireEvent.scroll(transcript);
+    await user.type(composer, "queued question{Enter}");
+    act(() => resize());
+    expect(transcript.scrollTop).toBe(100);
+    expect(request.mock.calls.filter(([action]) => action === "runPrompt")).toHaveLength(1);
+    await act(async () => releasePrompt());
+  });
+
+  it("keeps a narrow empty conversation at the start of its welcome content", async () => {
+    let resized = () => {};
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { resized = callback; } observe() {} disconnect() {} });
+    installDesktopApi();
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
+    Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 220 }, scrollHeight: { configurable: true, value: 800 } });
+    act(() => resized());
+    expect(transcript.scrollTop).toBe(0);
+  });
+
+  it("observes the real message column when an empty conversation receives its first reply", async () => {
+    const observe = vi.fn();
+    let resize = () => {};
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { resize = callback; } observe = observe; disconnect() {} });
+    const { emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "first reply{Enter}");
+    const content = document.querySelector(".message-column");
+    expect(observe).toHaveBeenCalledWith(content);
+    const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
+    Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, get: () => height } });
+    let height = 900;
+    act(() => resize());
+    expect(transcript.scrollTop).toBe(900);
+    await act(async () => {
+      emitCoreEvent({ type: "ui.event", event: { event: "tool_start", tool_call_id: "same-id", tool_name: "file_ops" } });
+      await new Promise(resolve => setTimeout(resolve, 80));
+    });
+    transcript.scrollTop = 100; fireEvent.scroll(transcript);
+    expect(screen.queryByRole("button", { name: "回到最新" })).toBeNull();
+    height = 1200;
+    act(() => { emitCoreEvent({ type: "ui.event", event: { event: "tool_result", tool_call_id: "same-id", output: "much longer result" } }); resize(); });
+    expect(transcript.scrollTop).toBe(100);
+    expect(await screen.findByRole("button", { name: "回到最新" })).toBeTruthy();
+    await act(async () => releasePrompt());
+  });
+
+  it("continues rendering sustained deltas and flushes the complete formatted text when a turn ends", async () => {
+    const { request, emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const original = request.getMockImplementation()!;
+    const finalText = "chunk0 chunk1 chunk2 chunk3 chunk4 **FINAL_MARKER**";
+    request.mockImplementation(async (action, payload) => {
+      const response = await original(action, payload);
+      if (action !== "runPrompt") return response;
+      const result = response as Extract<typeof response, { result: { success: boolean } }>;
+      return { ...result, result: { ...result.result, success: false, output_text: finalText, error: "Provider disconnected" } };
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByRole("textbox", { name: /向 Test Model 提问/ }), "continuous reply{Enter}");
+    vi.useFakeTimers();
+    for (let index = 0; index < 5; index += 1) {
+      await act(async () => { emitCoreEvent({ type: "assistant.delta", text: `chunk${index} ` }); await vi.advanceTimersByTimeAsync(60); });
+    }
+    expect(document.querySelector(".live-message .markdown")?.textContent).toContain("chunk2");
+    await act(async () => { emitCoreEvent({ type: "assistant.delta", text: "**FINAL_MARKER**" }); await vi.advanceTimersByTimeAsync(40); releasePrompt(); });
+    expect(document.querySelector(".live-message .markdown strong")?.textContent).toBe("FINAL_MARKER");
+    expect(document.querySelector(".live-message .markdown")?.textContent).toContain("chunk4");
+    vi.useRealTimers();
+  });
+
+  it.each([false, true])("shows an intentional stop neutrally and clears stopping controls (transport rejection: %s)", async (rejected) => {
+    const { request, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const original = request.getMockImplementation()!;
+    const detail = "Error processing message: Run stopped by user; check completed actions before continuing.";
+    request.mockImplementation(async (action, payload) => {
+      const response = await original(action, payload);
+      if (action !== "runPrompt") return response;
+      if (rejected) throw new Error(detail);
+      const result = response as Extract<typeof response, { result: { success: boolean } }>;
+      return { ...result, result: { ...result.result, success: false, error: detail, output_text: detail } };
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "stop this turn{Enter}");
+    await user.click(screen.getByRole("button", { name: "停止" }));
+    expect(await screen.findByText("正在停止，等待当前操作结束")).toBeTruthy();
+    await act(async () => releasePrompt());
+    expect(await screen.findByText("已停止")).toBeTruthy();
+    expect(screen.queryByText("正在停止，等待当前操作结束")).toBeNull();
+    expect(screen.queryByText("本轮出错")).toBeNull();
+    expect(screen.queryByRole("button", { name: "强制停止" })).toBeNull();
+    expect((composer as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("shows a failed live turn once when the saved transcript already contains its messages", async () => {
+    const { request, emitCoreEvent } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    let sent = false;
+    request.mockImplementation(async (action, payload) => {
+      const response = await original(action, payload);
+      if (action === "runPrompt") {
+        sent = true;
+        emitCoreEvent({ type: "run.started", history_message_count: 1 });
+        emitCoreEvent({ type: "assistant.delta", text: "Partial live answer" });
+        const result = response as Extract<typeof response, { result: { success: boolean } }>;
+        return { ...result, result: { ...result.result, success: false, error: "Provider disconnected", output_text: "Partial live answer" } };
+      }
+      if (action === "getSession" && sent) return { type: "session", session: { ...baseSession, messages: [
+        { role: "user", content: "Earlier saved turn" },
+        { role: "user", content: "Fail this turn" },
+        { role: "assistant", content: "Partial live answer" },
+      ] }, sessions: desktopState.sessions };
+      return response;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByRole("textbox", { name: /向 Test Model 提问/ }), "Fail this turn{Enter}");
+    await screen.findByText("Provider disconnected");
+    expect(await screen.findByText("Earlier saved turn")).toBeTruthy();
+    expect(screen.getAllByText("Fail this turn", { selector: ".user-text" })).toHaveLength(1);
+    expect(screen.getAllByText("Partial live answer")).toHaveLength(1);
+  });
+
+  it.each([true, false])("summarizes an HTML provider failure while retaining its complete diagnostic (Cloudflare: %s)", async (cloudflare) => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    const detail = `Error processing message: <!DOCTYPE html><html><title>${cloudflare ? "Attention Required! | Cloudflare" : "Gateway error"}</title><body>original diagnostic</body></html>`;
+    request.mockImplementation(async (action, payload) => {
+      if (action === "runPrompt") throw new Error(detail);
+      return original(action, payload);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByRole("textbox", { name: /向 Test Model 提问/ }), "try provider{Enter}");
+    expect(await screen.findByText(cloudflare
+      ? "供应商返回了 Cloudflare 拦截页面，本轮未获得模型回复。请检查供应商地址或稍后重试。"
+      : "供应商返回了网页内容，本轮未获得模型回复。请检查供应商地址或查看原始错误。")).toBeTruthy();
+    const details = document.querySelector<HTMLDetailsElement>(".inline-error-details")!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("pre")?.textContent).toBe(detail);
+    await user.click(screen.getByText("查看原始错误"));
+    expect(details.open).toBe(true);
+    await user.click(details.closest(".inline-error")!.querySelector<HTMLButtonElement>(".inline-error-copy")!);
+    expect(await navigator.clipboard.readText()).toBe(detail);
+  });
+
+  it.each([false, true])("keeps failed-turn diagnostics in the transcript and leaves the composer available for retry (transport error: %s)", async (transportError) => {
+    const { api, emitCoreEvent } = installDesktopApi();
+    const original = api.request.getMockImplementation()!;
+    const detail = "Provider failed with a long diagnostic. 中文 " + "details ".repeat(120);
+    api.request.mockImplementation(async (action, payload) => {
+      if (action === "runPrompt" && transportError) throw new Error(detail);
+      const response = await original(action, payload);
+      if (action !== "runPrompt") return response;
+      emitCoreEvent({ type: "assistant.delta", text: detail });
+      const failed = response as Extract<typeof response, { result: { success: boolean } }>;
+      return { ...failed, result: { ...failed.result, success: false, output_text: detail, error: detail } };
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "retry this request{Enter}");
+    await screen.findByText("本轮出错");
+    expect(document.querySelectorAll(".inline-error")).toHaveLength(1);
+    expect(document.querySelector(".inline-error-body")?.textContent).toBe(detail);
+    expect(document.querySelector(".composer .persistent-error")).toBeNull();
+    expect(screen.getAllByText(detail.trim())).toHaveLength(1);
+    expect((composer as HTMLTextAreaElement).disabled).toBe(false);
+    await user.type(composer, " revised");
+    expect((composer as HTMLTextAreaElement).value).toContain("revised");
+  });
+
   it("persists a custom user label and renders it on existing messages", async () => {
     const { api } = installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "user", content: "Hello from me" }] } });
     const user = userEvent.setup();
@@ -963,7 +1435,7 @@ describe("desktop GUI interactions", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     const dialog = await screen.findByRole("dialog", { name: "命令面板" });
-    const search = within(dialog).getByRole("textbox", { name: "搜索命令、工具和功能…" });
+    const search = within(dialog).getByRole("combobox", { name: "搜索命令、工具和功能…" });
     expect(document.activeElement).toBe(search);
 
     await user.keyboard("{Escape}");
@@ -1092,12 +1564,90 @@ describe("desktop GUI interactions", () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", {
       prompt: "Inspect the cache",
       sessionId: baseSession.id,
+      source: "test-source",
+      model: "test-model",
       mode: "reverie",
-      stream: true,
       attachments: [],
       projectRoot: "C:/workspace",
     }));
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
+  });
+
+  it("switches output mode from the composer, preserves the draft and uses the saved core preference", async () => {
+    const { request } = installDesktopApi({ settingItems: [{ name: "Stream Responses", key: "stream_responses", kind: "bool", description: "", value: false }] });
+    const user = userEvent.setup();
+    render(<App />);
+    const toggle = await screen.findByRole("button", { name: "流式输出" });
+    const composer = screen.getByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await user.type(composer, "保留中文草稿");
+    toggle.focus();
+    await user.keyboard(" ");
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("true"));
+    expect(request).toHaveBeenCalledWith("setSetting", { key: "stream_responses", value: true });
+    expect(composer.value).toBe("保留中文草稿");
+    expect(request.mock.calls.filter(([action]) => action === "runPrompt")).toHaveLength(0);
+    expect(document.activeElement).toBe(toggle);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("false"));
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.not.objectContaining({ stream: true })));
+  });
+
+  it("keeps output-mode state honest while saving and after a failed save", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    let rejectSave: (error: Error) => void = () => {};
+    const saveGate = new Promise<never>((_, reject) => { rejectSave = reject; });
+    request.mockImplementation(async (action, payload) => action === "setSetting" ? saveGate : original(action, payload));
+    const user = userEvent.setup();
+    render(<App />);
+    const toggle = await screen.findByRole("button", { name: "流式输出" }) as HTMLButtonElement;
+    const composer = screen.getByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "draft during save");
+    await user.click(toggle);
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-busy")).toBe("true");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    expect(request.mock.calls.filter(([action]) => action === "setSetting")).toHaveLength(1);
+    expect(request.mock.calls.filter(([action]) => action === "runPrompt")).toHaveLength(0);
+    await act(async () => rejectSave(new Error("Cannot save output mode")));
+    await screen.findByText("Cannot save output mode");
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.getAttribute("aria-disabled")).toBe("false");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(composer.value).toBe("draft during save");
+  });
+
+  it("changes the next output mode while a turn is running without cancelling or sending the pending draft", async () => {
+    const { request, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "start this turn{Enter}");
+    const toggle = screen.getByRole("button", { name: "流式输出" });
+    expect(toggle.title).toContain("下一轮");
+    await user.type(composer, "下一轮草稿");
+    await user.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("false"));
+    expect(request.mock.calls.filter(([action]) => ["runPrompt", "resumePrompt"].includes(action))).toHaveLength(1);
+    expect(request.mock.calls.filter(([action]) => ["stopPrompt", "steerPrompt"].includes(action))).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+    expect(composer.value).toBe("下一轮草稿");
+    await act(async () => releasePrompt());
+  });
+
+  it("shows the existing SenseNova Writer streaming requirement truthfully", async () => {
+    installDesktopApi({ initialState: { ...desktopState, workspace: { ...desktopState.workspace, mode: "writer", active_source: "sensenova" }, settings: { ...desktopState.settings, items: [{ name: "Stream Responses", key: "stream_responses", kind: "bool", description: "", value: false }] } } });
+    render(<App />);
+    const toggle = await screen.findByRole("button", { name: "流式输出" }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.title).toContain("SenseNova");
   });
 
   it("keeps a queued conversation running in the background without clearing another draft", async()=>{
@@ -1305,7 +1855,7 @@ describe("desktop GUI interactions", () => {
     render(<App />);
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
 
-    await user.click(screen.getByRole("button", { name: "打开检查器" }));
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
     await user.click(screen.getByRole("button", { name: "上下文" }));
     expect(await screen.findByTitle("压缩上下文")).toBeTruthy();
     await user.type(composer, "/compact preserve provider failures{Enter}");
@@ -1326,7 +1876,7 @@ describe("desktop GUI interactions", () => {
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
     await user.type(composer, "unfinished draft");
 
-    await user.click(screen.getByRole("button", { name: "打开检查器" }));
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
     await user.click(screen.getByRole("button", { name: "上下文" }));
     await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
 
@@ -1458,9 +2008,9 @@ describe("desktop GUI interactions", () => {
     });
     const { container } = render(<App />);
 
-    expect(await screen.findByRole("button", { name: /Computer/ })).toBeTruthy();
+    expect((await screen.findByRole("button", { name: "选择工作模式" })).textContent).toContain("Computer");
     expect(container.querySelector(".model-trigger")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "打开检查器" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开工作面板" }));
     fireEvent.click(screen.getByRole("button", { name: "上下文" }));
     expect(screen.getByText("Muse Glimmer 30B")).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "模型来源" })).toBeNull();
@@ -1735,7 +2285,7 @@ describe("desktop GUI interactions", () => {
 
     // Anchored to the opposite edge, so the same cursor travel means the inverse
     // width: a shell reporting no geometry under jsdom puts its right edge at 0.
-    const inspectorHandle = screen.getByRole("separator", { name: "调整检查器宽度" });
+    const inspectorHandle = screen.getByRole("separator", { name: "调整工作面板宽度" });
     fireEvent.pointerDown(inspectorHandle, { button: 0, pointerId: 2, clientX: 0 });
     fireEvent.pointerMove(inspectorHandle, { pointerId: 2, clientX: -404 });
     await waitFor(() => expect(shell.style.getPropertyValue("--inspector-width")).toBe("404px"));
@@ -2316,21 +2866,40 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByRole("button", { name: "加载更早的消息" })).toBeNull();
   });
 
+  it("restores loaded earlier history and the reading position after changing conversations", async () => {
+    const messages: SessionState["messages"] = Array.from({ length: 180 }, (_, index) => ({ role: "user", content: `Reading record ${index}` }));
+    installDesktopApi({ initialSession: { ...baseSession, messages } });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Reading record 179");
+    await user.click(screen.getByRole("button", { name: "加载更早的消息" }));
+    expect(screen.getByText("Reading record 60")).toBeTruthy();
+    const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
+    Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 300 }, scrollHeight: { configurable: true, value: 4000 } });
+    transcript.scrollTop = 320; fireEvent.scroll(transcript);
+    await user.click(screen.getAllByRole("button", { name: /Cache investigation/ })[0]);
+    await screen.findByText("Investigate cache invalidation");
+    await user.click(screen.getAllByRole("button", { name: /Initial session/ })[0]);
+    expect(await screen.findByText("Reading record 60")).toBeTruthy();
+    expect(document.querySelectorAll(".transcript .message")).toHaveLength(120);
+    expect(transcript.scrollTop).toBe(320);
+  });
+
   it("requests one context reading after bootstrap and one after a session switch", async () => {
     const { request } = installDesktopApi();
     render(<App />);
     await screen.findByRole("button", { name: "命令面板" });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
     expect(request.mock.calls.filter(([action]) => action === "getContextUsage")).toEqual([
-      ["getContextUsage", { sessionId: baseSession.id }],
+      ["getContextUsage", expect.objectContaining({ sessionId: baseSession.id })],
     ]);
     const row = [...document.querySelectorAll(".session-item")].find((item) => item.textContent?.includes(searchSession.name));
     fireEvent.click(row!);
     await screen.findByText("Investigate cache invalidation");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
     expect(request.mock.calls.filter(([action]) => action === "getContextUsage")).toEqual([
-      ["getContextUsage", { sessionId: baseSession.id }],
-      ["getContextUsage", { sessionId: searchSession.id }],
+      ["getContextUsage", expect.objectContaining({ sessionId: baseSession.id })],
+      ["getContextUsage", expect.objectContaining({ sessionId: searchSession.id })],
     ]);
   });
 
@@ -2345,7 +2914,7 @@ describe("desktop GUI interactions", () => {
     });
     render(<App />);
     await screen.findByRole("button", { name: "命令面板" });
-    await waitFor(() => expect(api.request).toHaveBeenCalledWith("getContextUsage", { sessionId: baseSession.id }));
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith("getContextUsage", expect.objectContaining({ sessionId: baseSession.id })));
     const row = [...document.querySelectorAll(".session-item")].find((item) => item.textContent?.includes(searchSession.name));
     fireEvent.click(row!);
     await screen.findByText("Investigate cache invalidation");
@@ -2609,10 +3178,10 @@ describe("desktop GUI interactions", () => {
     expect(shell?.classList.contains("with-inspector")).toBe(false);
     expect(container.querySelector(".inspector")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "打开检查器" }));
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
     await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
 
-    await user.click(screen.getByRole("button", { name: "关闭检查器" }));
+    await user.click(screen.getByRole("button", { name: "关闭工作面板" }));
 
     // A pane that unmounts cannot animate out, so it stays in the tree and is
     // only taken out of the accessibility tree and the tab order.
@@ -2623,7 +3192,7 @@ describe("desktop GUI interactions", () => {
     expect(inspector?.hasAttribute("inert")).toBe(true);
     expect(api.setUiPreferences).toHaveBeenCalledWith({ inspectorOpen: false });
 
-    await user.click(screen.getByRole("button", { name: "打开检查器" }));
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
 
     await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
     expect(container.querySelector(".inspector")?.hasAttribute("aria-hidden")).toBe(false);
@@ -2635,7 +3204,7 @@ describe("desktop GUI interactions", () => {
   });
 
   it("renders a streaming Thinking Tool call as reasoning instead of a silent activity row", async () => {
-    const { emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const { emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true, initialPreferences: { expandReasoning: false } });
     const user = userEvent.setup();
     render(<App />);
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
@@ -2661,9 +3230,9 @@ describe("desktop GUI interactions", () => {
       await new Promise((resolve) => setTimeout(resolve, 80));
     });
 
+    expect(document.querySelector(".reasoning-block .reasoning-content")).toBeNull();
+    await userEvent.setup().click(document.querySelector(".reasoning-block summary") as HTMLElement);
     expect(await screen.findByText("Cache invalidation")).toBeTruthy();
-    // Scope to the expanded body: the summary carries a truncated copy of the
-    // same prose, so an unscoped regex would match twice.
     const reasoning = document.querySelector(".reasoning-block .reasoning-content") as HTMLElement | null;
     expect(reasoning).toBeTruthy();
     expect(within(reasoning!).getByText(/The index is keyed by mtime/)).toBeTruthy();
@@ -2780,6 +3349,26 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByText("Experimental")).toBeNull();
   });
 
+  it("exposes API compatibility only in settings and saves its toggle", async () => {
+    const { request } = installDesktopApi({ settingItems: [{
+      name: "Broad API Compatibility", key: "api_compatibility", kind: "bool",
+      description: "Experimental. Use non-streaming text instructions for gateways that ignore native tools. CLI tools keep their normal permissions. Text only; select the provider's working API format.",
+      value: false, experimental: true,
+    }] });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    expect(screen.queryByText("广泛 API 兼容")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    const title = await screen.findByText("广泛 API 兼容");
+    const row = title.closest(".setting-row") as HTMLElement;
+    expect(within(row).getByText("实验性")).toBeTruthy();
+    await user.click(within(row).getByRole("switch"));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("setSetting", { key: "api_compatibility", value: true }));
+    await user.click(screen.getByRole("button", { name: "对话" }));
+    expect(screen.queryByText("广泛 API 兼容")).toBeNull();
+  });
+
   it("returns to chat when the active footer settings button is clicked again", async () => {
     installDesktopApi();
     const user = userEvent.setup();
@@ -2792,4 +3381,73 @@ describe("desktop GUI interactions", () => {
     await waitFor(() => expect(screen.queryByText("通用设置")).toBeNull());
     expect(screen.getByRole("button", { name: "对话" })).toBeTruthy();
   });
+  it("opens working mode from the composer and keeps the menu outside the clipped app", async () => {
+    const { request } = installDesktopApi();
+    const user = userEvent.setup();
+    render(<App />);
+    const trigger = await screen.findByRole("button", { name: "选择工作模式" });
+    expect(trigger.closest(".composer-toolbar")).toBeTruthy();
+    expect(document.querySelector(".topbar .mode-trigger")).toBeNull();
+    await user.click(trigger);
+    const menu = document.querySelector(".mode-menu")!;
+    expect(menu.parentElement).toBe(document.body);
+    await user.keyboard("{End}{Home}{Escape}");
+    expect(document.querySelector(".mode-menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+  });
+
+  it("filters stored conversation content immediately from the chat header and persists the chosen display", async () => {
+    const { api } = installDesktopApi({ initialSession: { ...baseSession, messages: [
+      { role: "user", content: "Display question" },
+      { role: "assistant", content: "Visible answer", reasoning_content: "Visible reasoning", tool_calls: [{ id: "display-tool", function: { name: "file_ops", arguments: '{"operation":"list"}' } }] },
+      { role: "tool", tool_call_id: "display-tool", content: "Tool result" },
+    ] } });
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByText("Visible reasoning");
+    expect(screen.getByText("工具调用步骤")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "对话内容显示" }));
+    const menu = screen.getByRole("dialog", { name: "对话内容显示" });
+    await user.click(within(menu).getByRole("button", { name: /思考与回复/ }));
+    expect(screen.getByText("Visible reasoning")).toBeTruthy();
+    expect(screen.queryByText("工具调用步骤")).toBeNull();
+    await user.click(within(menu).getByRole("button", { name: /仅模型回复/ }));
+    expect(screen.queryByText("Visible reasoning")).toBeNull();
+    expect(screen.getByText("Visible answer")).toBeTruthy();
+    expect(screen.getByText("Display question")).toBeTruthy();
+    await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith(expect.objectContaining({ showReasoning: false, showToolCalls: false, showToolResults: false })));
+    await user.click(within(menu).getByRole("button", { name: /全部内容/ }));
+    expect(screen.getByText("Visible reasoning")).toBeTruthy();
+    expect(screen.getByText("工具调用步骤")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "对话内容显示" }));
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
+    expect(screen.getAllByRole("region", { name: "工作面板" })).toHaveLength(1);
+    expect(screen.getByRole("separator", { name: "调整工作面板宽度" })).toBeTruthy();
+    for (const name of ["文件", "AI 改动", "上下文", "活动"]) expect(within(screen.getByRole("region", { name: "工作面板" })).getByRole("button", { name })).toBeTruthy();
+  });
+
+  it("restores collapsed thoughts and completed or interrupted tool steps without indefinite spinners", async () => {
+    installDesktopApi({ initialPreferences: { expandReasoning: false }, initialSession: { ...baseSession, messages: [
+      { role: "user", content: "Inspect the project" },
+      { role: "assistant", content: "Checking files", reasoning_content: "Inspect the smallest useful scope first.", tool_calls: [{ id: "finished", function: { name: "file_ops", arguments: '{"operation":"list","path":"."}' } }] },
+      { role: "tool", tool_call_id: "finished", content: "README.md" },
+      { role: "assistant", content: null, tool_calls: [{ id: "interrupted", function: { name: "command_exec", arguments: '{"command":"pytest"}' } }] },
+    ] } });
+    const user = userEvent.setup();
+    const mounted = render(<App />);
+    await screen.findByText("Checking files");
+    const thought = document.querySelector(".reasoning-block") as HTMLDetailsElement;
+    expect(thought.open).toBe(false);
+    expect(thought.querySelector(".reasoning-content")).toBeNull();
+    await user.click(within(thought).getByText("已思考"));
+    expect(within(thought).getByText("Inspect the smallest useful scope first.")).toBeTruthy();
+    await user.click(screen.getByText("工具调用步骤"));
+    expect(mounted.container.querySelectorAll(".activity-item.working .spin").length).toBe(0);
+    expect(mounted.container.querySelectorAll(".activity-item.success").length).toBe(1);
+    expect(mounted.container.querySelectorAll(".activity-item.warning").length).toBe(1);
+    await user.click(screen.getByText("file_ops"));
+    expect(screen.getByText("README.md")).toBeTruthy();
+  });
+
 });

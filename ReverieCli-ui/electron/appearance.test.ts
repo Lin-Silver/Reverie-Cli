@@ -12,12 +12,12 @@ describe("desktop appearance", () => {
   it("keeps the native title bar aligned with the renderer palette", () => {
     expect(windowAppearance(true)).toEqual({
       backgroundColor: "#0b0d12",
-      overlayColor: "#0b0d12",
+      overlayColor: "#00000000",
       symbolColor: "#aeb4bf",
     });
     expect(windowAppearance(false)).toEqual({
       backgroundColor: "#f6f7f9",
-      overlayColor: "#f6f7f9",
+      overlayColor: "#00000000",
       symbolColor: "#5f6671",
     });
   });

@@ -75,7 +75,7 @@ describe("desktop UI preferences", () => {
     );
     expect(value.inspectorOpen).toBe(false);
     expect(value.sidebarWidth).toBe(340);
-    expect(value.inspectorWidth).toBe(620);
+    expect(value.inspectorWidth).toBe(1100);
     expect(mergeUiPreferences({ sidebarWidth: 12 }, {}).sidebarWidth).toBe(208);
   });
 

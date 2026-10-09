@@ -37,4 +37,10 @@ describe("real Git workbench",()=>{
   it("pages a large preview without escaping through parent or symlink paths",async()=>{
     const root=await fixture();await mkdir(path.join(root,"docs"));await writeFile(path.join(root,"docs/large.md"),Array.from({length:5001},(_,i)=>`line ${i}`).join("\n"));const preview=await readPreview(root,"docs/large.md");expect(preview.totalLines).toBe(5001);expect(preview.next).toBe(2000);expect((await readPreview(root,"docs/large.md",4000)).next).toBeNull();await expect(readPreview(root,"../outside.txt")).rejects.toThrow("outside");
   });
+  it("bounds preview payloads and rejects oversized single lines and media clearly",async()=>{
+    const root=await fixture();await writeFile(path.join(root,"wide.txt"),("a".repeat(10000)+"\n").repeat(800));
+    const preview=await readPreview(root,"wide.txt");expect(Buffer.byteLength(preview.text || "")).toBeLessThanOrEqual(2*1024*1024);expect(preview.next).not.toBeNull();
+    await writeFile(path.join(root,"single.txt"),"a".repeat(300000));await expect(readPreview(root,"single.txt")).rejects.toThrow(/line|externally/);
+    await writeFile(path.join(root,"huge.png"),Buffer.alloc(21*1024*1024));await expect(readPreview(root,"huge.png")).rejects.toThrow(/20|externally/);
+  });
 });

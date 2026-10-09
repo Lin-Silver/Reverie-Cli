@@ -627,6 +627,8 @@ export type TurnSegment =
   | { kind: "activity"; events: Array<Record<string, unknown>> };
 
 export interface LiveTurn {
+  stopped?: boolean;
+  historyMessageCount?: number;
   userText: string;
   attachments?: Array<{ name: string; relativePath: string; size: number }>;
   assistantText: string;
@@ -656,6 +658,8 @@ export interface ContextUsageSegment {
 /** Live context-window accounting for the active session, from the agent's own
  *  next-request payload. Mirrors ReverieAgent.describe_context_usage(). */
 export interface ContextUsage {
+  usage_source?: "api" | "mixed";
+  api_baseline?: { tokens: number; estimated_tokens: number; api_tokens?: number; history_hashes?: string[] };
   tokenizer: { name: string; label: string; exact: boolean; detail: string };
   total_tokens: number;
   max_tokens: number;
@@ -673,6 +677,8 @@ export interface ContextUsage {
 }
 
 export interface DesktopPaths {
+  desktopExecutable?: string;
+  desktopBuild?: {version:string;id:string;builtAt:string;platform:string;arch:string} | null;
   projectRoot: string;
   kernelPath: string;
   coreAppRoot: string;

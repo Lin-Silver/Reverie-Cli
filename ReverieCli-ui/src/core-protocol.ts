@@ -83,20 +83,20 @@ interface CoreRequestMap {
   searchSessions: { payload: { query: string }; response: Envelope<"session.search", { query: string; results: SessionSearchResult[] }> };
   initialize: { payload: { projectRoot: string; deferPayloads?: boolean }; response: Envelope<"state", { state: DesktopState; deferred?: boolean }> };
   getState: { payload: EmptyPayload; response: Envelope<"state", { state: DesktopState }> };
-  getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState }> };
+  getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> };
   getFileChanges: { payload: { sessionId: string }; response: Envelope<"file.changes", { session_id: string; changes: FileChange[] }> };
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
   getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: ContextUsage | null }> };
   revealProviderSecret: { payload: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }; response: Envelope<"provider.secret", { value: string }> };
   getSubagents: { payload: EmptyPayload; response: Envelope<"subagents", { subagents: SubagentsState }> };
   getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };
-  createSession: { payload: { name?: string }; response: Envelope<"session.created", { session: SessionState; sessions: SessionListState }> };
+  createSession: { payload: { name?: string }; response: Envelope<"session.created", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> };
   runPrompt: {
-    payload: { prompt: string; sessionId: string; mode: string; stream: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string; attachments?: ComposerAttachment[]; runId?: string; runType?: "prompt" | "review" };
+    payload: { prompt: string; sessionId: string; mode: string; stream?: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string; attachments?: ComposerAttachment[]; runId?: string; runType?: "prompt" | "review"; goalContext?: string };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   resumePrompt: {
-    payload: { sessionId: string; mode: string; stream: boolean };
+    payload: { sessionId: string; mode: string; stream?: boolean };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   compactContext: {
@@ -115,7 +115,7 @@ interface CoreRequestMap {
   getImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   refreshImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   selectImageModel: { payload: { source: string; modelId: string }; response: Envelope<"image-model.selected", { selected: Record<string, unknown>; imageModels: ImageModelSourcesState }> };
-  setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models: ModelSourcesState; workspace: WorkspaceState }> };
+  setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models?: ModelSourcesState; workspace?: WorkspaceState }> };
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   updateStandardModel: { payload: { index: number; model: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };

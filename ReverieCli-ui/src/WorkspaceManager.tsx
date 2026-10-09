@@ -1,19 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ArchivePlan, ManagedWorkspace } from "../electron/isolated-workspaces";
 import type { ExecutionEntry } from "../electron/execution-coordinator";
 import { useI18n } from "./i18n";
 
+class StaleRequest extends Error {}
 export function WorkspaceManager({root,sessionId,onNavigate}:{root:string;sessionId:string;onNavigate:(root:string,id:string)=>void}) {
   const {t}=useI18n();const [items,setItems]=useState<ManagedWorkspace[]>([]);const [entries,setEntries]=useState<ExecutionEntry[]>([]);
   const [name,setName]=useState("");const [base,setBase]=useState("HEAD");const [busy,setBusy]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");
   const [copy,setCopy]=useState<{files:string[];version:string;sourceRoot:string}|null>(null);const [chosen,setChosen]=useState<string[]>([]);
   const [archive,setArchive]=useState<ArchivePlan|null>(null);const [preserve,setPreserve]=useState<string[]>([]);
   const [confirm,setConfirm]=useState<{text:string;run:()=>Promise<void>}|null>(null);
-  const call=useCallback(async<T,>(operation:string,payload:Record<string,unknown>={})=>await window.reverie.workbench(operation,{...payload,projectRoot:root,sessionId}) as T,[root,sessionId]);
-  const refresh=useCallback(async()=>{const [worktrees,executors]=await Promise.all([call<{worktrees:ManagedWorkspace[]}>("worktrees"),call<{entries:ExecutionEntry[]}>("executors")]);setItems(worktrees.worktrees);setEntries(executors.entries);},[call]);
-  const act=async(run:()=>Promise<void>)=>{setBusy(true);setError("");try{await run();}catch(e){setError(String(e));}finally{setBusy(false);}};
-  useEffect(()=>{let active=true;void refresh().catch(e=>{if(active)setError(String(e));});const timer=setInterval(()=>void refresh().catch(e=>{if(active)setError(String(e));}),2500);return()=>{active=false;clearInterval(timer);};},[refresh]);
-  useEffect(()=>{setCopy(null);setChosen([]);setArchive(null);setConfirm(null);setError("");},[root]);
+  const ownerKey=`${root}\0${sessionId}`;const owner=useRef({key:ownerKey});if(owner.current.key!==ownerKey)owner.current={key:ownerKey};const sequence=useRef(0);
+  const call=useCallback(async<T,>(operation:string,payload:Record<string,unknown>={})=>{const expected=owner.current;if(expected.key!==ownerKey)throw new StaleRequest();const value=await window.reverie.workbench(operation,{...payload,projectRoot:root,sessionId}) as T;if(owner.current!==expected)throw new StaleRequest();return value;},[root,sessionId,ownerKey]);
+  const refresh=useCallback(async()=>{const expected=owner.current;const request=++sequence.current;const [worktrees,executors]=await Promise.all([call<{worktrees:ManagedWorkspace[]}>("worktrees"),call<{entries:ExecutionEntry[]}>("executors")]);if(owner.current!==expected || request!==sequence.current)return;setItems(worktrees.worktrees);setEntries(executors.entries);},[call]);
+  const act=async(run:()=>Promise<void>)=>{const expected=owner.current;setBusy(true);setError("");try{await run();}catch(e){if(owner.current===expected && !(e instanceof StaleRequest))setError(String(e));}finally{if(owner.current===expected)setBusy(false);}};
+  useEffect(()=>{let active=true;let timer:ReturnType<typeof setTimeout>;const expected=owner.current;const poll=async()=>{try{await refresh();}catch(e){if(active && owner.current===expected && !(e instanceof StaleRequest))setError(String(e));}if(active)timer=setTimeout(()=>void poll(),2500);};void poll();return()=>{active=false;clearTimeout(timer);if(owner.current===expected)owner.current={key:ownerKey};};},[refresh,ownerKey]);
+  useEffect(()=>{setItems([]);setEntries([]);setName("");setBase("HEAD");setBusy(false);setCopy(null);setChosen([]);setArchive(null);setPreserve([]);setConfirm(null);setNotice("");setError("");},[root,sessionId]);
   return <div className="session-scroll workspace-manager">
     <div className="workbench-toolbar"><strong>{t("后台运行")} · {entries.filter(item=>item.state!=="queued").length}/4</strong><button type="button" disabled={busy} onClick={()=>void act(refresh)}>{t("刷新")}</button></div>
     {entries.map(item=><article className="run-row" key={item.id}><strong>{item.sessionId} · {item.state} · PID {item.pid || t("未知")}</strong><code>{item.projectRoot}</code><small>{item.reason || (item.readOnly?t("只读审查"):t("执行写入"))}</small><button type="button" onClick={()=>onNavigate(item.projectRoot,item.sessionId)}>{t("打开所属会话")}</button><button type="button" disabled={busy} onClick={()=>void act(async()=>{await window.reverie.request("stopPrompt",{projectRoot:item.projectRoot,sessionId:item.sessionId});await refresh();})}>{t(item.state==="queued"?"取消等待":"停止")}</button></article>)}

@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { CoreAction, CorePayload, CoreResponse } from "./core-protocol";
+import type { DesktopPaths } from "./types";
 import type { UiPreferences } from "./preferences";
 import type { GitWorkspaceStatus } from "../electron/git-workspace";
 import type { ComposerAttachment } from "../electron/attachments";
@@ -25,7 +26,7 @@ interface ReverieDesktopApi {
   switchGitBranch(name: string, remote: boolean): Promise<GitWorkspaceStatus>;
   createGitBranch(name: string): Promise<GitWorkspaceStatus>;
   selectCoreData(): Promise<string | null>;
-  paths(): Promise<{ projectRoot: string; kernelPath: string; coreAppRoot: string; runtimeRoot: string }>;
+  paths(): Promise<DesktopPaths>;
   appearance(): Promise<{ theme: "system" | "dark" | "light"; resolved: "dark" | "light" }>;
   setAppearance(theme: "system" | "dark" | "light"): Promise<{ theme: "system" | "dark" | "light"; resolved: "dark" | "light" }>;
   onAppearance(listener: (appearance: { theme: "system" | "dark" | "light"; resolved: "dark" | "light" }) => void): () => void;

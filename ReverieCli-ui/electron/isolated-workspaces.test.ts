@@ -3,13 +3,28 @@ import { mkdtemp, readFile, rm, unlink, writeFile, mkdir } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { archiveManaged, archivePlan, copyPlan, createManaged, listManaged, restoreManaged } from "./isolated-workspaces";
+import { archiveManaged, archivePlan, copyPlan, createManaged, listManaged, restoreManaged, workingSnapshot } from "./isolated-workspaces";
 
 const roots:string[]=[];
 const git=(root:string,...args:string[])=>execFileSync("git",args,{cwd:root,encoding:"utf8",windowsHide:true}).trim();
 async function fixture(){const root=await mkdtemp(path.join(tmpdir(),"reverie-worktrees-"));roots.push(root);git(root,"init","-b","main");git(root,"config","user.name","Acceptance");git(root,"config","user.email","acceptance@local.invalid");await writeFile(path.join(root,"file.txt"),"original\n");await writeFile(path.join(root,"deleted.txt"),"delete me\n");await writeFile(path.join(root,".gitignore"),"ignored.bin\n");git(root,"add",".");git(root,"commit","-m","Base");return root;}
 afterEach(async()=>{for(const root of roots.splice(0)){const actual=path.resolve(root);if(!actual.startsWith(path.resolve(tmpdir())+path.sep))throw new Error("Unsafe test cleanup");await rm(actual,{recursive:true,force:true,maxRetries:10,retryDelay:100});}});
 describe("recoverable managed worktrees",()=>{
+  it("reuses unchanged snapshot objects while capturing new bytes and parent commits without staging user files", async()=>{
+    const root=await fixture(); const originalIndex=await readFile(path.join(root,".git","index"));
+    const first=await workingSnapshot(root,"refs/reverie/runs/first/before");
+    const second=await workingSnapshot(root,"refs/reverie/runs/second/before");
+    expect(second).toBe(first);
+    expect(git(root,"rev-parse","refs/reverie/runs/second/before")).toBe(first);
+    await writeFile(path.join(root,"file.txt"),"new disk contents\n"); await writeFile(path.join(root,"untracked.txt"),"untracked\n");
+    const changed=await workingSnapshot(root,"refs/reverie/runs/third/before");
+    expect(changed).not.toBe(first); expect(git(root,"show",`${changed}:file.txt`)).toBe("new disk contents");
+    expect(git(root,"show",`${changed}:untracked.txt`)).toBe("untracked");
+    expect(await readFile(path.join(root,".git","index"))).toEqual(originalIndex);
+    git(root,"add","."); git(root,"commit","-m","New parent");
+    const next=await workingSnapshot(root,"refs/reverie/runs/fourth/before");
+    expect(git(root,"rev-parse",`${next}^`)).toBe(git(root,"rev-parse","HEAD"));
+  });
   it("copies only reviewed modifications and deletion while preserving the source index",async()=>{
     const root=await fixture();await writeFile(path.join(root,"file.txt"),"changed\n");await unlink(path.join(root,"deleted.txt"));await writeFile(path.join(root,"new.txt"),"untracked\n");git(root,"add","file.txt");const originalIndex=git(root,"diff","--cached");const plan=await copyPlan(root);
     const item=await createManaged(root,"selected","HEAD",["file.txt","deleted.txt"],plan.version);

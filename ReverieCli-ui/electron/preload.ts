@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld("reverie", {
       kernelPath: string;
       coreAppRoot: string;
       runtimeRoot: string;
+      desktopExecutable?: string;
+      desktopBuild?: {version:string;id:string;builtAt:string;platform:string;arch:string} | null;
     }>,
   appearance: () =>
     ipcRenderer.invoke("desktop:appearance") as Promise<{

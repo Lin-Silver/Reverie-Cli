@@ -53,9 +53,9 @@ describe("side pane drag geometry", () => {
   });
 
   it("never lets one pane drag the conversation column below its floor", () => {
-    // A 1000px window with a 316px inspector leaves the sidebar 264px.
-    expect(paneDragLimit(1_000, INSPECTOR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH))
-      .toBe(1_000 - INSPECTOR_DEFAULT_WIDTH - MAIN_AREA_MIN_WIDTH);
+    // The unified panel has a wider default; a 1400px window leaves 360px.
+    expect(paneDragLimit(1_400, INSPECTOR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH))
+      .toBe(1_400 - INSPECTOR_DEFAULT_WIDTH - MAIN_AREA_MIN_WIDTH);
     // A window with room to spare stops at the pane's own maximum instead.
     expect(paneDragLimit(2_400, INSPECTOR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH)).toBe(SIDEBAR_MAX_WIDTH);
     // Narrower than the floor plus the other pane: no width is affordable.

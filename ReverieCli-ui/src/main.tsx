@@ -2,6 +2,7 @@ import { Component, ErrorInfo, ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
+import "./desktop.css";
 import { applyTheme, normalizeTheme, THEME_STORAGE_KEY } from "./theme";
 import { applyUiPreferences, DEFAULT_UI_PREFERENCES } from "./preferences";
 

@@ -46,7 +46,7 @@ export function groupTranscriptMessages(messages: SessionMessage[]): TranscriptR
       };
       if (!calls.has(message.tool_call_id ?? "")) appendEvent(event, index);
       const success = !/^\s*(error|\[error|failed|exception)/i.test(textFragments(message.content));
-      Object.assign(event, { event: "tool_result", output: message.content, success, status: success ? "success" : "error" });
+      Object.assign(event, { event: "tool_result", output: message.content, success, status: success ? "success" : "error", detail: "" });
       continue;
     }
     const pureThinkingCall = message.role === "assistant" && !!message.tool_calls?.length
@@ -60,7 +60,7 @@ export function groupTranscriptMessages(messages: SessionMessage[]): TranscriptR
       const name = call.function?.name ?? "tool";
       const event = {
         event: "tool_start", tool_name: name, message: name,
-        tool_call_id: call.id, status: "working",
+        tool_call_id: call.id, status: "warning", detail: "No saved result. This operation may have been interrupted.",
         arguments: name.toLowerCase().startsWith("rats_") ? undefined : call.function?.arguments,
       };
       if (call.id) calls.set(call.id, event);

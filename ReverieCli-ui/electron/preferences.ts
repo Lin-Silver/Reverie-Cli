@@ -8,6 +8,7 @@ export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "emb
 export interface StoredUiPreferences {
   language: UiLanguage;
   userDisplayName: string;
+  userAvatarUrl: string;
   startupMode: StartupModePreference;
   accent: AccentPreference;
   fontSize: FontSizePreference;
@@ -40,12 +41,13 @@ export interface StoredUiPreferences {
  */
 const SIDEBAR_MIN_WIDTH = 208;
 const SIDEBAR_MAX_WIDTH = 460;
-const INSPECTOR_MIN_WIDTH = 264;
-const INSPECTOR_MAX_WIDTH = 620;
+const INSPECTOR_MIN_WIDTH = 380;
+const INSPECTOR_MAX_WIDTH = 1100;
 
 export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   language: "zh-CN",
   userDisplayName: "",
+  userAvatarUrl: "",
   startupMode: "gui",
   accent: "violet",
   fontSize: "comfortable",
@@ -66,7 +68,7 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   rtpProviderDetails: false,
   inspectorOpen: false,
   sidebarWidth: 268,
-  inspectorWidth: 316,
+  inspectorWidth: 620,
   recentProjects: [],
   archivedSessions: {},
 };
@@ -106,6 +108,7 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
   return {
     language: enumValue(source.language, ["zh-CN", "en-US"] as const, DEFAULT_UI_PREFERENCES.language),
     userDisplayName: String(source.userDisplayName ?? "").trim().slice(0, 32),
+    userAvatarUrl: typeof source.userAvatarUrl === "string" && source.userAvatarUrl.length <= 512 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(source.userAvatarUrl) ? source.userAvatarUrl : "",
     startupMode: enumValue(source.startupMode, ["gui", "tui"] as const, DEFAULT_UI_PREFERENCES.startupMode),
     accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"] as const, DEFAULT_UI_PREFERENCES.accent),
     fontSize: enumValue(source.fontSize, ["compact", "comfortable", "large"] as const, DEFAULT_UI_PREFERENCES.fontSize),

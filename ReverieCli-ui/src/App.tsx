@@ -1,3 +1,7 @@
+import { FloatingMenu } from "./FloatingMenu";
+import { AvatarEditor, UserAvatar } from "./AvatarEditor";
+import { StarterActions, WelcomeHeader } from "./StartPage";
+import { desktopCommand, desktopCommandAvailable } from "./desktop-commands";
 import {
   Activity,
   AlertCircle,
@@ -73,8 +77,10 @@ import {
   RefObject,
   memo,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -83,6 +89,9 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { Workbench, parseFileLink } from "./Workbench";
 import { SessionWorkbench } from "./SessionWorkbench";
+import { ConversationDisplay, DisplayPresets } from "./ConversationDisplay";
+import { ComposerSuggestions } from "./ComposerSuggestions";
+import { composerToken, slashOptions, type CompletionOption } from "./composer-completion";
 import remarkGfm from "remark-gfm";
 import { FileChanges } from "./FileChanges";
 import type {
@@ -203,13 +212,6 @@ const MODES = [
   ["writer", "Writer", Pencil],
   ["computer-controller", "Computer", SquareTerminal],
 ] as const;
-
-const QUICK_STARTS = [
-  { icon: Code2, title: "理解代码库", prompt: "分析这个项目的架构、入口和关键模块，并指出最值得关注的技术风险。" },
-  { icon: Wrench, title: "实现功能", prompt: "检查当前工作区，提出并实现一个最有价值且范围明确的改进，完成后运行验证。" },
-  { icon: ShieldCheck, title: "审查变更", prompt: "审查当前未提交的改动，重点找出正确性、安全性和回归风险。" },
-  { icon: FileText, title: "整理文档", prompt: "检查项目文档与实现是否一致，并修复最重要的文档缺口。" },
-];
 
 const THEME_OPTIONS: Array<{
   id: ThemePreference;
@@ -405,6 +407,19 @@ const Markdown = memo(function Markdown({ children }: { children: string }) {
   );
 });
 
+const StreamingMarkdown = memo(function StreamingMarkdown({ children, running }: { children: string; running: boolean }) {
+  const latestText = useRef(children);
+  const [sampledText, setSampledText] = useState(children);
+  useLayoutEffect(() => { latestText.current = children; }, [children]);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setSampledText(latestText.current), 100);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  const deferredText = useDeferredValue(sampledText);
+  return <Markdown>{running ? deferredText : children}</Markdown>;
+});
+
 function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`brand ${compact ? "compact" : ""}`}>
@@ -460,8 +475,10 @@ function PaneResizer({
   opposite,
   preview,
   commit,
+  overlay = false,
 }: {
   edge: "left" | "right";
+  overlay?: boolean;
   label: string;
   width: number;
   minimum: number;
@@ -492,21 +509,21 @@ function PaneResizer({
   const resolve = useCallback((clientX: number): number => {
     const bounds = shell.current?.getBoundingClientRect();
     const ceiling = bounds
-      ? Math.max(minimum, paneDragLimit(bounds.width, opposite, maximum))
+      ? Math.max(minimum, overlay ? Math.min(maximum, bounds.width - 48) : paneDragLimit(bounds.width, opposite, maximum))
       : maximum;
     const raw = bounds
       ? edge === "left" ? clientX - bounds.left : bounds.right - clientX
       : width;
     return clampPaneWidth(raw, minimum, ceiling, fallback);
-  }, [edge, fallback, maximum, minimum, opposite, shell, width]);
+  }, [edge, fallback, maximum, minimum, opposite, overlay, shell, width]);
 
   const step = useCallback((delta: number) => {
     const bounds = shell.current?.getBoundingClientRect();
     const ceiling = bounds
-      ? Math.max(minimum, paneDragLimit(bounds.width, opposite, maximum))
+      ? Math.max(minimum, overlay ? Math.min(maximum, bounds.width - 48) : paneDragLimit(bounds.width, opposite, maximum))
       : maximum;
     commit(clampPaneWidth(width + delta, minimum, ceiling, fallback));
-  }, [commit, fallback, maximum, minimum, opposite, shell, width]);
+  }, [commit, fallback, maximum, minimum, opposite, overlay, shell, width]);
 
   return (
     <div
@@ -609,18 +626,15 @@ function Sidebar({
   const [projectMenuRoot, setProjectMenuRoot] = useState("");
   const organization = useSidebarOrganization();
   const inputControls = useInputControls();
-  const [statusFilter, setStatusFilter] = useState("recent");
   const sessionStatus = (id: string) => inputControls?.sessionStates[ownerKey(state.workspace.project_root, id)] || (id === inputControls?.sessionId && inputControls.running ? inputControls.approval ? "approval" : "running" : "");
   const archivedIds = useMemo(
     () => new Set(preferences.archivedSessions[state.workspace.project_root] ?? []),
     [preferences.archivedSessions, state.workspace.project_root],
   );
-  const manualOrder = organization.value.order[state.workspace.project_root] ?? [];
-  const filteredSessions = state.sessions.items.filter(session => session.name.toLowerCase().includes(sessionFilter.toLowerCase()) && (statusFilter === "recent" || (statusFilter === "running" ? sessionStatus(session.id) === "running" : ["approval", "failed", "unread"].includes(sessionStatus(session.id)) || sessionStatus(session.id).startsWith("queued")))).sort((left, right) => {
+  const filteredSessions = state.sessions.items.filter(session => session.name.toLowerCase().includes(sessionFilter.toLowerCase())).sort((left, right) => {
     const pin = Number(organization.value.sessions.includes(ownerKey(state.workspace.project_root, right.id))) - Number(organization.value.sessions.includes(ownerKey(state.workspace.project_root, left.id)));
     if (pin) return pin;
-    const a = manualOrder.indexOf(left.id), b = manualOrder.indexOf(right.id);
-    return (a < 0 ? 999999 : a) - (b < 0 ? 999999 : b);
+    return 0;
   });
   const activeSessions = filteredSessions.filter((session) => !archivedIds.has(session.id));
   const archivedSessions = filteredSessions.filter((session) => archivedIds.has(session.id));
@@ -673,10 +687,8 @@ function Sidebar({
         <MoreHorizontal size={14} />
       </button>
       {sessionMenuId === session.id && (
-        <div className="session-menu" onPointerDown={(event) => event.stopPropagation()}>
+        <FloatingMenu className="session-menu" close={() => setSessionMenuId("")} side="bottom">
           <button type="button" onClick={() => { organization.pinSession(state.workspace.project_root, session.id); setSessionMenuId(""); }}>{t(organization.value.sessions.includes(ownerKey(state.workspace.project_root, session.id)) ? "取消置顶" : "置顶")}</button>
-          <button type="button" onClick={() => organization.move(state.workspace.project_root, filteredSessions.map(item => item.id), session.id, -1)}>{t("上移会话")}</button>
-          <button type="button" onClick={() => organization.move(state.workspace.project_root, filteredSessions.map(item => item.id), session.id, 1)}>{t("下移会话")}</button>
           <button type="button" onClick={() => { setSessionMenuId(""); renameSession(session); }}>
             <Pencil size={14} /><span>{t("重命名")}</span>
           </button>
@@ -688,7 +700,7 @@ function Sidebar({
           <button type="button" className="danger" onClick={() => { setSessionMenuId(""); deleteSession(session); }}>
             <Trash2 size={14} /><span>{t("删除")}</span>
           </button>
-        </div>
+        </FloatingMenu>
       )}
     </div>
   );
@@ -712,6 +724,7 @@ function Sidebar({
       </div>
 
       <nav className="main-nav" aria-label={t("主导航")}>
+        <div className="nav-primary">
         <button type="button" className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
           <MessageSquare size={16} /> {t("对话")}
         </button>
@@ -721,12 +734,16 @@ function Sidebar({
         <button type="button" className={view === "subagents" ? "active" : ""} onClick={() => setView("subagents")}>
           <Bot size={16} /> {t("SubAgents")}
         </button>
+        </div>
+        <div className="nav-automation">
         <button type="button" className={view === "rats" ? "active" : ""} onClick={() => setView("rats")}>
           <Database size={16} /> RATS
         </button>
         <button type="button" className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}>
           <Clock3 size={16} /> {t("RTP 任务")}
         </button>
+        </div>
+        <div className="nav-utilities">
         <button type="button" className={view === "skills" ? "active" : ""} onClick={() => setView("skills")}>
           <Sparkles size={16} /> {t("技能")}
         </button>
@@ -736,6 +753,7 @@ function Sidebar({
         <button type="button" className={view === "recovery" ? "active" : ""} onClick={() => setView("recovery")}>
           <ArchiveRestore size={16} /> {t("恢复")}
         </button>
+        </div>
       </nav>
 
       <div className="project-heading">
@@ -743,7 +761,6 @@ function Sidebar({
         <button type="button" aria-label={t("添加工作区")} onClick={selectWorkspace}><Plus size={14} /></button>
       </div>
       <div className="project-list">
-        <select className="sidebar-status-filter" aria-label={t("会话状态过滤")} value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="recent">{t("最近与手动顺序")}</option><option value="running">{t("运行中")}</option><option value="attention">{t("需处理")}</option></select>
         {organization.error && <p role="alert" className="persistent-error">{organization.error}</p>}
         {recentProjects.map((projectRoot) => {
           const active = projectRoot.toLowerCase() === state.workspace.project_root.toLowerCase();
@@ -775,7 +792,7 @@ function Sidebar({
                   <MoreHorizontal size={14} />
                 </button>
                 {projectMenuRoot === projectRoot && (
-                  <div className="project-menu" onPointerDown={(event) => event.stopPropagation()}>
+                  <FloatingMenu className="project-menu" close={() => setProjectMenuRoot("")} side="bottom">
                     <button type="button" onClick={() => { organization.pinProject(projectRoot); setProjectMenuRoot(""); }}>{t(organization.value.projects.includes(projectRoot) ? "取消置顶" : "置顶")}</button>
                     <button type="button" disabled={sessionBusy} onClick={() => { setProjectMenuRoot(""); newProjectSession(projectRoot); }}>
                       <Plus size={14} /><span>{t("新对话")}</span>
@@ -787,7 +804,7 @@ function Sidebar({
                     <button type="button" className="danger" onClick={() => { setProjectMenuRoot(""); deleteProject({ root: projectRoot, name: projectName, active }); }}>
                       <Trash2 size={14} /><span>{t("删除项目与记录")}</span>
                     </button>
-                  </div>
+                  </FloatingMenu>
                 )}
               </div>
               {active && activeProjectOpen && (
@@ -830,11 +847,11 @@ function Sidebar({
                             <MoreHorizontal size={14} />
                           </button>
                           {archiveMenuOpen && (
-                            <div className="project-menu archived-menu" onPointerDown={(event) => event.stopPropagation()}>
+                            <FloatingMenu className="project-menu archived-menu" close={() => setArchiveMenuOpen(false)} side="bottom">
                               <button type="button" className="danger" onClick={() => { setArchiveMenuOpen(false); deleteArchivedSessions(allArchivedSessions); }}>
                                 <Trash2 size={14} /><span>{t("清空全部归档会话")}</span>
                               </button>
-                            </div>
+                            </FloatingMenu>
                           )}
                         </div>
                         {archivedOpen && archivedSessions.map((session) => renderSession(session, true))}
@@ -986,13 +1003,15 @@ function ModelPicker({
   );
 }
 
+const COMMAND_VIEWS: Record<string, ViewId> = { "/mode": "settings", "/permission": "settings", "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/skill": "skills", "/skills": "skills", "/plugins": "plugins", "/checkpoints": "recovery", "/rollback": "recovery" };
+
 function Topbar({
   state,
+  view,
   sidebarCollapsed,
   toggleSidebar,
   openModelPicker,
   selectReasoning,
-  setMode,
   inspectorOpen,
   toggleInspector,
   openCommands,
@@ -1000,11 +1019,11 @@ function Topbar({
   setTheme,
 }: {
   state: DesktopState;
+  view: ViewId;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
   openModelPicker: () => void;
   selectReasoning: (value: string) => void;
-  setMode: (mode: string) => void;
   inspectorOpen: boolean;
   toggleInspector: () => void;
   openCommands: () => void;
@@ -1013,20 +1032,17 @@ function Topbar({
 }) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const activeSource = expandModelSources(state.models.sources).find((source) => source.active);
   const reasoning = activeSource?.selected_reasoning;
   const reasoningOptions = reasoning?.options ?? [];
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
-  const mode = MODES.find((item) => item[0] === state.workspace.mode) ?? MODES[0];
-  const ModeIcon = mode[2];
   const modelSelectionLocked = state.workspace.mode === "computer-controller";
+  const viewLabels: Record<ViewId, string> = { chat: "对话", tools: "工具", subagents: "SubAgents", rats: "RATS", tasks: "RTP 任务", skills: "技能", plugins: "插件", recovery: "恢复", settings: "设置" };
   useEffect(() => {
     const closeMenus = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setReasoningOpen(false);
-      setModeOpen(false);
       setThemeOpen(false);
     };
     window.addEventListener("keydown", closeMenus);
@@ -1037,10 +1053,12 @@ function Topbar({
     <header className="topbar">
       <div className="topbar-left">
         {sidebarCollapsed && <IconButton label={`${t("展开左侧栏")} (Ctrl+B)`} ariaKeyShortcuts="Control+B Meta+B" onClick={toggleSidebar}><PanelLeftOpen size={16} /></IconButton>}
+        <div className="workspace-breadcrumb"><Folder size={14} /><strong>{state.workspace.project_name || projectNameFromPath(state.workspace.project_root)}</strong><ChevronRight size={12} /><span>{t(viewLabels[view])}</span></div>
+      </div>
+      <div className="topbar-center">
         {!modelSelectionLocked && (
           <button type="button" className="model-trigger" onClick={openModelPicker}>
-            <span>{activeSource ? state.models.active_model?.display_name || t("选择模型") : t("选择模型")}</span>
-            <small>{activeSource?.display_name || t("选择模型来源")}</small>
+            <span className="model-copy"><strong>{activeSource ? state.models.active_model?.display_name || t("选择模型") : t("选择模型")}</strong><small>{activeSource?.display_name || t("选择模型来源")}</small></span>
             <ChevronDown size={14} />
           </button>
         )}
@@ -1052,7 +1070,6 @@ function Topbar({
               onClick={() => {
                 if (!reasoningOptions.length) return;
                 setReasoningOpen((value) => !value);
-                setModeOpen(false);
                 setThemeOpen(false);
               }}
             >
@@ -1061,7 +1078,7 @@ function Topbar({
               {reasoningOptions.length > 0 && <ChevronDown size={12} />}
             </button>
             {reasoningOpen && (
-              <div className="small-popover reasoning-menu">
+              <FloatingMenu className="small-popover reasoning-menu" close={() => setReasoningOpen(false)} side="bottom">
                 {reasoningOptions.map((option) => (
                   <button
                     type="button"
@@ -1076,49 +1093,21 @@ function Topbar({
                     {option.id === reasoning.value && <Check size={14} />}
                   </button>
                 ))}
-              </div>
+              </FloatingMenu>
             )}
           </div>
         )}
       </div>
-      <div className="topbar-center" />
       <div className="topbar-right">
-        <div className="relative">
-          <button type="button" className="mode-trigger" onClick={() => {
-            setModeOpen((value) => !value);
-            setReasoningOpen(false);
-            setThemeOpen(false);
-          }}>
-            <ModeIcon size={14} /> {mode[1]} <ChevronDown size={12} />
-          </button>
-          {modeOpen && (
-            <div className="small-popover mode-menu">
-              {MODES.map(([id, label, Icon]) => (
-                <button
-                  type="button"
-                  key={id}
-                  className={id === state.workspace.mode ? "active" : ""}
-                  onClick={() => {
-                    setMode(id);
-                    setModeOpen(false);
-                  }}
-                >
-                  <Icon size={15} /><span>{t(label)}</span>{id === state.workspace.mode && <Check size={14} />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
         <div className="relative">
           <IconButton label={t("切换主题")} onClick={() => {
             setThemeOpen((value) => !value);
             setReasoningOpen(false);
-            setModeOpen(false);
           }} active={themeOpen}>
             <Palette size={16} />
           </IconButton>
           {themeOpen && (
-            <div className="small-popover theme-menu">
+            <FloatingMenu className="small-popover theme-menu" close={() => setThemeOpen(false)} side="bottom">
               <div className="popover-title">{t("界面主题")}</div>
               {THEME_OPTIONS.map(({ id, label, description, icon: Icon }) => (
                 <button
@@ -1136,11 +1125,11 @@ function Topbar({
                   {id === theme && <Check size={14} />}
                 </button>
               ))}
-            </div>
+            </FloatingMenu>
           )}
         </div>
         <IconButton label={t("命令面板")} onClick={openCommands}><Command size={16} /></IconButton>
-        <IconButton label={t(inspectorOpen ? "关闭检查器" : "打开检查器")} onClick={toggleInspector} active={inspectorOpen}>
+        <IconButton label={t(inspectorOpen ? "关闭工作面板" : "打开工作面板")} onClick={toggleInspector} active={inspectorOpen}>
           {inspectorOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </IconButton>
       </div>
@@ -1161,21 +1150,6 @@ function GitBranchPicker({ status, busy, refresh, switchBranch, createBranch }: 
   const [creating, setCreating] = useState(false);
   const [newBranch, setNewBranch] = useState("");
   const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!container.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const escape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    window.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      window.removeEventListener("keydown", escape);
-    };
-  }, [open]);
   const needle = query.trim().toLowerCase();
   const local = status.localBranches.filter((branch) => branch.toLowerCase().includes(needle));
   const remote = status.remoteBranches.filter((branch) => branch.toLowerCase().includes(needle));
@@ -1185,7 +1159,7 @@ function GitBranchPicker({ status, busy, refresh, switchBranch, createBranch }: 
       {status.dirtyCount > 0 && <small>{t("git.changes", { count: status.dirtyCount })}</small>}
       <ChevronDown size={12} />
     </button>
-    {open && <div className="git-branch-menu" role="dialog" aria-label={t("Git 分支")}>
+    {open && <FloatingMenu className="git-branch-menu" close={() => setOpen(false)} side="top" label={t("Git 分支")}>
       <label className="git-branch-search"><Search size={14} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索分支")} aria-label={t("搜索分支")} /></label>
       <div className="git-branch-list">
         {local.length > 0 && <><div className="git-branch-section">{t("本地分支")}</div>{local.map((branch) => <button type="button" key={branch} disabled={busy} className={branch === status.currentBranch ? "active" : ""} onClick={() => { setOpen(false); if (branch !== status.currentBranch) switchBranch(branch, false); }}><GitBranch size={14} /><span title={[status.branchDetails?.[branch]?.upstream,status.branchDetails?.[branch]?.tracking,status.branchDetails?.[branch]?.lastCommit,status.branchDetails?.[branch]?.worktree].filter(Boolean).join(" · ")}>{branch}<small>{status.branchDetails?.[branch]?.upstream} {status.branchDetails?.[branch]?.tracking} {status.branchDetails?.[branch]?.lastCommit} {status.branchDetails?.[branch]?.worktree}</small>{branch === status.currentBranch && status.dirtyCount > 0 && <small>{t("git.uncommitted", { count: status.dirtyCount })}</small>}</span>{branch === status.currentBranch && <Check size={15} />}</button>)}</>}
@@ -1197,7 +1171,7 @@ function GitBranchPicker({ status, busy, refresh, switchBranch, createBranch }: 
           : <button type="button" disabled={busy} onClick={() => setCreating(true)}><Plus size={15} />{t("创建并切换到新分支")}</button>}
         <details><summary>{t("独立工作目录")}</summary>{[...new Set(Object.values(status.branchDetails || {}).map(item=>item.worktree).filter(directory=>directory && directory.toLowerCase()!==status.repositoryRoot.toLowerCase()))].map(directory=><button type="button" key={directory} title={directory} onClick={()=>{setOpen(false);window.dispatchEvent(new CustomEvent("reverie:workspace-open",{detail:{root:directory}}));}}>{t("打开并创建会话")} · {directory}</button>)}</details>
       </div>
-    </div>}
+    </FloatingMenu>}
   </div>;
 }
 
@@ -1301,22 +1275,13 @@ function HistoryToolResult({
 }
 
 function HistoryReasoning({ text, defaultExpanded, active = false }: { text: string; defaultExpanded: boolean; active?: boolean }) {
-  const { language, t } = useI18n();
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(defaultExpanded);
   useEffect(() => setExpanded(defaultExpanded), [defaultExpanded]);
-  const preview = text.replace(/\s+/g, " ").trim().slice(0, 110);
-  return (
-    <details className={`reasoning-block ${active ? "active" : ""}`} open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
-      <summary>
-        <span className="reasoning-icon"><Brain size={14} /></span>
-        <span className="reasoning-title"><strong>{t(active ? "正在思考" : "推理记录")}</strong><small>{t(active ? "模型正在生成推理过程" : "模型返回的内部分析")}</small></span>
-        <span className="reasoning-preview">{preview}</span>
-        <small>{t("reasoning.characters", { count: text.length.toLocaleString(language) })}</small>
-        <ChevronDown size={13} />
-      </summary>
-      {expanded && <div className="reasoning-content"><Markdown>{text}</Markdown></div>}
-    </details>
-  );
+  return <details className={`reasoning-block ${active ? "active" : ""}`} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary><Brain size={15} /><span>{t(active ? "正在思考" : "已思考")}</span><ChevronDown size={12} /></summary>
+    {expanded && <div className="reasoning-content"><Markdown>{text}</Markdown></div>}
+  </details>;
 }
 
 function ToolCallList({ message }: { message: SessionMessage }) {
@@ -1382,7 +1347,7 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
   return (
     <article className={`message ${message.role} ${technicalOnly ? "technical-only" : ""}`}>
       {!technicalOnly && <div className="message-heading">
-        <div className="message-avatar">{user ? [...userName][0] : <Sparkles size={15} strokeWidth={1.7} />}</div>
+        {user ? <UserAvatar name={userName} url={preferences.userAvatarUrl} /> : <div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div>}
         <strong>{user ? userName : "Reverie"}</strong>
       </div>}
       <div className="message-body">
@@ -1410,6 +1375,10 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
 function InlineError({ detail }: { detail: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const htmlResponse = /<!doctype\s+html|<html[\s>]/i.test(detail);
+  const summary = htmlResponse ? t(/Attention Required!.*Cloudflare/i.test(detail)
+    ? "供应商返回了 Cloudflare 拦截页面，本轮未获得模型回复。请检查供应商地址或稍后重试。"
+    : "供应商返回了网页内容，本轮未获得模型回复。请检查供应商地址或查看原始错误。") : "";
   const copy = useCallback(() => {
     void navigator.clipboard?.writeText(detail).then(() => {
       setCopied(true);
@@ -1425,7 +1394,10 @@ function InlineError({ detail }: { detail: string }) {
           {copied ? <><Check size={12} /> {t("已复制")}</> : <><Copy size={12} /> {t("复制")}</>}
         </button>
       </div>
-      <pre className="inline-error-body">{detail}</pre>
+      {summary ? <>
+        <p className="inline-error-summary">{summary}</p>
+        <details className="inline-error-details"><summary>{t("查看原始错误")}</summary><pre className="inline-error-body">{detail}</pre></details>
+      </> : <pre className="inline-error-body">{detail}</pre>}
     </div>
   );
 }
@@ -1433,12 +1405,13 @@ function InlineError({ detail }: { detail: string }) {
 const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { turn: LiveTurn; running: boolean; preferences: UiPreferences }) {
   const { t } = useI18n();
   const userName = preferences.userDisplayName || t("你");
-  const liveStatus = turn.error ? t("失败") : running ? t("正在处理") : t("已完成");
-  const liveStatusClass = turn.error ? "error" : running ? "working" : "success";
+  const liveStatus = turn.error ? t("失败") : running ? t("正在处理") : turn.stopped ? t("已停止") : t("已完成");
+  const liveStatusClass = turn.error ? "error" : running ? "working" : turn.stopped ? "stopped" : "success";
+  const visibleOutput = (text: string) => turn.error && text.endsWith(turn.error) ? text.slice(0, -turn.error.length).trimEnd() : text;
   return (
     <>
-      {!turn.resumed && <article className="message user">
-        <div className="message-heading"><div className="message-avatar">{[...userName][0]}</div><strong>{userName}</strong></div>
+      {!turn.resumed && <article className="message user live-user-message">
+        <div className="message-heading"><UserAvatar name={userName} url={preferences.userAvatarUrl} /><strong>{userName}</strong></div>
         <div className="message-body"><div className="user-text">{turn.userText}</div>
           {turn.attachments?.map((attachment, index) => <button key={index} type="button" className="message-attachment" aria-label={`${t("打开文件预览")} ${attachment.name}`} onClick={() => window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: { path: attachment.relativePath } }))}>
             <FileText size={18} /><span>{attachment.name}</span><small>{formatFileSize(attachment.size)}</small>
@@ -1452,8 +1425,8 @@ const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { 
             ? preferences.showLiveActivity && <ActivityGroup key={index} events={segment.events} />
             : segment.kind === "reasoning"
               ? preferences.showReasoning && <HistoryReasoning key={index} text={segment.text} defaultExpanded={preferences.expandReasoning} active={running && index === (turn.segments?.length ?? 0) - 1} />
-              : <Markdown key={index}>{segment.text}</Markdown>)}
-          {!turn.segments?.length && turn.assistantText && <Markdown>{turn.assistantText}</Markdown>}
+              : <StreamingMarkdown key={index} running={running}>{visibleOutput(segment.text)}</StreamingMarkdown>)}
+          {!turn.segments?.length && turn.assistantText && <StreamingMarkdown running={running}>{visibleOutput(turn.assistantText)}</StreamingMarkdown>}
           {running && <div className="typing"><span /><span /><span /></div>}
           {turn.error && <InlineError detail={turn.error} />}
         </div>
@@ -1461,63 +1434,6 @@ const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { 
     </>
   );
 });
-
-function EmptyChat({ setPrompt }: { setPrompt: (prompt: string) => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="empty-chat">
-      <div className="empty-mark"><img src={REVERIE_MARK_URL} alt="Reverie" /></div>
-      <h1>{t("今天想一起做点什么？")}</h1>
-      <p>{t("Reverie 可以理解工作区、编写代码、调用工具，并在同一会话中持续完成任务。")}</p>
-      <div className="quick-grid">
-        {QUICK_STARTS.map(({ icon: Icon, title, prompt }) => (
-          <button type="button" key={title} onClick={() => setPrompt(t(prompt))}>
-            <Icon size={16} /><strong>{t(title)}</strong><span>{t(prompt)}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MentionPicker({
-  items,
-  choose,
-  open,
-  loading,
-  selected = 0,
-}: {
-  items: Array<Record<string, unknown>>;
-  choose: (value: string) => void;
-  open: boolean;
-  loading: boolean;
-  selected?: number;
-}) {
-  const { t } = useI18n();
-  if (!open) return null;
-  return (
-    <div className={`mention-picker ${loading ? "is-loading" : ""}`} aria-live="polite" aria-busy={loading}>
-      <div className="mention-picker-heading">
-        <span><Sparkles size={13} />{t("Context Engine 推荐")}{loading && items.length > 0 && <RefreshCw className="spin mention-picker-refresh" size={12} />}</span>
-        <small>{t("结合当前提示、会话、索引与 Git 变更")}</small>
-      </div>
-      {loading && items.length === 0 && <div className="mention-picker-state"><RefreshCw className="spin" size={14} />{t("正在计算最相关文件…")}</div>}
-      {!loading && items.length === 0 && <div className="mention-picker-state">{t("当前工作区没有可推荐的文件")}</div>}
-      {items.slice(0, 12).map((item, index) => {
-        const pathValue = String(item.path ?? item.file_path ?? "");
-        const line = Number(item.line ?? item.start_line ?? 0);
-        const value = `${workspaceMention(pathValue)}${line ? `#L${line}` : ""}`;
-        const reason = t(String(item.reason ?? item.summary ?? item.source ?? "工作区匹配"));
-        return (
-          <button type="button" className={selected === index ? "selected" : ""} key={`${String(item.kind ?? "file")}-${value}`} onClick={() => choose(value)}>
-            {String(item.kind ?? "file") === "symbol" ? <Code2 size={14} /> : <FileText size={14} />}
-            <div><strong>{String(item.name ?? pathValue.split(/[\\/]/).pop() ?? pathValue)}</strong><span>{pathValue}</span><small>{reason}</small></div>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // One colour per context segment. The lavender accent leads (system prompt),
 // then cooler-to-warmer hues for injected context, the conversation roles, and
@@ -1529,6 +1445,8 @@ const CONTEXT_SEGMENT_COLORS: Record<string, string> = {
   user: "#7fd6ad",
   assistant: "#f0c274",
   tool: "#e59aa0",
+  api_context: "#c7b5ff",
+  local_delta: "#7fd6ad",
   overhead: "#606a79",
 };
 
@@ -1672,7 +1590,7 @@ function ContextRing({ usage }: { usage: ContextUsage | null }) {
           </ul>
           <div className="context-ring-foot">
             <span>{t("context.usage.remaining", { tokens: formatTokens(usage.remaining_tokens) })}</span>
-            {!usage.tokenizer.exact && <span className="context-ring-approx">{t("context.usage.approx")}</span>}
+            <span className="context-ring-approx">{t(usage.usage_source === "api" ? "context.usage.api" : usage.usage_source === "mixed" ? "context.usage.mixed" : usage.tokenizer.exact ? "context.usage.local" : "context.usage.approx")}</span>
           </div>
         </div>,
         document.body,
@@ -1693,11 +1611,11 @@ function taskListEntries(value: unknown): TaskListEntry[] {
 function TaskBar({ tasks, running, resumable, resume }: { tasks: TaskListEntry[]; running: boolean; resumable: boolean; resume: () => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  if (!tasks.length && !running && !resumable) return null;
+  if (!tasks.length && !resumable) return null;
   const current = tasks.find(task => task.state === "IN_PROGRESS")
     ?? tasks.find(task => task.state === "NOT_STARTED")
     ?? tasks.at(-1);
-  const summary = current?.name ?? t("正在处理任务");
+  const summary = current?.name ?? t(running ? "正在处理任务" : "继续任务");
   return <div className="task-bar">
     <div className="task-bar-head">
       <button type="button" className="task-bar-toggle" aria-expanded={expanded} aria-label={t("任务列表")} onClick={() => setExpanded(!expanded)}>
@@ -1714,6 +1632,18 @@ function TaskBar({ tasks, running, resumable, resume }: { tasks: TaskListEntry[]
         <span>{task.name}</span>
       </div>) : <div className="task-bar-empty">{t("任务列表尚未建立")}</div>}
     </div>}
+  </div>;
+}
+
+function ComposerMode() {
+  const controls = useInputControls();
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const mode = MODES.find(item => item[0] === controls?.mode) ?? MODES[0];
+  const Icon = mode[2];
+  return <div className="composer-mode">
+    <button type="button" className="mode-trigger" aria-label={t("选择工作模式")} aria-expanded={open} onClick={() => setOpen(value => !value)}><Icon size={15} /><span>{t(mode[1])}</span><ChevronDown size={12} /></button>
+    {open && <FloatingMenu className="small-popover mode-menu" side="top" close={() => setOpen(false)}>{MODES.map(([id, label, ModeIcon]) => <button type="button" key={id} className={id === controls?.mode ? "active" : ""} onClick={() => { controls?.setMode?.(id); setOpen(false); }}><ModeIcon size={15} /><span>{t(label)}</span>{id === controls?.mode && <Check size={14} />}</button>)}</FloatingMenu>}
   </div>;
 }
 
@@ -1750,8 +1680,8 @@ function Composer({
   mentionItems: Array<Record<string, unknown>>;
   mentionOpen: boolean;
   mentionLoading: boolean;
-  requestMentions: () => void;
-  chooseMention: (value: string) => void;
+  requestMentions: (query?: string) => void;
+  chooseMention: (value: string, range?: { start: number; end: number }) => void;
   attachments: ComposerAttachment[];
   selectAttachment: () => void;
   importDroppedFiles: (files: File[]) => void;
@@ -1769,10 +1699,64 @@ function Composer({
   const { t } = useI18n();
   const textarea = useRef<HTMLTextAreaElement>(null);
   const controls = useInputControls();
-  const [mentionIndex, setMentionIndex] = useState(0);
+  const anchor = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const [caret, setCaret] = useState(value.length);
+  const [selected, setSelected] = useState(0);
+  const [dismissed, setDismissed] = useState("");
+  const [skillBusy, setSkillBusy] = useState(false);
+  const token = composerToken(value, Math.min(caret, value.length));
+  const tokenKey = token ? `${token.kind}:${token.start}:${token.end}:${token.query}` : "";
+  const owner = `${controls?.projectRoot}:${controls?.sessionId}`;
+  const menuOpen = Boolean(token && dismissed !== tokenKey && !disabled);
+  const mentionMode = token?.kind === "mention";
+  const callbacks = useRef({ requestMentions, close: controls?.closeMentions });
+  callbacks.current = { requestMentions, close: controls?.closeMentions };
+  useEffect(() => {
+    callbacks.current.close?.();
+    setSelected(0);
+    if (!menuOpen || !mentionMode || !token) return;
+    const timer = window.setTimeout(() => callbacks.current.requestMentions(token.query), 120);
+    return () => window.clearTimeout(timer);
+  }, [tokenKey, menuOpen, owner]);
+  const full = Boolean(controls?.skills && pinnedSkills.length + unresolvedSkills.length >= controls.skills.pinned.max);
+  const options: CompletionOption[] = !token ? [] : mentionMode ? mentionItems.map((item, index) => {
+    const path = String(item.path ?? item.file_path ?? "");
+    const line = Number(item.line ?? item.start_line ?? 0);
+    return { id: `file:${index}:${path}`, kind: "file", label: String(item.name ?? path.split(/[\\/]/).pop() ?? path), description: `${path}${line ? `:${line}` : ""}`, value: `${workspaceMention(path)}${line ? `#L${line}` : ""}` };
+  }) : slashOptions(token, controls?.commands ?? [], controls?.skills?.records ?? [], full, t);
+  const loading = skillBusy || (mentionMode && (!mentionOpen || mentionLoading));
+  const closeMenu = useCallback(() => { setDismissed(tokenKey); controls?.closeMentions(); }, [tokenKey, controls?.closeMentions]);
+  const focusAt = (position: number) => requestAnimationFrame(() => { textarea.current?.focus(); textarea.current?.setSelectionRange(position, position); setCaret(position); });
+  const insertTrigger = (trigger: string) => {
+    if (token?.kind === (trigger === "@" ? "mention" : "command") && menuOpen) { closeMenu(); textarea.current?.focus(); return; }
+    const start = textarea.current?.selectionStart ?? value.length;
+    const end = textarea.current?.selectionEnd ?? start;
+    const prefix = start > 0 && !/\s$/.test(value.slice(0, start)) ? " " : "";
+    const next = trigger === "/" && value.trim() ? value : value.slice(0, start) + prefix + trigger + value.slice(end);
+    if (trigger === "/" && value.trim()) { window.dispatchEvent(new CustomEvent("reverie:commands")); return; }
+    setDismissed(""); setValue(next); focusAt(start + prefix.length + trigger.length);
+  };
+  const chooseCompletion = async (option: CompletionOption) => {
+    if (!token || option.disabled || skillBusy) return;
+    if (option.kind === "file") {
+      chooseMention(option.value, token);
+      closeMenu(); focusAt(token.start); return;
+    }
+    if (option.kind === "skill") {
+      setSkillBusy(true);
+      const pinned = await controls?.pinSkill?.(option.value);
+      setSkillBusy(false);
+      if (!pinned) return;
+      setValue(value.slice(0, token.start) + value.slice(token.end));
+      closeMenu(); focusAt(token.start); return;
+    }
+    const next = value.slice(0, token.start) + option.value + value.slice(token.end);
+    setValue(next); setDismissed(""); focusAt(token.start + option.value.length);
+  };
   const [forceAvailable, setForceAvailable] = useState(false);
-  useEffect(() => { setForceAvailable(false); if (!controls?.status.includes(t("正在停止，等待当前操作结束"))) return; const timer = window.setTimeout(() => setForceAvailable(true), 15000); return () => window.clearTimeout(timer); }, [controls?.status, t]);
-  useEffect(() => setMentionIndex(0), [mentionItems]);
+  useEffect(() => { setForceAvailable(false); if (!running || !controls?.status.includes(t("正在停止，等待当前操作结束"))) return; const timer = window.setTimeout(() => setForceAvailable(true), 15000); return () => window.clearTimeout(timer); }, [running, controls?.status, t]);
+  useEffect(() => setSelected(0), [mentionItems]);
   const dragDepth = useRef(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
   useEffect(() => {
@@ -1784,10 +1768,21 @@ function Composer({
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter" && event.ctrlKey && event.altKey && running) { event.preventDefault(); controls?.steer(); return; }
-    if (mentionOpen) {
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); controls?.closeMentions(); return; }
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setMentionIndex(index => Math.max(0, Math.min(mentionItems.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))); return; }
-      if (event.key === "Enter" && mentionItems[mentionIndex]) { event.preventDefault(); const item = mentionItems[mentionIndex]; const line = Number(item.line ?? item.start_line ?? 0); chooseMention(`${workspaceMention(String(item.path ?? item.file_path ?? ""))}${line ? `#L${line}` : ""}`); return; }
+    if (skillBusy) { if (event.key === "Enter") event.preventDefault(); return; }
+    if (menuOpen) {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeMenu(); return; }
+      if (!event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          setSelected(index => options.length ? (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length : 0);
+          return;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault();
+          if (!loading && options[selected]) void chooseCompletion(options[selected]);
+          return;
+        }
+      }
     }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       if (disabled) return;
@@ -1827,11 +1822,11 @@ function Composer({
       <GoalSummary />
       <TaskBar tasks={tasks} running={running} resumable={resumable && !disabled} resume={resume} />
       <QueueStrip />
-      <MentionPicker items={mentionItems} choose={chooseMention} open={mentionOpen} loading={mentionLoading} selected={mentionIndex} />
-      <div className={`composer ${draggingFiles ? "dragging-files" : ""}`} onDragEnter={dragEnter} onDragOver={dragOver} onDragLeave={dragLeave} onDrop={drop}>
+      {menuOpen && <ComposerSuggestions anchor={anchor} id={menuId} title={t(mentionMode ? "引用工作区文件" : token?.kind === "skill" ? "选择必须使用的 Skill" : "指令与 Skills")} hint={t(mentionMode ? "输入文件名筛选，选择后加入附件" : token?.kind === "skill" ? "固定后每轮必须使用，直到取消固定" : "选择指令填入输入框，或固定一个 Skill")} options={options} selected={selected} loading={loading} error={mentionMode ? controls?.mentionError : undefined} choose={option => void chooseCompletion(option)} select={setSelected} close={closeMenu} />}
+      <div ref={anchor} className={`composer ${draggingFiles ? "dragging-files" : ""}`} onDragEnter={dragEnter} onDragOver={dragOver} onDragLeave={dragLeave} onDrop={drop}>
         {draggingFiles && <div className="composer-drop-overlay"><Paperclip size={20} /><strong>{t("拖放文件以添加附件")}</strong><span>{t("最多一次添加 20 个本地文件")}</span></div>}
         {(pinnedSkills.length > 0 || unresolvedSkills.length > 0) && (
-          <div className="skill-strip">
+          <div className="skill-strip"><span className="skill-strip-label"><Pin size={12} />{t("必须使用")}</span>
             {pinnedSkills.map((name) => (
               <span className="skill-chip" key={name} title={t("skill.pinned.hint", { name })}>
                 <Sparkles size={12} />
@@ -1850,33 +1845,50 @@ function Composer({
         )}
         <AttachmentCards items={attachments} remove={removeAttachment} />
         {controls?.error && <p className="persistent-error" role="alert">{controls.error}</p>}
-        {controls?.status && <p className="composer-status" role="status">{controls.status}</p>}
-        {forceAvailable && <button type="button" onClick={controls?.forceStop}>{t("强制停止")}</button>}
+        {running && controls?.status && <p className="composer-status" role="status">{controls.status}</p>}
+        {running && forceAvailable && <button type="button" onClick={controls?.forceStop}>{t("强制停止")}</button>}
         {controls && attachments.some(item => /\.(png|jpe?g|webp|gif|bmp)$/i.test(item.relativePath)) && controls.vision !== true && <p className="persistent-error" role="alert">{t(controls.vision === false ? "当前模型不支持图片，请切换模型或移除图片" : "图片输入能力未知，请选择明确支持图片的模型")}</p>}
         <textarea
           ref={textarea}
           aria-label={t("composer.placeholder", { model: modelName || "Reverie" })}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => { setValue(event.target.value); setCaret(event.target.selectionStart); setDismissed(""); }}
+          onSelect={event => { const position = event.currentTarget.selectionStart; if (position !== caret) { setCaret(position); setDismissed(""); } }}
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-controls={menuOpen ? menuId : undefined}
+          aria-activedescendant={menuOpen && !loading && options[selected] ? `${menuId}-${selected}` : undefined}
           onKeyDown={keyDown}
           onPaste={event => { if (Array.from(event.clipboardData.items).some(item => item.type === "image/png" || item.type === "image/jpeg")) { event.preventDefault(); controls?.paste(); } }}
           placeholder={t("composer.placeholder", { model: modelName || "Reverie" })}
           rows={1}
-          disabled={disabled}
+          disabled={disabled || skillBusy}
         />
         <div className="composer-toolbar">
           <div>
-            <IconButton label={t("Context Engine 推荐工作区文件")} onClick={requestMentions} disabled={disabled}><AtSign size={16} /></IconButton>
+            <ComposerMode />
+            <IconButton label={t("Context Engine 推荐工作区文件")} onClick={() => insertTrigger("@")} disabled={disabled || skillBusy}><AtSign size={16} /></IconButton>
+            <IconButton label={t("指令与 Skills")} onClick={() => insertTrigger("/")} disabled={disabled || skillBusy}><Command size={16} /></IconButton>
             <IconButton label={t("选择任意文件作为附件")} onClick={selectAttachment} disabled={disabled}><Paperclip size={16} /></IconButton>
-            <span className="composer-drop-hint">{t("可拖入文件")}</span>
-            {controls && <details className="input-context-summary"><summary>{t("本条上下文")}</summary><div><strong>{t("用户附加")}</strong>{attachments.map(item => <p key={item.id || item.relativePath}>{item.relativePath}{item.line ? `:${item.line}` : ""}</p>)}<p>{t("Context Engine 推荐不表示已经发送")}</p><p>{t("图片能力")}: {t(controls.vision === true ? "支持" : controls.vision === false ? "不支持" : "未知")}</p><p>{pinnedSkills.join(" · ")}</p></div></details>}
           </div>
           <div className="composer-hint">
-            <span>{running ? t("Enter 按所选方式发送 · Ctrl Alt Enter 补充") : t("Enter 发送 · Shift Enter 换行")}</span>
-            {running && controls && <select aria-label={t("运行中发送方式")} value={controls.behavior} onChange={event => controls.setBehavior(event.target.value === "steer" ? "steer" : "queue")}><option value="queue">{t("排队下一轮")}</option><option value="steer">{t("补充当前任务")}</option></select>}
+            {running && controls && <div className="send-behavior" role="radiogroup" aria-label={t("运行中发送方式")} onKeyDown={event => {
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+              event.preventDefault(); event.stopPropagation();
+              const next = event.key === "Home" ? "queue" : event.key === "End" ? "steer" : controls.behavior === "queue" ? "steer" : "queue";
+              controls.setBehavior(next);
+              event.currentTarget.querySelectorAll<HTMLButtonElement>("button")[next === "queue" ? 0 : 1]?.focus();
+            }}>
+              {(["queue", "steer"] as const).map(behavior => <button key={behavior} type="button" role="radio" aria-checked={controls.behavior === behavior} tabIndex={controls.behavior === behavior ? 0 : -1} onClick={() => controls.setBehavior(behavior)}>{t(behavior === "queue" ? "排队下一轮" : "补充当前任务")}</button>)}
+            </div>}
+            {controls && <button type="button" className="stream-output-toggle" aria-label={t("流式输出")} aria-pressed={controls.streamReady ? controls.streaming : undefined} aria-busy={controls.streamSettingBusy} aria-disabled={controls.streamSettingBusy} disabled={!controls.streamReady || controls.streamRequired} title={!controls.streamReady ? t("正在读取输出模式") : controls.streamRequired ? t("SenseNova 写作模式需要流式输出") : controls.streamSettingBusy ? t("正在保存输出模式") : `${t(controls.streaming ? "切换为非流式输出" : "切换为流式输出")}${running ? ` · ${t("下一轮生效，当前输出继续")}` : ""}`} onClick={() => { if (!controls.streamSettingBusy) controls.toggleStreaming(); }}>
+              <Activity size={14} />
+
+            </button>}
             <ContextRing usage={contextUsage} />
             {running && <button type="button" className="stop-button" onClick={cancel}><Square size={12} fill="currentColor" /> {t("停止")}</button>}
-            <button type="button" className="send-button" aria-label={running ? t(controls?.behavior === "steer" ? "补充当前任务" : "排队下一轮") : t("发送")} onClick={send} disabled={disabled || (!value.trim() && !attachments.length) || attachments.some(item => item.status && item.status !== "ready")}><Send size={15} /></button>
+            <button type="button" className="send-button" aria-label={running ? t(controls?.behavior === "steer" ? "补充当前任务" : "排队下一轮") : t("发送")} onClick={send} disabled={disabled || skillBusy || controls?.streamSettingBusy || (!value.trim() && !attachments.length) || attachments.some(item => item.status && item.status !== "ready")}><Send size={16} /></button>
           </div>
         </div>
       </div>
@@ -1884,102 +1896,22 @@ function Composer({
   );
 }
 
-function ConversationTraceBar({
-  messages,
-  preferences,
-  updatePreferences,
-}: {
-  messages: SessionMessage[];
-  preferences: UiPreferences;
-  updatePreferences: (patch: Partial<UiPreferences>) => void;
-}) {
-  const { language, t } = useI18n();
-  // Counting walks every message and every tool call, so it must not re-run on a
-  // preference toggle or on each streaming tick -- only when the transcript or
-  // the display language actually changes.
-  const counts = useMemo(() => messages.reduce(
-    (current, message) => ({
-      reasoning: current.reasoning + (messageReasoningText(message) ? 1 : 0),
-      calls: current.calls + toolCallRecords(message).length,
-      results: current.results + (message.role === "tool" && messageText(message.content, language) ? 1 : 0),
-    }),
-    { reasoning: 0, calls: 0, results: 0 },
-  ), [messages, language]);
-  const hasTrace = counts.reasoning > 0 || counts.calls > 0 || counts.results > 0;
-  if (!hasTrace) return null;
-  return (
-    <div className="conversation-trace-bar">
-      <div className="trace-bar-summary">
-        <span className="trace-bar-mark"><Sparkles size={13} /></span>
-        <span><strong>{t("执行轨迹")}</strong><small>{t("trace.summary", { reasoning: counts.reasoning, calls: counts.calls, results: counts.results })}</small></span>
-      </div>
-      <div className="trace-bar-controls" aria-label={t("对话技术轨迹显示")}>
-        <button
-          type="button"
-          className={preferences.showReasoning ? "active" : ""}
-          aria-pressed={preferences.showReasoning}
-          disabled={counts.reasoning === 0}
-          title={t(counts.reasoning ? "显示或隐藏推理记录" : "当前会话没有保存推理记录")}
-          onClick={() => updatePreferences({
-            showReasoning: !preferences.showReasoning,
-            ...(!preferences.showReasoning ? { expandReasoning: true } : {}),
-          })}
-        >
-          <Brain size={13} />{t("推理")} <span>{counts.reasoning}</span>
-        </button>
-        <button
-          type="button"
-          className={preferences.showToolCalls ? "active" : ""}
-          aria-pressed={preferences.showToolCalls}
-          disabled={counts.calls === 0}
-          onClick={() => updatePreferences({ showToolCalls: !preferences.showToolCalls })}
-        >
-          <Wrench size={13} />{t("调用")} <span>{counts.calls}</span>
-        </button>
-        <button
-          type="button"
-          className={preferences.showToolResults ? "active" : ""}
-          aria-pressed={preferences.showToolResults}
-          disabled={counts.results === 0}
-          onClick={() => updatePreferences({ showToolResults: !preferences.showToolResults })}
-        >
-          <CheckCircle2 size={13} />{t("结果")} <span>{counts.results}</span>
-        </button>
-        {preferences.showReasoning && counts.reasoning > 0 && (
-          <button
-            type="button"
-            className={preferences.expandReasoning ? "active subtle" : "subtle"}
-            aria-pressed={preferences.expandReasoning}
-            onClick={() => updatePreferences({ expandReasoning: !preferences.expandReasoning })}
-          >
-            <ChevronDown size={13} />{t(preferences.expandReasoning ? "展开中" : "仅摘要")}
-          </button>
-        )}
-        <button
-          type="button"
-          className="subtle"
-          title={t("只显示用户与模型正文")}
-          onClick={() => updatePreferences({ showReasoning: false, showToolCalls: false, showToolResults: false })}
-        >
-          <EyeOff size={13} />{t("专注")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const HISTORY_PAGE_SIZE = 60;
 
-const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript }: {
+const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey }: {
   messages: SessionMessage[];
   preferences: UiPreferences;
   transcript: RefObject<HTMLDivElement | null>;
+  readingKey: string;
 }) {
   const { t } = useI18n();
-  const [start, setStart] = useState(() => Math.max(0, messages.length - HISTORY_PAGE_SIZE));
+  const [start, setStart] = useState(() => readingPositions.get(readingKey)?.first ?? Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const first = Math.min(start, Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const rows = useMemo(() => groupTranscriptMessages(messages.slice(first)), [messages, first]);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    readingPositions.set(readingKey, { top: 0, follow: true, ...readingPositions.get(readingKey), first });
+  }, [readingKey, first]);
   const loadEarlier = useCallback(() => {
     const container = transcript.current;
     if (container) pendingScroll.current = { height: container.scrollHeight, top: container.scrollTop };
@@ -2010,7 +1942,11 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
   </>;
 });
 
-const readingPositions = new Map<string,{top:number;follow:boolean}>();
+const readingPositions = new Map<string,{top:number;follow:boolean;first?:number}>();
+
+function isStoppedPrompt(detail: string) {
+  return /\b(?:Run stopped by user;|Run stopped before tools started\.|Queued run cancelled|Prompt cancelled; core restarted\.)/i.test(detail);
+}
 
 function ChatView({
   session,
@@ -2056,8 +1992,8 @@ function ChatView({
   mentionItems: Array<Record<string, unknown>>;
   mentionOpen: boolean;
   mentionLoading: boolean;
-  requestMentions: () => void;
-  chooseMention: (value: string) => void;
+  requestMentions: (query?: string) => void;
+  chooseMention: (value: string, range?: { start: number; end: number }) => void;
   attachments: ComposerAttachment[];
   selectAttachment: () => void;
   importDroppedFiles: (files: File[]) => void;
@@ -2079,9 +2015,10 @@ function ChatView({
 }) {
   const { t } = useI18n();
   const transcript = useRef<HTMLDivElement>(null);
+  const transcriptContent = useRef<HTMLDivElement>(null);
   const visibleMessages = useMemo(
-    () => resolveToolResultNames(visibleSessionMessages(session?.messages ?? [])),
-    [session?.messages],
+    () => resolveToolResultNames(visibleSessionMessages(liveTurn?.historyMessageCount === undefined ? session?.messages ?? [] : (session?.messages ?? []).slice(0, liveTurn.historyMessageCount))),
+    [session?.messages, liveTurn?.historyMessageCount],
   );
   const canRewind = previousTurnBoundary(session?.messages ?? []) !== null;
   const taskListEvent = [...(liveTurn?.events ?? [])].reverse().find(event => Array.isArray(event.task_list));
@@ -2091,64 +2028,79 @@ function ChatView({
   const inputOwner=useInputControls();
   const readingKey=ownerKey(inputOwner?.projectRoot || "",session?.id || "new");
   const followOutput = useRef(true);
+  const hasTranscriptContent = visibleMessages.length > 0 || Boolean(liveTurn);
+  const chooseStarter = (value: string) => {
+    setPrompt(value);
+    transcript.current?.parentElement?.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  };
   const [hasNewContent, setHasNewContent] = useState(false);
-  useEffect(() => {
+  const followLatest = () => {
+    followOutput.current = true;
+    setHasNewContent(false);
+  };
+  useLayoutEffect(() => {
     const container = transcript.current;
     if (!container) return;
     const onScroll = () => {
       followOutput.current = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-      readingPositions.set(readingKey,{top:container.scrollTop,follow:followOutput.current});
+      readingPositions.set(readingKey,{...readingPositions.get(readingKey),top:container.scrollTop,follow:followOutput.current});
       if (followOutput.current) setHasNewContent(false);
     };
+    const resize = () => {
+      container.style.setProperty("--transcript-height", `${container.clientHeight}px`);
+      if (followOutput.current) container.scrollTop = hasTranscriptContent ? container.scrollHeight : 0;
+    };
+    resize();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    observer?.observe(container);
+    if (transcriptContent.current) observer?.observe(transcriptContent.current);
     container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-  }, [readingKey]);
+    return () => { observer?.disconnect(); container.removeEventListener("scroll", onScroll); };
+  }, [readingKey, hasTranscriptContent]);
   useLayoutEffect(() => {
     const previous=readingPositions.get(readingKey);
     followOutput.current=previous?.follow ?? true;
     const container=transcript.current;
-    if(container)container.scrollTop=previous && !previous.follow?previous.top:container.scrollHeight;
+    if(container)container.scrollTop=previous && !previous.follow?previous.top:hasTranscriptContent?container.scrollHeight:0;
   }, [readingKey]);
   useEffect(() => {
     const container = transcript.current;
     if (!container) return;
     if (!followOutput.current) { setHasNewContent(true); return; }
-    container.scrollTop = container.scrollHeight;
-  }, [session?.id, session?.messages.length, liveTurn?.assistantText, liveTurn?.reasoningText, liveTurn?.events.length]);
+    container.scrollTop = hasTranscriptContent ? container.scrollHeight : 0;
+  }, [session?.id, session?.messages.length, liveTurn?.assistantText, liveTurn?.reasoningText, liveTurn?.events, liveTurn?.error]);
   return (
-    <div className="chat-view">
-      {session && (
-        <div className="conversation-top">
+    <div className={`chat-view ${hasTranscriptContent ? "" : "is-empty"}`}>
+      <div className="conversation-top">
           <div className="conversation-header">
-            <div><strong>{session.name}</strong><span>{t("chat.recordCount", { count: visibleMessages.length })}</span></div>
+            <div><strong>{session?.name || t("新对话")}</strong>{hasTranscriptContent && <span>{t("chat.recordCount", { count: visibleMessages.length })}</span>}</div>
             <div className="conversation-actions">
-              <IconButton label={t("重命名会话")} onClick={renameSession} disabled={running || sessionBusy}><Pencil size={14} /></IconButton>
-              <IconButton label={t("分叉会话")} onClick={forkSession} disabled={running || sessionBusy || visibleMessages.length === 0}><Copy size={14} /></IconButton>
-              <IconButton label={t("回退上一轮")} onClick={rewindSession} disabled={running || sessionBusy || !canRewind}><RotateCcw size={14} /></IconButton>
-              <IconButton label={t("删除会话")} onClick={deleteSession} disabled={running || sessionBusy}><Trash2 size={14} /></IconButton>
+              <ConversationDisplay preferences={preferences} update={updatePreferences} />
+              <IconButton label={t("重命名会话")} onClick={renameSession} disabled={!session || running || sessionBusy}><Pencil size={14} /></IconButton>
+              <IconButton label={t("分叉会话")} onClick={forkSession} disabled={!session || running || sessionBusy || visibleMessages.length === 0}><Copy size={14} /></IconButton>
+              <IconButton label={t("回退上一轮")} onClick={rewindSession} disabled={!session || running || sessionBusy || !canRewind}><RotateCcw size={14} /></IconButton>
+              <IconButton label={t("删除会话")} onClick={deleteSession} disabled={!session || running || sessionBusy}><Trash2 size={14} /></IconButton>
             </div>
           </div>
-          <ConversationTraceBar messages={visibleMessages} preferences={preferences} updatePreferences={updatePreferences} />
         </div>
-      )}
       <div className="transcript" ref={transcript} aria-busy={sessionBusy}>
-        {sessionBusy && <div className="session-loading"><RefreshCw className="spin" size={16} />{t("正在切换会话")}</div>}
+        {sessionBusy && <div className="session-loading-anchor"><div className="session-loading" role="status"><RefreshCw className="spin" size={16} />{t("正在切换会话")}</div></div>}
         {visibleMessages.length === 0 && !liveTurn ? (
-          <EmptyChat setPrompt={setPrompt} />
+          <WelcomeHeader workspace={projectNameFromPath(inputOwner?.projectRoot || "")} />
         ) : (
-          <div className="message-column">
-            <HistoryMessages key={session?.id} messages={visibleMessages} preferences={preferences} transcript={transcript} />
-            {liveTurn && <LiveMessage turn={liveTurn} running={running} preferences={preferences} />}
+          <div className="message-column" ref={transcriptContent}>
+            <HistoryMessages key={`history:${readingKey}`} messages={visibleMessages} preferences={preferences} transcript={transcript} readingKey={readingKey} />
+            {liveTurn && <LiveMessage key={`live:${readingKey}`} turn={liveTurn} running={running} preferences={preferences} />}
           </div>
         )}
       </div>
-      {hasNewContent && <button type="button" className="return-latest" onClick={() => { followOutput.current = true; if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight; setHasNewContent(false); }}>{t("回到最新")}</button>}
+      {hasNewContent && <button type="button" className="return-latest" onClick={() => { followLatest(); if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight; }}>{t("回到最新")}</button>}
       <div className="chat-input-stack">
       {approval && <ApprovalPanel approval={approval} resolve={resolveApproval} />}
       <Composer
         value={prompt}
         setValue={setPrompt}
-        send={send}
+        send={() => { if (!running && !sessionBusy && !inputOwner?.streamSettingBusy && (prompt.trim() || attachments.length)) followLatest(); send(); }}
         running={running}
         cancel={cancel}
         mentionItems={mentionItems}
@@ -2167,10 +2119,11 @@ function ChatView({
         contextUsage={contextUsage}
         tasks={tasks}
         resumable={resumable}
-        resume={resume}
+        resume={() => { followLatest(); resume(); }}
         disabled={sessionBusy}
       />
       </div>
+      {!hasTranscriptContent && <StarterActions choose={chooseStarter} />}
     </div>
   );
 }
@@ -2350,25 +2303,21 @@ function SkillsView({
     root: shadowOwners.get(record.path)?.root ?? "",
   });
   return (
-    <div className="page-scroll">
+    <div className="page-scroll skills-page">
       <PageHeader
         icon={<Sparkles size={20} />}
         title={t("技能")}
-        description={t("固定一个技能后，Reverie 每一轮都必须先读取它的 SKILL.md 并遵循其中的流程，直到你取消固定。固定只作用于当前会话，不会写入配置文件。")}
+        description={t("固定技能后，每轮都会先读取并遵循它，直到取消固定。也可以在输入框输入 /skill 选择。")}
         action={<button type="button" className="secondary-button" onClick={refresh}><RefreshCw size={14} />{t("重新扫描")}</button>}
       />
       {(skills.mode === "writer" || skills.mode === "computer-controller") && (
         <p role="note" className="muted">{t(skills.mode === "writer" ? "skill.mode.writer" : "skill.mode.computer")}</p>
       )}
-      <div className="metric-grid">
-        <div><Sparkles size={16} /><span>{t("已发现技能")}</span><strong>{skills.count}</strong></div>
-        <div><Pin size={16} /><span>{t("已固定")}</span><strong>{pinnedCount} / {skills.pinned.max}</strong></div>
-        <div><AlertCircle size={16} /><span>{t("无效技能")}</span><strong>{skills.invalid_count}</strong></div>
-        {skills.shadowed_count > 0 && (
-          <div title={t("同名技能优先级更高，这些文件不会被加载。")}>
-            <AlertCircle size={16} /><span>{t("被覆盖")}</span><strong>{skills.shadowed_count}</strong>
-          </div>
-        )}
+      <div className="skills-summary">
+        <span>{t("已发现技能")} <strong>{skills.count}</strong></span>
+        <span><Pin size={13} />{t("已固定")} <strong>{pinnedCount} / {skills.pinned.max}</strong></span>
+        {skills.invalid_count > 0 && <span className="error"><AlertCircle size={13}/>{t("无效技能")} {skills.invalid_count}</span>}
+        {skills.shadowed_count > 0 && <span title={t("同名技能优先级更高，这些文件不会被加载。")}>{t("被覆盖")} {skills.shadowed_count}</span>}
       </div>
       {pinnedCount > 0 && (
         <section className="page-section">
@@ -2414,8 +2363,7 @@ function SkillsView({
                   )}
                   {!record.allow_implicit_invocation && <span className="status-pill">{t("仅显式调用")}</span>}
                 </div>
-                <p>{record.description}</p>
-                <div className="plugin-stats"><span>{record.root}</span><span>{record.path}</span></div>
+                <details className="skill-description"><summary><span>{record.description}</span><ChevronDown size={13}/></summary><code>{record.path}</code></details>
               </div>
               <div className="plugin-toggles">
                 {record.pinned ? (
@@ -3334,15 +3282,11 @@ function SettingsView({
                 <input id="user-display-name" value={displayNameDraft} maxLength={32} onChange={(event) => setDisplayNameDraft(event.target.value)} placeholder={t("你")} />
                 <button type="submit" className="secondary-button" disabled={displayNameDraft.trim() === preferences.userDisplayName}>{t("保存")}</button>
               </form>
+              <AvatarEditor name={preferences.userDisplayName || t("你")} url={preferences.userAvatarUrl} save={userAvatarUrl => updatePreferences({ userAvatarUrl })} />
             </section>
             <section className="preference-section conversation-presets">
               <div className="preference-heading"><div><h2>{t("显示预设")}</h2><p>{t("选择预设后仍可单独调整每一项。")}</p></div></div>
-              <div className="preset-grid">
-                <button type="button" className={!preferences.showReasoning && !preferences.showToolCalls && !preferences.showToolResults ? "active" : ""} onClick={() => updatePreferences({ showReasoning: false, showToolCalls: false, showToolResults: false, showLiveActivity: false })}><MessageSquare size={16} /><strong>{t("纯净对话")}</strong><span>{t("只显示用户与模型正文")}</span></button>
-                <button type="button" className={!preferences.showReasoning && preferences.showToolCalls && !preferences.showToolResults ? "active" : ""} onClick={() => updatePreferences({ showReasoning: false, showToolCalls: true, showToolResults: false, showLiveActivity: true })}><Wrench size={16} /><strong>{t("调用优先")}</strong><span>{t("显示模型调用了什么")}</span></button>
-                <button type="button" className={!preferences.showReasoning && !preferences.showToolCalls && preferences.showToolResults ? "active" : ""} onClick={() => updatePreferences({ showReasoning: false, showToolCalls: false, showToolResults: true, showLiveActivity: false })}><CheckCircle2 size={16} /><strong>{t("结果优先")}</strong><span>{t("只保留工具返回结果")}</span></button>
-                <button type="button" className={preferences.showReasoning && preferences.showToolCalls && preferences.showToolResults ? "active" : ""} onClick={() => updatePreferences({ showReasoning: true, expandReasoning: true, showToolCalls: true, showToolResults: true, showLiveActivity: true })}><Brain size={16} /><strong>{t("完整轨迹")}</strong><span>{t("展开推理并显示全部技术细节")}</span></button>
-              </div>
+              <DisplayPresets preferences={preferences} update={updatePreferences} />
             </section>
             <section className="preference-section">
               <div className="preference-row"><div><Brain size={17} /><span><strong>{t("推理记录")}</strong><small>{t("显示模型返回并保存在会话中的思考内容")}</small></span></div><Toggle checked={preferences.showReasoning} onChange={(value) => updatePreferences({ showReasoning: value, ...(value ? { expandReasoning: true } : {}) })} /></div>
@@ -3377,6 +3321,8 @@ function SettingsView({
           <>
             <PageHeader icon={<Info size={20} />} title={t("关于 Reverie")} description={t("Electron 仅承载界面；所有 AI、工具和会话逻辑都由嵌入的 Reverie CLI exe 执行。")} />
             <div className="about-card"><div className="about-mark"><img src={REVERIE_MARK_URL} alt="Reverie" /></div><div><h2>Reverie {state.core.version}</h2><p>{t("核心接口")} {state.core.interface_version} · {state.core.release_status}</p></div></div>
+            {paths?.desktopBuild && <p>{t("界面构建")}: <code>{paths.desktopBuild.version} · {paths.desktopBuild.id}</code> · {paths.desktopBuild.builtAt}</p>}
+            {paths?.desktopExecutable && <div className="path-list"><button type="button" onClick={()=>void window.reverie.reveal(paths.desktopExecutable!)}><span>{t("正在运行的应用")}</span><code>{paths.desktopExecutable}</code><FolderOpen size={14}/></button></div>}
             <div className="path-list"><button type="button" onClick={() => void window.reverie.reveal(state.workspace.config_path)}><span>{t("配置文件")}</span><code>{state.workspace.config_path}</code><FolderOpen size={14} /></button><button type="button" onClick={() => void window.reverie.reveal(state.workspace.project_data_dir)}><span>{t("工作区数据")}</span><code>{state.workspace.project_data_dir}</code><FolderOpen size={14} /></button>{paths && <button type="button" onClick={() => void window.reverie.reveal(paths.kernelPath)}><span>{t("CLI 内核")}</span><code>{paths.kernelPath}</code><FolderOpen size={14} /></button>}</div>
           </>
         )}
@@ -3385,45 +3331,15 @@ function SettingsView({
   );
 }
 
-function Inspector({
-  state,
-  liveTurn,
-  indexWorkspace,
-  compactContext,
-  compactDisabled,
-  hidden,
-  sessionId,
-  running,
-  close,
-}: {
-  state: DesktopState;
-  liveTurn: LiveTurn | null;
-  indexWorkspace: () => void;
-  compactContext: () => void;
-  compactDisabled: boolean;
-  hidden: boolean;
-  sessionId: string;
-  running: boolean;
-  close: () => void;
+function InspectorContent({ state, liveTurn, indexWorkspace, compactContext, compactDisabled, tab }: {
+  state: DesktopState; liveTurn: LiveTurn | null; indexWorkspace: () => void; compactContext: () => void; compactDisabled: boolean; tab: "context" | "activity";
 }) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"changes" | "context" | "activity">("changes");
   const permission = state.settings.items.find((item) => item.key === "permission_level")?.value;
   const events = liveTurn?.events ?? [];
   const contextEngine = state.workspace.context_engine;
-  const contextLabel = contextEngine?.indexing
-    ? t("context.indexing", { progress: Math.round(contextEngine.progress) })
-    : contextEngine?.ready
-      ? t("自动检索已启用")
-      : t("正在按需预热");
-  return (
-    // Stays in the tree while collapsed so the slide-out can play, but is taken
-    // out of the accessibility tree and the tab order while it is off screen.
-    <aside className="inspector" aria-hidden={hidden || undefined} inert={hidden || undefined}>
-      <div className="inspector-tabs"><button type="button" className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>{t("改动")}</button><button type="button" className={tab === "context" ? "active" : ""} onClick={() => setTab("context")}>{t("上下文")}</button><button type="button" className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>{t("活动")} {events.length > 0 && <span>{events.length}</span>}</button><button type="button" className="inspector-close" aria-label={t("收起右侧栏")} title={t("收起右侧栏")} onClick={close}><PanelRightClose size={16} /></button></div>
-      {tab === "changes" ? (
-        !hidden && <FileChanges sessionId={sessionId} running={running} revision={state.recovery} />
-      ) : tab === "context" ? (
+  const contextLabel = contextEngine?.indexing ? t("context.indexing", { progress: Math.round(contextEngine.progress) }) : contextEngine?.ready ? t("自动检索已启用") : t("正在按需预热");
+  return <>{tab === "context" ? (
         <div className="inspector-content">
           <section><div className="inspector-heading"><span>{t("工作区")}</span><div className="inspector-actions"><button type="button" onClick={compactContext} disabled={compactDisabled} aria-label={t("压缩上下文")} title={t("压缩上下文")}><Archive size={13} /></button><button type="button" onClick={indexWorkspace} title={t("重新索引")}><RefreshCw className={contextEngine?.indexing ? "spin" : ""} size={13} /></button></div></div><div className="context-card"><Folder size={15} /><div><strong>{state.workspace.project_name}</strong><span>{state.workspace.project_root}</span></div></div><div className="context-engine-card"><div><span className="context-engine-orbit"><Sparkles size={14} /></span><span><strong>{t("上下文引擎")}</strong><small>{contextLabel}</small></span></div><div className="context-engine-metrics"><span><strong>{contextEngine?.files ?? 0}</strong> {t("文件")}</span><span><strong>{contextEngine?.symbols ?? 0}</strong> {t("符号")}</span></div>{contextEngine?.indexing && <div className="context-progress"><span style={{ width: `${Math.max(3, contextEngine.progress)}%` }} /></div>}</div></section>
           <section><div className="inspector-heading"><span>{t("运行时")}</span></div><div className="context-line"><span>{t("模型")}</span><strong>{state.models.active_model?.display_name || t("未配置")}</strong></div><div className="context-line"><span>{t("来源")}</span><strong>{expandModelSources(state.models.sources).find((item) => item.active)?.display_name}</strong></div><div className="context-line"><span>{t("模式")}</span><strong>{state.workspace.mode}</strong></div><div className="context-line"><span>{t("权限")}</span><strong>{String(permission ?? "workspace_write")}</strong></div></section>
@@ -3433,8 +3349,7 @@ function Inspector({
       ) : (
         <div className="inspector-content activity-feed">{events.length ? events.map((event, index) => <ActivityItem key={index} event={event} />) : <div className="empty-panel compact"><Clock3 size={22} /><strong>{t("暂无实时活动")}</strong><span>{t("模型调用工具时会在这里显示。")}</span></div>}</div>
       )}
-    </aside>
-  );
+  </>;
 }
 
 function CommandPalette({ commands, close, choose }: { commands: CommandRecord[]; close: () => void; choose: (command: CommandRecord) => void }) {
@@ -3442,12 +3357,14 @@ function CommandPalette({ commands, close, choose }: { commands: CommandRecord[]
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef, close);
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(0);
   const filtered = commands.filter((item) => `${item.command} ${item.summary} ${item.section}`.toLowerCase().includes(query.toLowerCase())).slice(0, 30);
+  useEffect(() => { dialogRef.current?.querySelector(`[data-command-index="${selected}"]`)?.scrollIntoView?.({block:"nearest"}); }, [selected]);
   return (
     <div className="modal-backdrop" onMouseDown={close}>
       <div ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-label={t("命令面板")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="command-search"><Search size={17} /><input autoFocus aria-label={t("搜索命令、工具和功能…")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索命令、工具和功能…")} /><kbd>Esc</kbd></div>
-        <div className="command-results">{filtered.map((item) => <button type="button" key={item.id} onClick={() => choose(item)}><div className="command-icon"><Command size={14} /></div><div><strong>{item.command}</strong><span>{t(item.summary)}</span></div><small>{t(item.section)}</small></button>)}</div>
+        <div className="command-search"><Search size={17} /><input autoFocus role="combobox" aria-expanded="true" aria-controls="desktop-command-list" aria-activedescendant={filtered[selected] ? `desktop-command-${selected}` : undefined} aria-label={t("搜索命令、工具和功能…")} value={query} onChange={(event) => {setQuery(event.target.value);setSelected(0);}} onKeyDown={event=>{if(event.nativeEvent.isComposing || event.nativeEvent.keyCode===229)return;if(event.key==="ArrowDown" || event.key==="ArrowUp"){event.preventDefault();setSelected(value=>filtered.length ? (value+(event.key==="ArrowDown"?1:-1)+filtered.length)%filtered.length : 0);}else if(event.key==="Enter" && filtered[selected]){event.preventDefault();choose(filtered[selected]);}}} placeholder={t("搜索命令、工具和功能…")} /><kbd>Esc</kbd></div>
+        <div className="command-results" id="desktop-command-list" role="listbox" aria-label={t("命令面板")}>{filtered.map((item,index) => <button type="button" role="option" aria-selected={selected===index} tabIndex={-1} id={`desktop-command-${index}`} data-command-index={index} key={item.id} onPointerMove={()=>setSelected(index)} onClick={() => choose(item)}><div className="command-icon"><Command size={14} /></div><div><strong>{item.command}</strong><span>{t(item.summary)}</span></div><small>{desktopCommandAvailable(item.command) ? t(item.section) : t("终端参考")}</small></button>)}</div>
         <div className="command-footer"><span><kbd>↵</kbd> {t("插入命令参考")}</span><span>{t("完整功能可直接通过 GUI 页面或自然语言调用")}</span></div>
       </div>
     </div>
@@ -4982,6 +4899,15 @@ export default function App() {
     sidebarViewportOverride,
   );
   const shellRef = useRef<HTMLDivElement>(null);
+  const [layoutWidth, setLayoutWidth] = useState(0);
+  const layoutReady = Boolean(state);
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const measure = () => setLayoutWidth(shell.getBoundingClientRect().width);
+    const observer = new ResizeObserver(measure); observer.observe(shell); measure();
+    return () => observer.disconnect();
+  }, [layoutReady]);
   /**
    * Width being dragged right now, which deliberately bypasses the preference
    * round-trip: persisting every pointer frame would queue an IPC call per
@@ -4991,6 +4917,11 @@ export default function App() {
   const paneResizing = paneWidthDraft.sidebar !== undefined || paneWidthDraft.inspector !== undefined;
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  useEffect(() => {
+    const open = () => setCommandOpen(true);
+    window.addEventListener("reverie:commands", open);
+    return () => window.removeEventListener("reverie:commands", open);
+  }, []);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   /** `null` while closed; `{ target: null }` to add; `{ target }` to edit in place. */
   const [standardModelForm, setStandardModelForm] = useState<{ target: { index: number; model: ModelRecord } | null } | null>(null);
@@ -5004,13 +4935,20 @@ export default function App() {
   const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; name: string } | null>(null);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const contextBaselines = useRef(new Map<string, NonNullable<ContextUsage["api_baseline"]>>());
+  const contextDirty = useRef(true);
+  const contextRevision = useRef(0);
   const [mentionItems, setMentionItems] = useState<Array<Record<string, unknown>>>([]);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionLoading, setMentionLoading] = useState(false);
+  const [mentionError, setMentionError] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [draftError, setDraftError] = useState("");
   const [composerError, setComposerError] = useState("");
   const [controlStatus, setControlStatus] = useState("");
+  const [streamSettingBusy, setStreamSettingBusy] = useState(false);
+  const streamSettingPending = useRef(false);
+  useEffect(() => () => readingPositions.clear(), []);
   const [sessionStates, setSessionStates] = useState<Record<string, string>>({});
   const [sendBehavior, setSendBehavior] = useState<"queue" | "steer">("queue");
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
@@ -5194,8 +5132,13 @@ export default function App() {
     });
   }, [toast]);
 
-  const sidebarWidth = paneWidthDraft.sidebar ?? uiPreferences.sidebarWidth;
-  const inspectorWidth = paneWidthDraft.inspector ?? uiPreferences.inspectorWidth;
+  const setWorkbenchOpen = useCallback((inspectorOpen: boolean) => updateUiPreferences({ inspectorOpen }), [updateUiPreferences]);
+  const desiredSidebarWidth = paneWidthDraft.sidebar ?? uiPreferences.sidebarWidth;
+  const desiredInspectorWidth = paneWidthDraft.inspector ?? uiPreferences.inspectorWidth;
+  const sidebarWidth = layoutWidth && !compactViewport
+    ? Math.min(desiredSidebarWidth, Math.max(SIDEBAR_MIN_WIDTH, paneDragLimit(layoutWidth, uiPreferences.inspectorOpen ? INSPECTOR_MIN_WIDTH : 0, SIDEBAR_MAX_WIDTH))) : desiredSidebarWidth;
+  const inspectorWidth = layoutWidth
+    ? Math.min(desiredInspectorWidth, compactViewport ? Math.max(INSPECTOR_MIN_WIDTH, layoutWidth - 48) : Math.max(INSPECTOR_MIN_WIDTH, paneDragLimit(layoutWidth, sidebarCollapsed ? 0 : sidebarWidth, INSPECTOR_MAX_WIDTH))) : desiredInspectorWidth;
   const commitSidebarWidth = useCallback((width: number) => {
     setPaneWidthDraft((current) => ({ ...current, sidebar: undefined }));
     updateUiPreferences({ sidebarWidth: width });
@@ -5361,6 +5304,21 @@ export default function App() {
       const eventOwner = ownerKey(String(event.project_root || draftOwner.current.root), String(event.session_id || draftOwner.current.id));
       const currentOwner = ownerKey(draftOwner.current.root, draftOwner.current.id);
       const runtime = runtimeViews.current.get(eventOwner);
+      if (type === "run.started" && typeof event.history_message_count === "number") {
+        if (runtime?.live) runtime.live = { ...runtime.live, historyMessageCount: event.history_message_count };
+        if (eventOwner === currentOwner) setLiveTurn(current => current ? { ...current, historyMessageCount: event.history_message_count as number } : current);
+        return;
+      }
+      if (type === "context.usage") {
+        const usage = event.usage as ContextUsage;
+        if (usage.api_baseline) contextBaselines.current.set(eventOwner, usage.api_baseline);
+        if (eventOwner === currentOwner) {
+          contextRevision.current += 1;
+          contextDirty.current = true;
+          setContextUsage(usage);
+        }
+        return;
+      }
       if (runtime?.live) {
         const saved = emptyLiveTurnBatch();
         if (type === "assistant.delta") saved.assistantText = String(event.text || "");
@@ -5466,33 +5424,50 @@ export default function App() {
     return () => window.removeEventListener("keydown", shortcuts);
   });
 
-  // Pull the live context-window breakdown for the composer ring. Fired when the
-  // conversation actually changes -- after a turn, on session open, after a
-  // compact -- never mid-stream, since the backend reads the agent's live state.
-  // Keep the composer's context ring current without anyone having to click a
-  // session. The reading reflects the payload the *next* turn would send, and
-  // the core only answers between turns, so this fires when the active session
-  // changes or a turn finishes (running flips back to false). With no session
-  // yet -- the fresh welcome screen -- we still ask (sessionId omitted) so the
-  // ring shows the fixed system-prompt + memory baseline the first turn carries,
-  // instead of staying invisible until the user opens a conversation.
+  const contextSnapshot = useRef<Record<string, unknown>>({});
+  const contextOwner = ownerKey(projectRoot, session?.id || NEW_SESSION_DRAFT_ID);
+  const contextModel = JSON.stringify([state?.models.active_source, state?.models.active_model, state?.models.sources.find(source => source.id === "custom")?.custom_providers?.find(provider => provider.active)?.id]);
+  useEffect(() => {
+    contextBaselines.current.clear();
+    contextRevision.current += 1;
+    contextDirty.current = true;
+  }, [contextModel]);
+  contextSnapshot.current = {
+    ...(session?.id ? { sessionId: session.id } : {}),
+    draftText: prompt,
+    attachments: attachments.filter(item => !item.status || item.status === "ready"),
+    liveAssistantText: running ? liveTurn?.assistantText || "" : "",
+    apiBaseline: contextBaselines.current.get(contextOwner),
+  };
   useEffect(() => {
     setContextUsage(null);
+    contextRevision.current += 1;
+    contextDirty.current = true;
   }, [projectRoot, session?.id, state?.workspace.active_model]);
   useEffect(() => {
-    if (!workspaceReady || running || sessionBusy || !state?.workspace.active_model) return;
+    contextDirty.current = true;
+  }, [session?.messages, prompt, attachments, liveTurn?.assistantText, liveTurn?.events, running]);
+  useEffect(() => {
+    if (!workspaceReady || sessionBusy || !state?.workspace.active_model) return;
     let cancelled = false;
-    // Session reads and rapid navigation take precedence over advisory stats.
-    const timer = window.setTimeout(async () => {
+    let inFlight = false;
+    // Throttle rather than debounce: continuous typing/streaming must keep updating.
+    const timer = window.setInterval(async () => {
+      if (!contextDirty.current || inFlight) return;
+      contextDirty.current = false;
+      inFlight = true;
+      const revision = contextRevision.current;
       try {
-        const response = await window.reverie.request("getContextUsage", session?.id ? { sessionId: session.id } : {});
-        if (!cancelled) setContextUsage(response.usage ?? null);
+        const response = await window.reverie.request("getContextUsage", contextSnapshot.current);
+        if (!cancelled && revision === contextRevision.current) setContextUsage(response.usage ?? null);
       } catch {
-        if (!cancelled) setContextUsage(null);
+        if (!cancelled && revision === contextRevision.current) setContextUsage(null);
+      } finally {
+        inFlight = false;
       }
     }, 250);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [workspaceReady, projectRoot, session?.id, session?.messages, running, sessionBusy, state?.workspace.active_model]);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [workspaceReady, projectRoot, session?.id, sessionBusy, state?.workspace.active_model]);
 
   const openSession = useCallback(async (id: string) => {
     // Re-selecting the conversation already in view is just a jump back to its
@@ -5536,7 +5511,7 @@ export default function App() {
         ? cached
         : response.session;
       setSession(nextSession);
-      setState((current) => current ? { ...current, sessions: response.sessions } : current);
+      setState((current) => current ? { ...current, sessions: response.sessions, skills: response.skills ?? current.skills } : current);
       setView("chat");
       setLiveTurn(runtimeViews.current.get(ownerKey(projectRoot, id))?.live ?? null);
       // The draft was already restored for the optimistic paint; re-applying it
@@ -5572,7 +5547,7 @@ export default function App() {
       if (requestSequence !== sessionRequestSequence.current) return;
       const nextSession = response.session;
       setSession(nextSession);
-      setState((current) => current ? { ...current, sessions: response.sessions } : current);
+      setState((current) => current ? { ...current, sessions: response.sessions, skills: response.skills ?? current.skills } : current);
       setView("chat");
       setLiveTurn(null);
       setPrompt(drafts.current[nextSession.id] ?? "");
@@ -5609,7 +5584,7 @@ export default function App() {
         if (requestSequence !== sessionRequestSequence.current) return;
         activeSession = created.session;
         setSession(activeSession);
-        setState((current) => current ? { ...current, sessions: created.sessions } : current);
+        setState((current) => current ? { ...current, sessions: created.sessions, skills: created.skills ?? current.skills } : current);
       }
       const response = await window.reverie.request("compactContext", {
         sessionId: activeSession.id,
@@ -5649,8 +5624,10 @@ export default function App() {
   // Pinning is session state on the core side, so every mutation answers with the
   // whole pin set: the composer chip and the Skills page can never drift apart.
   const pinSkill = useCallback(async (name: string) => {
+    const owner = { ...draftOwner.current };
     try {
       const response = await window.reverie.request("pinSkill", { skill: name });
+      if (owner.root !== draftOwner.current.root || owner.id !== draftOwner.current.id) return false;
       setState((current) => current ? { ...current, skills: response.skills } : current);
       if (response.status === "full") {
         toast(t("skill.pin.full", { max: String(response.skills.pinned.max) }), "error");
@@ -5661,7 +5638,8 @@ export default function App() {
       } else {
         toast(t("skill.pin.done", { name: response.name }), "success");
       }
-    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
+      return response.status === "pinned" || response.status === "already";
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); return false; }
   }, [t, toast]);
 
   const unpinSkill = useCallback(async (name: string) => {
@@ -5681,6 +5659,27 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
+  const updateSetting = useCallback(async (key: string, value: unknown) => {
+    const outputMode = key === "stream_responses";
+    if (outputMode && streamSettingPending.current) return false;
+    const previous = state?.settings.items.find(item => item.key === key)?.value;
+    if (outputMode) {
+      streamSettingPending.current = true; setStreamSettingBusy(true);
+      setState(current => current ? { ...current, settings: { ...current.settings, items: current.settings.items.map(item => item.key === key ? { ...item, value } : item) } } : current);
+    }
+    try {
+      const response = await window.reverie.request("setSetting", { key, value });
+      if (response.success === false) throw new Error(String(response.message ?? t("设置未保存")));
+      setState((current) => current ? { ...current, settings: response.settings, models: response.models ?? current.models, workspace: response.workspace ?? current.workspace } : current);
+      if (!outputMode) toast(t("设置已保存"), "success");
+      return true;
+    } catch (error) {
+      if (outputMode) setState(current => current ? { ...current, settings: { ...current.settings, items: current.settings.items.map(item => item.key === key ? { ...item, value: previous } : item) } } : current);
+      toast(error instanceof Error ? error.message : String(error), "error"); return false;
+    }
+    finally { if (outputMode) { streamSettingPending.current = false; setStreamSettingBusy(false); } }
+  }, [state?.settings, t, toast]);
+
   // Runs one turn end to end. Split out of sendPrompt so a mid-stream interrupt
   // can reuse the exact same path after cancelling the in-flight turn. Assumes
   // the composer control commands (/skill, /compact) have already been handled
@@ -5690,7 +5689,7 @@ export default function App() {
     const runRoot = queuedOwner?.projectRoot || projectRoot;
     const runSessionId = queuedOwner?.sessionId || session?.id || NEW_SESSION_DRAFT_ID;
     const startsInView = ownerKey(draftOwner.current.root,draftOwner.current.id)===ownerKey(runRoot,runSessionId);
-    if (!activeState || (resume && !session)) return;
+    if (!activeState || streamSettingPending.current || (resume && !session)) return false;
     // A cached transcript is usable while its read reconciles. Once a turn
     // starts, an older read must not clear that turn's live output.
     if (startsInView) sessionRequestSequence.current += 1;
@@ -5698,7 +5697,7 @@ export default function App() {
     if (startsInView) setRunning(true);
     setSessionStates(current => ({ ...current, [ownerKey(runRoot, runSessionId)]: "running" }));
     if (startsInView) { setComposerError(""); setControlStatus(""); resetLiveBatch(); acceptLiveEvents.current = true; }
-    const runtime = { live: { userText: resume ? "" : text, attachments: resume ? [] : inputAttachments.map(({ name, relativePath, size }) => ({ name, relativePath, size })), resumed: resume, assistantText: "", reasoningText: "", events: [], segments: [], error: "", startedAt: Date.now() } as LiveTurn | null, running: true, approval: null as Record<string, unknown> | null };
+    const runtime = { live: { userText: resume ? "" : text, historyMessageCount: startsInView ? session?.messages.length ?? 0 : undefined, attachments: resume ? [] : inputAttachments.map(item => ({ ...item })), resumed: resume, assistantText: "", reasoningText: "", events: [], segments: [], error: "", startedAt: Date.now() } as LiveTurn | null, running: true, approval: null as Record<string, unknown> | null };
     let runtimeKey = ownerKey(runRoot, runSessionId);
     runtimeViews.current.set(runtimeKey, runtime);
     if (startsInView) setLiveTurn(runtime.live);
@@ -5712,7 +5711,7 @@ export default function App() {
         runtimeKey = ownerKey(runRoot, activeSession.id);
         runtimeViews.current.set(runtimeKey, runtime);
         setSession(activeSession);
-        setState((current) => current ? { ...current, sessions: created.sessions } : current);
+        setState((current) => current ? { ...current, sessions: created.sessions, skills: created.skills ?? current.skills } : current);
       }
       // The prompt has been sent, so this conversation's draft is spent. Clear
       // both the saved slot and the pre-session placeholder that a brand-new
@@ -5722,26 +5721,31 @@ export default function App() {
         ...(!resume ? { prompt: text } : {}),
         sessionId: activeSession.id,
         mode: activeState.workspace.mode,
-        stream: true,
+        source: activeState.models.active_source,
+        model: activeState.models.active_model?.id,
         ...(!resume ? { attachments: inputAttachments, projectRoot: runRoot } : {}),
         ...(runType === "review" ? { runType } : {}),
       });
       const result = response.result;
+      const stopped = isStoppedPrompt(result.error);
+      const outputText = result.output_text === result.error ? "" : result.output_text;
+      const assistantText = (streamed: string) => outputText || (result.error && streamed.endsWith(result.error) ? streamed.slice(0, -result.error.length).trimEnd() : streamed);
       onResult?.(result.output_text || "");
       runtime.running = false;
       runtime.approval = null;
-      runtime.live = result.success ? null : { ...runtime.live!, assistantText: result.output_text || runtime.live?.assistantText || "", reasoningText: result.thinking_text || runtime.live?.reasoningText || "", error: result.error };
+      runtime.live = result.success ? null : { ...runtime.live!, assistantText: assistantText(runtime.live?.assistantText || ""), reasoningText: result.thinking_text || runtime.live?.reasoningText || "", error: stopped ? "" : result.error, stopped };
       if (!result.success) authorizedQueues.current.delete(runtimeKey);
-      if (!ownsView()) { setSessionStates(current => ({ ...current, [runtimeKey]: result.success ? "unread" : "failed" })); return result.success; }
+      if (!ownsView()) { setSessionStates(current => ({ ...current, [runtimeKey]: result.success ? "unread" : stopped ? "" : "failed" })); return result.success; }
       acceptLiveEvents.current = false;
       if (liveBatchTimer.current !== null) window.clearTimeout(liveBatchTimer.current);
       flushLiveBatch();
       resetLiveBatch();
       setLiveTurn((current) => current ? {
         ...current,
-        assistantText: result.output_text || current.assistantText,
+        assistantText: assistantText(current.assistantText),
         reasoningText: result.thinking_text || current.reasoningText,
-        error: result.error,
+        error: stopped ? "" : result.error,
+        stopped,
       } : current);
       setState((current) => current ? {
         ...current,
@@ -5753,14 +5757,12 @@ export default function App() {
       setSession(refreshed.session);
       setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
       if (!result.success) {
-        setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id)]: "failed" }));
+        setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id)]: stopped ? "" : "failed" }));
         setQueuePaused(true);
-        setComposerError(result.error || t("请求失败"));
         // The in-body error block carries the full humanized detail (e.g. the
         // 403 guidance) under the model output, and main.ts raises a native OS
         // toast when the window is in the background. That covers both the
         // focused and unfocused cases, so no in-app toast is needed here.
-        const detail = result.error || t("请求失败");
       } else {
         setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id)]: document.hasFocus() ? "" : "unread" }));
         setLiveTurn(null);
@@ -5770,29 +5772,40 @@ export default function App() {
       authorizedQueues.current.delete(runtimeKey);
       runtime.running = false;
       runtime.approval = null;
-      runtime.live = runtime.live ? { ...runtime.live, error: String(error) } : null;
-      if (!ownsView()) { setSessionStates(current => ({ ...current, [runtimeKey]: "failed" })); return false; }
-      acceptLiveEvents.current = false;
       const message = error instanceof Error ? error.message : String(error);
+      const stopped = isStoppedPrompt(message);
+      runtime.live = runtime.live ? { ...runtime.live, error: stopped ? "" : message, stopped } : null;
+      if (!ownsView()) { setSessionStates(current => ({ ...current, [runtimeKey]: stopped ? "" : "failed" })); return false; }
+      acceptLiveEvents.current = false;
       setQueuePaused(true);
-      setComposerError(message);
+      setSessionStates(current => ({ ...current, [runtimeKey]: stopped ? "" : "failed" }));
       // A cancel is an intentional interrupt, not a failure -- interruptAndSend
       // clears the turn itself, so don't paint it as an error or notify.
-      if (message.includes("cancel")) {
-        setLiveTurn((current) => current ? { ...current, error: "" } : current);
+      if (stopped) {
+        setLiveTurn((current) => current ? { ...current, error: "", stopped: true } : current);
       } else {
         setLiveTurn((current) => current ? { ...current, error: message } : current);
+        if (!runtime.live) setComposerError(message);
       }
       return false;
     } finally {
-      if (ownsView()) setRunning(false);
+      if (ownsView()) { setRunning(false); setControlStatus(""); }
     }
   }, [flushLiveBatch, projectRoot, resetLiveBatch, session, state, t]);
 
   const sendPrompt = useCallback(async (behaviorOverride?: "queue" | "steer") => {
     const text = prompt.trim();
-    if ((!text && !attachments.length) || sessionBusy || !state) return;
-    if (/^\/review(?:\s|$)/i.test(text)) { window.dispatchEvent(new CustomEvent("reverie:workbench", { detail: { tab: "review" } })); return; }
+    if ((!text && !attachments.length) || sessionBusy || streamSettingPending.current || !state) return;
+    const targetView = COMMAND_VIEWS[text.toLowerCase()];
+    if (targetView && !/^\/skills?$/i.test(text)) { setView(targetView); setPrompt(""); return; }
+    const command = desktopCommand(text);
+    if (command?.kind === "setting") {
+      if (running) { setComposerError(t("请先停止当前任务再修改运行设置")); return; }
+      if (await updateSetting(command.key, command.value)) setPrompt("");
+      return;
+    }
+    if (command?.kind === "review") { setPrompt(""); window.dispatchEvent(new CustomEvent("reverie:workbench", { detail: { tab: "review", reviewFile: command.file, scope: command.scope, base: command.base } })); return; }
+    if (command?.kind === "provider") { setView("settings"); setPrompt(""); return; }
     if (attachments.some(item => item.status && item.status !== "ready")) { setComposerError(t("请处理未就绪附件")); return; }
     if (attachments.length > 20 || attachments.reduce((sum, item) => sum + item.size, 0) > 200 * 1024 * 1024) { setComposerError(t("附件超过数量或总量限制")); return; }
     // `/skill …` is a composer control, not a turn: Enter converts the typed text
@@ -5831,6 +5844,7 @@ export default function App() {
       await compactContext((compactMatch[1] || "").trim());
       return;
     }
+    if (/^\/[a-z][\w-]*(?:\s|$)/i.test(text)) { setComposerError(t("此终端指令不能在桌面输入框执行，请使用对应页面或 Reverie TUI。")); return; }
     if (running) {
       if (!session) return;
       if ((behaviorOverride ?? sendBehavior) === "steer") {
@@ -5858,11 +5872,11 @@ export default function App() {
       setPrompt(current => current || text);
       setAttachments(current => current.length ? current : attachments);
     }
-  }, [clearPinnedSkills, compactContext, pinSkill, prompt, attachments, queue, sendBehavior, running, runPromptText, sessionBusy, session, projectRoot, state, unpinSkill, updateQueue, t]);
+  }, [clearPinnedSkills, compactContext, pinSkill, prompt, attachments, queue, sendBehavior, running, runPromptText, sessionBusy, session, projectRoot, state, unpinSkill, updateQueue, updateSetting, t]);
 
   useEffect(() => {
     const pump = () => {
-      if (sessionBusy) return;
+      if (sessionBusy || streamSettingBusy) return;
       for (const [key, owner] of authorizedQueues.current) {
         if (runtimeViews.current.get(key)?.running || queueStarting.current.has(key)) continue;
         const item = loadQueue(owner.projectRoot, owner.sessionId)[0];
@@ -5879,7 +5893,7 @@ export default function App() {
       }
     };
     pump();const timer=window.setInterval(pump,500);return()=>window.clearInterval(timer);
-  }, [queue, queuePaused, running, sessionBusy, runPromptText]);
+  }, [queue, queuePaused, running, sessionBusy, streamSettingBusy, runPromptText]);
 
   const cancelPrompt = useCallback(async () => {
     if (!session || !running) return;
@@ -6103,16 +6117,6 @@ export default function App() {
       toast(t("思考设置已更新"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [state, t, toast]);
-
-  const updateSetting = useCallback(async (key: string, value: unknown) => {
-    try {
-      const response = await window.reverie.request("setSetting", { key, value });
-      if (response.success === false) throw new Error(String(response.message ?? t("设置未保存")));
-      const settings = response.settings;
-      setState((current) => current ? { ...current, settings, models: response.models, workspace: response.workspace } : current);
-      toast(t("设置已保存"), "success");
-    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
 
   const revealSecret = useCallback<RevealSecret>(async (params) => {
     const response = await window.reverie.request("revealProviderSecret", {
@@ -6378,7 +6382,7 @@ export default function App() {
     if(!attachments.length || !window.reverie.workbench)return;
     const owner={...draftOwner.current};let active=true;
     void window.reverie.workbench("validate-input",{projectRoot:owner.root,sessionId:owner.id,attachments}).then(value=>{
-      if(active && draftOwner.current.root===owner.root && draftOwner.current.id===owner.id)setAttachments((value as {attachments:ComposerAttachment[]}).attachments);
+      if(active && draftOwner.current.root===owner.root && draftOwner.current.id===owner.id)setAttachments(current => current === attachments ? (value as {attachments:ComposerAttachment[]}).attachments : current);
     }).catch(error=>{if(active)setComposerError(String(error));});
     return()=>{active=false;};
   },[projectRoot,session?.id,attachmentValidationKey]);
@@ -6394,6 +6398,7 @@ export default function App() {
     const expectedRoot = projectRoot;
     setMentionOpen(true);
     setMentionLoading(true);
+    setMentionError("");
     try {
       const response = await window.reverie.request("workspaceMentions", { query: query ?? prompt.trim(), limit: 24 });
       if (requestSequence !== mentionRequestSequence.current || draftOwner.current.root !== expectedRoot) return;
@@ -6407,19 +6412,13 @@ export default function App() {
       } : current);
     } catch (error) {
       if (requestSequence !== mentionRequestSequence.current) return;
-      setMentionOpen(false);
-      toast(error instanceof Error ? error.message : String(error), "error");
+      setMentionItems([]);
+      setMentionError(error instanceof Error ? error.message : String(error));
     } finally {
       if (requestSequence === mentionRequestSequence.current) setMentionLoading(false);
     }
   }, [mentionOpen, projectRoot, prompt, t, toast]);
 
-  useEffect(() => {
-    const token = /(?:^|\s)@([^\s]*)$/.exec(prompt);
-    if (!token) return;
-    const timer=window.setTimeout(()=>void requestMentions(token[1]),200);
-    return()=>window.clearTimeout(timer);
-  }, [prompt, projectRoot]);
 
   const updateOwnedAttachments = useCallback((owner: { root: string; id: string }, change: (items: ComposerAttachment[]) => ComposerAttachment[]) => {
     if (owner.root === draftOwner.current.root && owner.id === draftOwner.current.id) setAttachments(change);
@@ -6483,13 +6482,13 @@ export default function App() {
     } catch (error) { updateOwnedAttachments(owner, current => current.map(entry => (item.id ? entry.id === item.id : entry.relativePath === item.relativePath) ? { ...entry, status: "failed", error: error instanceof Error ? error.message : String(error) } : entry)); }
   }, [updateOwnedAttachments]);
 
-  const chooseStructuredMention = useCallback((value: string) => {
+  const chooseStructuredMention = useCallback((value: string, range?: { start: number; end: number }) => {
     const match = /^@(?:"([^"]+)"|'([^']+)'|(.+?))(?:#L(\d+))?$/.exec(value);
     if (!match) return;
     const file = match[1] || match[2] || match[3];
     addAttachments([{ id: crypto.randomUUID(), relativePath: file, sourcePath: `${projectRoot}/${file}`, name: file.split(/[\\/]/).pop() || file, size: 0, status: "ready", kind: "reference", line: match[4] ? Number(match[4]) : undefined }]);
     try{const key=`reverie.recentRefs:${ownerKey(projectRoot,"")}`;const recent=JSON.parse(localStorage.getItem(key) || "[]") as Array<Record<string,unknown>>;const line=match[4]?Number(match[4]):undefined;localStorage.setItem(key,JSON.stringify([{path:file,name:file.split(/[\\/]/).pop(),kind:line?"symbol":"file",line},...recent.filter(item=>item.path!==file || item.line!==line)].slice(0,16)));}catch(error){setComposerError(String(error));}
-    setPrompt(current => current.replace(/(?:^|\s)@[^\s]*$/, " "));
+    setPrompt(current => range ? current.slice(0, range.start) + current.slice(range.end) : current.replace(/(?:^|\s)@[^\s]*$/, " "));
     setMentionOpen(false);
   }, [addAttachments, projectRoot]);
 
@@ -6543,7 +6542,7 @@ export default function App() {
       await createSession(true);
       return;
     }
-    if (await switchWorkspace(projectRoot)) { const response=await window.reverie.request("createSession",{}); setSession(response.session); setState(current=>current?{...current,sessions:response.sessions}:current); const draft=loadStructuredDraft(projectRoot,response.session.id);setPrompt(draft.text);setAttachments(draft.attachments);setView("chat"); }
+    if (await switchWorkspace(projectRoot)) { const response=await window.reverie.request("createSession",{}); setSession(response.session); setState(current=>current?{...current,sessions:response.sessions,skills:response.skills??current.skills}:current); const draft=loadStructuredDraft(projectRoot,response.session.id);setPrompt(draft.text);setAttachments(draft.attachments);setView("chat"); }
   }, [createSession, running, sessionBusy, state?.workspace.project_root, switchWorkspace]);
 
   const navigateToSession = useCallback(async (root: string, id: string) => {
@@ -6551,7 +6550,7 @@ export default function App() {
     if (!await switchWorkspace(root)) return;
     const response = id ? await window.reverie.request("getSession", { sessionId: id }) : await window.reverie.request("createSession", {});
     setSession(response.session);
-    setState(current => current ? { ...current, sessions: response.sessions } : current);
+    setState(current => current ? { ...current, sessions: response.sessions, skills: response.skills ?? current.skills } : current);
     const draft = loadStructuredDraft(root, response.session.id);
     setPrompt(draft.text); setAttachments(draft.attachments); setView("chat");
   }, [projectRoot, openSession, createSession, switchWorkspace]);
@@ -6612,8 +6611,8 @@ export default function App() {
 
   const chooseCommand = useCallback((command: CommandRecord) => {
     setCommandOpen(false);
-    const navigation: Record<string, ViewId> = { "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/skill": "skills", "/skills": "skills", "/plugins": "plugins", "/checkpoints": "recovery", "/rollback": "recovery" };
-    const target = navigation[command.command];
+
+    const target = COMMAND_VIEWS[command.command];
     if (target) { setView(target); return; }
     setView("chat");
     setPrompt(command.examples?.[0] || command.command);
@@ -6663,19 +6662,26 @@ export default function App() {
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} />;
-    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={() => void requestMentions()} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences} updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
+    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
+        updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
   }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
   const selectedModelSource = state.models.sources.find(source => source.id === state.workspace.active_source);
+  const streamRequired = state.workspace.mode === "writer" && state.workspace.active_source === "sensenova";
+  const streamSetting = state.settings.items.find(item => item.key === "stream_responses");
+  const streaming = streamRequired || streamSetting?.value !== false;
 
   return (
     <I18nProvider language={uiPreferences.language}>
     <InputContext.Provider value={{
       projectRoot, sessionId: session?.id ?? "", behavior: sendBehavior, setBehavior: setSendBehavior,
+      streaming, streamReady: Boolean(streamSetting), streamSettingBusy, streamRequired, toggleStreaming: () => void updateSetting("stream_responses", !streaming),
       paste: () => void pasteImage(), retryAttachment: (item, copy) => void retryAttachment(item, copy),
-      closeMentions: () => setMentionOpen(false), error: [draftError, composerError].filter(Boolean).join(" · "), status: controlStatus,
+      commands: state.commands.items, skills: state.skills, pinSkill, mentionError,
+      mode: state.workspace.mode, setMode: mode => void updateSetting("mode", mode),
+      closeMentions: () => { mentionRequestSequence.current += 1; setMentionOpen(false); setMentionLoading(false); }, error: [draftError, composerError].filter(Boolean).join(" · "), status: controlStatus,
       moveAttachment: (index, direction) => setAttachments(current => { const next = [...current]; const target = Math.max(0, Math.min(next.length - 1, index + direction)); const [item] = next.splice(index, 1); next.splice(target, 0, item); return next; }),
       queue, queuePaused, resumeQueue: () => { if(session)authorizedQueues.current.set(ownerKey(projectRoot,session.id),{projectRoot,sessionId:session.id}); setQueuePaused(false); },
       editQueue: (index, text, items) => { updateQueue(queue.map((item, i) => i === index ? { ...item, text, attachments: items } : item)); },
@@ -6692,13 +6698,18 @@ export default function App() {
     >
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className={`main-area ${gitStatus ? "with-git-status" : ""}`}>
-        <Topbar state={state} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} setMode={(mode) => void updateSetting("mode", mode)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
-        <div className="content-area">{page}<Workbench root={projectRoot} sessionId={activeSessionId} running={running} onDraft={value=>{setPrompt(current=>current ? `${current}\n\n${value}` : value);setView("chat");}} onReview={async text=>{let output="";const success=await runPromptText(text,false,[],"review",undefined,value=>{output=value;});if(!success)throw new Error(t("审查未完成，请检查运行记录"));return output;}}><SessionWorkbench root={projectRoot} sessionId={activeSessionId} running={running} state={state} onDraft={value=>setPrompt(current=>current ? `${current}\n\n${value}` : value)} onNavigate={(root,id)=>void navigateToSession(root,id).catch(error=>toast(String(error),"error"))} /></Workbench></div>
+        <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
+        <div className="content-area">{page}</div>
         {gitStatus && <GitBranchPicker status={gitStatus} busy={running || sessionBusy || gitBusy} refresh={() => void refreshGitStatus()} switchBranch={(name, remote) => void switchBranch(name, remote)} createBranch={(name) => void createBranch(name)} />}
       </main>
-      {/* Always mounted so the pane can transition out instead of vanishing; the
-          `with-inspector` class alone decides whether it is on screen. */}
-      <Inspector state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} hidden={!uiPreferences.inspectorOpen} sessionId={session?.id ?? ""} running={running} close={() => updateUiPreferences({ inspectorOpen: false })} />
+      <Workbench root={projectRoot} sessionId={activeSessionId} running={running} open={uiPreferences.inspectorOpen} onOpenChange={setWorkbenchOpen}
+        onDraft={value => { setPrompt(current => current ? `${current}\n\n${value}` : value); setView("chat"); }}
+        onReview={async text => { let output = ""; const success = await runPromptText(text, false, [], "review", undefined, value => { output = value; }); if (!success) throw new Error(t("审查未完成，请检查运行记录")); return output; }}
+        changesPanel={<FileChanges sessionId={activeSessionId} running={running} revision={state.recovery} />}
+        contextPanel={<InspectorContent state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} tab="context" />}
+        activityPanel={<InspectorContent state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} tab="activity" />}>
+        <SessionWorkbench root={projectRoot} sessionId={activeSessionId} running={running} state={state} onDraft={value => setPrompt(current => current ? `${current}\n\n${value}` : value)} onNavigate={(root, id) => void navigateToSession(root, id).catch(error => toast(String(error), "error"))} />
+      </Workbench>
       {/* Handles live on the shell, not inside the panes: both panes clip their
           overflow, so a child handle could not straddle the seam it drags. */}
       <PaneResizer
@@ -6715,7 +6726,8 @@ export default function App() {
       />
       <PaneResizer
         edge="right"
-        label={t("调整检查器宽度")}
+        label={t("调整工作面板宽度")}
+        overlay={compactViewport}
         width={inspectorWidth}
         minimum={INSPECTOR_MIN_WIDTH}
         maximum={INSPECTOR_MAX_WIDTH}

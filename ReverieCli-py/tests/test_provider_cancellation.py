@@ -4,10 +4,11 @@ import select
 import threading
 import time
 
+import httpx
 import pytest
 
 from reverie.desktop_control import RunControl
-from reverie.provider_transport import provider_client, provider_post, request_scope, interruptible_sleep
+from reverie.provider_transport import _wait, provider_client, provider_post, request_scope, interruptible_sleep
 
 
 @pytest.fixture
@@ -202,6 +203,24 @@ def test_stop_interrupts_an_already_waiting_retry():
         control.stop()
         with pytest.raises(RuntimeError, match="stopped"):
             future.result(timeout=1)
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_completed_socket_error_preserves_cancellation_state(stopped):
+    control = RunControl(lambda _event: None)
+
+    async def failed_read():
+        if stopped:
+            # Socket shutdown can complete with an error before the future's
+            # cancel callback runs, after stop has already set this event.
+            control.cancelled.set()
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    error = RuntimeError if stopped else httpx.RemoteProtocolError
+    message = "stopped" if stopped else "Server disconnected"
+    with pytest.raises(error, match=message):
+        _wait(failed_read(), control)
+    assert not control._cancel_callbacks
 
 
 @pytest.mark.parametrize("operation", ["compression", "codex-refresh", "codex-handoff"])

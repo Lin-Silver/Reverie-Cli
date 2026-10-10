@@ -802,15 +802,20 @@ def test_diagnostics_accepts_a_limit_and_ignores_a_bad_one() -> None:
     assert "settings.custom_provider_rejected" in _output(console)
 
 
-def test_path_reports_both_state_files() -> None:
+@pytest.mark.parametrize("width", [80, 140])
+def test_path_reports_both_state_files(width: int) -> None:
     runtime = _FakeRuntime(_test_root("path"))
     handler, console = _handler(runtime)
+    console.width = width
 
     assert handler.cmd_rats("path") is True
 
-    text = _output(console)
-    assert "settings.json" in text
-    assert "diagnostics.jsonl" in text
+    # Rich can wrap long CI checkout paths inside the filename itself.
+    text = "".join(_output(console).split())
+    assert "settings:" in text
+    assert "diagnostics:" in text
+    assert "".join(str(runtime.settings_path).split()) in text
+    assert "".join(str(runtime.diagnostics_path).split()) in text
 
 
 def test_an_unknown_subcommand_shows_the_usage_line() -> None:

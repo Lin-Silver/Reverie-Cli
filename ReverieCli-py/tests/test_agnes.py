@@ -162,6 +162,14 @@ def test_agnes_model_command_prompts_key_before_switching(tmp_path, monkeypatch)
     monkeypatch.setattr("reverie.config.get_launcher_root", lambda: app_root)
     monkeypatch.setattr("reverie.cli.commands.Prompt.ask", lambda *args, **kwargs: "agnes-test")
 
+    requested_keys = []
+
+    def provider_catalog(config, **_kwargs):
+        requested_keys.append(config.get("api_key"))
+        return [{"id": "agnes-2.0-flash"}]
+
+    monkeypatch.setattr(agnes_module, "fetch_agnes_provider_model_catalog", provider_catalog)
+
     config_manager = ConfigManager(project_root)
     handler = CommandHandler(
         Console(record=True, force_terminal=False, width=120),
@@ -169,6 +177,7 @@ def test_agnes_model_command_prompts_key_before_switching(tmp_path, monkeypatch)
     )
 
     assert handler._cmd_agnes_model("agnes-2.0-flash") is True
+    assert requested_keys and set(requested_keys) == {"agnes-test"}
 
     reloaded = config_manager.load()
     active = reloaded.active_model

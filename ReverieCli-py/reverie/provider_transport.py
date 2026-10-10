@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-from concurrent.futures import CancelledError
 from contextlib import contextmanager
 from contextvars import ContextVar
 import threading
@@ -78,7 +77,9 @@ def _wait(coroutine, control=None):
         if control is not None:
             control.check_cancel()
         return value
-    except CancelledError:
+    except Exception:
+        # Closing the socket can finish the future with a network error before
+        # its cancel callback runs. Preserve the user's stop in either case.
         if control is not None:
             control.check_cancel()
         raise

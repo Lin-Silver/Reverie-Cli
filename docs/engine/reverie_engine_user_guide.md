@@ -5,6 +5,11 @@
 `reverie_engine` is Reverie CLI's canonical built-in runtime surface.
 The previous lightweight compatibility package has been migrated into `reverie.engine`; new projects should use only `reverie_engine`.
 
+This guide describes the CLI's built-in Python game runtime. The external Engine
+editor registered with RATS also uses the provider ID `reverie.engine`; its
+application window and native tool contract are a separate surface. The runtime
+maturity limits below do not describe that editor's window support.
+
 This runtime is designed for `Reverie-Gamer` workflows that need:
 
 - a first-party project skeleton
@@ -21,12 +26,16 @@ Reverie Engine is an alpha runtime. Its capability report deliberately separates
 | --- | --- |
 | Scene graph, deterministic gameplay, physics queries, navigation, input, save data | Runtime implemented and covered by headless integration tests |
 | Native rendering | ModernGL framebuffer rendering for primitive/custom meshes, transforms, flat or textured materials, depth, alpha/add/multiply blending, pixel readback, and PNG capture |
-| Native presentation | Off-screen framebuffer only; a desktop window/event-loop presentation layer is not yet part of the engine |
+| Native presentation | Pyglet desktop window with framebuffer presentation, resize, keyboard/pointer/focus/close events and current-frame input; verified on Windows, other native hosts unverified |
 | Audio | Pyglet decoding/playback when the host backend succeeds; status distinguishes installed, unverified, operational, and failed states |
 | Live2D | Manifest validation, Cubism Core discovery, motion routing, and browser-bridge generation; no native Cubism renderer |
 | Reverie-Gamer | Work in progress: project planning, generation, deterministic slice execution, and evidence gates are implemented, but this is not a general one-prompt production-game guarantee |
 
 `/engine profile` exposes these distinctions under `capability_levels`. A dependency being importable is not treated as proof that a native device or external asset pipeline works.
+
+The Python API `reverie.engine.run_project(..., headless=False)` opens the native window when Pyglet and ModernGL can create the host graphics context. Initialization failure is reported explicitly; it does not silently switch to headless execution. The loop pumps events, applies the actual window viewport, presents frames, and releases graphics/audio/window resources on close or errors. Deterministic validation can continue using `headless=True`; `/engine smoke` remains a headless validation command.
+
+The [2026-10-05 repair report](../VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05) records a real Windows sample presentation, key and pointer events, resize and clean close. The visible sample used a placeholder texture and an explicitly scaled sprite; that evidence does not establish production art, advanced rendering, physical-device audio or Cubism character rendering.
 
 ## Standard Project Layout
 
@@ -74,7 +83,7 @@ The main Reverie executable does not embed full desktop DCC/editor applications 
 
 ## Modeling Integration
 
-The engine's modeling layer is documented separately in [Reverie-Gamer Modeling Guide](./reverie_gamer_modeling_pipeline.md).
+The engine's modeling layer is documented separately in [Reverie-Gamer Modeling Guide](reverie_gamer_modeling_pipeline.md).
 
 In short:
 

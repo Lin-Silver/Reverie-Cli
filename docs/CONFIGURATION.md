@@ -31,6 +31,18 @@ For each project Reverie creates a cache directory:
 
 Additional subdirectories such as `indexes/`, `computer_use/`, `nexus/`, or `runtime_sandbox/` are created on demand under the same project cache root.
 
+The layout above describes **Python-core state**, not every Desktop artifact. Desktop can select a different core data root in settings; packaged portable startup separates the executable/runtime path from persistent data. See [runtime-paths.ts](../ReverieCli-ui/electron/runtime-paths.ts) and [storage.py](../ReverieCli-py/reverie/storage.py) for the actual resolver.
+
+| Desktop data | Current location / owner |
+| --- | --- |
+| Core profiles, sessions, Context Engine, Skill draft pins | Selected core app root, `.reverie/projects/<project-path-key>/`; pins in session metadata or `desktop/draft-skills.json` |
+| Terminal logs, run records, goals, managed-worktree manifest | `<project_root>/.reverie/desktop/` via Electron `session-workspace.ts` / `isolated-workspaces.ts` |
+| Imported attachments, project actions | `<project_root>/.reverie/attachments/` and `.reverie/project-actions.json` |
+| Appearance/backgrounds and Electron profile | Desktop's resolved runtime/settings directory; see `electron/main.ts` and `preferences.ts` |
+| Unsent drafts, queues and sidebar organization | Renderer `localStorage` inside that Electron profile, scoped by project/session |
+
+Back up the relevant core, workspace and Desktop profile locations together. Copying only the core session directory does not migrate terminal logs, unsent attachment drafts or UI preferences. These locations are not equivalent to a universal `%APPDATA%/Reverie/config.json` profile.
+
 `<project-path-key>` is derived from the full absolute project path by replacing drive separators, path separators, and invalid filename characters. It does not append a hash. For example, `G:\Reverie\Reverie-Cli` becomes `G_Reverie_Reverie-Cli`.
 
 ## Profile Selection
@@ -126,6 +138,43 @@ The `security` block holds both the hard capability ceiling and the approval mod
 
 `permission_mode` is `default`, `auto_check`, or `strict`; `review` configures the Auto Check reviewer, and `model_mode` is `follow` (reuse the chat model) or `custom` (use `source` plus `model`/`model_index`). Every value is clamped or falls back on load, so a hand-edited or partial block never blocks startup. Manage the whole block from the settings UI or the `/permission` commands rather than by hand. See [SECURITY_PERMISSIONS.md](SECURITY_PERMISSIONS.md) for what each mode actually does.
 
+## MCP Server Connections
+
+MCP configuration is stored separately from `config.json` at `<app_root>/.reverie/mcp.json`. It is shared by the CLI and Desktop core. A minimal local-server entry looks like this:
+
+```json
+{
+  "version": 1,
+  "mcp": {
+    "enabled": true,
+    "allowed": [],
+    "excluded": [],
+    "discovery_timeout_ms": 15000
+  },
+  "mcpServers": {
+    "local-example": {
+      "type": "stdio",
+      "command": "my-mcp-server",
+      "args": [],
+      "enabled": true,
+      "trust": false
+    }
+  }
+}
+```
+
+Each server can set `type` to `stdio`, `http` (Streamable HTTP), or `sse` (legacy HTTP+SSE). Local entries also accept `cwd` and `env`; remote entries accept `httpUrl` or `url`, `headers`, and `timeout`. `includeTools` / `excludeTools` filter exposed tools, and `includeModes` / `excludeModes` restrict the Reverie modes that can see a server. The global `allowed` / `excluded` lists control which configured server names participate in discovery. Keep credentials out of checked-in files and protect the app-root configuration on disk.
+
+The current client executes discovered tools and supports listing / reading MCP resources. Tool, resource and prompt discovery follows `nextCursor` within the discovery time budget; invalid or repeated cursors fail explicitly. It counts `prompts/list` results for server status but cannot invoke `prompts/get`; it also does not expose resource templates, resource subscriptions, or the optional `roots`, `sampling`, and `elicitation` client features. Remote HTTP authorization is static-header-only; there is no managed OAuth flow.
+
+MCP tool text, structured content and resource metadata are retained. Supported PNG/JPEG/WebP/GIF image blocks become model image content; WAV/MP3 blocks become OpenAI Chat audio content. Anthropic and Responses receive supported image conversions and explicit text notices for unsupported audio. Inline base64 blocks are limited to 12 MiB encoded, and malformed / unsupported media gets a text notice instead of a base64 JSON dump. User-only image/audio/text annotations are excluded from model content. Binary embedded resources and real multimodal model/server compatibility still need broader acceptance. See [current gaps G24–G27](FEATURE_STATUS.md) and the [request / profile repairs](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05).
+
+### Model Request Lifecycle
+
+Desktop executors retain a bounded pool of four kernels between turns. Model requests use a shared connection pool (32 connections, 16 idle connections, 120-second idle expiry) with one asynchronous I/O loop behind the synchronous SDK interfaces. Proxy / TLS settings select separate pools. Requests and SDK clients can reuse healthy connections after SSE terminal records; unfinished response cleanup is bounded to 50 ms / 64 KiB. The system curl transport remains a per-request process.
+
+Stop interrupts connect, response-header / body waits and retry delays without waiting for the API read timeout. Compression, native Codex summary / handoff and token refresh POSTs use the same cancellable transport. OpenAI / Anthropic SDK automatic retries are disabled; Reverie's configured retry policy owns retries before output starts. Remote connection quality, queue time and first-token generation remain provider-dependent. Desktop's streaming toggle updates immediately, persists the actual setting, rolls back on failure and applies to the next request. See [measurements and limits](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05).
+
 ## Custom Compatibility Providers
 
 `models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Codex, AIHubMix, Agnes, SenseNova, NVIDIA, ModelScope, WebGemini, and Opencode sources use their own first-party runtime paths instead.
@@ -187,7 +236,7 @@ A skill directory holds `SKILL.md` with YAML frontmatter (`name`, `description`)
 
 A few bundled skills are gated to one mode — `reverie-engine` only appears in `reverie-gamer`. The rest, including `browser-controler` and `photo-to-3d`, are available in every mode that allows skill discovery.
 
-Pinned skills (`/skill <name>`) are session state held in memory only. They are never written to `config.json`, so restarting Reverie releases every pin. A pin overrides `allow_implicit_invocation: false` because it is an explicit user instruction. See [CLI_COMMANDS.md](CLI_COMMANDS.md) for the commands.
+Pinned skills (`/skill <name>`) are not written to `config.json`. Desktop persists them in session metadata or `desktop/draft-skills.json` under the core project cache and restores ordinary sessions/drafts after restart. Fork/rotation inheritance and standalone CLI save/restore remain incomplete. A pin overrides `allow_implicit_invocation: false` because it is an explicit user instruction. It adds mandatory prompt guidance, without a host-enforced per-turn inspection gate. See the [Skills guide](SKILLS.md) for persistence, mode limits and bundled design packages, and [CLI_COMMANDS.md](CLI_COMMANDS.md) for commands.
 
 ## Built-In Model Sources
 

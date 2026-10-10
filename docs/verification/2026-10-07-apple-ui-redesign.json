@@ -1,0 +1,1339 @@
+{
+  "date": "2026-10-07",
+  "scope": "Apple Design desktop UI redesign",
+  "head_unchanged": "127c39769217d87dd7647a3c6b296e2629d8f9ff",
+  "build": {
+    "version": "2.5.0",
+    "id": "6feebc499e567dc8",
+    "builtAt": "2026-10-07T11:01:16.813Z",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "artifacts": [
+    {
+      "path": "dist/Reverie-Portable-2.5.0-x64.exe",
+      "bytes": 501960662,
+      "sha256": "14d8919c364f0747a5d8d5cf15451a9322ac36aa12b3dfe6aecf478bf6f80739"
+    },
+    {
+      "path": "ReverieCli-ui/release/Reverie-Setup-2.5.0-x64.exe",
+      "bytes": 441225267,
+      "sha256": "9aafbc8b5a6f3ff263d89adaf826c29ae57a1f98e2f04a6921874e051cfffc27"
+    }
+  ],
+  "checks": {
+    "typecheck": {
+      "command": "npm run typecheck",
+      "result": "passed",
+      "translation_keys": 1016,
+      "translation_templates": 82
+    },
+    "ui_tests": {
+      "command": "npm test",
+      "passed": 283,
+      "skipped": 1,
+      "passing_files": 41,
+      "skipped_files": 1,
+      "duration_s": 76.12,
+      "skip_reason": "External RATS integration requires RATS_ENGINE"
+    },
+    "build": {
+      "result": "passed",
+      "logs": [
+        ".runtime/apple-redesign-20261007/build-windows.log",
+        ".runtime/apple-redesign-20261007/build-release.log"
+      ],
+      "targets": [
+        "Python CLI kernel",
+        "Electron main",
+        "renderer",
+        "Windows NSIS installer",
+        "portable launcher"
+      ]
+    },
+    "diff_check": {
+      "command": "git diff --check (changed UI files)",
+      "result": "passed"
+    }
+  },
+  "runtime": {
+    "release-final": {
+      "phase": "release-final",
+      "preview_css": false,
+      "pid": 52364,
+      "ports": {
+        "cdp": 53606,
+        "inspector": 53607
+      },
+      "screens": {
+        "home-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 1110,
+            "y": 7.5,
+            "width": 108,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)",
+          "caption_colors": [
+            [
+              249,
+              249,
+              252
+            ],
+            [
+              249,
+              249,
+              252
+            ],
+            [
+              249,
+              249,
+              252
+            ],
+            [
+              249,
+              249,
+              252
+            ]
+          ]
+        },
+        "home-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)",
+          "caption_colors": [
+            [
+              21,
+              22,
+              28
+            ],
+            [
+              21,
+              22,
+              28
+            ],
+            [
+              21,
+              22,
+              28
+            ],
+            [
+              21,
+              22,
+              28
+            ]
+          ]
+        },
+        "tools-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)"
+        },
+        "home-attachments": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 170.671875,
+            "width": 920,
+            "height": 168,
+            "bottom": 338.671875
+          },
+          "composer": {
+            "x": 412,
+            "y": 366.671875,
+            "width": 920,
+            "height": 396.5,
+            "bottom": 763.171875
+          },
+          "starters": {
+            "x": 416,
+            "y": 765.671875,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 843.171875
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)"
+        },
+        "accessible-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgb(249, 249, 252)"
+        },
+        "accessible-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgb(21, 22, 28)"
+        },
+        "home-compact-collapsed": {
+          "viewport": {
+            "width": 960,
+            "height": 700
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 32,
+            "y": 201.75,
+            "width": 896,
+            "height": 130,
+            "bottom": 331.75
+          },
+          "composer": {
+            "x": 32,
+            "y": 349.75,
+            "width": 896,
+            "height": 140,
+            "bottom": 489.75
+          },
+          "starters": {
+            "x": 32,
+            "y": 503.75,
+            "width": 896,
+            "height": 69.5,
+            "bottom": 573.25
+          },
+          "model": {
+            "x": 394.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-compact-sidebar": {
+          "viewport": {
+            "width": 960,
+            "height": 700
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 272,
+            "y": 166,
+            "width": 656,
+            "height": 130,
+            "bottom": 296
+          },
+          "composer": {
+            "x": 272,
+            "y": 314,
+            "width": 656,
+            "height": 140,
+            "bottom": 454
+          },
+          "starters": {
+            "x": 272,
+            "y": 468,
+            "width": 656,
+            "height": 141,
+            "bottom": 609
+          },
+          "model": {
+            "x": 394.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-short": {
+          "viewport": {
+            "width": 900,
+            "height": 500
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 272,
+            "y": 117,
+            "width": 588,
+            "height": 130,
+            "bottom": 247
+          },
+          "composer": {
+            "x": 272,
+            "y": 265,
+            "width": 588,
+            "height": 140,
+            "bottom": 405
+          },
+          "starters": {
+            "x": 272,
+            "y": 419,
+            "width": 588,
+            "height": 141,
+            "bottom": 560
+          },
+          "model": {
+            "x": 334.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-english": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 883.28125,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "subagents-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "rats-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "tasks-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "skills-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "skills-pinned-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "plugins-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "recovery-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "appearance-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-clean": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "conversation-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": {
+            "x": 416,
+            "y": 764,
+            "width": 920,
+            "height": 140,
+            "bottom": 904
+          },
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "files-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": {
+            "x": 300,
+            "y": 764,
+            "width": 532,
+            "height": 140,
+            "bottom": 904
+          },
+          "starters": null,
+          "model": {
+            "x": 436.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "conversation-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": {
+            "x": 416,
+            "y": 764,
+            "width": 920,
+            "height": 140,
+            "bottom": 904
+          },
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)"
+        }
+      },
+      "errors": [],
+      "launch_to_ready_s": 1.58,
+      "paths": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\fixture",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\gui-release-final\\core",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\gui-release-final\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "6feebc499e567dc8",
+          "builtAt": "2026-10-07T11:01:16.813Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "starter_draft_focus": true,
+      "draft_survived_navigation": true,
+      "attachment_layout": true,
+      "accessibility_preferences": true,
+      "skill_pin_visible_in_composer": true,
+      "workspace_caption_colors": [
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ]
+      ],
+      "tray_menu": [
+        [
+          "File",
+          "Edit",
+          "View",
+          "Window"
+        ],
+        [
+          "Exit"
+        ],
+        [
+          "Undo",
+          "Redo",
+          "",
+          "Cut",
+          "Copy",
+          "Paste",
+          "Delete",
+          "",
+          "Select All"
+        ],
+        [
+          "Reload",
+          "Force Reload",
+          "Toggle Developer Tools",
+          "",
+          "Actual Size",
+          "Zoom In",
+          "Zoom Out",
+          "",
+          "Toggle Full Screen"
+        ],
+        [
+          "Minimize",
+          "Zoom",
+          "Close"
+        ],
+        [
+          "显示 Reverie",
+          "",
+          "退出 Reverie"
+        ]
+      ],
+      "tray_terminal_survived": true,
+      "quit_cancel_preserved": true,
+      "exit_code": 0
+    },
+    "release-portable": {
+      "phase": "release-portable",
+      "preview_css": false,
+      "pid": 53036,
+      "ports": {
+        "cdp": 65176,
+        "inspector": 65177
+      },
+      "screens": {
+        "home-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)",
+          "caption_colors": [
+            [
+              249,
+              249,
+              252
+            ],
+            [
+              249,
+              249,
+              252
+            ],
+            [
+              249,
+              249,
+              252
+            ],
+            [
+              249,
+              249,
+              252
+            ]
+          ]
+        },
+        "home-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)",
+          "caption_colors": [
+            [
+              21,
+              22,
+              28
+            ],
+            [
+              21,
+              22,
+              28
+            ],
+            [
+              21,
+              22,
+              28
+            ],
+            [
+              21,
+              22,
+              28
+            ]
+          ]
+        },
+        "tools-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)"
+        },
+        "home-compact-collapsed": {
+          "viewport": {
+            "width": 960,
+            "height": 700
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 32,
+            "y": 201.75,
+            "width": 896,
+            "height": 130,
+            "bottom": 331.75
+          },
+          "composer": {
+            "x": 32,
+            "y": 349.75,
+            "width": 896,
+            "height": 140,
+            "bottom": 489.75
+          },
+          "starters": {
+            "x": 32,
+            "y": 503.75,
+            "width": 896,
+            "height": 69.5,
+            "bottom": 573.25
+          },
+          "model": {
+            "x": 394.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-compact-sidebar": {
+          "viewport": {
+            "width": 960,
+            "height": 700
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 272,
+            "y": 166,
+            "width": 656,
+            "height": 130,
+            "bottom": 296
+          },
+          "composer": {
+            "x": 272,
+            "y": 314,
+            "width": 656,
+            "height": 140,
+            "bottom": 454
+          },
+          "starters": {
+            "x": 272,
+            "y": 468,
+            "width": 656,
+            "height": 141,
+            "bottom": 609
+          },
+          "model": {
+            "x": 394.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-short": {
+          "viewport": {
+            "width": 900,
+            "height": 500
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 272,
+            "y": 117,
+            "width": 588,
+            "height": 130,
+            "bottom": 247
+          },
+          "composer": {
+            "x": 272,
+            "y": 265,
+            "width": 588,
+            "height": 140,
+            "bottom": 405
+          },
+          "starters": {
+            "x": 272,
+            "y": 419,
+            "width": 588,
+            "height": 141,
+            "bottom": 560
+          },
+          "model": {
+            "x": 334.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "home-english": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": {
+            "x": 416,
+            "y": 279.765625,
+            "width": 920,
+            "height": 168,
+            "bottom": 447.765625
+          },
+          "composer": {
+            "x": 416,
+            "y": 475.765625,
+            "width": 920,
+            "height": 140,
+            "bottom": 615.765625
+          },
+          "starters": {
+            "x": 416,
+            "y": 634.765625,
+            "width": 920,
+            "height": 77.5,
+            "bottom": 712.265625
+          },
+          "model": {
+            "x": 883.28125,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "appearance-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": null,
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "conversation-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": {
+            "x": 416,
+            "y": 764,
+            "width": 920,
+            "height": 140,
+            "bottom": 904
+          },
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "files-light": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": {
+            "x": 300,
+            "y": 764,
+            "width": 532,
+            "height": 140,
+            "bottom": 904
+          },
+          "starters": null,
+          "model": {
+            "x": 436.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(249, 249, 252, 0.933)"
+        },
+        "conversation-dark": {
+          "viewport": {
+            "width": 1484,
+            "height": 952
+          },
+          "bodyOverflow": false,
+          "header": null,
+          "composer": {
+            "x": 416,
+            "y": 764,
+            "width": 920,
+            "height": 140,
+            "bottom": 904
+          },
+          "starters": null,
+          "model": {
+            "x": 918.421875,
+            "y": 7.5,
+            "width": 205.578125,
+            "height": 42,
+            "bottom": 49.5
+          },
+          "canvas": "rgba(21, 22, 28, 0.88)"
+        }
+      },
+      "errors": [],
+      "launch_to_ready_s": 69.56,
+      "paths": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\fixture",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\gui-release-portable\\.reverie\\desktop\\app-runtime\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\gui-release-portable\\core",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\gui-release-portable\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\.runtime\\apple-redesign-20261007\\gui-release-portable\\.reverie\\desktop\\app-runtime\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "6feebc499e567dc8",
+          "builtAt": "2026-10-07T11:01:16.813Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "starter_draft_focus": true,
+      "draft_survived_navigation": true,
+      "workspace_caption_colors": [
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ],
+        [
+          249,
+          249,
+          252
+        ]
+      ],
+      "tray_menu": [
+        [
+          "File",
+          "Edit",
+          "View",
+          "Window"
+        ],
+        [
+          "Exit"
+        ],
+        [
+          "Undo",
+          "Redo",
+          "",
+          "Cut",
+          "Copy",
+          "Paste",
+          "Delete",
+          "",
+          "Select All"
+        ],
+        [
+          "Reload",
+          "Force Reload",
+          "Toggle Developer Tools",
+          "",
+          "Actual Size",
+          "Zoom In",
+          "Zoom Out",
+          "",
+          "Toggle Full Screen"
+        ],
+        [
+          "Minimize",
+          "Zoom",
+          "Close"
+        ],
+        [
+          "显示 Reverie",
+          "",
+          "退出 Reverie"
+        ]
+      ],
+      "tray_terminal_survived": true,
+      "quit_cancel_preserved": true,
+      "exit_code": 0
+    }
+  },
+  "screenshots": {
+    "light.png": {
+      "path": "result_images/apple-redesign-20261007/light.png",
+      "source": ".runtime/apple-redesign-20261007/release-portable-home-light-native.png"
+    },
+    "dark.png": {
+      "path": "result_images/apple-redesign-20261007/dark.png",
+      "source": ".runtime/apple-redesign-20261007/release-portable-home-dark-native.png"
+    },
+    "conversation.png": {
+      "path": "result_images/apple-redesign-20261007/conversation.png",
+      "source": ".runtime/apple-redesign-20261007/release-portable-conversation-light.png"
+    },
+    "files.png": {
+      "path": "result_images/apple-redesign-20261007/files.png",
+      "source": ".runtime/apple-redesign-20261007/release-portable-files-light-native.png"
+    },
+    "settings.png": {
+      "path": "result_images/apple-redesign-20261007/settings.png",
+      "source": ".runtime/apple-redesign-20261007/release-final-appearance-light.png"
+    },
+    "skills-pinned.png": {
+      "path": "result_images/apple-redesign-20261007/skills-pinned.png",
+      "source": ".runtime/apple-redesign-20261007/release-final-skills-pinned-light.png"
+    },
+    "subagents.png": {
+      "path": "result_images/apple-redesign-20261007/subagents.png",
+      "source": ".runtime/apple-redesign-20261007/release-final-subagents-light.png"
+    },
+    "tasks.png": {
+      "path": "result_images/apple-redesign-20261007/tasks.png",
+      "source": ".runtime/apple-redesign-20261007/release-final-tasks-light.png"
+    }
+  },
+  "source_sha256": {
+    "ReverieCli-ui/src/StartPage.tsx": "b0e580831c002736de6a836bb025c516ee55eba3ac40b86e56eef5c98757a8b2",
+    "ReverieCli-ui/src/StartPage.test.tsx": "b87b0af6320ddc6fc19e5180e8a5c3b261e4edc16bb72c1001210f7187dc14f0",
+    "ReverieCli-ui/src/desktop.css": "6d49fa56e983a819c8dfc714b8a1ae52f38065375ed68e5c37a817f004ee8db4",
+    "ReverieCli-ui/src/main.tsx": "6fd22df519617679081a04fbe515d6b7dda170208f02f6e211f183af32e4b275",
+    "ReverieCli-ui/src/App.tsx": "6bb4f00e959bcb58565c373e19eaa4a434f72556d98a60937be2db8a93debbc8",
+    "ReverieCli-ui/src/App.interaction.test.tsx": "9ef31191f2c0c155d355615660113c804a1fceb6191b077f6d2c1dd2e5289d17",
+    "ReverieCli-ui/src/i18n.tsx": "2e22ddbc9e6b82b456d5732091cabd379e94517855969f3a3cac9f05309e22b4",
+    "ReverieCli-ui/electron/main.ts": "d650f8e1dbf353b9d317d9e951a3f30918f6d1ead591088531c5cb27cb3523db"
+  },
+  "worktree": {
+    "staged_or_committed": false,
+    "preexisting_status_entries_removed": [],
+    "new_status_paths": [
+      "ReverieCli-ui/src/StartPage.test.tsx",
+      "ReverieCli-ui/src/StartPage.tsx",
+      "ReverieCli-ui/src/desktop.css",
+      "ReverieCli-ui/src/main.tsx",
+      "docs/REVERIE_CLI_APPLE_UI_REDESIGN_2026-10-07.md",
+      "docs/verification/2026-10-07-apple-ui-redesign.json"
+    ]
+  },
+  "limits": [
+    "Runtime profiles and project fixtures are isolated under the project .runtime directory.",
+    "Final runtime checks use packaged styles without CSS injection.",
+    "File-picker and quit-dialog selections are supplied for deterministic tests; native window, tray, PTY, IPC and persistence run normally.",
+    "Conversation contents are local fixtures; this work does not establish live model-provider or external RATS integration results.",
+    "The 960x700 and 900x500 stress windows temporarily lower the test-only native minimum; production minimum remains 1080x700.",
+    "The portable launch-to-ready observation includes first extraction into a fresh profile and is one sample, not a stable performance estimate.",
+    "The existing fast CLI ZIP and its earlier startup evidence are retained separately."
+  ]
+}

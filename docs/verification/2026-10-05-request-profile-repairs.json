@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "repair_date": "2026-10-05",
+  "product_version": "2.5.0",
+  "source_document": "REVERIE_CLI_REQUEST_PROFILE_REPAIRS_2026-10-05.md",
+  "predecessor": "verification/2026-10-05-feature-repairs.json",
+  "baseline_head": "127c39769217d87dd7647a3c6b296e2629d8f9ff",
+  "final_head": "127c39769217d87dd7647a3c6b296e2629d8f9ff",
+  "baseline_had_uncommitted_changes": true,
+  "commit_or_push_performed": false,
+  "scope": "Stop, output-mode switching, local user profile and crop, chat alignment, pooled provider transport, kernel reuse, and MCP catalogue/media audit follow-up on the current Windows worktree",
+  "checks": {
+    "python_full": {
+      "passed": 1826,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 1,
+      "suite_seconds": 370.143,
+      "local_evidence": ".runtime/full-repairs-python-final.xml",
+      "reported_total_seconds": 370.26
+    },
+    "desktop_full": {
+      "passed": 264,
+      "failed": 0,
+      "skipped": 1,
+      "duration_seconds": 57.81,
+      "max_workers": 2,
+      "per_test_timeout_seconds": 15
+    },
+    "desktop_typecheck": {
+      "passed": true,
+      "i18n_translations": 971,
+      "i18n_templates": 82
+    },
+    "network": {
+      "passed": 59,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_seconds": 32.676,
+      "local_evidence": ".runtime/network-cancellation.xml",
+      "cancellation_cases": 45,
+      "matrix": "5 transports x 3 phases x 3 repeats",
+      "transports": [
+        "requests adapter",
+        "HTTPX client",
+        "OpenAI SDK",
+        "Anthropic SDK",
+        "system curl"
+      ],
+      "phases": [
+        "waiting for headers",
+        "reading response body",
+        "stalled streaming response"
+      ],
+      "other_coverage": [
+        "new client connection reuse",
+        "SSE terminal framing with Content-Length and chunked encoding",
+        "bounded early response close",
+        "retry cancellation",
+        "compression, Codex refresh and handoff cancellation"
+      ]
+    },
+    "engine_rats_isolated": {
+      "passed": 11,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_seconds": 53.084,
+      "local_evidence": ".runtime/rats-isolated-repairs.xml"
+    },
+    "cli_build": {
+      "passed": true,
+      "command": "build.bat --reuse-venv --skip-plugins --test-exe --no-pause",
+      "boundary": "Existing plugin artifacts reused; no plugin source modification in this request"
+    },
+    "desktop_build": {
+      "passed": true,
+      "command": "npm run dist:win",
+      "build_id": "cac49bb794e88eaa",
+      "built_at": "2026-10-05T14:50:50.057Z"
+    },
+    "kernel_smokes": {
+      "standalone_cli": {
+        "passed": true,
+        "artifact": "dist/reverie.exe",
+        "kernel_info": {
+          "schema": "reverie.kernel.v1",
+          "version": "2.5.0",
+          "bridge_protocol": "sdk-bridge.v1",
+          "interface_version": "1.0",
+          "platform": "win32",
+          "arch": "x64",
+          "frozen": true
+        },
+        "bridge_messages": [
+          {
+            "type": "ready",
+            "protocol_version": 1
+          },
+          {
+            "id": "smoke",
+            "type": "shutdown"
+          }
+        ]
+      },
+      "desktop_kernel": {
+        "passed": true,
+        "artifact": "ReverieCli-ui/release/win-unpacked/reverie.exe",
+        "kernel_info": {
+          "schema": "reverie.kernel.v1",
+          "version": "2.5.0",
+          "bridge_protocol": "sdk-bridge.v1",
+          "interface_version": "1.0",
+          "platform": "win32",
+          "arch": "x64",
+          "frozen": true
+        },
+        "bridge_messages": [
+          {
+            "type": "ready",
+            "protocol_version": 1
+          },
+          {
+            "id": "smoke",
+            "type": "shutdown"
+          }
+        ]
+      }
+    },
+    "packaged_gui": {
+      "passed": true,
+      "profile": {
+        "drag": true,
+        "keyboard_pan_zoom": true,
+        "crop_size": [
+          256,
+          256
+        ],
+        "crop_center_rgb": [
+          227,
+          38,
+          54
+        ],
+        "escape_preserves_avatar": true,
+        "reload_persists_name_and_avatar": true,
+        "restart_persists_name_avatar_and_history": true
+      },
+      "page_errors": [],
+      "next_turn_after_stop": true,
+      "owned_fixture_cleanly_closed": true,
+      "native_file_picker_dialog_verified": false,
+      "boundary": "Actual packaged Electron renderer, IPC, kernel and HTTP fixture; OS picker dialog and installer/portable first extraction not revalidated"
+    },
+    "documentation": {
+      "passed": true,
+      "documents": 42,
+      "local_links": 422,
+      "errors": 0,
+      "external_urls_fetched": false,
+      "local_artifact_references_required": false
+    },
+    "git_diff_whitespace": {
+      "passed": true,
+      "boundary": "Git diff --check for tracked changes; unrelated pre-existing changes remain in this worktree"
+    }
+  },
+  "artifacts": [
+    {
+      "path": "dist/reverie.exe",
+      "size_bytes": 328890888
+    },
+    {
+      "path": "ReverieCli-ui/release/win-unpacked/ReverieUI.exe",
+      "size_bytes": 223114752
+    },
+    {
+      "path": "ReverieCli-ui/release/win-unpacked/reverie.exe",
+      "size_bytes": 14099176
+    },
+    {
+      "path": "ReverieCli-ui/release/Reverie-Setup-2.5.0-x64.exe",
+      "size_bytes": 441208936
+    },
+    {
+      "path": "dist/Reverie-Portable-2.5.0-x64.exe",
+      "size_bytes": 501941759
+    }
+  ],
+  "measurements": {
+    "toggle": {
+      "samples": [
+        {
+          "feedback_ms": 1.3,
+          "persisted_ms": 82.9
+        },
+        {
+          "feedback_ms": 1,
+          "persisted_ms": 70.8
+        },
+        {
+          "feedback_ms": 1,
+          "persisted_ms": 71
+        },
+        {
+          "feedback_ms": 0.9,
+          "persisted_ms": 71.4
+        },
+        {
+          "feedback_ms": 0.8,
+          "persisted_ms": 67.9
+        },
+        {
+          "feedback_ms": 0.8,
+          "persisted_ms": 89.6
+        }
+      ],
+      "feedback_method": "MutationObserver/performance.now around actual renderer button event",
+      "persistence_method": "Same renderer clock through real IPC and Python save"
+    },
+    "stop": {
+      "samples": [
+        {
+          "mode": "slow-headers",
+          "socket_disconnect_ms_including_automation": 18.18,
+          "ui_completion_ms_including_automation": 345.15
+        },
+        {
+          "mode": "slow-headers",
+          "socket_disconnect_ms_including_automation": 22.09,
+          "ui_completion_ms_including_automation": 346.39
+        },
+        {
+          "mode": "slow-headers",
+          "socket_disconnect_ms_including_automation": 19.27,
+          "ui_completion_ms_including_automation": 350.06
+        },
+        {
+          "mode": "stall-stream",
+          "socket_disconnect_ms_including_automation": 20.44,
+          "ui_completion_ms_including_automation": 266.49
+        },
+        {
+          "mode": "stall-stream",
+          "socket_disconnect_ms_including_automation": 19.72,
+          "ui_completion_ms_including_automation": 236.98
+        },
+        {
+          "mode": "stall-stream",
+          "socket_disconnect_ms_including_automation": 16.68,
+          "ui_completion_ms_including_automation": 249.76
+        }
+      ],
+      "method": "Playwright click to upstream socket EOF/reset and UI completion, including automation overhead"
+    },
+    "request_start": {
+      "cold_first_click_to_request_ms": 3987.89,
+      "second_warm_click_to_request_ms": 1307.66,
+      "later_warm_samples": [
+        {
+          "click_to_request_ms": 697.08,
+          "total_ms": 1597.94,
+          "connection": 480
+        },
+        {
+          "click_to_request_ms": 846.93,
+          "total_ms": 2701.93,
+          "connection": 480
+        },
+        {
+          "click_to_request_ms": 1242.32,
+          "total_ms": 3106.52,
+          "connection": 480
+        },
+        {
+          "click_to_request_ms": 4475.76,
+          "total_ms": 8370.1,
+          "connection": 480
+        },
+        {
+          "click_to_request_ms": 1548.3,
+          "total_ms": 3436.72,
+          "connection": 480
+        }
+      ],
+      "later_warm_median_ms": 1242.32,
+      "same_worker_pid": 49740,
+      "first_two_connection_id": 106,
+      "after_stop_shared_connection_id": 480,
+      "boundary": "Synthetic local model. Includes session, Git snapshot and context preparation; no old-build benchmark and no guarantee of subsecond total request startup."
+    }
+  },
+  "remote_probe": {
+    "source": "opencode",
+    "model": "nemotron-3.5-lightning-free",
+    "host": "opencode.ai",
+    "endpoint": "/zen/v1/chat/completions",
+    "synthetic_prompt_only": true,
+    "max_output_tokens": 64,
+    "new_transport_status": 403,
+    "requests_control_status": 403,
+    "provider_error": "Error from provider (Console): OpenCode's free tier can only be used from within OpenCode",
+    "first_token_verified": false,
+    "boundary": "Provider rejected both implementations. An initial probe using the base URL returned 404; that helper mistake was corrected and is excluded from product findings."
+  },
+  "audit_follow_up": {
+    "G25": "repaired: all three MCP catalogues follow nextCursor; invalid/repeated cursors fail explicitly",
+    "G27": "partially repaired: supported typed image/audio relay, structuredContent and errors retained; embedded binary resources and per-model real-server acceptance remain",
+    "G24": "optional client capabilities and prompt/template/subscription flow remain incomplete",
+    "G26": "managed OAuth remains incomplete; static headers remain available"
+  },
+  "remaining_limits": [
+    "Real remote first-token performance for the current provider",
+    "Provider/model tool, reasoning and vision matrix",
+    "Native IME and screen reader acceptance",
+    "Other operating systems",
+    "Authenticated MCP/plugin flows and embedded binary resources",
+    "Installer and portable first extraction",
+    "Long task combinations and Engine production depth"
+  ]
+}

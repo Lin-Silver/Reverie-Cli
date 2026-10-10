@@ -1,8 +1,110 @@
+# Changelog
+
+Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，按语义版本倒序排列；同一版本只保留一个顶层入口，原始细节与发布后更新继续保留。当前源码版本仍为 **2.5.0**。
+
+- **Unreleased** 表示当前工作树和后续开发记录，不保证已提交、打包或公开发布。
+- **版本条目日期**保留原日志所记日期；**本地标签日期**是 Git 证据，不等于 GitHub Release 的发布时间。未联网核验远端发布资产。
+- 当时的测试数字、模型可用性、权限行为和路线图属于历史陈述；现在的状态请看 [FEATURE_STATUS](FEATURE_STATUS.md)，实测范围看 [VERIFICATION_HISTORY](VERIFICATION_HISTORY.md)，计划看 [ROADMAP](ROADMAP.md)。
+- 本次保留原有全部版本段落；恢复早期标签基线与废弃开发版本记录。历史文案中的宣传性表述不能视为当前验收结论。
+
+## 版本索引
+
+| 版本 | 原记录日期 | 本地语义版本标签 / 日期 | 更新主题 |
+| --- | --- | --- | --- |
+| [Unreleased](#unreleased) | 2026-10-10 更新 | 无新版本标签 | 工作树修复、提交前验证与 Intelligent UI 开发规格 |
+| [v2.5.0](#v2-5-0) | 2026-07-17 | `v2.5.0` / 2026-07-17 | Trusted Portable Core and Multi-Platform Releases |
+| [v2.4.0](#v2-4-0) | 2026-07-16 | `v2.4.0` / 2026-07-17 | Desktop, Context Engine, and Release Upgrade |
+| [v2.3.4](#v2-3-4) | 2026-07-06 | `v2.3.4` / 2026-07-06 | Writer, Sources, Memory, and Engine Upgrades |
+| [v2.3.3](#v2-3-3) | 2026-05-04 | `v2.3.3` / 2026-05-04 | Reverie UI SDK Bridge and Plugin Releases |
+| [v2.3.2](#v2-3-2) | 2026-05-02 | `v2.3.2` / 2026-05-02 | NVIDIA Profiles and Global Config Reliability |
+| [v2.3.1](#v2-3-1) | 2026-04-19 | 本地未见对应标签 | Base Reverie Subagents |
+| [v2.3.0](#v2-3-0) | 2026-04-15 | 本地未见对应标签 | Harness Runtime Audit and Prompt-Run Stability Upgrade |
+| [v2.2.0](#v2-2-0) | 2026-04-11 | 本地未见对应标签 | Large-Scale 3D Game Generation Upgrade |
+| [v2.1.24](#v2-1-24) | 2026-04-09 | 本地未见对应标签 | TUI Stability and Build Flow Cleanup |
+| [v2.1.21](#v2-1-21) | 2026-04-04 | 本地未见对应标签 | TUI Performance, Streaming Controls, and Settings Upgrade；Squad Search Upgrade |
+| [v2.1.20](#v2-1-20) | 2026-04-04 | 本地未见对应标签 | Alert Network Upgrade |
+| [v2.1.19](#v2-1-19) | 2026-04-04 | 本地未见对应标签 | Patrol Route Upgrade |
+| [v2.1.18](#v2-1-18) | 2026-04-04 | 本地未见对应标签 | Regional Encounter Upgrade |
+| [v2.1.17](#v2-1-17) | 2026-04-04 | 本地未见对应标签 | Region Objective Upgrade |
+| [v2.1.16](#v2-1-16) | 2026-04-03 | 本地未见对应标签 | Region Travel Upgrade |
+| [v2.1.15](#v2-1-15) | 2026-04-03 | 本地未见对应标签 | Detour Reward Upgrade |
+| [v2.1.14](#v2-1-14) | 2026-04-03 | 本地未见对应标签 | Encounter Director Upgrade |
+| [v2.1.13](#v2-1-13) | 2026-04-03 | 本地未见对应标签 | Guard Loop Upgrade |
+| [v2.1.12](#v2-1-12) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Guided Quest Arc and Gateway Priming |
+| [v2.1.11](#v2-1-11) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Guardian Finale and Boss Encounter Template |
+| [v2.1.10](#v2-1-10) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Region Gateways and NPC Anchors |
+| [v2.1.9](#v2-1-9) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Continuity, Expansion Backlog, and Resume State |
+| [v2.1.8](#v2-1-8) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder |
+| [v2.1.7](#v2-1-7) | 2026-04-03 | `v2.1.7` / 2026-04-03 | Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal |
+| [v2.1.6](#v2-1-6) | 2026-03-30 | `v2.1.6` / 2026-03-29 | Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup |
+| [v2.1.5](#v2-1-5) | 2026-03-28 | 本地未见对应标签 | Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration |
+| [v2.1.4](#v2-1-4) | 2026-03-27 | `2.1.4` / 2026-03-27 | LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh |
+| [v2.1.3](#v2-1-3) | 2026-03-15 / 2026-03-16 | `v2.1.3` / 2026-03-18 | Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite；Computer Controller, Mode Switching, and Context Intelligence |
+| [v2.1.2](#v2-1-2) | 2026-03-14 | `2.1.2` / 2026-03-14 | Workspace Sandbox & Command Audit |
+| [v2.1.1](#v2-1-1) | 2026-03-12 | `2.1.1` / 2026-03-12 | Command Flow, UX, and Memory Upgrade |
+| [v2.1.0](#v2-1-0) | 2026-02-27 | `2.1.0` / 2026-02-27 | Session Memory & Reliability |
+| [v2.0.4](#v2-0-4) | 2026-02-22（年份纠正） | `2.0.4` / 2026-02-22 | Provider Relay Fix & Enhancement |
+| [v2.0.3](#v2-0-3) | 2026-02-17 | `2.0.3` / 2026-02-18 | Critical Fixes & Enhanced Context Management |
+| [v2.0.2](#v2-0-2) | 2026-02-15 | `2.0.2` / 2026-02-15 | Provider Integration |
+| [v2.0.1](#v2-0-1) | 2026-02-13 | `2.0.1` / 2026-02-14 | Text-to-Image Integration & Stability Fixes |
+| [v2.0.0](#v2-0-0) | 2026-02-04 | `2.0.0` / 2026-02-08 | Reverie-Gamer Mode & Game Dev Toolchain |
+| [v1.4.1](#v1-4-1) | 2026-01-17 | 本地未见对应标签 | Advanced Context Engine & Nexus Integration |
+| [v1.4.0](#v1-4-0) | 2026-01-12 | `1.4.0` / 2026-01-14 | Reverie-Ant Autonomous Agentic Enhancement |
+| [v1.3.1](#v1-3-1) | 2026-01-04 | 本地未见对应标签 | Thinking Display Update |
+| [v1.3.0](#v1-3-0) | 2025-12-28 | `1.3.0` / 2025-12-28 | Dreamscape Update |
+| [1.2.5 标签基线](#early-tag-baseline) | 原 README 无发布日期 | `1.2.5` / 2025-12-26 | 早期 Context Engine / CLI；版本命名冲突另注 |
+
+历史例外见 [日期、缺号与证据说明](#history-provenance)，包括未发布的 2.3.5 开发草案；没有为了补齐编号而编造 2.1.22 / 2.1.23 的更新。
+
 ## Unreleased
+
+### 2026-10-09–10 — 工作树整理与提交前验证
+
+* 按 Python 内核、设计 Skills、原生引擎与 Windows 打包、Desktop、文档五个主题整理已有改动。版本号仍为 2.5.0，未新增语义版本标签；Intelligent UI 规格仍属于后续开发。
+* 修复 14 个设计 Skills 的 Git 字节一致性：为清单中的资源限定换行与空白保留规则，22 个资源的 Git blob 与检出文件均匹配 SHA-256。保留第三方正文、资源和许可证。
+* 更新发布流程回归，检查 Windows CLI ZIP 同时包含 EXE 与运行目录，并提供完整包下载链接。此前测试仍要求旧版单 EXE 说明。
+* 重新运行 Python 全量、Desktop 测试与类型检查，并验证 Windows 编译 CLI 的本地工具流程和打包 GUI 的设置/重启。初跑失败与定向重测分开记录，不把它们累加为一次全量通过；详见 [2026-10-09 验证](VERIFICATION_HISTORY.md#publish-validation-2026-10-09)。
+
+### 2026-10-08 — 文档与 Intelligent UI 调研
+
+* 核实 ChatGPT Visualizations、MCP Apps UI 和 Plugin Extensions 的区别，修订 [Intelligent UI 技术规格与 AI 提示词](INTELLIGENT_UI_SPEC.md)。这是待开发设计，没有将 RIU 标记为已实现。
+* 将 25 份旧规格、交接与验证文档整合到 [开发历史](DEVELOPMENT_HISTORY.md) 和 [验证历史](VERIFICATION_HISTORY.md)，更新入口和链接，保留原日期、测量及未验证限制；结构化证据继续存放在 `docs/verification/`。
+* Changelog 按版本排序，合并 v2.1.3 与 v2.1.21 的重复入口，恢复落在文末的 v2.1.13–v2.1.20 系列，补充版本索引及日期/标签差异。v2.0.4 原写 2025-02-22 的年份按 Git 证据纠正。
+
+### 2026-10-07–08 — 已有工作树改动的补录
+
+以下概述取自对应历史报告，本次只整理文档，未重新执行其中的软件测试。
+
+* 增加默认关闭的广泛 API 兼容实验开关，覆盖非流式文本工具交互；真实服务的 HTTP 403、原生工具未执行及编译后 HTTP 503 仍分别记录，不能宣称全部供应商通过。[API 兼容记录](VERIFICATION_HISTORY.md#reverie-cli-api-compatibility-2026-10-08)
+* 更新 Desktop 起始页、导航与共享视觉样式，保留输入框身份、用户背景偏好、主题与辅助显示设置；打包证据与 provider/RATS 验证边界分开。[UI 更新记录](VERIFICATION_HISTORY.md#reverie-cli-apple-ui-redesign-2026-10-07)
+* 修复连续背景、原生标题栏、关闭到托盘及终端保活；Windows CLI 默认采用 EXE 加运行目录，延迟加载引擎后端，新增终端 ZIP 验证与实际启动计时。[启动与托盘记录](VERIFICATION_HISTORY.md#reverie-cli-background-startup-repairs-2026-10-07)
+
+### 原有未发布记录（完整保留）
+
+
+* Merged the Workbench and Inspector into one resizable pane, added a lazy file tree and UTF-8 editor with conflict checks, named Git status filters, and in-chat display presets. Prepared idle model kernels, overlapped initialization with Git snapshots, reused unchanged snapshot objects, and fixed stale session caches after worker writes. Windows packaged verification, performance samples and limits are in the [2026-10-06 repair report](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06).
+
+* Added cancellable, pooled model HTTP transport, interruptible retry/preflight requests and reusable Desktop kernels; streaming output toggles update immediately with persisted-setting rollback. Added cropped avatar upload, local display-name/profile persistence and user-right/model-left chat layout. Fixed MCP catalog pagination and typed image/audio/structured-result relay with explicit provider limits. Packaged upload validation caught and fixed the renderer's missing image blob permission. See the [request / profile repair report](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05) for measured runtime evidence and remaining gaps.
+
+* Repaired the confirmed software findings from the 2026-10-05 audit: Desktop command dispatch, pin persistence/fork/rotation, checkout ownership, saved-goal input, provider probe content validation, full pinned-Skill body loading, streamed diff/preview memory, cached history search, bounded logs/stale responses and validated review records. Real packaged inspection also corrected read-only reviews entering coding follow-ups and stale/empty goal summaries. Added native Engine window presentation with Windows input/resize/close evidence and Desktop build identity. See the [repair report](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05) for measured limits and the [current status](FEATURE_STATUS.md) for remaining acceptance work.
+* First repair batch: Python 1761 passed / 1 skipped; Desktop 254 passed / 1 skipped; typecheck and new Windows CLI/GUI packaging passed. Compiled GUI, real PTY/CLI, loopback requests and GUI restart were exercised in isolated data. Portable first launch was rejected by automatic approval review (`blocked by policy`); first extraction is unverified. The counts below describe the earlier documentation audit baseline.
+
+* A third source pass registered five more limits, all documentation-only: RATS executable and process identity fail open off Windows (the PE `ProductName` and PID-image layer is Windows-exclusive), eleven Windows-only `skipif` gates make a published pass/skip total host-specific, tree-sitter is an optional extra that reaches neither `install_requires`, `.[build]` nor the PyInstaller spec so ten languages silently fall back to regex with no test coverage, `.zig` is claimed by the parser with no grammar dependency and no parse path in either mode (0 symbols, 0 errors), and the LSP bridge defines only six servers. The RATS, development and status documents now state these boundaries; no runtime code changed. See the [cross-platform identity and language coverage addendum](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05).
+
+* A second source pass recorded four additional MCP client limits: prompt/client-request coverage, single-page catalogs, no managed remote OAuth, and flattened image/audio tool results. The configuration guide, feature matrix and roadmap now state these boundaries; no MCP runtime behavior changed in this documentation update. The same pass clarified that browser automation is an agent tool and the Electron Desktop app has no interactive browser tab panel.
+
+* Reconciled the documentation system with the local 2.5.0 worktree on 2026-10-05: added a current [capability/gap matrix](FEATURE_STATUS.md), [Desktop guide](DESKTOP_GUIDE.md), [Skills guide](SKILLS.md) and [audit evidence](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05); corrected launch flags, data ownership, RATS schema/custom-provider guidance and historical handoffs. Recorded 23 gaps/limits, with documentation reconciliation completed and software gaps retained in [ROADMAP](ROADMAP.md).
+* Added an offline relative-link/heading-anchor check and a documentation CI job. Fresh Desktop regression: 235 passed / 1 skipped; full Python regression: 1740 passed / 2 failed / 1 skipped, with both failures reproduced individually. Typecheck, Electron/renderer build and existing compiled CLI bridge smoke passed; this documentation change does not claim the software gaps are fixed or the full regression gate passes.
 
 * Corrected SenseNova image editing to send `size=auto` unless the caller specifies dimensions, aligned Pollinations' image-model credential warning with its key-required runtime, and added a Desktop image-model picker interaction test. Verified one real SenseNova U1.5 Lite generation and one edit on 2026-09-25; the provider chose a 2048×2048 edited output from a 1024×1024 input when given `auto`.
 
-## Reverie CLI v2.5.0 - Trusted Portable Core and Multi-Platform Releases
+
+
+<a id="v2-5-0"></a>
+
+## v2.5.0 — Trusted Portable Core and Multi-Platform Releases
+
+<a id="reverie-cli-v250---trusted-portable-core-and-multi-platform-releases"></a>
 
 Released 2026-07-17.
 
@@ -68,6 +170,10 @@ Released 2026-07-17.
 
 * Added the first verified Reverie RATS/RTP client slice: the Python core now owns executable-local Engine discovery, explicit permission sessions, token-safe persisted selection, compact catalogs, progressive native schema loading, and direct dynamic Engine tools. Reverie Desktop adds a dedicated RATS status/permission/catalog page while keeping all RTP credentials out of Electron and the renderer. Additional supported-provider onboarding remained open.
 
+### Post-release update (still v2.5.0) — 2026-07-22
+
+* Made parallel Context Engine indexing correct and deterministic (2026-07-22). Worker threads shared one set of stateful parser instances, so concurrent parses corrupted each other — a full index dropped and misattributed symbols run to run (varying symbol counts with zero reported failures), and the nondeterministic merge order let the top ranking hit jitter in and out of results. Each worker thread now owns its parser pipeline, and the committed symbol table and dependency graph are canonicalized by qualified name. A parallel build now extracts exactly the same symbols as a serial one and is byte-identical across runs. This resolves the ranking-stability item deferred on 2026-07-21. See [historical retrieval results](VERIFICATION_HISTORY.md#context-engine-benchmark).
+
 ### Post-release update (still v2.5.0) — 2026-07-21
 
 * Added cache-first prompt input across production text-model transports. OpenAI Chat/Responses/native HTTP/curl calls now use stable privacy-preserving cache keys (plus the local-compatible `cache_prompt` hint where applicable), Anthropic calls enable automatic ephemeral caching, and Context Engine compression/session handoff use the same policy. Gateways that explicitly reject cache fields are retried once without only those hints.
@@ -78,9 +184,13 @@ Released 2026-07-17.
 
 * Reduced core EXE startup extraction work by packaging Chromium and FFmpeg as lazy first-use archives. The Windows installer and portable desktop remain a single product containing both the GUI and fast unpacked kernel; the default GUI or terminal startup can be selected in Settings and temporarily overridden with `--gui` or `--tui`.
 
-* Filtered corpus-absent Context Engine query expansions: joined prose compounds (`"undefined expression"` → `undefinedexpression`) and reproduction-snippet dotted fragments (`r.limit`, `e.subs`) that name nothing in the index no longer collect the rare-term IDF bonus and displace real query terms. A compound is kept only with non-zero content document frequency or a real symbol/file-name match; a zero-frequency dotted fragment is dropped while its attribute suffix is retained. Held-out profiles improved or held with no regression (e.g. blind Recall@10 0.89 → 1.00, MRR@10 0.62 → 0.77). See `docs/CONTEXT_ENGINE_BENCHMARK.md`.
+* Filtered corpus-absent Context Engine query expansions: joined prose compounds (`"undefined expression"` → `undefinedexpression`) and reproduction-snippet dotted fragments (`r.limit`, `e.subs`) that name nothing in the index no longer collect the rare-term IDF bonus and displace real query terms. A compound is kept only with non-zero content document frequency or a real symbol/file-name match; a zero-frequency dotted fragment is dropped while its attribute suffix is retained. Held-out profiles improved or held with no regression (e.g. blind Recall@10 0.89 → 1.00, MRR@10 0.62 → 0.77). See [historical retrieval results](VERIFICATION_HISTORY.md#context-engine-benchmark).
 
-* Made parallel Context Engine indexing correct and deterministic (2026-07-22). Worker threads shared one set of stateful parser instances, so concurrent parses corrupted each other — a full index dropped and misattributed symbols run to run (varying symbol counts with zero reported failures), and the nondeterministic merge order let the top ranking hit jitter in and out of results. Each worker thread now owns its parser pipeline, and the committed symbol table and dependency graph are canonicalized by qualified name. A parallel build now extracts exactly the same symbols as a serial one and is byte-identical across runs. This resolves the ranking-stability item deferred on 2026-07-21. See `docs/CONTEXT_ENGINE_BENCHMARK.md`.
+
+
+### Initial release and baseline updates — 2026-07-17
+
+> 以下为原日志中未单独分日期的发布基线条目；更晚的行为以当前指南为准。
 
 * Added a cross-platform kernel compatibility contract (`--kernel-info`) and a desktop resolver that accepts a sibling core only when its SHA-256 is present in the ASAR-integrity-protected build allowlist and its platform, architecture, version, and bridge protocol handshake match. All failures use the compiled internal kernel.
 * Defined stable launch behavior: `reverie` runs the TUI/core, `reverieui` opens the GUI in the current directory, and the portable GUI supports an explicit `--tui` route without guessing whether a launch came from a terminal or double-click.
@@ -98,7 +208,13 @@ Released 2026-07-17.
 * Accelerated context compression with bounded role-aware transcripts, lazy deterministic fallback generation, compact checkpoint/cache serialization, and faster gzip settings.
 * Made repository-dependent turns proactively select the native `codebase-retrieval` tool once, strengthened its model-facing routing guidance, and kept cached recommendations visible while the desktop refreshes them in the background.
 
-## Reverie CLI v2.4.0 - Desktop, Context Engine, and Release Upgrade
+
+
+<a id="v2-4-0"></a>
+
+## v2.4.0 — Desktop, Context Engine, and Release Upgrade
+
+<a id="reverie-cli-v240---desktop-context-engine-and-release-upgrade"></a>
 
 **Release Date:** 2026-07-16
 
@@ -140,7 +256,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.3.4 - Writer, Sources, Memory, and Engine Upgrades
+
+
+<a id="v2-3-4"></a>
+
+## v2.3.4 — Writer, Sources, Memory, and Engine Upgrades
+
+<a id="reverie-cli-v234---writer-sources-memory-and-engine-upgrades"></a>
 
 **Release Date:** 2026-07-06
 
@@ -182,7 +304,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.3.3 - Reverie UI SDK Bridge and Plugin Releases
+
+
+<a id="v2-3-3"></a>
+
+## v2.3.3 — Reverie UI SDK Bridge and Plugin Releases
+
+<a id="reverie-cli-v233---reverie-ui-sdk-bridge-and-plugin-releases"></a>
 
 **Release Date:** 2026-05-04
 
@@ -206,7 +334,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.3.2 - NVIDIA Profiles and Global Config Reliability
+
+
+<a id="v2-3-2"></a>
+
+## v2.3.2 — NVIDIA Profiles and Global Config Reliability
+
+<a id="reverie-cli-v232---nvidia-profiles-and-global-config-reliability"></a>
 
 **Release Date:** 2026-05-02
 
@@ -260,7 +394,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.3.1 - Base Reverie Subagents
+
+
+<a id="v2-3-1"></a>
+
+## v2.3.1 — Base Reverie Subagents
+
+<a id="reverie-cli-v231---base-reverie-subagents"></a>
 
 **Release Date:** 2026-04-19
 
@@ -284,7 +424,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.3.0 - Harness Runtime Audit and Prompt-Run Stability Upgrade
+
+
+<a id="v2-3-0"></a>
+
+## v2.3.0 — Harness Runtime Audit and Prompt-Run Stability Upgrade
+
+<a id="reverie-cli-v230---harness-runtime-audit-and-prompt-run-stability-upgrade"></a>
 
 **Release Date:** 2026-04-15
 
@@ -323,7 +469,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.2.0 - Large-Scale 3D Game Generation Upgrade
+
+
+<a id="v2-2-0"></a>
+
+## v2.2.0 — Large-Scale 3D Game Generation Upgrade
+
+<a id="reverie-cli-v220---large-scale-3d-game-generation-upgrade"></a>
 
 **Release Date:** 2026-04-11
 
@@ -354,7 +506,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.24 - TUI Stability and Build Flow Cleanup
+
+
+<a id="v2-1-24"></a>
+
+## v2.1.24 — TUI Stability and Build Flow Cleanup
+
+<a id="reverie-cli-v2124---tui-stability-and-build-flow-cleanup"></a>
 
 **Release Date:** 2026-04-09
 
@@ -372,31 +530,39 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.21 - TUI Performance, Streaming Controls, and Settings Upgrade
+
+
+<a id="v2-1-21"></a>
+
+## v2.1.21 — TUI Performance, Streaming Controls, and Settings Upgrade / Squad Search Upgrade
+
+<a id="reverie-cli-v2121---tui-performance-streaming-controls-and-settings-upgrade"></a>
+
+### 2026-04-04 — TUI Performance, Streaming Controls, and Settings Upgrade
 
 **Release Date:** 2026-04-04
 
-### CLI and TUI
+#### CLI and TUI
 
 * Reworked the streaming transcript so tool activity is denser, cleaner, and closer to Codex/Gemini-style terminal output.
 * Added a live tool-output panel that shows in-progress stdout/stderr during execution, then collapses automatically back into a compact finished-result card.
 * Added a streaming task drawer with `Ctrl+T` toggle support so long-running work can show or hide the current todo list without leaving the transcript.
 * Reduced empty-line churn in streamed output and tightened markdown rendering so assistant text, tool logs, and footer panels no longer fight each other.
 
-### Settings and Config
+#### Settings and Config
 
 * Added `/settings` as an alias of `/setting`.
 * Added `/setting tool-output compact|condensed|full` so finished tool results can be shown in fully compact, partially condensed, or full transcript form.
 * Added `/setting thinking full|compact|hidden` so streamed reasoning can stay fully visible, be compacted, or be hidden explicitly instead of being implicitly suppressed.
 * Config repair now auto-adds missing `tool_output_style` and `thinking_output_style` keys to `config.json`, so older configs upgrade themselves cleanly.
 
-### Runtime and Performance
+#### Runtime and Performance
 
 * Replaced the old slow streaming hot path with a shared SSE parser and shared streaming state logic across providers, reducing unnecessary latency on simple tasks.
 * Improved `command_exec` on Windows so PowerShell cmdlets, pipelines, quoted executables, and `python -c` style invocations behave more reliably.
 * Improved Context Engine resilience and speed by handling UTF-8 BOM files correctly, respecting symbol-search limits, and avoiding unnecessary retrieval work.
 
-### Reverie-Gamer Status
+#### Reverie-Gamer Status
 
 * This version does not introduce a new large gameplay milestone by itself; it focuses on making Reverie faster and more dependable while the Gamer pipeline continues to expand.
 * The current expected Reverie-Gamer delivery window is:
@@ -404,13 +570,284 @@ Released 2026-07-17.
   * Late April 2026: stronger asset-pipeline and validation-loop integration for generated game projects
   * May 2026: broader long-running project continuation and richer multi-region generation work
 
-### Validation
+#### Validation
 
 * `python -m pytest -q`
 
 ---
 
-## Reverie CLI v2.1.12 - Reverie-Gamer Guided Quest Arc and Gateway Priming
+
+<a id="reverie-cli-v2121---squad-search-upgrade"></a>
+
+### 2026-04-04 — Squad Search Upgrade
+
+**Release Date:** 2026-04-04
+
+#### Reverie-Gamer Regional AI
+
+* Generated slices now assign `squad_role` values to Godot enemy specs, so defenders can react as vanguards, suppressors, anchors, or boss anchors instead of sharing one alert response path
+* `alert_networks` now carry `search_duration_seconds` and `anchor_point`, and `world_graph.guard_networks` mirrors those fields so regional AI state is inspectable from the generated world graph
+* Godot runtime enemies now keep searching after an alert fades, which makes regional defense feel more persistent than a single converge pulse
+
+#### Runtime Behavior
+
+* Suppressors now bias toward ranged response positions instead of collapsing into melee clumps every time an alert fires
+* Anchor units now bias toward local anchor points, which makes relay and spire defense read more like held territory than wandering cleanup
+* Generated runtime scripts now explicitly wire squad roles from `slice_manifest.json` into `enemy_dummy.gd`, and tests validate both the contract layer and the emitted GDScript search behavior
+
+#### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-20"></a>
+
+## v2.1.20 — Alert Network Upgrade
+
+<a id="reverie-cli-v2120---alert-network-upgrade"></a>
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Regional AI
+
+* Generated slices now emit `alert_networks` contracts for both Reverie Engine content and Godot runtime data
+* `world_graph` now includes `guard_networks`, giving regional AI coordination a formal place in the generated world-state graph
+* Godot runtime enemies now raise and respond to regional alerts, so one defender making contact can pull nearby lane partners into the same fight
+
+### Runtime Coordination
+
+* Starter Ruins, Cloudstep Basin, and Echo Watch now each ship with their own regional alert networks
+* Patrol routes and alert networks now work together, so enemies can both inhabit a route and converge on a shared contact point
+* Frontier defense no longer feels like isolated 1v1 pockets only; local guards can reinforce relay and spire approaches in a more believable way
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-19"></a>
+
+## v2.1.19 — Patrol Route Upgrade
+
+<a id="reverie-cli-v2119---patrol-route-upgrade"></a>
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer World Population
+
+* Generated slices now emit `patrol_routes` contracts for both Reverie Engine content and Godot runtime data
+* Godot runtime now loads `patrol_routes.json`, and enemies can resolve a patrol lane from shared data instead of standing at a fixed spawn
+* World graphs now include `patrol_lanes`, which gives regional world-state data a formal place for guard-route ownership
+
+### Runtime Behavior
+
+* Starter Ruins, Cloudstep Basin, and Echo Watch now ship with their own sweep routes, so enemies feel stationed inside a living slice instead of dropped in as static props
+* Patrol routes are now region-aware, and frontier enemies can inherit combat tuning from archetypes while still following their own local lanes
+* HUD purification counts now stay region-correct while patrol populations scale across multiple areas
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py reverie/gamer/system_generators/world_structure.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-18"></a>
+
+## v2.1.18 — Regional Encounter Upgrade
+
+<a id="reverie-cli-v2118---regional-encounter-upgrade"></a>
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Frontier Runtime
+
+* Secondary regions now generate their own defender encounters instead of only landmarks, NPC anchors, and objective props
+* Generated enemy instances can now derive from shared combat archetypes through `archetype_id`, which removes the old one-ID-per-enemy-type bottleneck
+* Regional objectives now carry `encounter_id` contracts, so basin and observatory goals are gated by local combat beats before they can be secured
+
+### Runtime Playability
+
+* Cloudstep Basin now ships with a relay-defense combat pocket, and Echo Watch now ships with an elite-backed spire reclaim encounter
+* HUD purification progress now reflects the current region instead of counting hidden enemies from every region at once
+* Root-region shrine progression now ignores frontier enemies, so multi-region content no longer pollutes the main slice objective loop
+
+### Validation
+
+* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-17"></a>
+
+## v2.1.17 — Region Objective Upgrade
+
+<a id="reverie-cli-v2117---region-objective-upgrade"></a>
+
+**Release Date:** 2026-04-04
+
+### Reverie-Gamer Regional Progression
+
+* `slice_manifest.json` now emits `region_objectives`, and `world_graph.json` now carries `regional_goals` plus per-region `region_objective_id` links
+* Generated Godot slices now include `region_objective_site.gd` and `region_objectives.json`, so secondary regions contain playable objectives instead of landmark-only previews
+* `GameState` now persists completed regional objectives alongside region travel, encounters, detour rewards, and quest progress
+
+### Runtime Payoff
+
+* Cloudstep Basin and Echo Watch now deliver persistent rewards such as `basin_insight` and `watch_resonance`
+* Regional rewards now feed back into runtime stats like skill range, cooldowns, dash i-frames, movement speed, and stamina recovery
+* HUD expansion status now surfaces current region goals and overall regional objective progress
+
+### Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-16"></a>
+
+## v2.1.16 — Region Travel Upgrade
+
+<a id="-reverie-cli-v2116--region-travel-upgrade"></a>
+
+**Release Date:** 2026-04-03
+
+### 🌍 Reverie-Gamer World Runtime
+
+* Upgraded the generated Godot 3D slice from a single-region scaffold to a multi-region runtime foundation
+* `slice_manifest.json` now emits `region_layouts`, `world_graph`, `active_region_id`, and richer gateway contracts with `from_region`, `target_spawn`, and travel gating rules
+* Generated Godot runtime now includes `region_manager.gd` and real gateway-driven region travel instead of gateway hints only
+* Save/load now persists current region and discovered regions alongside combat, quest, encounter, and reward state
+
+### 🧭 Expansion Flow
+
+* Secondary regions now have their own preview landmarks, home-region NPC placement, and return gateways
+* HUD expansion status now surfaces the active region and discovered-region count
+* Region switching now moves the player to region-specific spawn points and activates only the relevant region content
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+
+
+<a id="v2-1-15"></a>
+
+## v2.1.15 — Detour Reward Upgrade
+
+<a id="-reverie-cli-v2115--detour-reward-upgrade"></a>
+
+**Release Date:** 2026-04-03
+
+### 🗺️ Reverie-Gamer Slice Content
+
+* Upgraded the generated Godot 3D slice from a single critical-path route to a main-route plus optional detour structure
+* `combat.json` now emits an elite detour profile and encounter template for side-route pressure
+* `slice_manifest.json` now emits `reward_sites` so optional cache rewards exist as first-class runtime content
+* Generated slices now include an elite guard encounter and a reward cache that unlocks only after the detour is cleared
+
+### 🎮 Runtime Progression
+
+* Added generated `reward_cache.gd` and runtime spawning for optional reward sites
+* Save/load now persists completed encounters and claimed reward caches
+* Optional detour rewards now feed back into gameplay by improving guard timing, guard reduction, movement, and stamina recovery
+* Critical-path accounting now excludes optional detour elites so side content stays optional instead of accidentally blocking shrine completion
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-14"></a>
+
+## v2.1.14 — Encounter Director Upgrade
+
+<a id="-reverie-cli-v2114--encounter-director-upgrade"></a>
+
+**Release Date:** 2026-04-03
+
+### 🎮 Reverie-Gamer Encounter Runtime
+
+* Upgraded the generated Godot 3D slice with encounter sequencing instead of isolated enemy placement only
+* `combat.json` now emits a `pattern_library` for melee, ranged, and boss profiles, including multi-phase guardian pacing data
+* `slice_manifest.json` now emits explicit `encounters` so generated runtime scenes know where combat beats begin and how they escalate
+* Added generated `encounter_director.gd` to activate encounter beats, announce completions, and keep the runtime encounter state aligned with the authored data contracts
+
+### ⚔️ Boss Pattern Improvements
+
+* Generated boss enemies now consume phase profiles for windup timing, recovery timing, lunge distance, burst cadence, and movement pressure
+* HUD combat status now surfaces the active encounter and boss-phase summary instead of only player-side cooldown data
+* Save/load payloads now preserve encounter and boss-phase state alongside the existing slice continuity data
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-13"></a>
+
+## v2.1.13 — Guard Loop Upgrade
+
+<a id="-reverie-cli-v2113--guard-loop-upgrade"></a>
+
+**Release Date:** 2026-04-03
+
+### 🎮 Reverie-Gamer Combat Runtime
+
+* Upgraded the generated Godot 3D slice with a guard and perfect-guard loop
+* `combat.json` now includes `player_actions.guard` tuning with stamina drain, damage reduction, perfect-guard timing, and counter-poise rules
+* Generated player runtime now supports `C` guard, perfect-guard timing, reduced-damage blocking, and counter-poise feedback
+* Enemy melee and projectile hits now pass source context so guard responses can differentiate between normal blocks and clean defensive reads
+
+### ⚔️ Battle Feel Improvements
+
+* HUD now surfaces live guard state alongside skill and heavy cooldowns
+* Perfect guard now opens a real counter window instead of behaving like a cosmetic hint only
+* README for the generated Godot scaffold now documents the added defensive controls
+
+### ✅ Validation
+
+* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
+* `python -m pytest tests -q`
+
+---
+
+
+
+<a id="v2-1-12"></a>
+
+## v2.1.12 — Reverie-Gamer Guided Quest Arc and Gateway Priming
+
+<a id="reverie-cli-v2112---reverie-gamer-guided-quest-arc-and-gateway-priming"></a>
 
 **Release Date:** 2026-04-03
 
@@ -428,7 +865,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.11 - Reverie-Gamer Guardian Finale and Boss Encounter Template
+
+
+<a id="v2-1-11"></a>
+
+## v2.1.11 — Reverie-Gamer Guardian Finale and Boss Encounter Template
+
+<a id="reverie-cli-v2111---reverie-gamer-guardian-finale-and-boss-encounter-template"></a>
 
 **Release Date:** 2026-04-03
 
@@ -446,7 +889,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.10 - Reverie-Gamer Region Gateways and NPC Anchors
+
+
+<a id="v2-1-10"></a>
+
+## v2.1.10 — Reverie-Gamer Region Gateways and NPC Anchors
+
+<a id="reverie-cli-v2110---reverie-gamer-region-gateways-and-npc-anchors"></a>
 
 **Release Date:** 2026-04-03
 
@@ -464,7 +913,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.9 - Reverie-Gamer Continuity, Expansion Backlog, and Resume State
+
+
+<a id="v2-1-9"></a>
+
+## v2.1.9 — Reverie-Gamer Continuity, Expansion Backlog, and Resume State
+
+<a id="reverie-cli-v219---reverie-gamer-continuity-expansion-backlog-and-resume-state"></a>
 
 **Release Date:** 2026-04-03
 
@@ -488,7 +943,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.8 - Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder
+
+
+<a id="v2-1-8"></a>
+
+## v2.1.8 — Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder
+
+<a id="reverie-cli-v218---reverie-gamer-prompt-compiler-runtime-registry-and-3d-slice-builder"></a>
 
 **Release Date:** 2026-04-03
 
@@ -513,7 +974,13 @@ Released 2026-07-17.
 * Expanded the Gamer system prompt and prompt-side tool descriptions so the model now knows about `runtime_registry.json`, `production_plan.json`, `system_specs.json`, `task_graph.json`, `slice_score.json`, request compilation, and direct slice generation.
 * Updated mode metadata and discovery keywords so tool recommendation can rank Gamer compilation and production-flow tools more accurately.
 
-## Reverie CLI v2.1.7 - Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal
+
+
+<a id="v2-1-7"></a>
+
+## v2.1.7 — Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal
+
+<a id="reverie-cli-v217---tool-discovery-upgrade-mode-aware-tool-browser-prompt-slimming-and-snapshot-removal"></a>
 
 **Release Date:** 2026-04-03
 
@@ -557,7 +1024,13 @@ Released 2026-07-17.
 * Added repair logic for legacy mojibake in persisted Atlas document-filename settings, reducing broken `master_document_filename` and `appendix_filename_pattern` values in older configs.
 * Relaxed the Atlas confirmation-gate wording so previously user-authorized “draft to implementation” flows can continue without a redundant first confirmation step when no material ambiguity remains.
 
-## Reverie CLI v2.1.6 - Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup
+
+
+<a id="v2-1-6"></a>
+
+## v2.1.6 — Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup
+
+<a id="reverie-cli-v216---codex-style-skills-support-single-file-gamer-runtime-integration-and-runtime-packaging-cleanup"></a>
 
 **Release Date:** 2026-03-30
 
@@ -586,7 +1059,13 @@ Released 2026-07-17.
 
 * Removed the tracked `tests/` repository directory from GitHub distribution; local tests can now stay untracked.
 
-## Reverie CLI v2.1.5 - Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration
+
+
+<a id="v2-1-5"></a>
+
+## v2.1.5 — Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration
+
+<a id="reverie-cli-v215---reverie-gamer-modeling-pipeline-engine-cleanup-and-blockbenchashfox-integration"></a>
 
 **Release Date:** 2026-03-28
 
@@ -608,7 +1087,13 @@ Released 2026-07-17.
 
 * Removed the external-reference modeling bridge approach and the related root-level helper-script workflow.
 
-## Reverie CLI v2.1.4 - LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh
+
+
+<a id="v2-1-4"></a>
+
+## v2.1.4 — LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh
+
+<a id="reverie-cli-v214---llm-first-rotation-context-intelligence-mcp-and-provider-refresh"></a>
 
 **Release Date:** 2026-03-27
 
@@ -652,11 +1137,39 @@ Released 2026-07-17.
 
 * Removed all `Iflow` source code, commands, proxy logic, configuration surfaces, and documentation references from Reverie CLI.
 
-## Reverie CLI v2.1.3 - Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite
+
+
+<a id="v2-1-3"></a>
+
+## v2.1.3 — Computer Controller, Mode Switching, and Context Intelligence / Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite
+
+<a id="reverie-cli-v213---computer-controller-mode-switching-and-context-intelligence"></a>
+
+### 2026-03-15 — Computer Controller, Mode Switching, and Context Intelligence
+
+**Release Date:** 2026-03-15
+
+#### Highlights
+* Added `computer-controller` mode as a dedicated desktop-control workflow powered by NVIDIA-hosted `qwen/qwen3.5-397b-a17b`, plus a new unified `computer_control` tool for screenshot observation, mouse actions, keyboard input, scrolling, dragging, waits, and screen-state inspection.
+* Added `/nvidia` provider management with interactive API-key entry, model activation, endpoint overrides, and automatic source switching when entering Computer Controller mode.
+* Added `switch_mode` so non-desktop modes can proactively move between Reverie, Reverie-Gamer, Reverie-Ant, Spec-Driven, Spec-Vibe, and Writer while updating tool availability and system prompts in-session.
+* Reworked the main Reverie system prompt for generic LLMs with stronger repository-first retrieval, spec-style planning discipline, full-project delivery expectations, and a stricter test/build/verification standard.
+* Upgraded workspace memory and Context Engine flow: session-level memory is now refreshed back into the active conversation, workspace-global memory summaries are injected automatically, `codebase-retrieval` can query memory/LSP data, and an optional LSP bridge exposes diagnostics, definitions, symbols, and status.
+* Improved provider transport reliability: Codex models are standardized to `258K`, and request-provider response parsing is more robust across wrapped text/reasoning payloads.
+
+#### Notes
+* Computer Controller mode is intentionally isolated from `switch_mode`; it is entered explicitly and stays focused on desktop control instead of general coding workflows.
+
+---
+
+
+<a id="reverie-cli-v213---post-release-updates-still-v213---reverie-gamer-production-upgrade--reverie-engine-lite"></a>
+
+### 2026-03-16 — Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite
 
 **Release Date:** 2026-03-16
 
-### Highlights
+#### Highlights
 * Rebuilt `reverie-gamer` into a stronger end-to-end game-production workflow: the active Gamer system prompt now pushes blueprint-first planning, engine-aware scaffolding, playable-first delivery, proactive verification loops, and repeated balance/playtest iteration instead of stopping at design docs.
 * Added three major Gamer tools for large-scale game creation: `game_design_orchestrator` for structured blueprints and vertical-slice planning, `game_project_scaffolder` for engine-aware project foundations and content pipelines, and `game_playtest_lab` for telemetry schemas, quality gates, session-log analysis, and feedback synthesis.
 * Added `Reverie Engine Lite` as Reverie's first-party built-in runtime, with a data-driven scene/prefab format, project scaffolding helpers, deterministic smoke testing, and three built-in samples spanning `2D`, `2.5D`, and `3D`.
@@ -665,36 +1178,25 @@ Released 2026-07-17.
 * Expanded the CLI game workflow with new `/blueprint`, `/scaffold`, and `/playtest` commands, while upgrading `/gdd` with validation/version/export flows and turning `/assets` into a fuller asset workbench for manifests, dependency graphs, optimization, and diagnostics.
 * Strengthened generic `reverie` mode as well: mode switching is now more proactive in the system prompt, and verification is treated as a required debug-and-retest loop instead of an optional final step.
 
-### Supported Game Creation Coverage
+#### Supported Game Creation Coverage
 * **2D games**: platformers, metroidvanias, top-down action games, roguelikes, bullet hell shooters, JRPGs, tactics games, deckbuilders/card games, puzzle games, visual novels, and management/simulation projects.
 * **2.5D games**: isometric ARPGs, tactics/strategy games, Diablo-like loot games, cinematic platformers, survival-horror hybrids, and fixed-camera exploration projects.
 * **3D games**: action-adventure games, RPGs, open-zone/open-world projects, FPS/TPS combat games, survival/crafting games, dungeon crawlers, immersive sims, racing prototypes, and systemic sandbox experiences.
 * **Engine/runtime coverage**: built-in `Reverie Engine Lite`, custom runtime workflows, web stacks (`Phaser`, `PixiJS`, `Three.js`), lightweight Python/Lua stacks (`Pygame`, `Love2D`), and open engine project structures for `Godot` and `O3DE`.
 
-### Notes
+#### Notes
 * `reverie-gamer` now has the strongest results when used as a production loop: blueprint -> scaffold -> first playable -> simulation -> playtest -> telemetry-informed iteration.
 * The CLI now exposes the new game-production surfaces directly, including the first-party engine runtime, so Gamer workflows no longer depend only on in-chat tool calling.
 
 ---
 
-## Reverie CLI v2.1.3 - Computer Controller, Mode Switching, and Context Intelligence
 
-**Release Date:** 2026-03-15
 
-### Highlights
-* Added `computer-controller` mode as a dedicated desktop-control workflow powered by NVIDIA-hosted `qwen/qwen3.5-397b-a17b`, plus a new unified `computer_control` tool for screenshot observation, mouse actions, keyboard input, scrolling, dragging, waits, and screen-state inspection.
-* Added `/nvidia` provider management with interactive API-key entry, model activation, endpoint overrides, and automatic source switching when entering Computer Controller mode.
-* Added `switch_mode` so non-desktop modes can proactively move between Reverie, Reverie-Gamer, Reverie-Ant, Spec-Driven, Spec-Vibe, and Writer while updating tool availability and system prompts in-session.
-* Reworked the main Reverie system prompt for generic LLMs with stronger repository-first retrieval, spec-style planning discipline, full-project delivery expectations, and a stricter test/build/verification standard.
-* Upgraded workspace memory and Context Engine flow: session-level memory is now refreshed back into the active conversation, workspace-global memory summaries are injected automatically, `codebase-retrieval` can query memory/LSP data, and an optional LSP bridge exposes diagnostics, definitions, symbols, and status.
-* Improved provider transport reliability: Codex models are standardized to `258K`, and request-provider response parsing is more robust across wrapped text/reasoning payloads.
+<a id="v2-1-2"></a>
 
-### Notes
-* Computer Controller mode is intentionally isolated from `switch_mode`; it is entered explicitly and stays focused on desktop control instead of general coding workflows.
+## v2.1.2 — Workspace Sandbox & Command Audit
 
----
-
-## Reverie CLI v2.1.2 - Workspace Sandbox & Command Audit
+<a id="reverie-cli-v212---workspace-sandbox--command-audit"></a>
 
 **Release Date:** 2026-03-14
 
@@ -712,7 +1214,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.1 - Command Flow, UX, and Memory Upgrade
+
+
+<a id="v2-1-1"></a>
+
+## v2.1.1 — Command Flow, UX, and Memory Upgrade
+
+<a id="reverie-cli-v211---command-flow-ux-and-memory-upgrade"></a>
 
 **Release Date:** 2026-03-12
 
@@ -731,7 +1239,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.1.0 - Session Memory & Reliability
+
+
+<a id="v2-1-0"></a>
+
+## v2.1.0 — Session Memory & Reliability
+
+<a id="reverie-cli-v210---session-memory--reliability"></a>
 
 **Release Date:** 2026-02-27
 
@@ -767,9 +1281,17 @@ Released 2026-07-17.
 
 ---
 
-## 🚀 Reverie CLI v2.0.4 — Provider Relay Fix & Enhancement
 
-**Release Date:** 2025-02-22
+
+<a id="v2-0-4"></a>
+
+## v2.0.4 — Provider Relay Fix & Enhancement
+
+<a id="-reverie-cli-v204--provider-relay-fix--enhancement"></a>
+
+> 年份修正：原条目为 2025-02-22；本地 `2.0.4` 标签 `4c53b02` 与发布提交 `c459f93` 均在 2026-02-22。原值和依据保留于文末。
+
+**Release Date:** 2026-02-22
 
 ### 🔧 Critical Fixes
 * **Built-in Provider Proxy**: Added native credential support with automatic endpoint detection
@@ -788,7 +1310,13 @@ Released 2026-07-17.
 
 ---
 
-## 🚀 Reverie CLI v2.0.3 — Critical Fixes & Enhanced Context Management
+
+
+<a id="v2-0-3"></a>
+
+## v2.0.3 — Critical Fixes & Enhanced Context Management
+
+<a id="-reverie-cli-v203--critical-fixes--enhanced-context-management"></a>
 
 **Release Date:** 2026-02-17
 
@@ -836,7 +1364,13 @@ Released 2026-07-17.
 
 ---
 
-## Reverie CLI v2.0.2 - Provider Integration
+
+
+<a id="v2-0-2"></a>
+
+## v2.0.2 — Provider Integration
+
+<a id="reverie-cli-v202---provider-integration"></a>
 
 **Release Date:** 2026-02-15
 
@@ -853,7 +1387,13 @@ Released 2026-07-17.
 
 ---
 
-## 🚀 Reverie CLI v2.0.1 — Text-to-Image Integration & Stability Fixes
+
+
+<a id="v2-0-1"></a>
+
+## v2.0.1 — Text-to-Image Integration & Stability Fixes
+
+<a id="-reverie-cli-v201--text-to-image-integration--stability-fixes"></a>
 
 **Release Date:** 2026-02-13
 
@@ -882,7 +1422,13 @@ Released 2026-07-17.
 
 ---
 
-## 🚀 Reverie CLI v2.0.0 — Reverie-Gamer Mode & Game Dev Toolchain
+
+
+<a id="v2-0-0"></a>
+
+## v2.0.0 — Reverie-Gamer Mode & Game Dev Toolchain
+
+<a id="-reverie-cli-v200--reverie-gamer-mode--game-dev-toolchain"></a>
 
 **Release Date:** 2026-02-04
 
@@ -916,7 +1462,13 @@ Released 2026-07-17.
 
 ---
 
-## 🚀 Reverie CLI v1.4.1 — Advanced Context Engine & Nexus Integration
+
+
+<a id="v1-4-1"></a>
+
+## v1.4.1 — Advanced Context Engine & Nexus Integration
+
+<a id="-reverie-cli-v141--advanced-context-engine--nexus-integration"></a>
 
 **Release Date:** 2026-01-17
 
@@ -969,7 +1521,13 @@ Released 2026-07-17.
 
 ---
 
-## 🚀 Reverie CLI v1.4.0 — Reverie-Ant Autonomous Agentic Enhancement
+
+
+<a id="v1-4-0"></a>
+
+## v1.4.0 — Reverie-Ant Autonomous Agentic Enhancement
+
+<a id="-reverie-cli-v140--reverie-ant-autonomous-agentic-enhancement"></a>
 
 **Release Date:** 2026-01-12
 
@@ -1122,7 +1680,13 @@ Verification Phase:
 
 ---
 
-## ✨ Reverie CLI v1.3.1 — Thinking Display Update
+
+
+<a id="v1-3-1"></a>
+
+## v1.3.1 — Thinking Display Update
+
+<a id="-reverie-cli-v131--thinking-display-update"></a>
 
 **Release Date:** 2026-01-04
 
@@ -1148,7 +1712,13 @@ Verification Phase:
 
 ---
 
-## ✨ Reverie CLI v1.3.0 — Dreamscape Update
+
+
+<a id="v1-3-0"></a>
+
+## v1.3.0 — Dreamscape Update
+
+<a id="-reverie-cli-v130--dreamscape-update"></a>
 
 **Release Date:** 2025-12-28
 
@@ -1186,216 +1756,43 @@ Verification Phase:
 
 ---
 
-## ✨ Reverie CLI v2.1.13 — Guard Loop Upgrade
 
-**Release Date:** 2026-04-03
 
-### 🎮 Reverie-Gamer Combat Runtime
+<a id="early-tag-baseline"></a>
 
-* Upgraded the generated Godot 3D slice with a guard and perfect-guard loop
-* `combat.json` now includes `player_actions.guard` tuning with stamina drain, damage reduction, perfect-guard timing, and counter-poise rules
-* Generated player runtime now supports `C` guard, perfect-guard timing, reduced-damage blocking, and counter-poise feedback
-* Enemy melee and projectile hits now pass source context so guard responses can differentiate between normal blocks and clean defensive reads
+## 早期标签基线：1.2.5（2025-12-26）
 
-### ⚔️ Battle Feel Improvements
+本地最早的语义版本标签是 `1.2.5`，指向 `04a01bf`。该提交标题为 `v1.5.2`，与标签命名冲突；当时没有独立 changelog，不能把任一名称认定为已核验的正式发布版本。
 
-* HUD now surfaces live guard state alongside skill and heavy cooldowns
-* Perfect guard now opens a real counter window instead of behaving like a cosmetic hint only
-* README for the generated Godot scaffold now documents the added defensive controls
+根据该标签的 README，早期能力包括符号索引/依赖关系/增量检索、兼容 OpenAI 的工具调用、流式与非流式输出、TUI 代码/diff 展示、会话与 Git 上下文。这里是基线内容概述，不推定这些能力最初在哪个版本加入，也不验证旧 README 的性能或覆盖面声明。
 
-### ✅ Validation
+证据：`git show 1.2.5:README.md`、`git show -s --format=fuller 1.2.5`。可在 [固定提交 README](https://github.com/Lin-Silver/Reverie-Cli/blob/04a01bf/README.md) 查看历史；本次证据来自本地 Git 对象。
 
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
+<a id="history-provenance"></a>
 
----
+## 日期、缺号与证据说明
 
-## Reverie CLI v2.1.21 - Squad Search Upgrade
+1. 本次核对当前工作树、HEAD 可达的 93 个文档相关提交、70 份不同历史 changelog 内容，以及本地语义版本标签。检查范围不是所有远端 Release，也不覆盖不可达/已丢失的历史。
+2. v2.0.4 的 `2025-02-22` 与前后版本及 Git 冲突；现改为 `2026-02-22`。`2.0.4` 标签指向 `4c53b02ca5f75d11bdbb48462ecb6bed5098df1c`，发布提交为 `c459f93`。保留此说明，不悄悄抹去原值。
+3. 原日志日期与标签日期不一致的情况（如 1.4.0、2.0.0、2.1.3、2.1.6、2.4.0）不自动更改；标签可能晚于开发或文档日期。`1.3.0` 标签的提交标题还是 `1.3.2`，说明早期提交标题也不能单独作为发布编号。未核实远端发布日时不能选一个日期冒充唯一权威。
+4. v2.1.3 的 03-15 初始记录与 03-16 后续更新合在一个版本内；v2.1.21 的 TUI 与 Squad Search 两组条目同日但内容不同，全部保留。v2.1.13–v2.1.20 移回正确版本位置。
+5. 当前日志/本地标签未找到独立的 v2.1.22、v2.1.23 发布记录；不补写猜测内容。浮动标签 `latest`、`plugins-latest` 和 `iflow-proxy` 不是新的 CLI 语义版本。
+6. 下方保留历史 `v2.3.5 - Unreleased` 草案，来源 `a6012d7`；该编号后来没有成为当前版本序列的独立已确认发布。它不能插入已发布版本表，旧文案也不代表现在的发布策略。
 
-**Release Date:** 2026-04-04
+### 历史开发草案：v2.3.5（未发布记录）
 
-### Reverie-Gamer Regional AI
+原文取自 `git show a6012d7:docs/changelog.md`，仅补回历史，不重复计为新更新：
 
-* Generated slices now assign `squad_role` values to Godot enemy specs, so defenders can react as vanguards, suppressors, anchors, or boss anchors instead of sharing one alert response path
-* `alert_networks` now carry `search_duration_seconds` and `anchor_point`, and `world_graph.guard_networks` mirrors those fields so regional AI state is inspectable from the generated world graph
-* Godot runtime enemies now keep searching after an alert fades, which makes regional defense feel more persistent than a single converge pulse
 
-### Runtime Behavior
-
-* Suppressors now bias toward ranged response positions instead of collapsing into melee clumps every time an alert fires
-* Anchor units now bias toward local anchor points, which makes relay and spire defense read more like held territory than wandering cleanup
-* Generated runtime scripts now explicitly wire squad roles from `slice_manifest.json` into `enemy_dummy.gd`, and tests validate both the contract layer and the emitted GDScript search behavior
-
-### Validation
-
-* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
+* Upgraded Codex reverse-proxy transport with query-safe Responses URL resolution, custom model ids and headers, environment-key/no-auth modes, proxy-safe identity headers, explicit stream failures, strict tool schemas, dynamic cross-platform Codex user agents, and live CLI-cache-first GPT-5.6 model discovery.
+* Added workspace mutation isolation: every AI tool call is wrapped in an executable-root internal shadow-Git checkpoint, only `delete_file` may leave a file deleted, blocked deletions are restored automatically, and approved deletions receive a separate timestamped backup under `.reverie/projects/<project-path-key>/deleted-files/`.
+* Enforced workspace-only path arguments for mutating tools, permanently disabled inline interpreter/shell code in `command_exec`, retained direct terminal deletion/move blocks, and added regression coverage for traversal, ignored files, outside-workspace writes, deletion restoration, and deletion archives.
+* Upgraded the unified `@` picker to consume the Context Engine index and return both files and code symbols, including line-range mentions, with a scrollable cross-platform selector and transient Windows rendering.
+* Exactly pinned maintained Python dependencies and the optional hardware-specific TTI stack, added a dependency-pin/synchronization policy check, expanded test coverage to Linux, Windows, macOS, and Python 3.10/3.12/3.14, and added a dedicated CI security/coverage gate.
+* Marked `2.3.5` as a development version only and gated the rolling GitHub Release behind an explicit manual `publish_release` input; push, pull-request, and scheduled builds now produce workflow artifacts without publishing.
+* Moved Harness/checkpoint prompt enrichment off the interactive Agent critical path and warmed Skills for the active mode during Discovery, reducing the measured source Agent first-paint path from roughly 249 ms to 12 ms with the current `dist` configuration.
+* Made automatic MCP discovery silent and background-only. Pending or failed servers contribute no tools, resource tools, server guidance, prompt content, or tool descriptions to model context; `/mcp` status reads cached health without waiting for network probes.
+* Hardened the Windows packager to build `reverie.exe` in a staging directory before replacing the deployed binary, with bounded retries and an actionable error when another process holds `dist\reverie.exe` open.
+* Added the built-in Opencode (`/oc`) source, completed the native ModernGL framebuffer path and backend diagnostics, implemented the session selector, made recoverable failures observable across the package, introduced domain-specific context/runtime type names with compatibility aliases, added cross-platform CI and complete SDK bridge smoke checks, consolidated duplicate internals, repaired packaging/documentation/licensing, and limited the maintained roadmap to remaining game-development work.
 
 ---
-
-## Reverie CLI v2.1.20 - Alert Network Upgrade
-
-**Release Date:** 2026-04-04
-
-### Reverie-Gamer Regional AI
-
-* Generated slices now emit `alert_networks` contracts for both Reverie Engine content and Godot runtime data
-* `world_graph` now includes `guard_networks`, giving regional AI coordination a formal place in the generated world-state graph
-* Godot runtime enemies now raise and respond to regional alerts, so one defender making contact can pull nearby lane partners into the same fight
-
-### Runtime Coordination
-
-* Starter Ruins, Cloudstep Basin, and Echo Watch now each ship with their own regional alert networks
-* Patrol routes and alert networks now work together, so enemies can both inhabit a route and converge on a shared contact point
-* Frontier defense no longer feels like isolated 1v1 pockets only; local guards can reinforce relay and spire approaches in a more believable way
-
-### Validation
-
-* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
-
----
-
-## Reverie CLI v2.1.19 - Patrol Route Upgrade
-
-**Release Date:** 2026-04-04
-
-### Reverie-Gamer World Population
-
-* Generated slices now emit `patrol_routes` contracts for both Reverie Engine content and Godot runtime data
-* Godot runtime now loads `patrol_routes.json`, and enemies can resolve a patrol lane from shared data instead of standing at a fixed spawn
-* World graphs now include `patrol_lanes`, which gives regional world-state data a formal place for guard-route ownership
-
-### Runtime Behavior
-
-* Starter Ruins, Cloudstep Basin, and Echo Watch now ship with their own sweep routes, so enemies feel stationed inside a living slice instead of dropped in as static props
-* Patrol routes are now region-aware, and frontier enemies can inherit combat tuning from archetypes while still following their own local lanes
-* HUD purification counts now stay region-correct while patrol populations scale across multiple areas
-
-### Validation
-
-* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py reverie/gamer/system_generators/world_structure.py tests/test_gamer_mode_upgrade.py`
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
-
----
-
-## Reverie CLI v2.1.18 - Regional Encounter Upgrade
-
-**Release Date:** 2026-04-04
-
-### Reverie-Gamer Frontier Runtime
-
-* Secondary regions now generate their own defender encounters instead of only landmarks, NPC anchors, and objective props
-* Generated enemy instances can now derive from shared combat archetypes through `archetype_id`, which removes the old one-ID-per-enemy-type bottleneck
-* Regional objectives now carry `encounter_id` contracts, so basin and observatory goals are gated by local combat beats before they can be secured
-
-### Runtime Playability
-
-* Cloudstep Basin now ships with a relay-defense combat pocket, and Echo Watch now ships with an elite-backed spire reclaim encounter
-* HUD purification progress now reflects the current region instead of counting hidden enemies from every region at once
-* Root-region shrine progression now ignores frontier enemies, so multi-region content no longer pollutes the main slice objective loop
-
-### Validation
-
-* `python -m py_compile reverie/gamer/runtime_adapters/godot.py reverie/gamer/vertical_slice_builder.py tests/test_gamer_mode_upgrade.py`
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
-
----
-
-## Reverie CLI v2.1.17 - Region Objective Upgrade
-
-**Release Date:** 2026-04-04
-
-### Reverie-Gamer Regional Progression
-
-* `slice_manifest.json` now emits `region_objectives`, and `world_graph.json` now carries `regional_goals` plus per-region `region_objective_id` links
-* Generated Godot slices now include `region_objective_site.gd` and `region_objectives.json`, so secondary regions contain playable objectives instead of landmark-only previews
-* `GameState` now persists completed regional objectives alongside region travel, encounters, detour rewards, and quest progress
-
-### Runtime Payoff
-
-* Cloudstep Basin and Echo Watch now deliver persistent rewards such as `basin_insight` and `watch_resonance`
-* Regional rewards now feed back into runtime stats like skill range, cooldowns, dash i-frames, movement speed, and stamina recovery
-* HUD expansion status now surfaces current region goals and overall regional objective progress
-
-### Validation
-
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
-
----
-
-## ✨ Reverie CLI v2.1.14 — Encounter Director Upgrade
-
-**Release Date:** 2026-04-03
-
-### 🎮 Reverie-Gamer Encounter Runtime
-
-* Upgraded the generated Godot 3D slice with encounter sequencing instead of isolated enemy placement only
-* `combat.json` now emits a `pattern_library` for melee, ranged, and boss profiles, including multi-phase guardian pacing data
-* `slice_manifest.json` now emits explicit `encounters` so generated runtime scenes know where combat beats begin and how they escalate
-* Added generated `encounter_director.gd` to activate encounter beats, announce completions, and keep the runtime encounter state aligned with the authored data contracts
-
-### ⚔️ Boss Pattern Improvements
-
-* Generated boss enemies now consume phase profiles for windup timing, recovery timing, lunge distance, burst cadence, and movement pressure
-* HUD combat status now surfaces the active encounter and boss-phase summary instead of only player-side cooldown data
-* Save/load payloads now preserve encounter and boss-phase state alongside the existing slice continuity data
-
-### ✅ Validation
-
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
-
----
-
-## ✨ Reverie CLI v2.1.15 — Detour Reward Upgrade
-
-**Release Date:** 2026-04-03
-
-### 🗺️ Reverie-Gamer Slice Content
-
-* Upgraded the generated Godot 3D slice from a single critical-path route to a main-route plus optional detour structure
-* `combat.json` now emits an elite detour profile and encounter template for side-route pressure
-* `slice_manifest.json` now emits `reward_sites` so optional cache rewards exist as first-class runtime content
-* Generated slices now include an elite guard encounter and a reward cache that unlocks only after the detour is cleared
-
-### 🎮 Runtime Progression
-
-* Added generated `reward_cache.gd` and runtime spawning for optional reward sites
-* Save/load now persists completed encounters and claimed reward caches
-* Optional detour rewards now feed back into gameplay by improving guard timing, guard reduction, movement, and stamina recovery
-* Critical-path accounting now excludes optional detour elites so side content stays optional instead of accidentally blocking shrine completion
-
-### ✅ Validation
-
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`
-
----
-
-## ✨ Reverie CLI v2.1.16 — Region Travel Upgrade
-
-**Release Date:** 2026-04-03
-
-### 🌍 Reverie-Gamer World Runtime
-
-* Upgraded the generated Godot 3D slice from a single-region scaffold to a multi-region runtime foundation
-* `slice_manifest.json` now emits `region_layouts`, `world_graph`, `active_region_id`, and richer gateway contracts with `from_region`, `target_spawn`, and travel gating rules
-* Generated Godot runtime now includes `region_manager.gd` and real gateway-driven region travel instead of gateway hints only
-* Save/load now persists current region and discovered regions alongside combat, quest, encounter, and reward state
-
-### 🧭 Expansion Flow
-
-* Secondary regions now have their own preview landmarks, home-region NPC placement, and return gateways
-* HUD expansion status now surfaces the active region and discovered-region count
-* Region switching now moves the player to region-specific spawn points and activates only the relevant region content
-
-### ✅ Validation
-
-* `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
-* `python -m pytest tests -q`

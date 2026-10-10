@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "repair_date": "2026-10-05",
+  "product_version": "2.5.0",
+  "scope": "Local Windows worktree; repair of the confirmed software defects recorded in the 2026-10-05 audit, with documentation reconciliation",
+  "source_document": "REVERIE_CLI_FEATURE_REPAIRS_2026-10-05.md",
+  "predecessor": "verification/2026-10-05-feature-audit.json",
+  "baseline_head": "127c39769217d87dd7647a3c6b296e2629d8f9ff",
+  "final_head": "127c39769217d87dd7647a3c6b296e2629d8f9ff",
+  "baseline_had_uncommitted_changes": true,
+  "commit_or_push_performed": false,
+  "provenance": {
+    "recorded_run": "Every value under `gaps_repaired`, `checks` and `performance_comparison` is transcribed from the repair report named in `source_document`; it is the machine-readable form of that run, not a re-measurement.",
+    "independent_revalidation": "The `independent_revalidation` block is a separate execution performed later on 2026-10-05 at the same HEAD and the same uncommitted worktree. Only the three automated gates listed there were re-run."
+  },
+  "gaps_repaired": [
+    {"id": "G01", "summary": "Parameterized /mode, /permission mode, /provider and /review dispatch explicitly; other terminal commands are marked terminal-reference, raise on send and preserve the draft instead of reaching the model"},
+    {"id": "G02", "summary": "Pin changes persist immediately; forks and automatic rotation copy an independent pin list while an ordinary new session clears it"},
+    {"id": "G03", "summary": "CLI and Desktop restore pins on launch, load and switch"},
+    {"id": "G04", "summary": "Write coordination over a real Git checkout and non-Git overlapping directories; root, subdirectory and path aliases cannot bypass the lock, independently managed worktrees keep parallelism"},
+    {"id": "G05", "summary": "The owning executor loads the saved goal when it acquires the run, passes it into this turn's system message and run record; queued tasks read the latest saved value, ordinary goals stay out of read-only review, transient guidance does not sink into compacted history"},
+    {"id": "G06", "summary": "Chat / Responses / Messages text probes require non-empty valid text; HTTP 200 with empty choices or usage-only cannot report online"},
+    {"id": "G07", "summary": "The full pinned SKILL.md main body is read each turn and attached to the system request with name, SHA256, character count and completeness; invalidation, an empty body or exceeding 128000 characters blocks execution"},
+    {"id": "G08", "summary": "Streaming text and Git diff with 2000 lines / 2 MiB per page, 256 KiB per line, 10000 hunk metadata entries, 20 MiB media preview; workspace revision is computed from path/object and streamed content hashes"},
+    {"id": "G09", "summary": "A workspace SQLite derived index with incremental update replaces reading every session JSON; batched transactions and a compact trigram index cut build cost, literal recheck avoids candidate mismatches, legacy caches rebuild by version"},
+    {"id": "G10", "summary": "Logs keep 8 MiB current plus 8 MiB previous with up to 1 MiB restore and UTF-8 / JSONL boundary handling; the PTY disk queue applies backpressure and marks burst loss; asynchronous Workbench, goal and isolated-directory responses verify project/session ownership and wait for the previous poll"},
+    {"id": "G11", "summary": "A valid empty array is distinguished from a malformed payload; findings require valid fields, a priority and a real file/line inside the captured diff; the raw output is saved rather than read as no-problems. Read-only review no longer inherits the coding completion continuation rule"},
+    {"id": "G13", "summary": "Command palette gains arrow keys, Enter, selected-item scrolling and ARIA, and does not select during composition; the goal bar clears a stale goal on session switch and hides 0/0 verification when there are no steps"},
+    {"id": "G17", "summary": "Builds emit a distinguishable identifier; the About page shows build ID, build time and the actual GUI/kernel launch path"},
+    {"id": "G19", "summary": "The built-in Engine gains a Pyglet native window, event loop and ModernGL presentation wired to current-frame input, actual window size, close and exception-time resource release; initialization failure is reported explicitly and the headless path stays available"},
+    {"id": "G22", "summary": "Guides, status matrix, roadmap, documentation index and changelog reconciled"},
+    {"id": "G23", "summary": "Two outdated regression fixture / query assumptions corrected while keeping the original semantic assertions"}
+  ],
+  "repair_boundary": "Loading the full Skill main body each turn guarantees the host supplied the instructions; it does not guarantee the model follows every step semantically and does not auto-execute references or scripts.",
+  "checks": {
+    "python_full": {
+      "passed": 1761,
+      "failed": 0,
+      "skipped": 1,
+      "duration_seconds": 314.64,
+      "skip_boundary": "RTP task lifecycle without a configured real Engine"
+    },
+    "desktop_full": {
+      "passed": 254,
+      "failed": 0,
+      "skipped": 1,
+      "worker": "serial",
+      "per_test_timeout_seconds": 15,
+      "covered": ["real Git root / subdirectory / alias / worktree", "review parsing", "delayed responses"],
+      "skip_boundary": "Real Engine service integration"
+    },
+    "desktop_typecheck": {
+      "command": "npm run typecheck",
+      "passed": true,
+      "i18n_translations": 957,
+      "i18n_templates": 82
+    },
+    "cli_build": {
+      "command": "build.bat --reuse-venv --skip-plugins --test-exe --no-pause",
+      "passed": true,
+      "artifact": "dist/reverie.exe",
+      "boundary": "Plugin sources unchanged; existing plugin artifacts reused"
+    },
+    "windows_desktop_build": {
+      "command": "npm run dist:win",
+      "passed": true,
+      "artifacts": ["installer", "portable", "win-unpacked GUI"],
+      "build_id": "3446a494732d4efb",
+      "built_at": "2026-10-05T09:30:56.029Z"
+    },
+    "isolated_gui_chain": {
+      "passed": true,
+      "covered": ["real @ file selection", "/skill apple-design", "bottom-left mode menu", "command palette keyboard selection", "parameter dispatch", "terminal-reference interception", "directory entries", "goal persistence", "review error display", "fork / new-session pin semantics"]
+    },
+    "actual_network_requests": {
+      "runtime": "Isolated local HTTP server capturing outbound requests",
+      "apple_design_body_present_each_turn": true,
+      "goal_absent_before_save": true,
+      "goal_present_after_save": true,
+      "fork_carries_owning_goal": false,
+      "review_carries_ordinary_goal": false,
+      "boundary": "The server returns protocol fixtures only and does not demonstrate remote model quality"
+    },
+    "standalone_cli": {
+      "runtime": "Real Windows PTY launching the compiled reverie.exe",
+      "session_restored": true,
+      "pinned_skill_restored": "apple-design",
+      "skill_status_executed": true,
+      "skill_body_in_actual_http_request": true,
+      "clean_save_exit": true
+    },
+    "real_pty_logs": {
+      "approximate_output_mib": 12,
+      "previous_log_bytes": 8388424,
+      "current_log_bytes": 4455369,
+      "restored_bytes": 1048576,
+      "pty_end_marker_retained": true,
+      "truncated_flag": true,
+      "exit_code": 0,
+      "after_gui_restart": "both terminal records restored as exited / 0"
+    },
+    "gui_restart_and_repack": {
+      "restored": ["original session ID", "Chinese draft", "dark theme", "pinned skill", "saved goal"],
+      "new_build_id_and_path_correct": true,
+      "empty_steps_show_no_verification_counter": true,
+      "runtime": "Isolated win-unpacked GUI"
+    },
+    "engine_native_window": {
+      "platform": "Windows",
+      "frames_presented": 5,
+      "key_events": ["D down", "D up"],
+      "mouse_position_and_per_frame_delta": true,
+      "resize": "480x300 -> 640x360",
+      "close": "WM_CLOSE clean exit",
+      "framebuffer_image_check": "passed",
+      "boundary": "Placeholder textures and a deliberately enlarged sample sprite; not production art or complete game control"
+    }
+  },
+  "performance_comparison": {
+    "method": "Windows host, identical isolated data, three samples per path; the original implementation was kept as the control path",
+    "boundary": "Observed range, not a latency guarantee for all machines and repositories",
+    "large_document_fixture": {"bytes": 32550000, "text_lines": 350001, "diff_lines": 700006},
+    "samples": [
+      {"scenario": "process peak RSS over the large document fixture", "before": "629080 KiB", "after": "81996 KiB"},
+      {"scenario": "Git snapshot", "before_ms": [801, 1286], "after_ms": [424, 596]},
+      {"scenario": "diff page", "before_ms": [932, 975], "after_ms": [551, 581]},
+      {"scenario": "text preview page", "before_ms": [47, 64], "after_ms": [58, 69], "note": "No speedup is claimed for this path"},
+      {"scenario": "hot search over 1000 sessions / 49516034 bytes of history", "before_ms": [189, 203], "before_note": "reads 1000 JSON bodies per query", "after_ms": [4.3, 4.8], "after_unchanged_body_reads": 0},
+      {"scenario": "search manager reusing the index after restart", "before": "rescans bodies every time", "after_ms": [4.5, 11], "after_unchanged_body_reads": 0}
+    ],
+    "first_index_build_ms": 4368.83,
+    "first_index_build_boundary": "Single construction sample that still reads 1000 bodies; not a repeated cold-disk range. Exact hashes and total line counts still scan the full stream per page; random disk paging and cancellation are not closed. Short queries, SQLite without trigram and file-timestamp reconciliation retain scan cost. Paged body hashes match the previous path."
+  },
+  "independent_revalidation": {
+    "date": "2026-10-05",
+    "head": "127c39769217d87dd7647a3c6b296e2629d8f9ff",
+    "worktree_uncommitted_entries": 120,
+    "host": {"os": "Windows", "python": "3.10.11", "pytest": "9.1.1", "node": "v24.18.0"},
+    "purpose": "Confirm the three automated gates still reproduce at the recorded HEAD and worktree state",
+    "checks": {
+      "python_full": {"command": "python -m pytest -q", "working_directory": "ReverieCli-py", "passed": 1761, "failed": 0, "skipped": 1, "exit_code": 0, "duration_seconds": 242.76},
+      "desktop_vitest": {"command": "npm test", "working_directory": "ReverieCli-ui", "passed": 254, "failed": 0, "skipped": 1, "test_files_passed": 35, "test_files_skipped": 1, "exit_code": 0, "duration_seconds": 73.56},
+      "desktop_typecheck": {"command": "npm run typecheck", "working_directory": "ReverieCli-ui", "passed": true, "exit_code": 0, "i18n_translations": 957, "i18n_templates": 82}
+    },
+    "agreement_with_recorded_run": "Pass/skip counts and i18n totals match the recorded run; durations differ because the host load differs.",
+    "coverage_boundary": {
+      "platform": "Windows. Eleven `skipif` gates require Windows and three more tests branch on the platform inside the test body, so 1761 passed / 1 skipped is a Windows figure and a non-Windows host reports a higher skip count. See G29.",
+      "optional_extras": "The host did not have the `treesitter` extra installed, so `tree_sitter` was absent and the Context Engine's JavaScript, TypeScript, C, C++, C#, Rust, Go, Java, HTML and CSS parsing exercised only the regex fallback. No test references tree-sitter in either mode. See G30."
+    },
+    "not_re_run": [
+      "CLI and Windows desktop packaging",
+      "Isolated GUI chain, GUI restart and repack checks",
+      "Outbound request capture and standalone CLI PTY session",
+      "Real PTY log rotation and restore",
+      "Engine native window presentation",
+      "Every performance comparison sample"
+    ],
+    "default_vitest_configuration_note": "The revalidation used the default `npm test` rather than the recorded run's serial worker and 15 s per-test timeout; the resulting pass/skip counts are identical."
+  },
+  "documentation": {
+    "checker": "scripts/verification/check_docs.py",
+    "boundary": "Offline relative file/heading check; local ignored evidence is reported separately; external URLs and natural-language claims are not validated"
+  },
+  "local_material_directory": ".runtime/feature-repairs-20261005",
+  "local_material_boundary": "Ignored logs, screenshots, packaged artifacts and fixtures are supplementary; this published summary contains the results without requiring those files",
+  "remaining_boundaries": {
+    "G12": "Per-source / per-model SSE, tools, thinking signatures, vision and both Claude Desktop modes were not re-accepted; the 2026-10-04 JDW remote anomaly stands only as a dated historical sample",
+    "G14": "Notification click and OS-disabled combinations",
+    "G15": "Real authorized integrations",
+    "G16": "Complete retrieval quality benchmark",
+    "G18": "Linux / macOS and prolonged runs",
+    "G20": "Advanced rendering, audio and Cubism",
+    "G21": "Production game depth",
+    "native_ime": "Native Chinese IME candidate windows and screen readers still lack host acceptance",
+    "portable_first_launch": "The portable build's first launch was blocked by automatic approval review, which returned only `blocked by policy`; the action was not retried through another mechanism, so first extraction / launch remains unverified. The compiled GUI, which avoids NSIS extraction cleanup, was used for the runtime checks instead."
+  }
+}

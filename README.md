@@ -1,8 +1,12 @@
 # Reverie CLI
 
+Documentation was consolidated on 2026-10-08: start with the [documentation index](docs/README.md), [complete version history](docs/changelog.md), or the proposed [Intelligent UI implementation specification and AI prompts](docs/INTELLIGENT_UI_SPEC.md). Interactive view support is planned, not implemented.
+
 Current stable version: **v2.5.0** (released 2026-07-17).
 
-**Reverie** is an open-source, terminal-based agentic coding assistant that wraps large language models to enable natural language interaction with your local codebase. It combines multi-provider LLM access, a powerful Context Engine for codebase intelligence, session management, inline media support, 3D/Game modeling workflows, browser automation, and more — all in a unified terminal interface.
+Current working-tree behavior and remaining gaps were reviewed on **2026-10-05**. Start with the [documentation index](docs/README.md), [feature status](docs/FEATURE_STATUS.md), [Desktop guide](docs/DESKTOP_GUIDE.md), and [roadmap](docs/ROADMAP.md). The dated audit distinguishes implementation from completed acceptance; local updates are not necessarily published releases.
+
+**Reverie** is an open-source agentic coding assistant with terminal and Electron desktop interfaces for natural language interaction with your local codebase. Both use the Python core's multi-provider LLM access, Context Engine retrieval, sessions and tools; Desktop adds project/chat navigation, structured input, Git review and runtime evidence surfaces. Optional 3D/game, media and browser workflows have the boundaries documented below.
 
 - **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
 - **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
@@ -14,13 +18,13 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 - **Approval policy**: Three tool-call approval modes — Default (software policy only), Auto Check (a stateless model review rates each call's risk and pauses only on risky ones), and Strict (every call waits for you); answer allow, deny, or reply in your own words to redirect the model. See [SECURITY_PERMISSIONS.md](docs/SECURITY_PERMISSIONS.md)
 - **Inline media**: Attach images and video directly in conversations
 - **Image generation**: Choose local or remote image models in Desktop Settings → Image models. Pollinations generation requires an API key; SenseNova editing chooses its output dimensions automatically unless `size` is specified.
-- **Experimental integrations**: Blender, Blockbench, legacy Godot/O3DE migration, Ashfox MCP, image/video generation, and embedded browser automation
-- **Browser automation**: Embedded Chromium runtime for web inspection and interaction
+- **Experimental integrations**: Blender, Blockbench, legacy Godot/O3DE migration, Ashfox MCP, image/video generation, and agent-operated browser automation
+- **Browser automation**: The Python core exposes a Chromium-based browser-control tool. The Desktop app does not include an interactive browser tab panel; see the [recorded scope](docs/FEATURE_STATUS.md).
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
 - **Specialist runtime plugins**: Ren'Py and Live2D/Cubism Galgame workflows are delivered through plugin-owned `rc_*` tools, skills, and prompt guidance
-- **Skills**: Codex-style progressive `SKILL.md` discovery, plus `/skill <name>` to pin one so every following turn is required to load and follow it; pinned skills render as a coloured tag in the CLI prompt and the Desktop composer. Bundled skills include `photo-to-3d`, which rebuilds a photographed subject as procedural Three.js code
-- **Roadmap**: Planned game-runtime and Gamer work is maintained in [one roadmap](docs/ROADMAP.md)
+- **Skills**: Progressive `SKILL.md` discovery and `/skill <name>` mandatory prompt guidance, with pin tags in CLI/Desktop. Bundled skills include `photo-to-3d` and all 14 Emil Kowalski design skills, including Apple Design. Desktop ordinary session/restart restoration is implemented; fork/rotation, standalone CLI restoration, and per-turn inspection enforcement have [documented limits](docs/SKILLS.md).
+- **Roadmap**: Planned CLI, Desktop, provider, runtime and Gamer work is maintained in [one roadmap](docs/ROADMAP.md)
 
 ---
 
@@ -63,7 +67,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
 | **Custom**         | Any endpoint you add with `/provider add` - OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages     | Read live from the provider's own model-list endpoint                                                                                                                                        |
 
-All providers support streaming responses where applicable. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider.
+Provider transports support streaming where their model and endpoint implement the required protocol. A listed model, HTTP 200, or availability probe does not prove working content, complete SSE, tool calls or vision. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider; [current compatibility limits](docs/FEATURE_STATUS.md) and the [JDW sample](docs/VERIFICATION_HISTORY.md#reverie-cli-jdw-compatibility-2026-10-04) are recorded separately.
 
 Use `/provider list` to see every source at once with its API-key flag and a parallel availability probe, and `/provider add` to register your own gateway from four fields: name, base URL, API key, and API request format.
 
@@ -148,7 +152,7 @@ Reverie-Gamer mode currently includes a work-in-progress modeling toolchain:
 
 ### Browser Automation
 
-Embedded Chromium runtime for non-disruptive web interaction:
+The Python core's browser-control tool uses an embedded Chromium runtime for web interaction. It is an agent tool, not a visible browser panel in the Electron Desktop app:
 
 - Open pages, run DevTools, inspect DOM/network/console
 - Selector-based click, type, upload, wait actions
@@ -217,7 +221,8 @@ Reverie-Cli/
 │   ├── setup.py
 │   └── ...
 └── dist/
-    └── reverie.exe            ← Windows executable (packaged)
+    ├── reverie.exe            ← Windows executable (packaged)
+    └── reverie-runtime/       ← Companion terminal runtime
 ```
 
 ---
@@ -235,7 +240,7 @@ Reverie-Cli/
 
 The core/desktop Release is separate from the optional plugin Release:
 
-- Windows x64: `reverie.exe`, the portable GUI executable, and the NSIS installer.
+- Windows x64: `Reverie-CLI-windows-x64.zip` (EXE and runtime), the portable GUI executable, and the NSIS installer.
 - Linux x64: `reverie`, AppImage, and Debian package. The Debian installer provides both `reverie` and `reverieui` commands.
 - macOS: explicitly named Apple Silicon (M-series) and Intel DMGs plus matching native CLI cores. Command-line tools remain an explicit user-installed symlink from the app bundle.
 - Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin paths additionally trigger their isolated plugin build while the rolling desktop prerelease is refreshed by every `main` push.
@@ -265,18 +270,18 @@ py -m reverie
 
 ### Pre-built Executable
 
-Download the latest `reverie.exe` from the `dist/` directory and run it directly. No Python installation required.
+Download `Reverie-CLI-windows-x64.zip`, extract it, and run `reverie.exe`. Keep the companion `reverie-runtime/` directory beside the EXE; the terminal starts without unpacking these files each time. No Python installation is required.
 
 ### First-Run Setup
 
 On first launch, Reverie guides you through a setup wizard:
 
 1. **Select an LLM provider** — choose from NVIDIA, ModelScope, Codex, SenseNova, AIHubMix, Agnes, WebGemini, or Standard
-2. **Configure API keys** — enter your provider API key (stored securely in `config.json`)
+2. **Configure API keys** — enter your provider API key (file-stored keys are saved in `config.json`; supported environment variables avoid storing those values there)
 3. **Select a default model** — pick from the provider's catalog
 4. **Choose a workspace** — set your project root directory
 
-Configuration is stored per-project in `.reverie/config.json` and globally in `%APPDATA%\Reverie\config.json`.
+Core configuration uses `<app_root>/.reverie/config.json` by default, or `<app_root>/.reverie/projects/<project-path-key>/config.json` when workspace mode is enabled. Source runs default to the repository's `dist/` app root. Desktop workspace artifacts and browser storage have separate locations; see [Configuration](docs/CONFIGURATION.md).
 
 ---
 
@@ -290,10 +295,10 @@ reverie
 reverie --mode reverie-atlas
 
 # Start with a specific provider/model
-reverie --provider nvidia --model meta/muse-glimmer-30b
+reverie --source nvidia --model meta/muse-glimmer-30b
 
-# Resume the last session
-reverie --resume
+# Start in a specific project; saved sessions are managed inside the CLI
+reverie "G:\Projects\MyProject"
 ```
 
 Once inside the CLI:
@@ -302,10 +307,10 @@ Once inside the CLI:
 - Use `/help` to see available commands
 - Use `/tools` to inspect available tools
 - Use `/mode <name>` to switch modes mid-session
-- Use `/session list` to browse saved sessions
+- Use `/sessions` to browse saved sessions
 - Attach files by referencing them in your message (e.g., "review `src/main.py`")
 
-For the native desktop interface, build or run `ReverieCli-ui` as described in [Reverie Desktop](ReverieCli-ui/README.md). The desktop keeps a single CLI bridge alive across project switches; `@` recommends relevant workspace files through Context Engine, while the paperclip selects an arbitrary local file.
+For the native desktop interface, build or run `ReverieCli-ui` as described in [Reverie Desktop](ReverieCli-ui/README.md) and the [Desktop guide](docs/DESKTOP_GUIDE.md). A management bridge persists across project switches; task runs use separate session-owned cores. `@` recommends workspace files, the paperclip selects attachments, and `/` opens command/Skill candidates. Only the documented subset of CLI commands executes directly in Desktop.
 
 ---
 
@@ -313,7 +318,7 @@ For the native desktop interface, build or run `ReverieCli-ui` as described in [
 
 ### Configuration File
 
-Reverie uses `config.json` stored in the project's `.reverie/` directory or the global app data folder. Key sections:
+Reverie uses the shared or project profile under the selected app root, as described in [Configuration](docs/CONFIGURATION.md). Key sections:
 
 ```json
 {
@@ -615,17 +620,23 @@ The `standard` source uses user-defined model presets stored in the `models` arr
 ### Command-Line Arguments
 
 ```
-reverie [OPTIONS]
+reverie [OPTIONS] [path]
 
 Options:
   --mode <MODE>            Start in a specific mode (reverie, atlas, gamer, etc.)
-  --provider <PROVIDER>    Override active provider (nvidia, codex, modelscope, sensenova, aihubmix, agnes, webgemini, opencode...)
+  --source <SOURCE>        Temporarily select the model source
   --model <MODEL>          Override selected model
-  --resume                 Resume last active session
-  --session <ID>           Load a specific session by ID
-  --workspace <PATH>       Set project workspace directory
-  --no-stream              Disable streaming responses
-  --verbose                Enable verbose output
+  --reasoning <VALUE>      Temporarily select supported reasoning depth/toggle
+  --prompt <TEXT>          Run one non-interactive prompt
+  --prompt-file <PATH>     Read one prompt from a file
+  --prompt-stdin           Read one prompt from stdin
+  --report-file <PATH>     Write prompt-mode JSON results
+  --index-only             Index the project and exit
+  --no-index               Skip startup indexing
+  --debug                  Enable internal diagnostics
+  --kernel-info            Print the kernel compatibility record and exit
+  --sdk-bridge             Run the JSONL Desktop bridge
+  --version                Show version and exit
   --help                   Show help message
 ```
 
@@ -802,7 +813,7 @@ Type `@` to search indexed workspace files and symbols. Code-symbol selections i
 
 ### Browser Control
 
-Use the embedded Chromium browser:
+Call the core's browser-control tool from an agent session. The tool controls Chromium; the Electron Desktop app does not provide an interactive browser tab panel:
 
 ```
 browser_controler(action="open_page", url="http://localhost:3000")
@@ -970,8 +981,8 @@ profile = get_mode_tool_discovery_profile("reverie-gamer")
 **"File not found" errors**
 
 - Ensure you're running from the correct project root
-- Check that `.reverie/` directory exists in your workspace
-- Use `--workspace <PATH>` to explicitly set the project root
+- Check the selected app root and project cache described in [Configuration](docs/CONFIGURATION.md)
+- Pass the project path as the positional argument: `reverie "G:\Projects\MyProject"`
 
 **LLM connection errors**
 
@@ -1009,13 +1020,14 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ```powershell
 # Python runtime with verbose logging
-py -m reverie --verbose
+py -m reverie --debug
 
-# Check configuration
-py -m reverie --show-config
+# Check the compiled/source kernel contract
+py -m reverie --kernel-info
 
-# Verify provider connection
-py -m reverie --provider nvidia --verify
+# Inside the interactive CLI: inspect source/configuration and probe availability
+# /status
+# /provider list
 ```
 
 ---

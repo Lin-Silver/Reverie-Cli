@@ -50,8 +50,10 @@ env/
 *.log
 *.tmp
 # Scratch output from local desktop-automation probes.
+/.runtime/
 /.tmp-*/
 /.tmp-*.json
+/result_images/
 @AutomationLog.txt
 
 # Reverie local state and secrets

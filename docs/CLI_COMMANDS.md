@@ -1,5 +1,7 @@
 # CLI Command Reference
 
+This is the **terminal** command reference. Desktop reuses its catalog for discovery but dispatches only the subset described in the [Desktop guide](DESKTOP_GUIDE.md). For actual executable flags use `reverie --help`; the project path is positional and the source override is `--source`.
+
 This reference is aligned with `reverie/cli/help_catalog.py`, which is the source of truth for command names, summaries, and examples.
 
 ## Core
@@ -126,7 +128,7 @@ Raw stream frames (`[[REVERIE_EVENT]]{...}`) are internal protocol details rende
 | `/tti source <source>` | Select a TTI source; `/tti source pollinations` prompts for its API key when needed |
 | `/tti <prompt>` | Generate an image using the default TTI model |
 
-MCP discovery runs silently in the background. A server's tools, resource access, prompt guidance, and tool descriptions become visible to the model only after that server passes discovery; pending and failed servers remain excluded. `/mcp status` and its refresh UI read the cached health snapshot without blocking the terminal on network checks.
+MCP discovery runs silently in the background. After discovery, dynamic tools and the `list_mcp_resources` / `read_mcp_resource` tools can use healthy servers. `/mcp status` reports how many prompts a server listed, but Reverie currently has no `prompts/get` action to render one into chat; server prompt templates are not model guidance. Catalog pagination and other MCP client features also have documented limits in the [configuration guide](CONFIGURATION.md#mcp-server-connections) and [feature status](FEATURE_STATUS.md). Pending and failed servers remain excluded. `/mcp status` and its refresh UI read the cached health snapshot without blocking the terminal on network checks.
 
 `/CE` is case-sensitive.
 
@@ -163,6 +165,8 @@ When two skills share a name, the higher-precedence root wins and `/skills` prin
 Pinning removes model-side selection for that entry: the skill is promoted into a mandatory system-prompt block, marked `[PINNED]` in the metadata list and in `skill_lookup` output, and drawn as a coloured tag in the input prompt and the live footer. A pin applies even when the skill's `agents/openai.yaml` sets `policy.allow_implicit_invocation: false`, since an explicit pin is a user instruction. Up to 4 skills can be pinned at once. Pins are session state and are never written to the configuration file, so restarting Reverie clears them.
 
 In Reverie Desktop, typing `/skill <skill-name>` in the composer and pressing Enter converts the text into a pinned-skill chip above the input instead of sending a message; the Skills page lists every skill with its pin controls.
+
+Pins are mandatory prompt guidance, not host-verified model compliance. Desktop ordinary session/restart persistence is implemented, while fork/rotation and standalone CLI restoration remain incomplete. The current [Skills guide](SKILLS.md) records these boundaries and the 14 bundled design skills.
 
 ## Project and Rules
 

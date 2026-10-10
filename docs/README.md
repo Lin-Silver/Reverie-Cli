@@ -1,43 +1,57 @@
-# Reverie CLI Documentation
+# Reverie CLI 文档导航
 
-## Getting Started
+2026-10-10 更新。先按问题选入口，避免把历史规格、测试记录和当前能力混为一谈。本次提交前的回归与打包范围见 [最新验证](VERIFICATION_HISTORY.md#publish-validation-2026-10-09)。
 
-- [English README](../README.md) — project overview, installation, and quick start
-- [Chinese README](README.zh-CN.md) — 中文项目概览与快速上手
-
-## Core Guides
-
-| Document | Description |
+| 想了解什么 | 唯一主要入口 |
 | --- | --- |
-| [Harness Engineering Notes](HARNESS_ENGINEERING.md) | Prompt/context/harness framing, Reverie capability audit, and the runtime harness upgrades inspired by Claude Code patterns and recent Harness Engineering practice |
-| [Managed SubAgents](SUBAGENTS.md) | SubAgent configuration, TUI flow, delegation tools, logging, isolation, and validation |
-| [Computer Controller](COMPUTER_CONTROLLER.md) | Embedded Open Computer Use-compatible desktop runtime, semantic desktop workflow, and SubAgent orchestration |
-| [Writer Mode](writer_mode.md) | Native long-form fiction projects, chapter control cards, continuity ledgers, resumption, and verified completion |
-| [Configuration Guide](CONFIGURATION.md) | Runtime storage layout, profile selection, model sources, TTI config, Atlas settings |
-| [CLI Command Reference](CLI_COMMANDS.md) | Full command catalog: core, models, providers, tools, settings, sessions, game workflow |
-| [Context Engine Project Memory](CONTEXT_ENGINE_MEMORY.md) | Project-isolated cross-session memory, immediate hybrid retrieval, provenance, conflict/version handling, and AI tool behavior |
-| [Context Engine Retrieval Results](CONTEXT_ENGINE_BENCHMARK.md) | Brief SWE-bench Lite file-localization results and interpretation |
-| [Development Guide](DEVELOPMENT.md) | Local setup, testing, packaging, and documentation maintenance rules |
-| [Security Permissions](SECURITY_PERMISSIONS.md) | Permission levels, permanently blocked operations, and trust boundaries |
-| [RATS / RTP](RATS_RTP.md) | Allowlisted Reverie/Rilance provider discovery, active selection, permission sessions, desktop management, and progressive native tool loading |
-| [RATS Provider Generalization Handoff](RATS_PROVIDER_GENERALIZATION_HANDOFF.md) | Coding-agent brief for removing Engine-only client assumptions while keeping Engine as the sole current production selection |
-| [Roadmap](ROADMAP.md) | Single source of truth for planned game-runtime and Gamer work |
-| [Changelog](changelog.md) | Release history and version notes |
+| 安装、启动、项目概览 | [English README](../README.md) / [中文快速上手](README.zh-CN.md) |
+| 当前能做什么、已知缺口与未验证范围 | [FEATURE_STATUS](FEATURE_STATUS.md) |
+| 下一步做什么、完成条件是什么 | [ROADMAP](ROADMAP.md) |
+| ChatGPT 类交互视图怎么开发、下一步给 AI 什么提示词 | [INTELLIGENT_UI_SPEC](INTELLIGENT_UI_SPEC.md) — 提案，尚未实现 |
+| 各版本到底改了什么 | [changelog](changelog.md) — 40 个版本入口、发布后更新、Unreleased 和历史例外 |
+| 过去具体测过什么 | [VERIFICATION_HISTORY](VERIFICATION_HISTORY.md) — 原日期、主机、测量、失败与限制 |
+| 过去为什么这样设计 | [DEVELOPMENT_HISTORY](DEVELOPMENT_HISTORY.md) — S01–S21、Codex 比较、旧提示词和 RATS 交接 |
 
-## Gamer and Engine Guides
+## 使用与配置
 
-| Document | Description |
+| 指南 | 内容 |
 | --- | --- |
-| [Reverie Engine User Guide](engine/reverie_engine_user_guide.md) | Built-in runtime architecture, content model, CLI workflow, and authoring expectations |
-| [Reverie-Gamer Modeling Guide](engine/reverie_gamer_modeling_pipeline.md) | Work-in-progress Blender plugin-assisted authoring, Ashfox MCP integration, model workspace layout, import flow, and `/modeling`/`/blender` usage |
+| [Desktop](DESKTOP_GUIDE.md) | 输入、指令、工作面板、文件编辑、显示选项、执行与恢复 |
+| [CLI commands](CLI_COMMANDS.md) | 终端命令、参数、模型、会话、工具与专用模式 |
+| [Configuration](CONFIGURATION.md) | 配置与存储、模型提供者、MCP、图像/视频与 Atlas |
+| [Skills](SKILLS.md) | 发现、固定、完整正文读取、持久化与内置技能 |
+| [Context Engine memory](CONTEXT_ENGINE_MEMORY.md) | 项目记忆、检索、来源、冲突与版本；历史检索测量见验证历史 |
+| [SubAgents](SUBAGENTS.md) | 委派、隔离、会话与日志 |
+| [Computer Controller](COMPUTER_CONTROLLER.md) | 桌面观察、动作与工作流 |
+| [Writer](writer_mode.md) | 长篇项目、连续性与恢复 |
+| [RATS / RTP](RATS_RTP.md) | 本地服务发现、权限会话、目录与动态工具 |
+| [Security permissions](SECURITY_PERMISSIONS.md) | 权限级别、禁用操作与信任边界 |
 
-## Documentation Structure
+## 开发与 Engine
 
-- Top-level `docs/*.md` files are the canonical product, configuration, developer, and roadmap documents; all planned work belongs in `ROADMAP.md`.
-- `docs/engine/` contains runtime-specific guides for Reverie Engine and Gamer production tooling.
-- The old top-level `docs/reverie_modeling_pipeline.md` path has been retired in favor of `docs/engine/reverie_gamer_modeling_pipeline.md`.
+| 指南 | 内容 |
+| --- | --- |
+| [Development](DEVELOPMENT.md) | 环境、检查命令、打包与文档维护规范 |
+| [Harness engineering](HARNESS_ENGINEERING.md) | Prompt、上下文、工具执行与验证纪律 |
+| [Engine user guide](engine/reverie_engine_user_guide.md) | 内置运行时、内容模型与 `/engine` 工作流 |
+| [Gamer modeling](engine/reverie_gamer_modeling_pipeline.md) | Blender/Ashfox、模型工作区与导入流程 |
 
-## Source of Truth
+子项目的 [Python README](../ReverieCli-py/README.md)、[Desktop README](../ReverieCli-ui/README.md) 和 [Plugins README](../plugins/README.md) 保留各自安装/构建入口；第三方内置 Skill 文档、许可证和上游 changelog 不属于本次产品文档合并范围。
 
-- `reverie/cli/help_catalog.py` is the authoritative source for command names, summaries, and examples.
-- `reverie/agent/system_prompt.py` controls runtime storage and spec/steering path references.
+## 历史与迁移规则
+
+原有 25 份分散的历史文件已完整迁入两份历史文档，`docs/` Markdown 数从 **44 减为 22**；其中另有一份原位于 Python 子项目的记忆审查记录。两份历史文档的目录列出每个原路径和新锚点，可按旧文件名定位。正文保留原测试数字、失败、平台限制与旧决策，仅调整层级和内部链接。
+
+- 当前指南只描述已有行为；每个新功能规格明确标注“提案/实现中/已验收”。不要把计划写成能力。
+- 新的日期化验证追加到 `VERIFICATION_HISTORY.md`；旧计划/交接追加到 `DEVELOPMENT_HISTORY.md`。原章节视为历史证据，不改写成新一次测试通过。
+- 结构化证据继续保留在 `docs/verification/*.json`；它们是原始记录，不为减少文件数而合并或改写时间戳。
+- `.runtime/`、`result_images/`、本地安装包和截图是本地材料，Git 克隆中可能没有；公开文档须独立说明测试条件与限制。
+- 项目更新只进入 `changelog.md`；同一版本的多个更新放在同一版本下。没有 release 证据的工作进入 Unreleased；不凭 Git 提交日猜发布日，不填补不存在的版本。
+
+本次整理的完整文件备份与 SHA-256 清单位于仓库内 `.runtime/docs-20261008/`，可恢复原来的未提交文档内容。该目录是本地可复核材料；公共导航与历史正文不依赖它才能阅读。
+
+## 源码真源与检查
+
+CLI 名称以 [help_catalog.py](../ReverieCli-py/reverie/cli/help_catalog.py) 为入口，执行能力还须核对 [commands.py](../ReverieCli-py/reverie/cli/commands.py) / [__main__.py](../ReverieCli-py/reverie/__main__.py)。Desktop 派发看 [App.tsx](../ReverieCli-ui/src/App.tsx)、[core-actions.ts](../ReverieCli-ui/electron/core-actions.ts) 和 [sdk_bridge.py](../ReverieCli-py/reverie/sdk_bridge.py)。存储位置看 [storage.py](../ReverieCli-py/reverie/storage.py) 与 [runtime-paths.ts](../ReverieCli-ui/electron/runtime-paths.ts)。
+
+从仓库根运行 `python scripts/verification/check_docs.py` 检查本地文件/标题链接；检查不验证外部网址、自然语言事实或产品运行结果。

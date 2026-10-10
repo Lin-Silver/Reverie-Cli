@@ -7,9 +7,11 @@ is the client, management center, active-provider selector, and AI scheduling
 environment. Together they form the Reverie Agentic Developer Environment
 (RADE). RATS is not an Engine-only protocol.
 
-The current production allowlist and user-selectable provider list contain one
-implemented entry: `reverie.engine` (Reverie Engine). This describes present
-product availability, not a protocol limitation or permanent uniqueness rule.
+Last reconciled with the local worktree: **2026-10-05**. The built-in production
+registry contains one entry: `reverie.engine` (Reverie Engine). Users can also
+explicitly declare custom providers; these are validated into the effective
+registry and are not additional verified Reverie products. See
+[Feature Status](FEATURE_STATUS.md) for current integration evidence and limits.
 The Engine starts its loopback service with the editor, but Reverie CLI does not
 show it until a registered executable-local descriptor passes a live identity
 handshake and does not enable any native tool until the user explicitly turns
@@ -26,14 +28,17 @@ Both products keep their state beside their own executable:
 <cli-exe-root>/.reverie/rats/diagnostics.jsonl
 ```
 
-Settings use schema version 2 with `enabledProviders` entries keyed by
-`providerId` plus executable and permissions. Older `enabledEngines` settings
+Settings use **schema version 4**, distinct from **state response version 2**.
+They store `enabledProviders` entries keyed by `providerId` plus executable and
+permissions, `providerPermissionClasses`, and explicit `customProviders`
+definitions. Older `enabledEngines` settings
 are migrated deterministically and idempotently; the state response also keeps
 a deprecated Engine-only mirror until packaged Desktop clients migrate to
 `ratsRegisterProvider` and `ratsSetProviderEnabled`.
 
 The CLI accepts only discovery descriptors that declare the exact
-`reverie.rats.discovery/1` schema, `reverie.rtp/1`, an allowlisted provider
+`reverie.rats.discovery/1` schema, `reverie.rtp/1`, a provider in the effective
+registry,
 identity, an absolute provider executable path, a valid service id and token,
 an endpoint exactly matching `http://127.0.0.1:<port>/rtp`, and a descriptor
 parent matching that provider's registry-defined discovery root. It then
@@ -55,6 +60,21 @@ version metadata, and PID-image matching does not prove that the PID owns the
 advertised TCP port. Any same-user process able to read the Engine descriptor
 remains inside the current local trust boundary.
 
+**Off Windows, both identity checks degrade and fail open.** There is no
+portable equivalent of PE VersionInfo, so the executable check becomes
+`executable.is_file()` — any existing file at the descriptor's path passes — and
+the live-process check becomes an `os.kill(pid, 0)` liveness probe in which a
+`PermissionError` (a PID owned by another user) is treated as a match. The
+descriptor schema, registry membership, absolute-path, service-id/token,
+exact-endpoint and discovery-root requirements still apply, as do the live
+`hello` comparison, the echoed request ID and the canonical response hash, so
+this is not an open local-server catalog. But the layer that ties a descriptor
+to a specific product binary and a specific running process exists only on
+Windows. This is a deliberate degradation rather than a per-platform
+implementation, and it is registered as gap G28 in
+[Feature Status](FEATURE_STATUS.md); the Windows-only regression gating that
+hides it from other platforms is G29. Treat non-Windows RATS as unaccepted.
+
 For every parsed RTP response, the Python client requires an exact echoed
 request ID and verifies `result_sha256` against the response's raw canonical
 `result` or `error` value span. This deliberately preserves Godot's float
@@ -75,6 +95,18 @@ ProductName check; settings, discovery, and live PID-image validation then use
 the adjacent real Engine executable. The terminal wrapper itself is never
 treated as the RTP service process.
 There is no port scan, network broadcast, or arbitrary local-server catalog.
+
+Custom providers use the versioned `reverie.rats.custom-provider/1` definition
+with a dotted `providerId`, exact product, service kinds and permission classes.
+Optional discovery-root segments stay relative to the executable; identity can
+use the executable path or declared PE ProductNames. A built-in identity cannot
+be redefined. Declare one in the Desktop RATS page or the terminal with
+`/rats define <json>`, then register its executable and enable its permissions.
+`/rats undefine <providerId>` removes the definition and its selections.
+Declaration alone does not prove a live handshake or a working tool; descriptor,
+process, request-ID and response-hash checks still apply. The current code and
+contract tests are in [rats.py](../ReverieCli-py/reverie/rats.py) and
+[test_rats_custom_providers.py](../ReverieCli-py/tests/test_rats_custom_providers.py).
 
 Anonymous presence probes have a 350 ms deadline, normal session/catalog
 requests use 1.5 seconds, and native tool calls use a separate 12-second bound.
@@ -143,7 +175,8 @@ engine's world-streaming flow alone loads 20 tools on top of the 4 pinned ones.
 Tools without an RTP request schema remain visible in the compact catalog but
 are not promoted to direct model functions. This is intentional: guessing an
 argument contract would be less reliable than leaving the tool unavailable
-until the provider publishes a versioned schema. Against today's Reverie Engine
+until the provider publishes a versioned schema. Against the Engine baseline
+verified on 2026-08-21,
 that case does not arise: `_get_tool_schemas` answers for eight tool families
 covering 67 catalog entries plus six specials, which is all 73, so
 `not_loaded` is expected to be empty and `loaded` true for every match. The
@@ -151,7 +184,7 @@ reporting exists for the provider-neutral case and for a future catalog entry
 added without a matching schema branch — RATS must not silently present such a
 tool as callable.
 
-**Status of this section, verified 2026-08-21:** the capability card, the bounded
+**Historical evidence, verified 2026-08-21:** the capability card, the bounded
 working set, the opt-in loading flag, and the honest `loaded` / `not_loaded`
 reporting are pinned by `tests/test_rats_progressive_disclosure.py`. That file
 plus `tests/test_rats_runtime.py` pass 49 tests, and the complete Python suite
@@ -195,14 +228,19 @@ HEAD and does not encode the uncommitted Engine fixes compiled into the binary.
 The RATS page and task workspace are interaction-tested but have not received a
 current real-window visual inspection.
 
-RATS is designed for multiple explicitly supported Reverie/Rilance providers,
-but Reverie Engine is the only provider currently implemented, verified, and
-shown in the active selection list. Each additional provider needs a versioned
-identity/capability contract, an explicit client allowlist entry, and real
-cross-product E2E before it can appear. Arbitrary third-party package discovery,
+RATS is designed for multiple explicitly supported Reverie/Rilance providers.
+Reverie Engine remains the only built-in production provider; user-declared
+providers may appear after registration and successful live validation. A new
+official provider needs a versioned identity/capability contract, an explicit
+registry entry, and real cross-product E2E before being described as verified.
+Arbitrary third-party package discovery,
 download, or installation is outside the current RATS model. Multi-client
 sessions, streamed RTP task events, and remote transports also remain open and
 must not be presented as complete.
 
-The provider-neutral client cleanup task and its acceptance criteria are in
-[`RATS_PROVIDER_GENERALIZATION_HANDOFF.md`](RATS_PROVIDER_GENERALIZATION_HANDOFF.md).
+Provider-neutral dispatch, custom definitions and persisted permission classes
+are implemented. The [2026-10-05 audit](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05)
+includes fresh runtime/contract regression results; the unconfigured real Engine
+E2E was skipped, so older live-provider results above are not current acceptance.
+The earlier [provider-generalization handoff](DEVELOPMENT_HISTORY.md#rats-provider-generalization-handoff)
+is historical context, not an unstarted cleanup task.

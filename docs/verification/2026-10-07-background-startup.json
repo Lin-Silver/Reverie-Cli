@@ -1,0 +1,1272 @@
+{
+  "date": "2026-10-07",
+  "platform": "Windows x64",
+  "build": {
+    "version": "2.5.0",
+    "id": "1acc55d4895fd101",
+    "builtAt": "2026-10-07T09:32:31.255Z",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "status": "verified",
+  "changes": [
+    "continuous workspace background",
+    "visible light-theme wallpaper",
+    "transparent native caption controls",
+    "close to tray with restore and explicit quit",
+    "Windows terminal EXE plus companion runtime",
+    "deferred optional graphics/media initialization"
+  ],
+  "tests": {
+    "python": {
+      "passed": 162,
+      "log": ".runtime\\background-startup-20261007\\python-focused.log"
+    },
+    "desktop": {
+      "passed": 280,
+      "skipped": 1,
+      "skip_reason": "REVERIE_RATS_ENGINE_BIN not configured",
+      "log": ".runtime\\background-startup-20261007\\ui-full-final.log"
+    },
+    "typecheck": "passed",
+    "cli_build": "passed",
+    "desktop_build": "passed"
+  },
+  "gui": {
+    "pid": 41144,
+    "session": "20261007_053552_998268",
+    "themes": {
+      "dark": {
+        "chat": {
+          "background": "color(srgb 0.0431373 0.0509804 0.0705882 / 0.18)",
+          "opacity": "1"
+        },
+        "transcript": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "composer": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "image": "0.9",
+        "veil": "rgba(0, 0, 0, 0.12)",
+        "boundary": 750,
+        "left": 268,
+        "boundary_mean_rgb_difference": 0.33,
+        "native_capture": {
+          "width": 1516,
+          "height": 968
+        },
+        "native_caption_backgrounds": [
+          [
+            11,
+            14,
+            22
+          ],
+          [
+            11,
+            14,
+            21
+          ],
+          [
+            11,
+            14,
+            21
+          ],
+          [
+            11,
+            14,
+            22
+          ]
+        ]
+      },
+      "light": {
+        "chat": {
+          "background": "color(srgb 0.964706 0.968627 0.976471 / 0.58)",
+          "opacity": "1"
+        },
+        "transcript": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "composer": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "image": "0.9",
+        "veil": "rgba(255, 255, 255, 0.12)",
+        "boundary": 750,
+        "left": 268,
+        "boundary_mean_rgb_difference": 0.16333333333333333,
+        "native_capture": {
+          "width": 1516,
+          "height": 968
+        },
+        "native_caption_backgrounds": [
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ]
+        ]
+      }
+    },
+    "native": {
+      "windows": 1,
+      "visible": true,
+      "minimized": false,
+      "maximized": false,
+      "handle": 2033792,
+      "pid": 41144
+    },
+    "tray_menus": [
+      [
+        "File",
+        "Edit",
+        "View",
+        "Window"
+      ],
+      [
+        "Exit"
+      ],
+      [
+        "Undo",
+        "Redo",
+        "",
+        "Cut",
+        "Copy",
+        "Paste",
+        "Delete",
+        "",
+        "Select All"
+      ],
+      [
+        "Reload",
+        "Force Reload",
+        "Toggle Developer Tools",
+        "",
+        "Actual Size",
+        "Zoom In",
+        "Zoom Out",
+        "",
+        "Toggle Full Screen"
+      ],
+      [
+        "Minimize",
+        "Zoom",
+        "Close"
+      ],
+      [
+        "显示 Reverie",
+        "",
+        "退出 Reverie"
+      ]
+    ],
+    "restore_minimized": {
+      "count": 1
+    },
+    "terminal": {
+      "id": "606184d1-5c36-424b-adb3-ca358bdfdd51",
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture",
+      "sessionId": "20261007_053552_998268",
+      "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture",
+      "shell": "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "pid": 43624,
+      "state": "running",
+      "createdAt": "2026-10-07T09:36:01.982Z",
+      "logPath": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture\\.reverie\\desktop\\terminals\\606184d1-5c36-424b-adb3-ca358bdfdd51.log",
+      "actionId": null,
+      "command": null
+    },
+    "after_close": {
+      "windows": 1,
+      "visible": false,
+      "minimized": false,
+      "maximized": false,
+      "handle": 2033792,
+      "pid": 41144
+    },
+    "terminal_survived_close": true,
+    "quit_cancel_preserved_window": true,
+    "explicit_quit_exit_code": 0
+  },
+  "portable_first": {
+    "pid": 45432,
+    "session": "20261007_054606_565769",
+    "themes": {
+      "dark": {
+        "chat": {
+          "background": "color(srgb 0.0431373 0.0509804 0.0705882 / 0.18)",
+          "opacity": "1"
+        },
+        "transcript": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "composer": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "image": "0.9",
+        "veil": "rgba(0, 0, 0, 0.12)",
+        "boundary": 750,
+        "left": 268,
+        "boundary_mean_rgb_difference": 0.33,
+        "native_capture": {
+          "width": 1516,
+          "height": 968
+        },
+        "native_caption_backgrounds": [
+          [
+            11,
+            14,
+            22
+          ],
+          [
+            11,
+            14,
+            21
+          ],
+          [
+            11,
+            14,
+            21
+          ],
+          [
+            11,
+            14,
+            22
+          ]
+        ]
+      },
+      "light": {
+        "chat": {
+          "background": "color(srgb 0.964706 0.968627 0.976471 / 0.58)",
+          "opacity": "1"
+        },
+        "transcript": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "composer": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "image": "0.9",
+        "veil": "rgba(255, 255, 255, 0.12)",
+        "boundary": 750,
+        "left": 268,
+        "boundary_mean_rgb_difference": 0.16333333333333333,
+        "native_capture": {
+          "width": 1516,
+          "height": 968
+        },
+        "native_caption_backgrounds": [
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ]
+        ]
+      }
+    },
+    "launch_to_ready_s": 48.29699999999866,
+    "native": {
+      "windows": 1,
+      "visible": true,
+      "minimized": false,
+      "maximized": false,
+      "handle": 1181744,
+      "pid": 48640
+    },
+    "tray_menus": [
+      [
+        "File",
+        "Edit",
+        "View",
+        "Window"
+      ],
+      [
+        "Exit"
+      ],
+      [
+        "Undo",
+        "Redo",
+        "",
+        "Cut",
+        "Copy",
+        "Paste",
+        "Delete",
+        "",
+        "Select All"
+      ],
+      [
+        "Reload",
+        "Force Reload",
+        "Toggle Developer Tools",
+        "",
+        "Actual Size",
+        "Zoom In",
+        "Zoom Out",
+        "",
+        "Toggle Full Screen"
+      ],
+      [
+        "Minimize",
+        "Zoom",
+        "Close"
+      ],
+      [
+        "显示 Reverie",
+        "",
+        "退出 Reverie"
+      ]
+    ],
+    "restore_minimized": {
+      "count": 1
+    },
+    "terminal": {
+      "id": "793cd4ab-71ec-4fbc-bee7-7e5057062e3b",
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture",
+      "sessionId": "20261007_054606_565769",
+      "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture",
+      "shell": "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "pid": 43980,
+      "state": "running",
+      "createdAt": "2026-10-07T09:47:03.694Z",
+      "logPath": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture\\.reverie\\desktop\\terminals\\793cd4ab-71ec-4fbc-bee7-7e5057062e3b.log",
+      "actionId": null,
+      "command": null
+    },
+    "after_close": {
+      "windows": 1,
+      "visible": false,
+      "minimized": false,
+      "maximized": false,
+      "handle": 1181744,
+      "pid": 48640
+    },
+    "terminal_survived_close": true,
+    "quit_cancel_preserved_window": true,
+    "explicit_quit_exit_code": 0
+  },
+  "portable_cached": {
+    "pid": 45468,
+    "session": "20261007_054300_999575",
+    "themes": {
+      "dark": {
+        "chat": {
+          "background": "color(srgb 0.0431373 0.0509804 0.0705882 / 0.18)",
+          "opacity": "1"
+        },
+        "transcript": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "composer": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "image": "0.9",
+        "veil": "rgba(0, 0, 0, 0.12)",
+        "boundary": 750,
+        "left": 268,
+        "boundary_mean_rgb_difference": 0.33,
+        "native_capture": {
+          "width": 1516,
+          "height": 968
+        },
+        "native_caption_backgrounds": [
+          [
+            11,
+            14,
+            22
+          ],
+          [
+            11,
+            14,
+            21
+          ],
+          [
+            11,
+            14,
+            21
+          ],
+          [
+            11,
+            14,
+            22
+          ]
+        ]
+      },
+      "light": {
+        "chat": {
+          "background": "color(srgb 0.964706 0.968627 0.976471 / 0.58)",
+          "opacity": "1"
+        },
+        "transcript": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "composer": {
+          "background": "rgba(0, 0, 0, 0)",
+          "opacity": "1"
+        },
+        "image": "0.9",
+        "veil": "rgba(255, 255, 255, 0.12)",
+        "boundary": 750,
+        "left": 268,
+        "boundary_mean_rgb_difference": 0.16333333333333333,
+        "native_capture": {
+          "width": 1516,
+          "height": 968
+        },
+        "native_caption_backgrounds": [
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ],
+          [
+            224,
+            225,
+            226
+          ]
+        ]
+      }
+    },
+    "launch_to_ready_s": 9.282000000002881,
+    "native": {
+      "windows": 1,
+      "visible": true,
+      "minimized": false,
+      "maximized": false,
+      "handle": 1048922,
+      "pid": 48576
+    },
+    "tray_menus": [
+      [
+        "File",
+        "Edit",
+        "View",
+        "Window"
+      ],
+      [
+        "Exit"
+      ],
+      [
+        "Undo",
+        "Redo",
+        "",
+        "Cut",
+        "Copy",
+        "Paste",
+        "Delete",
+        "",
+        "Select All"
+      ],
+      [
+        "Reload",
+        "Force Reload",
+        "Toggle Developer Tools",
+        "",
+        "Actual Size",
+        "Zoom In",
+        "Zoom Out",
+        "",
+        "Toggle Full Screen"
+      ],
+      [
+        "Minimize",
+        "Zoom",
+        "Close"
+      ],
+      [
+        "显示 Reverie",
+        "",
+        "退出 Reverie"
+      ]
+    ],
+    "restore_minimized": {
+      "count": 1
+    },
+    "terminal": {
+      "id": "cbbabfe4-dff7-47de-92d6-2ff74d312a65",
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture",
+      "sessionId": "20261007_054300_999575",
+      "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture",
+      "shell": "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "pid": 46712,
+      "state": "running",
+      "createdAt": "2026-10-07T09:43:36.685Z",
+      "logPath": "G:\\Reverie\\Reverie-Cli\\.runtime\\background-startup-20261007\\fixture\\.reverie\\desktop\\terminals\\cbbabfe4-dff7-47de-92d6-2ff74d312a65.log",
+      "actionId": null,
+      "command": null
+    },
+    "after_close": {
+      "windows": 1,
+      "visible": false,
+      "minimized": false,
+      "maximized": false,
+      "handle": 1048922,
+      "pid": 48576
+    },
+    "terminal_survived_close": true,
+    "quit_cancel_preserved_window": true,
+    "explicit_quit_exit_code": 0
+  },
+  "native_engine": {
+    "success": true,
+    "events": [
+      {
+        "frame": 0,
+        "viewport": {
+          "name": "MainCamera",
+          "width": 480,
+          "height": 300,
+          "clear_color": [
+            0.1,
+            0.1,
+            0.1,
+            1.0
+          ],
+          "msaa": 0,
+          "hdr": false
+        },
+        "keys": [],
+        "mouse": [
+          0.0,
+          0.0
+        ],
+        "mouse_delta": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "frame": 1,
+        "viewport": {
+          "name": "MainCamera",
+          "width": 480,
+          "height": 300,
+          "clear_color": [
+            0.1,
+            0.1,
+            0.1,
+            1.0
+          ],
+          "msaa": 0,
+          "hdr": false
+        },
+        "keys": [
+          100
+        ],
+        "mouse": [
+          30.0,
+          280.0
+        ],
+        "mouse_delta": [
+          30.0,
+          280.0
+        ]
+      },
+      {
+        "frame": 2,
+        "viewport": {
+          "name": "MainCamera",
+          "width": 640,
+          "height": 360,
+          "clear_color": [
+            0.1,
+            0.1,
+            0.1,
+            1.0
+          ],
+          "msaa": 0,
+          "hdr": false
+        },
+        "keys": [],
+        "mouse": [
+          30.0,
+          280.0
+        ],
+        "mouse_delta": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "frame": 3,
+        "viewport": {
+          "name": "MainCamera",
+          "width": 640,
+          "height": 360,
+          "clear_color": [
+            0.1,
+            0.1,
+            0.1,
+            1.0
+          ],
+          "msaa": 0,
+          "hdr": false
+        },
+        "keys": [],
+        "mouse": [
+          30.0,
+          280.0
+        ],
+        "mouse_delta": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "frame": 4,
+        "viewport": {
+          "name": "MainCamera",
+          "width": 640,
+          "height": 360,
+          "clear_color": [
+            0.1,
+            0.1,
+            0.1,
+            1.0
+          ],
+          "msaa": 0,
+          "hdr": false
+        },
+        "keys": [],
+        "mouse": [
+          30.0,
+          280.0
+        ],
+        "mouse_delta": [
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "summary": {
+      "event_count": 4,
+      "events_by_name": {
+        "session_start": 1,
+        "engine_bootstrap": 1,
+        "checkpoint": 1,
+        "session_end": 1
+      },
+      "metrics": {
+        "frames_executed": 5.0,
+        "frame_time_ms_average": 33.76146000009612,
+        "runtime_elapsed_seconds": 0.1688073000004806
+      },
+      "world_state": {
+        "flags": {},
+        "counters": {},
+        "resources": {},
+        "inventory": {},
+        "quests": {},
+        "notes": {},
+        "active_dialogue": "",
+        "active_waves": [],
+        "live2d_models": []
+      },
+      "rendering": {
+        "initialized": true,
+        "requested_backend": "native",
+        "backend": "native",
+        "native_ready": true,
+        "native_draw_calls": 1,
+        "gpu_mesh_count": 1,
+        "texture_count": 1,
+        "native_errors": [],
+        "fallback_reason": "",
+        "mode": "2d",
+        "frame_count": 5,
+        "viewport": {
+          "name": "MainCamera",
+          "width": 640,
+          "height": 360,
+          "clear_color": [
+            0.1,
+            0.1,
+            0.1,
+            1.0
+          ],
+          "msaa": 0,
+          "hdr": false
+        },
+        "last_frame": {
+          "frame_index": 4,
+          "mode": "2d",
+          "backend": "native",
+          "viewport": {
+            "name": "MainCamera",
+            "width": 640,
+            "height": 360,
+            "clear_color": [
+              0.1,
+              0.1,
+              0.1,
+              1.0
+            ],
+            "msaa": 0,
+            "hdr": false
+          },
+          "active_camera": "Camera2D",
+          "draw_calls": 1,
+          "light_count": 0,
+          "command_breakdown": {
+            "canvas_2d": 1
+          },
+          "primitive_breakdown": {
+            "sprite": 1
+          },
+          "commands": [
+            {
+              "source_node": "/PlatformerMain/Player",
+              "primitive": "sprite",
+              "pipeline": "canvas_2d",
+              "mesh_id": "quad",
+              "layer": 0,
+              "z_index": 0,
+              "sort_key": 0.0,
+              "visible": true,
+              "material": {
+                "shader": "sprite",
+                "albedo_color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "albedo_texture": "assets/textures/player_placeholder.png",
+                "metallic": 0.0,
+                "roughness": 1.0,
+                "emission": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "emission_energy": 1.0,
+                "blend_mode": "mix",
+                "cull_mode": "back",
+                "depth_test": false,
+                "transparent": true,
+                "unshaded": true
+              },
+              "transform": {
+                "position": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  160.0,
+                  120.0,
+                  1.0
+                ],
+                "quaternion": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "metadata": {
+                "atlas": "",
+                "frame": "",
+                "size": [
+                  1.0,
+                  2.0
+                ],
+                "billboard": false,
+                "parallax": false,
+                "scroll_scale": [
+                  1.0,
+                  1.0
+                ],
+                "offset": [
+                  0.0,
+                  0.0
+                ],
+                "repeat": false
+              }
+            }
+          ]
+        }
+      },
+      "sequencing": {
+        "animation_players": 0,
+        "state_machines": 0,
+        "active_timelines": [],
+        "known_timelines": []
+      },
+      "ui": {
+        "control_count": 0,
+        "controls": []
+      },
+      "localization": {
+        "current_locale": "en",
+        "fallback_locale": "en",
+        "available_locales": [],
+        "entry_count": 0
+      },
+      "save_data": {
+        "slots": []
+      },
+      "audio": {
+        "available": true,
+        "backend_status": {
+          "backend": "pyglet",
+          "installed": true,
+          "operational": false,
+          "mode": "unverified",
+          "last_error": ""
+        },
+        "master_volume": 1.0,
+        "music_volume": 1.0,
+        "sfx_volume": 1.0,
+        "bus_count": 6,
+        "buses": {
+          "Ambient": {
+            "name": "Ambient",
+            "parent": "Master",
+            "volume": 1.0,
+            "muted": false,
+            "solo": false,
+            "send": "",
+            "tags": [
+              "ambient"
+            ]
+          },
+          "Master": {
+            "name": "Master",
+            "parent": "",
+            "volume": 1.0,
+            "muted": false,
+            "solo": false,
+            "send": "",
+            "tags": [
+              "master"
+            ]
+          },
+          "Music": {
+            "name": "Music",
+            "parent": "Master",
+            "volume": 1.0,
+            "muted": false,
+            "solo": false,
+            "send": "",
+            "tags": [
+              "music"
+            ]
+          },
+          "SFX": {
+            "name": "SFX",
+            "parent": "Master",
+            "volume": 1.0,
+            "muted": false,
+            "solo": false,
+            "send": "",
+            "tags": [
+              "sfx"
+            ]
+          },
+          "UI": {
+            "name": "UI",
+            "parent": "SFX",
+            "volume": 1.0,
+            "muted": false,
+            "solo": false,
+            "send": "",
+            "tags": [
+              "ui"
+            ]
+          },
+          "Voice": {
+            "name": "Voice",
+            "parent": "Master",
+            "volume": 1.0,
+            "muted": false,
+            "solo": false,
+            "send": "",
+            "tags": [
+              "voice"
+            ]
+          }
+        },
+        "active_players": {},
+        "stream_count": 0
+      }
+    }
+  },
+  "cli_zip": {
+    "success": true,
+    "archive": "G:\\Reverie\\Reverie-Cli\\dist\\Reverie-CLI-windows-x64.zip",
+    "files": 1766,
+    "version": "Reverie Cli v2.5.0\nRelease status: stable\nCore Interface v1.0\nKernel: python",
+    "kernel": {
+      "schema": "reverie.kernel.v1",
+      "version": "2.5.0",
+      "bridge_protocol": "sdk-bridge.v1",
+      "interface_version": "1.0",
+      "platform": "win32",
+      "arch": "x64",
+      "frozen": true
+    },
+    "bridge_messages": [
+      {
+        "type": "ready",
+        "protocol_version": 1
+      },
+      {
+        "id": "package-smoke",
+        "type": "shutdown"
+      }
+    ],
+    "archive_size": 329881804,
+    "sha256": "b04086e67f82e0816a3037c56b29b516f526e3b8b983f3b0e0436b7998b95993"
+  },
+  "startup": {
+    "metric": "real ConPTY process creation to interactive prompt, seconds; isolated configuration without model network calls",
+    "same_project_control": [
+      {
+        "phase": "control",
+        "label": "legacy",
+        "trial": 0,
+        "first_output_s": 0.054247800000000006,
+        "prompt_ready_s": 13.3567741,
+        "total_s": 15.4754601,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "control",
+        "label": "legacy",
+        "trial": 1,
+        "first_output_s": 0.04692040000000088,
+        "prompt_ready_s": 8.172862,
+        "total_s": 10.363735700000001,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "control",
+        "label": "legacy",
+        "trial": 2,
+        "first_output_s": 0.04541400000000067,
+        "prompt_ready_s": 7.770091199999999,
+        "total_s": 17.493723500000005,
+        "exit_code": 0,
+        "success": true
+      }
+    ],
+    "final": [
+      {
+        "phase": "settled",
+        "label": "terminal",
+        "trial": 0,
+        "first_output_s": 0.1277719,
+        "prompt_ready_s": 2.3213119,
+        "total_s": 3.5685197,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "terminal",
+        "trial": 1,
+        "first_output_s": 0.048108099999999925,
+        "prompt_ready_s": 4.260189899999999,
+        "total_s": 5.505143699999999,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "terminal",
+        "trial": 2,
+        "first_output_s": 0.04957080000000133,
+        "prompt_ready_s": 2.9907543000000003,
+        "total_s": 4.2365972,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "extracted",
+        "trial": 0,
+        "first_output_s": 0.203676300000001,
+        "prompt_ready_s": 2.6976531000000015,
+        "total_s": 3.930887300000002,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "extracted",
+        "trial": 1,
+        "first_output_s": 0.04716929999999775,
+        "prompt_ready_s": 2.1349556999999986,
+        "total_s": 3.3944795999999986,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "extracted",
+        "trial": 2,
+        "first_output_s": 0.049487300000000685,
+        "prompt_ready_s": 2.5362579000000007,
+        "total_s": 3.782692900000002,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "onedir",
+        "trial": 0,
+        "first_output_s": 0.3291879000000008,
+        "prompt_ready_s": 2.9870131,
+        "total_s": 4.799633700000002,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "onedir",
+        "trial": 1,
+        "first_output_s": 0.04657890000000043,
+        "prompt_ready_s": 2.7493192999999994,
+        "total_s": 3.992441799999997,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "settled",
+        "label": "onedir",
+        "trial": 2,
+        "first_output_s": 0.04666280000000552,
+        "prompt_ready_s": 1.8253219000000027,
+        "total_s": 3.0525680000000066,
+        "exit_code": 0,
+        "success": true
+      }
+    ],
+    "old_baseline": [
+      {
+        "phase": "before",
+        "label": "source",
+        "trial": 0,
+        "first_output_s": 0.0552333,
+        "prompt_ready_s": 2.4415045,
+        "total_s": 3.8569011,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "source",
+        "trial": 1,
+        "first_output_s": 0.043459699999999886,
+        "prompt_ready_s": 2.5261057,
+        "total_s": 4.454478799999999,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "source",
+        "trial": 2,
+        "first_output_s": 0.042742299999999886,
+        "prompt_ready_s": 3.678812099999999,
+        "total_s": 5.015170599999999,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "onefile",
+        "trial": 0,
+        "first_output_s": 0.15655929999999899,
+        "prompt_ready_s": 15.870303600000002,
+        "total_s": 18.9405614,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "onefile",
+        "trial": 1,
+        "first_output_s": 0.04779279999999926,
+        "prompt_ready_s": 24.008980899999997,
+        "total_s": 26.8276971,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "onefile",
+        "trial": 2,
+        "first_output_s": 0.04439849999999569,
+        "prompt_ready_s": 20.059997799999998,
+        "total_s": 22.401292700000006,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "onedir",
+        "trial": 0,
+        "first_output_s": 0.047842700000008336,
+        "prompt_ready_s": 12.4025723,
+        "total_s": 13.7249663,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "onedir",
+        "trial": 1,
+        "first_output_s": 0.0541362000000081,
+        "prompt_ready_s": 2.7194568,
+        "total_s": 4.044737800000003,
+        "exit_code": 0,
+        "success": true
+      },
+      {
+        "phase": "before",
+        "label": "onedir",
+        "trial": 2,
+        "first_output_s": 0.043849199999996924,
+        "prompt_ready_s": 2.1276071999999986,
+        "total_s": 3.4487534999999916,
+        "exit_code": 0,
+        "success": true
+      }
+    ],
+    "old_control_median_s": 8.172862,
+    "extracted_zip_median_s": 2.5362579000000007,
+    "earlier_runs": "before-startup.json, after-startup.json and final-startup.json retained under evidence_root; final-startup.json includes a 90s old-layout timeout and an 8.22s directory-layout sample during other verification"
+  },
+  "limitations": [
+    "one external RATS integration test skipped",
+    "quit confirmation responses injected; native modal buttons not manually clicked",
+    "portable GUI first launch performs one-time extraction, measured once; an earlier first-launch attempt exceeded a 60s wait",
+    "startup timings are local observations with no external model traffic"
+  ],
+  "artifacts": [
+    {
+      "path": "dist/Reverie-CLI-windows-x64.zip",
+      "bytes": 329881804
+    },
+    {
+      "path": "dist/Reverie-Portable-2.5.0-x64.exe",
+      "bytes": 501953611
+    },
+    {
+      "path": "ReverieCli-ui/release/Reverie-Setup-2.5.0-x64.exe",
+      "bytes": 441220447
+    }
+  ],
+  "evidence_root": ".runtime\\background-startup-20261007",
+  "publication": "not committed or pushed",
+  "owned_process_cleanup": {
+    "evidence": [
+      {
+        "evidence": "final-gui.json",
+        "gui_pid": 41144,
+        "terminal_pid": 43624
+      },
+      {
+        "evidence": "portable-gui.json",
+        "gui_pid": 48576,
+        "terminal_pid": 46712
+      },
+      {
+        "evidence": "portable-first-gui.json",
+        "gui_pid": 48640,
+        "terminal_pid": 43980
+      }
+    ],
+    "status": [
+      {
+        "pid": 41144,
+        "alive": false,
+        "name": null
+      },
+      {
+        "pid": 43624,
+        "alive": false,
+        "name": null
+      },
+      {
+        "pid": 48576,
+        "alive": false,
+        "name": null
+      },
+      {
+        "pid": 46712,
+        "alive": false,
+        "name": null
+      },
+      {
+        "pid": 48640,
+        "alive": false,
+        "name": null
+      },
+      {
+        "pid": 43980,
+        "alive": false,
+        "name": null
+      }
+    ]
+  },
+  "diff_check": "passed"
+}

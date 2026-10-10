@@ -33,6 +33,8 @@ def pytest_configure(config):
         root = _DIST_ROOT.parent / ".runtime" / f"pytest-{os.getpid()}"
         if root.exists():
             raise RuntimeError(f"Refusing to reuse pytest temporary directory: {root}")
+        # pytest creates basetemp itself, but not its parent on a fresh checkout.
+        root.parent.mkdir(parents=True, exist_ok=True)
         config.option.basetemp = str(root)
 
 

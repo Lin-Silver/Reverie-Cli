@@ -58,6 +58,12 @@ Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，�
 
 ## Unreleased
 
+### 2026-10-10 — GitHub Actions 全新检出与 Linux 测试修复
+
+* 修复 pytest 默认临时目录初始化：全新检出时先创建 `.runtime` 父目录，再由 pytest 创建独立测试目录；保留拒绝复用已有目录与显式 `--basetemp` 的原有行为。此前本地已有 `.runtime` 掩盖了问题，CI 的五组 Python 测试和覆盖率任务均在 fixture 初始化时失败。
+* 新增子进程回归测试，在没有 `.runtime` 的最小检出中加载实际共享 fixtures，验证 `tmp_path` 与隔离应用目录可正常创建。
+* 为 Workbench 提交失败测试的 `pre-commit` hook 设置可执行权限，使 Linux 实际执行并拒绝提交，继续验证暂存内容保持不变。
+
 ### 2026-10-09–10 — 工作树整理与提交前验证
 
 * 按 Python 内核、设计 Skills、原生引擎与 Windows 打包、Desktop、文档五个主题整理已有改动。版本号仍为 2.5.0，未新增语义版本标签；Intelligent UI 规格仍属于后续开发。

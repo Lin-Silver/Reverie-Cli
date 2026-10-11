@@ -698,7 +698,6 @@ class ReverieSdkBridge:
             }
         if action == "initialize":
             interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
-            interface._prime_context_engine_background()
             if payload.get("prepareModel") and interface.config_manager.load().active_model is not None:
                 interface._init_agent(persist_config_changes=False, defer_runtime_enrichment=True)
                 if interface.agent is not None:

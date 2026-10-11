@@ -2,27 +2,40 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkerPool } from "./worker-pool";
 
 describe("warm kernels", () => {
-  it("prepares one kernel in advance and shares preparation with the first request", async () => {
-    let finish!: () => void;
-    const pool = new WorkerPool<object>(2, vi.fn(async () => {}));
-    const worker = {}; const create = vi.fn(() => worker);
-    const initialize = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-    const prepared = pool.prepare("project", create, initialize);
-    expect(pool.prepare("project", create, initialize)).toBe(prepared);
-    const acquired = pool.acquire("project", create);
-    await Promise.resolve(); expect(initialize).toHaveBeenCalledTimes(1);
-    finish(); await prepared;
-    expect(await acquired).toEqual({ worker, reused: true });
-    expect(create).toHaveBeenCalledTimes(1);
-    await pool.close();
+  it("spawns only on demand, keeps one idle kernel, and expires it without stopping active work", async () => {
+    vi.useFakeTimers();
+    try {
+      const dispose = vi.fn(async () => {});
+      const pool = new WorkerPool<object>(4, dispose, 30_000);
+      expect(dispose).not.toHaveBeenCalled();
+      const first = await pool.acquire("a", () => ({ id: "first" }));
+      const second = await pool.acquire("b", () => ({ id: "second" }));
+      const active = await pool.acquire("c", () => ({ id: "active" }));
+      await pool.release("a", first.worker, true);
+      await pool.release("b", second.worker, true);
+      expect(dispose).toHaveBeenCalledWith(first.worker);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(dispose).toHaveBeenCalledWith(second.worker);
+      expect(dispose).not.toHaveBeenCalledWith(active.worker);
+      expect((await pool.acquire("b", () => ({}))).reused).toBe(false);
+      await pool.close();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 
-  it("discards failed preparation and permits a fresh kernel on request", async () => {
-    const dispose = vi.fn(async () => {}); const pool = new WorkerPool<object>(1, dispose);
-    await pool.prepare("project", () => ({}), async () => { throw new Error("initialization failed"); });
-    expect(dispose).toHaveBeenCalledTimes(1);
-    expect((await pool.acquire("project", () => ({}))).reused).toBe(false);
-    await pool.close();
+  it("cancels expiry when an idle kernel is reused", async () => {
+    vi.useFakeTimers();
+    try {
+      const dispose = vi.fn(async () => {});
+      const pool = new WorkerPool<object>(2, dispose);
+      const first = await pool.acquire("a", () => ({}));
+      await pool.release("a", first.worker, true);
+      expect((await pool.acquire("a", () => ({}))).reused).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(dispose).not.toHaveBeenCalled();
+      await pool.close();
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
   });
   it("reuses idle kernels and keeps simultaneous runs separate", async () => {
     const dispose = vi.fn(async () => {});
@@ -69,9 +82,12 @@ describe("warm kernels", () => {
     const first = await pool.acquire("a", () => ({}));
     await pool.release("a", first.worker, true);
     const pending = pool.acquire("b", create);
-    await pool.close();
+    const closing = pool.close();
+    const rejected = expect(pending).rejects.toThrow("closing");
+    await Promise.resolve();
     finish();
-    await expect(pending).rejects.toThrow("closing");
+    await closing;
+    await rejected;
     expect(create).not.toHaveBeenCalled();
   });
 });

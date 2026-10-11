@@ -682,9 +682,6 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   const response = await bridge.request(action, payload);
   if (action === "initialize") {
     void log(`Desktop initialized in ${Date.now() - desktopStartedAt} ms`);
-    const root = bridge.getProjectRoot(); const coreRoot = bridge.getCoreAppRoot(); const kernel = activeKernelPath;
-    const key = JSON.stringify([root, coreRoot, kernel]);
-    void workerPool.prepare(key, () => new CoreBridge(root, coreRoot, kernel, () => {}), worker => worker.request("initialize", { projectRoot: root, deferPayloads: true, prepareModel: true })).catch(error => log(`Kernel preparation failed: ${String(error)}`));
   }
   return assertCoreResponse(action, response);
 });

@@ -148,7 +148,7 @@ button:disabled { cursor: default; }
 .message-body, .has-workspace-background .message.assistant .message-body { text-shadow: none; line-height: 1.8; color: var(--text-2); }
 .message.user .message-body { border-radius: 16px 5px 16px 16px; box-shadow: none; padding: 12px 17px; background: var(--user-bubble); border-color: var(--user-bubble-border); }
 .has-workspace-background .message.user .message-body { background: var(--user-bubble); backdrop-filter: none; }
-.tool-message, .reasoning-block, .has-workspace-background .tool-message, .has-workspace-background .reasoning-block { background: var(--panel-2); border-color: var(--border); box-shadow: none; backdrop-filter: none; }
+.tool-message, .has-workspace-background .tool-message { background: var(--panel-2); border-color: var(--border); box-shadow: none; backdrop-filter: none; }
 .code-block { border-radius: 12px; box-shadow: none; }
 .chat-input-stack { background: transparent; }
 .chat-input-stack .composer-shell { padding-bottom: 18px; }
@@ -259,8 +259,9 @@ button:disabled { cursor: default; }
 :root[data-theme].has-workspace-background .settings-content { background: transparent; backdrop-filter: none; }
 :root[data-theme].has-workspace-background .composer { background: var(--composer-surface); backdrop-filter: none; }
 :root[data-theme].has-workspace-background .message.user .message-body { background: var(--user-bubble); backdrop-filter: none; }
-:root[data-theme].has-workspace-background .tool-message,
-:root[data-theme].has-workspace-background .reasoning-block { background: var(--panel-2); backdrop-filter: none; }
+:root[data-theme].has-workspace-background .tool-message { background: var(--panel-2); backdrop-filter: none; }
+:root[data-theme] .reasoning-block { background: transparent; backdrop-filter: none; }
+.about-repository { color: var(--accent); text-underline-offset: 3px; }
 :root[data-theme].has-workspace-background .inspector { background: var(--inspector); backdrop-filter: none; }
 
 @media (max-width: 1250px) {

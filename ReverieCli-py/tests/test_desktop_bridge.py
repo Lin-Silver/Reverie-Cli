@@ -93,7 +93,7 @@ def test_sdk_bridge_deferred_initialize_skips_heavy_desktop_payloads(tmp_path: P
         "state": {"kind": "bootstrap"},
         "deferred": True,
     }
-    assert calls == ["prime", "bootstrap"]
+    assert calls == ["bootstrap"]
 
 
 def test_desktop_bootstrap_payload_keeps_a_complete_safe_state_shape() -> None:

@@ -18,12 +18,12 @@ from reverie.modelscope import (
 from reverie.provider_smoke import _redact, parse_model_overrides, run_provider_smoke
 
 
-def test_modelscope_default_model_is_live_verified_step_37_flash() -> None:
+def test_modelscope_default_model_is_current_qwen_38() -> None:
     cfg = default_modelscope_config()
 
-    assert MODELSCOPE_DEFAULT_MODEL_ID == "stepfun-ai/Step-3.7-Flash"
-    assert cfg["selected_model_id"] == "stepfun-ai/Step-3.7-Flash"
-    assert cfg["selected_model_display_name"] == "Step-3.7-Flash"
+    assert MODELSCOPE_DEFAULT_MODEL_ID == "Qwen/Qwen3.8-27B"
+    assert cfg["selected_model_id"] == "Qwen/Qwen3.8-27B"
+    assert cfg["selected_model_display_name"] == "Qwen3.8-27B"
     assert cfg["max_context_tokens"] == 262144
 
 
@@ -34,20 +34,26 @@ def test_modelscope_catalog_exactly_matches_requested_models_and_capabilities() 
             "vision": True,
             "reasoning": ["low", "medium", "high"],
         },
-        "ZhipuAI/GLM-5.2": {
-            "context": 1048576,
-            "vision": False,
-            "reasoning": ["none", "high", "max"],
+        "Qwen/Qwen3.8-27B": {
+            "context": 262144, "vision": True, "reasoning": ["none", "low", "medium", "xhigh"],
         },
-        "deepseek-ai/DeepSeek-V4-Pro": {
+        "ZhipuAI/GLM-5.3": {
             "context": 1048576,
             "vision": False,
-            "reasoning": ["true", "false"],
+            "reasoning": ["none", "low", "high", "max"],
         },
-        "deepseek-ai/DeepSeek-V4-Flash": {
+        "ZhipuAI/GLM-5.3-Flash": {
+            "context": 1048576, "vision": True, "reasoning": ["none", "low", "high", "max"],
+        },
+        "deepseek-ai/DeepSeek-V4-Pro-0813": {
             "context": 1048576,
             "vision": False,
-            "reasoning": ["true", "false"],
+            "reasoning": [],
+        },
+        "deepseek-ai/DeepSeek-V4.1-Flash": {
+            "context": 1048576,
+            "vision": True,
+            "reasoning": [],
         },
     }
     catalog = {item["id"]: item for item in get_modelscope_model_catalog()}
@@ -67,6 +73,24 @@ def test_modelscope_base_url_normalizes_openai_and_legacy_anthropic_paths() -> N
     assert resolve_modelscope_openai_base_url("https://api-inference.modelscope.cn/v1") == MODELSCOPE_DEFAULT_API_URL
     assert resolve_modelscope_openai_base_url("https://api-inference.modelscope.cn/v1/chat/completions") == MODELSCOPE_DEFAULT_API_URL
     assert resolve_modelscope_openai_base_url("https://proxy.example.com/messages") == "https://proxy.example.com/v1"
+
+
+def test_current_modelscope_options_and_saved_legacy_model() -> None:
+    qwen = {"selected_model_id": "Qwen/Qwen3.8-27B", "reasoning_effort": "xhigh"}
+    options = build_modelscope_openai_options(qwen)
+    assert options["reasoning_effort"] == "xhigh"
+    assert options["extra_body"] == {"chat_template_kwargs": {"enable_thinking": True}}
+    disabled = build_modelscope_openai_options({**qwen, "reasoning_effort": "none"})
+    assert "reasoning_effort" not in disabled
+    assert disabled["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    glm = build_modelscope_openai_options({"selected_model_id": "ZhipuAI/GLM-5.3-Flash", "reasoning_effort": "low"})
+    assert glm["extra_body"]["chat_template_kwargs"]["reasoning_effort"] == "low"
+    deepseek = build_modelscope_openai_options({"selected_model_id": "deepseek-ai/DeepSeek-V4.1-Flash"})
+    assert "extra_body" not in deepseek
+    legacy = normalize_modelscope_config({"selected_model_id": "ZhipuAI/GLM-5.2", "reasoning_effort": "high"})
+    assert legacy["selected_model_id"] == "ZhipuAI/GLM-5.2"
+    assert legacy["reasoning_effort"] == "high"
+    assert any(item["id"] == legacy["selected_model_id"] for item in get_modelscope_model_catalog(legacy))
 
 
 def test_modelscope_runtime_uses_openai_chat_and_preserves_vision(monkeypatch) -> None:
@@ -125,9 +149,9 @@ def test_modelscope_saved_removed_selection_falls_back_to_default(monkeypatch) -
     cfg = normalize_modelscope_config({"selected_model_id": "ZhipuAI/GLM-5.1"})
     runtime = build_modelscope_runtime_model_data(cfg)
 
-    assert cfg["selected_model_id"] == "stepfun-ai/Step-3.7-Flash"
+    assert cfg["selected_model_id"] == MODELSCOPE_DEFAULT_MODEL_ID
     assert runtime is not None
-    assert runtime["model"] == "stepfun-ai/Step-3.7-Flash"
+    assert runtime["model"] == MODELSCOPE_DEFAULT_MODEL_ID
 
 
 def test_config_active_model_resolves_modelscope_openai_transport(monkeypatch) -> None:

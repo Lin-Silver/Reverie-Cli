@@ -8896,7 +8896,7 @@ class CommandHandler:
         chosen_mode = ""
         raw_value = str(value or "").strip().lower()
         if raw_value:
-            chosen_mode = normalize_agnes_thinking_mode(raw_value, supports_thinking=True)
+            chosen_mode = normalize_agnes_thinking_mode(raw_value, supports_thinking=True, model_id=str(selected["id"]))
             if chosen_mode != raw_value and raw_value not in ("on", "true", "enabled", "enable", "default", "off", "false", "disabled", "disable", "no"):
                 self.console.print(
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Unsupported Agnes thinking depth: {value}[/{self.theme.CORAL_SOFT}]"
@@ -8930,7 +8930,9 @@ class CommandHandler:
         if not supports_thinking:
             return "none"
 
-        modes = get_agnes_thinking_catalog(supports_thinking=supports_thinking)
+        modes = get_agnes_thinking_catalog(supports_thinking=supports_thinking, model_id=str(selected_model["id"]))
+        if not modes:
+            return "on"
         current_mode = str(agnes_cfg.get("thinking_mode", "") or "").strip().lower()
         models_data = []
         current_selector_id = None

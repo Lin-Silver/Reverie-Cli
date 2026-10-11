@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from reverie import agnes as agnes_module
 from reverie.agnes import (
@@ -27,9 +28,9 @@ def test_agnes_catalog_contains_documented_text_models(monkeypatch) -> None:
     ids = {item["id"] for item in catalog}
 
     assert ids == {
-        "agnes-2.5-pro-alpha",
-        "agnes-2.5-flash",
-        "agnes-2.0-flash",
+        "agnes-2.5-pro",
+        "agnes-3.0-flash",
+        "agnes-3.0-flash-max",
     }
 
 
@@ -37,33 +38,46 @@ def test_agnes_catalog_context_lengths_match_model_docs(monkeypatch) -> None:
     monkeypatch.delenv("AGNES_API_KEY", raising=False)
     catalog = {item["id"]: item for item in get_agnes_model_catalog({"live_model_list": False})}
 
-    assert catalog["agnes-2.5-pro-alpha"]["display_name"] == "Agnes 2.5 Pro Alpha"
-    assert catalog["agnes-2.5-pro-alpha"]["context_length"] == 1_000_000
-    assert catalog["agnes-2.5-pro-alpha"]["max_output_tokens"] == 65_536
-    assert catalog["agnes-2.5-pro-alpha"]["vision"] is True
-    assert catalog["agnes-2.5-pro-alpha"]["thinking"] is True
-    assert catalog["agnes-2.5-flash"]["context_length"] == 512_000
-    assert catalog["agnes-2.5-flash"]["max_output_tokens"] == 65_536
-    assert catalog["agnes-2.5-flash"]["vision"] is True
-    assert catalog["agnes-2.5-flash"]["thinking"] is True
-    assert catalog["agnes-2.0-flash"]["context_length"] == 512_000
-    assert catalog["agnes-2.0-flash"]["max_output_tokens"] == 65_536
-    assert catalog["agnes-2.0-flash"]["vision"] is True
-    assert catalog["agnes-2.0-flash"]["thinking"] is True
+    assert catalog["agnes-2.5-pro"]["context_length"] == 1_000_000
+    assert catalog["agnes-3.0-flash"]["context_length"] == 512_000
+    assert catalog["agnes-3.0-flash"]["max_output_tokens"] == 65_536
+    assert catalog["agnes-3.0-flash-max"]["context_length"] == 524_288
+    assert catalog["agnes-3.0-flash-max"]["max_output_tokens"] == 131_072
+    assert all(item["vision"] and item["thinking"] for item in catalog.values())
 
 
-def test_agnes_defaults_to_fully_available_25_flash(monkeypatch) -> None:
+def test_agnes_defaults_to_current_30_flash(monkeypatch) -> None:
     monkeypatch.setenv("AGNES_API_KEY", "agnes-test")
     config = normalize_agnes_config({"live_model_list": False})
     runtime = build_agnes_runtime_model_data(config)
 
-    assert config["selected_model_id"] == "agnes-2.5-flash"
-    assert config["selected_model_display_name"] == "Agnes 2.5 Flash"
+    assert config["selected_model_id"] == "agnes-3.0-flash"
+    assert config["selected_model_display_name"] == "Agnes 3.0 Flash"
     assert config["max_context_tokens"] == 512_000
     assert runtime is not None
-    assert runtime["model"] == "agnes-2.5-flash"
+    assert runtime["model"] == "agnes-3.0-flash"
     assert runtime["max_context_tokens"] == 512_000
     assert runtime["supports_vision"] is True
+
+
+def test_agnes_current_thinking_parameters_and_legacy_selection(monkeypatch) -> None:
+    monkeypatch.delenv("AGNES_API_KEY", raising=False)
+    for model_id in ("agnes-3.0-flash", "agnes-3.0-flash-max"):
+        disabled = build_agnes_openai_options({"selected_model_id": model_id, "thinking_mode": "none", "live_model_list": False})
+        assert disabled["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    enabled = build_agnes_openai_options({"selected_model_id": "agnes-3.0-flash-max", "thinking_mode": "high", "max_tokens": 999999, "live_model_list": False})
+    assert enabled["extra_body"] == {"chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "xhigh"}}
+    assert enabled["max_tokens"] == 131072
+    assert [item["id"] for item in get_agnes_thinking_catalog(model_id="agnes-3.0-flash")] == ["none", "on"]
+    legacy = normalize_agnes_config({"selected_model_id": "agnes-2.5-pro-alpha", "live_model_list": False})
+    assert legacy["selected_model_id"] == "agnes-2.5-pro-alpha"
+    assert any(item["id"] == legacy["selected_model_id"] for item in get_agnes_model_catalog(legacy))
+
+
+def test_documented_agnes_metadata_does_not_fetch_live_catalog(monkeypatch) -> None:
+    monkeypatch.setenv("AGNES_API_KEY", "test-only")
+    monkeypatch.setattr(agnes_module, "fetch_agnes_model_catalog", lambda *args, **kwargs: pytest.fail("metadata must not access the network"))
+    assert agnes_module.get_agnes_model_metadata("agnes-3.0-flash-max")["context_length"] == 524288
 
 
 def test_agnes_live_source_catalog_classifies_every_supported_modality(monkeypatch) -> None:

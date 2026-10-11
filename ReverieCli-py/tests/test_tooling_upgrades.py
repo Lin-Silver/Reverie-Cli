@@ -1295,9 +1295,10 @@ def test_github_action_builds_desktop_and_publishes_version_tags() -> None:
     assert "plugins-manifest.json" in plugin_workflow
     assert "embedded Chromium browser-control runtime" in workflow
     assert "Open Computer Use desktop controller" in workflow
-    assert "Compress-Archive -Path dist\\reverie.exe, dist\\reverie-runtime" in workflow
-    assert "-DestinationPath release-assets\\Reverie-CLI-windows-x64.zip" in workflow
-    assert "[CLI package (EXE and runtime)]($base_url/Reverie-CLI-windows-x64.zip)" in workflow
+    assert "REVERIE_PYINSTALLER_MODE: onefile" in workflow
+    assert "Verify standalone Windows EXE without adjacent runtime" in workflow
+    assert "Reverie-CLI-windows-x64.zip" not in workflow
+    assert "[Standalone CLI EXE]($base_url/reverie.exe)" in workflow
     assert "$uploadSpec" not in workflow
     assert "Label =" not in workflow
     assert "reverie-blender.exe" not in workflow

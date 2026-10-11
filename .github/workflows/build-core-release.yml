@@ -105,7 +105,22 @@ jobs:
       - name: Build and verify Windows kernel
         if: runner.os == 'Windows'
         shell: cmd
+        env:
+          REVERIE_PYINSTALLER_MODE: onefile
         run: ReverieCli-py\build.bat --clean --test-exe --skip-plugins --no-pause
+
+      - name: Verify standalone Windows EXE without adjacent runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $standalone = Join-Path $env:RUNNER_TEMP 'reverie-standalone'
+          New-Item -ItemType Directory -Path $standalone -Force | Out-Null
+          Copy-Item -LiteralPath dist\reverie.exe -Destination $standalone
+          $executable = Join-Path $standalone 'reverie.exe'
+          & $executable --kernel-info
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone kernel handshake failed' }
+          python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable $executable --timeout 120
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone SDK bridge failed' }
 
       - name: Build and verify Unix kernel
         if: runner.os != 'Windows'
@@ -166,7 +181,6 @@ jobs:
           $version = node -p "require('./ReverieCli-ui/package.json').version"
           New-Item -ItemType Directory -Force release-assets | Out-Null
           Copy-Item dist\reverie.exe release-assets\reverie.exe
-          Compress-Archive -Path dist\reverie.exe, dist\reverie-runtime -DestinationPath release-assets\Reverie-CLI-windows-x64.zip -Force
           Copy-Item "ReverieCli-ui\release\Reverie-Setup-$version-x64.exe" release-assets
           Copy-Item "dist\Reverie-Portable-$version-x64.exe" release-assets
           python ReverieCli-py\scripts\write_kernel_manifest.py --executable dist\reverie.exe --output release-assets\reverie-kernel-windows-x64.json --asset-name reverie.exe
@@ -246,7 +260,6 @@ jobs:
           version=$(node -p "require('./ReverieCli-ui/package.json').version")
           for asset in \
             reverie.exe \
-            Reverie-CLI-windows-x64.zip \
             "Reverie-Setup-$version-x64.exe" \
             "Reverie-Portable-$version-x64.exe" \
             reverie \
@@ -289,12 +302,12 @@ jobs:
           fi
           base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag"
           notes=$(cat <<EOF
-          Verified Windows x64, Linux x64, macOS Apple Silicon (M-series), and macOS Intel build from \`$GITHUB_SHA\`. The Windows CLI ZIP contains \`reverie.exe\` and its required \`reverie-runtime\` directory for fast startup. Desktop packages contain a compiled fallback kernel, the embedded Chromium browser-control runtime, and Open Computer Use desktop controller.
+          Verified Windows x64, Linux x64, macOS Apple Silicon (M-series), and macOS Intel build from \`$GITHUB_SHA\`. The Windows CLI is a standalone \`reverie.exe\`: no adjacent runtime directory or Python installation is required. Desktop packages contain a compiled fallback kernel, the embedded Chromium browser-control runtime, and Open Computer Use desktop controller.
 
           ## Windows x64
           - [Installer EXE]($base_url/Reverie-Setup-$version-x64.exe)
           - [Portable GUI EXE]($base_url/Reverie-Portable-$version-x64.exe)
-          - [CLI package (EXE and runtime)]($base_url/Reverie-CLI-windows-x64.zip)
+          - [Standalone CLI EXE]($base_url/reverie.exe)
 
           ## Linux x64
           - [AppImage]($base_url/Reverie-$version-linux-x64.AppImage)
@@ -336,7 +349,6 @@ jobs:
             "Reverie-Setup-$version-x64.exe#Windows · Reverie-Setup-$version-x64.exe"
             "Reverie-Portable-$version-x64.exe#Windows · Reverie-Portable-$version-x64.exe"
             "reverie.exe#Windows · reverie.exe"
-            "Reverie-CLI-windows-x64.zip#Windows · CLI with runtime"
             "Reverie-$version-linux-x64.AppImage#Linux · Reverie-$version-linux-x64.AppImage"
             "Reverie-$version-linux-x64.deb#Linux · Reverie-$version-linux-x64.deb"
             "reverie#Linux · reverie"

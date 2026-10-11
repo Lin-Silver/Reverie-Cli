@@ -193,10 +193,10 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     assert {item["id"] for item in toggle_model["reasoning"]["options"]} == {"true", "false"}
 
     agnes = _source(payload, "agnes")
-    pro = next(item for item in agnes["models"] if item["id"] == "agnes-2.5-pro-alpha")
+    pro = next(item for item in agnes["models"] if item["id"] == "agnes-3.0-flash-max")
     assert pro["thinking"] is True
     assert pro["reasoning"]["control"] == "effort"
-    assert [item["id"] for item in pro["reasoning"]["options"]] == ["none", "low", "medium", "high"]
+    assert [item["id"] for item in pro["reasoning"]["options"]] == ["none", "low", "medium", "xhigh"]
     assert agnes["modalities"] == {"live": False, "llm": 3, "tti": 2, "ttv": 1}
 
     opencode = _source(payload, "opencode")
@@ -218,10 +218,10 @@ def test_desktop_catalog_uses_native_model_reasoning_metadata() -> None:
     assert step["vision"] is True
     assert [item["id"] for item in step["reasoning"]["options"]] == ["low", "medium", "high"]
     modelscope_deepseek = next(
-        item for item in modelscope["models"] if item["id"] == "deepseek-ai/DeepSeek-V4-Flash"
+        item for item in modelscope["models"] if item["id"] == "deepseek-ai/DeepSeek-V4.1-Flash"
     )
-    assert modelscope_deepseek["reasoning"]["control"] == "toggle"
-    assert [item["id"] for item in modelscope_deepseek["reasoning"]["options"]] == ["true", "false"]
+    assert modelscope_deepseek["reasoning"]["control"] == "fixed"
+    assert modelscope_deepseek["reasoning"]["options"] == []
 
     for source in payload["sources"]:
         for model in source["models"]:
@@ -413,8 +413,8 @@ def test_model_selection_updates_model_specific_reasoning(monkeypatch) -> None:
     assert config.opencode["selected_model_id"] == "hy3-free"
     assert config.opencode["reasoning_effort"] == "high"
 
-    apply_model_selection(config, "modelscope", "ZhipuAI/GLM-5.2", "none")
-    assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.2"
+    apply_model_selection(config, "modelscope", "ZhipuAI/GLM-5.3", "none")
+    assert config.modelscope["selected_model_id"] == "ZhipuAI/GLM-5.3"
     assert config.modelscope["reasoning_effort"] == "none"
 
 

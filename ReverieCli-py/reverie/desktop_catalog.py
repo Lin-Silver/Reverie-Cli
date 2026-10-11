@@ -148,7 +148,7 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
     if source == "modelscope":
         from .modelscope import get_modelscope_model_catalog
 
-        return get_modelscope_model_catalog()
+        return get_modelscope_model_catalog(getattr(config, "modelscope", {}))
     if source == "nvidia":
         from .nvidia import get_nvidia_model_catalog
 
@@ -210,9 +210,9 @@ def _reasoning_metadata(source: str, model: Dict[str, Any], provider_config: Dic
 
         supports = bool(model.get("thinking", False))
         return {
-            "control": "effort" if supports else "none",
-            "options": get_agnes_thinking_catalog(supports_thinking=supports) if supports else [],
-            "value": normalize_agnes_thinking_mode(provider_config.get("thinking_mode"), supports_thinking=supports),
+            "control": "fixed" if model_id == "agnes-2.5-pro" else "toggle" if model_id == "agnes-3.0-flash" else "effort" if supports else "none",
+            "options": get_agnes_thinking_catalog(supports_thinking=supports, model_id=model_id) if supports else [],
+            "value": normalize_agnes_thinking_mode(provider_config.get("thinking_mode"), supports_thinking=supports, model_id=model_id),
         }
     if source == "sensenova":
         from .sensenova import normalize_sensenova_reasoning_effort
@@ -562,6 +562,7 @@ def apply_model_selection(
             provider_config["thinking_mode"] = normalize_agnes_thinking_mode(
                 reasoning,
                 supports_thinking=bool(selected.get("thinking", False)),
+                model_id=str(selected["id"]),
             )
         provider_config = normalize_agnes_config(provider_config)
     elif normalized_source == "sensenova":

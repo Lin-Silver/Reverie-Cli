@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from pathlib import Path
 import os
 
-build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onedir' if os.name == 'nt' else 'onefile').strip().lower()
+build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
 datas = [('README.md', '.')]
 binaries = []
 hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.syntax', 'rich.markdown', 'rich.progress', 'rich.prompt', 'rich.text', 'click', 'requests', 'openai', 'git', 'ddgs', 'bs4', 'yaml', 'tqdm', 

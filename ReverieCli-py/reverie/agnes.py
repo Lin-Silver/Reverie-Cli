@@ -10,8 +10,8 @@ from urllib.request import Request, urlopen
 
 
 AGNES_DEFAULT_API_URL = "https://apihub.agnes-ai.com/v1"
-AGNES_DEFAULT_MODEL_ID = "agnes-2.5-flash"
-AGNES_DEFAULT_MODEL_DISPLAY_NAME = "Agnes 2.5 Flash"
+AGNES_DEFAULT_MODEL_ID = "agnes-3.0-flash"
+AGNES_DEFAULT_MODEL_DISPLAY_NAME = "Agnes 3.0 Flash"
 AGNES_API_KEY_HINT_URL = "https://platform.agnes-ai.com/settings/apiKeys"
 AGNES_DEFAULT_CONTEXT_TOKENS = 512_000
 AGNES_DEFAULT_MAX_TOKENS = 65_536
@@ -24,12 +24,16 @@ AGNES_THINKING_BUDGETS = {
     "high": 8192,
 }
 AGNES_THINKING_LABELS = {
+    "on": "On",
+    "xhigh": "Max",
     "none": "Off",
     "low": "Low",
     "medium": "Medium",
     "high": "High",
 }
 AGNES_THINKING_DESCRIPTIONS = {
+    "on": "Enable Agnes thinking.",
+    "xhigh": "Use the highest documented reasoning effort.",
     "none": "Disable Agnes thinking for lower latency.",
     "low": "Use a small thinking budget for straightforward prompts.",
     "medium": "Use the provider-recommended thinking budget for heavier coding and reasoning.",
@@ -67,7 +71,7 @@ def _agnes_model(
     }
 
 
-_AGNES_STATIC_MODEL_CATALOG: List[Dict[str, Any]] = [
+_AGNES_LEGACY_MODEL_CATALOG: List[Dict[str, Any]] = [
     _agnes_model(
         "agnes-2.5-pro-alpha",
         "Agnes 2.5 Pro Alpha",
@@ -97,9 +101,15 @@ _AGNES_STATIC_MODEL_CATALOG: List[Dict[str, Any]] = [
     ),
 ]
 
+_AGNES_STATIC_MODEL_CATALOG: List[Dict[str, Any]] = [
+    _agnes_model("agnes-3.0-flash", "Agnes 3.0 Flash", "Agnes current fast agent model with vision and a thinking switch.", vision=True, thinking=True),
+    _agnes_model("agnes-3.0-flash-max", "Agnes 3.0 Flash Max", "Agnes paid international model with selectable reasoning effort.", context_length=524_288, max_output_tokens=131_072, vision=True, thinking=True),
+    _agnes_model("agnes-2.5-pro", "Agnes 2.5 Pro", "Agnes stable paid reasoning model with text and image input.", context_length=1_000_000, vision=True, thinking=True),
+]
+
 
 def _static_model_metadata() -> Dict[str, Dict[str, Any]]:
-    return {str(item["id"]).strip().lower(): dict(item) for item in _AGNES_STATIC_MODEL_CATALOG}
+    return {str(item["id"]).strip().lower(): dict(item) for item in [*_AGNES_LEGACY_MODEL_CATALOG, *_AGNES_STATIC_MODEL_CATALOG]}
 
 
 def default_agnes_config() -> Dict[str, Any]:
@@ -121,8 +131,16 @@ def default_agnes_config() -> Dict[str, Any]:
     }
 
 
-def normalize_agnes_thinking_mode(value: Any, *, supports_thinking: bool = True) -> str:
+def normalize_agnes_thinking_mode(value: Any, *, supports_thinking: bool = True, model_id: str = "") -> str:
     candidate = str(value or "").strip().lower()
+    if model_id.lower() == "agnes-2.5-pro":
+        return "on"
+    if model_id.lower() in {"agnes-3.0-flash", "agnes-3.0-flash-max", "agnes-2.5-pro"}:
+        if not supports_thinking or candidate in {"none", "off", "false", "disabled", "disable", "no"}:
+            return "none"
+        if model_id.lower() == "agnes-3.0-flash-max":
+            return {"high": "xhigh", "max": "xhigh"}.get(candidate, candidate) if candidate in {"low", "medium", "high", "max", "xhigh"} else "low"
+        return "on"
     aliases = {
         "off": "none",
         "false": "none",
@@ -144,12 +162,20 @@ def normalize_agnes_thinking_mode(value: Any, *, supports_thinking: bool = True)
 
 
 def get_agnes_thinking_label(mode: Any) -> str:
+    if mode in {"on", "xhigh"}:
+        return AGNES_THINKING_LABELS[mode]
     normalized = normalize_agnes_thinking_mode(mode)
     return AGNES_THINKING_LABELS.get(normalized, AGNES_THINKING_LABELS[AGNES_DEFAULT_THINKING_MODE])
 
 
-def get_agnes_thinking_catalog(*, supports_thinking: bool = True) -> List[Dict[str, str]]:
+def get_agnes_thinking_catalog(*, supports_thinking: bool = True, model_id: str = "") -> List[Dict[str, str]]:
     modes = ("none", "low", "medium", "high") if supports_thinking else ("none",)
+    if supports_thinking and model_id.lower() == "agnes-3.0-flash":
+        modes = ("none", "on")
+    elif supports_thinking and model_id.lower() == "agnes-3.0-flash-max":
+        modes = ("none", "low", "medium", "xhigh")
+    elif model_id.lower() == "agnes-2.5-pro":
+        return []
     return [
         {
             "id": mode,
@@ -351,7 +377,12 @@ def get_agnes_model_catalog(agnes_config: Any = None) -> List[Dict[str, Any]]:
         except Exception:
             models = []
 
-    return models or [dict(item) for item in _AGNES_STATIC_MODEL_CATALOG]
+    models = models or [dict(item) for item in _AGNES_STATIC_MODEL_CATALOG]
+    selected_id = str(cfg.get("selected_model_id") or "").lower()
+    selected = _static_model_metadata().get(selected_id)
+    if selected and not any(item["id"].lower() == selected_id for item in models):
+        models.append({**selected, "deprecated": True})
+    return models
 
 
 def get_agnes_source_catalog(agnes_config: Any = None) -> Dict[str, Any]:
@@ -401,6 +432,9 @@ def get_agnes_model_metadata(model_id: Any, agnes_config: Any = None) -> Optiona
     wanted = str(model_id or "").strip().lower()
     if not wanted:
         return None
+    documented = _static_model_metadata().get(wanted)
+    if documented:
+        return documented
     for item in get_agnes_model_catalog(agnes_config):
         if str(item.get("id", "")).strip().lower() == wanted:
             return dict(item)
@@ -473,6 +507,7 @@ def normalize_agnes_config(raw_agnes: Any) -> Dict[str, Any]:
         cfg["thinking_mode"] = normalize_agnes_thinking_mode(
             cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE),
             supports_thinking=bool(matched.get("thinking", False)),
+            model_id=str(matched["id"]),
         )
         context_length = matched.get("context_length")
         if context_length:
@@ -510,6 +545,7 @@ def build_agnes_runtime_model_data(agnes_config: Any, model_id: Optional[str] = 
         "thinking_mode": normalize_agnes_thinking_mode(
             cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE),
             supports_thinking=bool(selected.get("thinking", False)),
+            model_id=str(selected["id"]),
         ),
         "endpoint": str(cfg.get("endpoint", "") or ""),
         "custom_headers": {},
@@ -533,6 +569,16 @@ def build_agnes_openai_options(agnes_config: Any, model_id: Optional[str] = None
         "top_p": float(cfg.get("top_p", AGNES_DEFAULT_TOP_P)),
         "max_tokens": min(max_tokens, output_limit),
     }
+    selected_id = str((selected or {}).get("id") or "")
+    mode = normalize_agnes_thinking_mode(cfg.get("thinking_mode"), model_id=selected_id, supports_thinking=bool((selected or {}).get("thinking")))
+    if selected_id in {"agnes-3.0-flash", "agnes-3.0-flash-max"}:
+        template = {"enable_thinking": mode != "none"}
+        if selected_id == "agnes-3.0-flash-max" and mode != "none":
+            template["reasoning_effort"] = mode
+        options["extra_body"] = {"chat_template_kwargs": template}
+        return options
+    if selected_id == "agnes-2.5-pro":
+        return options
     thinking = build_agnes_thinking_payload(
         normalize_agnes_thinking_mode(
             cfg.get("thinking_mode", AGNES_DEFAULT_THINKING_MODE),

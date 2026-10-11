@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Optional
 
 MODELSCOPE_DEFAULT_API_URL = "https://api-inference.modelscope.cn/v1"
 MODELSCOPE_DEFAULT_ENDPOINT = "/chat/completions"
-MODELSCOPE_DEFAULT_MODEL_ID = "stepfun-ai/Step-3.7-Flash"
-MODELSCOPE_DEFAULT_MODEL_DISPLAY_NAME = "Step-3.7-Flash"
+MODELSCOPE_DEFAULT_MODEL_ID = "Qwen/Qwen3.8-27B"
+MODELSCOPE_DEFAULT_MODEL_DISPLAY_NAME = "Qwen3.8-27B"
 MODELSCOPE_API_KEY_HINT_URL = "https://www.modelscope.cn/my/access/token"
 MODELSCOPE_DEFAULT_CONTEXT_TOKENS = 262_144
 MODELSCOPE_DEFAULT_MAX_TOKENS = 16_384
@@ -27,6 +27,7 @@ MODELSCOPE_STEP_CONTEXT_TOKENS = 262_144
 MODELSCOPE_STEP_MAX_TOKENS = 65_536
 
 _REASONING_LABELS = {
+    "xhigh": ("Max", "Use the model's highest documented reasoning effort."),
     "none": ("Non-think", "Disable thinking for a faster direct response."),
     "no_think": ("Non-think", "Use the model's direct-response mode."),
     "low": ("Low", "Use a low reasoning effort."),
@@ -81,7 +82,7 @@ def _modelscope_model(
     }
 
 
-_MODELSCOPE_MODEL_CATALOG: List[Dict[str, Any]] = [
+_MODELSCOPE_LEGACY_MODEL_CATALOG: List[Dict[str, Any]] = [
     _modelscope_model(
         "stepfun-ai/Step-3.7-Flash",
         "Step-3.7-Flash",
@@ -127,8 +128,35 @@ _MODELSCOPE_MODEL_CATALOG: List[Dict[str, Any]] = [
     ),
 ]
 
+_MODELSCOPE_MODEL_CATALOG: List[Dict[str, Any]] = [
+    _modelscope_model(
+        "Qwen/Qwen3.8-27B", "Qwen3.8-27B", "Qwen multimodal model with a native 256K context window.",
+        context_length=262_144, max_output_tokens=32_768, vision=True, thinking=True,
+        thinking_options=_reasoning_options("none", "low", "medium", "xhigh"), default_thinking_choice="xhigh",
+    ),
+    _modelscope_model(
+        "ZhipuAI/GLM-5.3", "GLM-5.3", "GLM flagship coding and agent model.",
+        context_length=MODELSCOPE_GLM_CONTEXT_TOKENS, max_output_tokens=MODELSCOPE_GLM_MAX_TOKENS, thinking=True,
+        thinking_options=_reasoning_options("none", "low", "high", "max"), default_thinking_choice="max",
+    ),
+    _modelscope_model(
+        "ZhipuAI/GLM-5.3-Flash", "GLM-5.3-Flash", "GLM multimodal model with selectable reasoning effort.",
+        context_length=MODELSCOPE_GLM_CONTEXT_TOKENS, max_output_tokens=MODELSCOPE_GLM_MAX_TOKENS, vision=True, thinking=True,
+        thinking_options=_reasoning_options("none", "low", "high", "max"), default_thinking_choice="max",
+    ),
+    _modelscope_model(
+        "deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek V4.1 Flash", "DeepSeek current multimodal model; use hosted reasoning defaults.",
+        context_length=MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS, max_output_tokens=MODELSCOPE_DEEPSEEK_MAX_TOKENS, vision=True, thinking=True,
+    ),
+    _modelscope_model(
+        "deepseek-ai/DeepSeek-V4-Pro-0813", "DeepSeek V4 Pro 0813", "DeepSeek updated flagship model; use hosted reasoning defaults.",
+        context_length=MODELSCOPE_DEEPSEEK_CONTEXT_TOKENS, max_output_tokens=MODELSCOPE_DEEPSEEK_MAX_TOKENS, thinking=True,
+    ),
+    _MODELSCOPE_LEGACY_MODEL_CATALOG[0],
+]
+
 _MODELSCOPE_MODEL_METADATA = {
-    str(item["id"]).strip().lower(): dict(item) for item in _MODELSCOPE_MODEL_CATALOG
+    str(item["id"]).strip().lower(): dict(item) for item in [*_MODELSCOPE_LEGACY_MODEL_CATALOG, *_MODELSCOPE_MODEL_CATALOG]
 }
 
 
@@ -144,13 +172,18 @@ def default_modelscope_config() -> Dict[str, Any]:
         "max_context_tokens": MODELSCOPE_DEFAULT_CONTEXT_TOKENS,
         "timeout": 300,
         "max_tokens": MODELSCOPE_DEFAULT_MAX_TOKENS,
-        "reasoning_effort": "medium",
+        "reasoning_effort": "xhigh",
     }
 
 
-def get_modelscope_model_catalog() -> List[Dict[str, Any]]:
+def get_modelscope_model_catalog(modelscope_config: Any = None) -> List[Dict[str, Any]]:
     """Return the supported ModelScope model catalog."""
-    return [dict(item) for item in _MODELSCOPE_MODEL_CATALOG]
+    models = [dict(item) for item in _MODELSCOPE_MODEL_CATALOG]
+    selected_id = str((modelscope_config or {}).get("selected_model_id") or "").lower()
+    selected = _MODELSCOPE_MODEL_METADATA.get(selected_id)
+    if selected and not any(item["id"].lower() == selected_id for item in models):
+        models.append({**selected, "deprecated": True})
+    return models
 
 
 def get_modelscope_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
@@ -271,12 +304,14 @@ def normalize_modelscope_reasoning_choice(model_id: Any, value: Any) -> str:
     options = [str(item.get("id") or "") for item in selected.get("thinking_options", [])]
     default = str(selected.get("default_thinking_choice") or "")
     candidate = str(value or "").strip().lower().replace("-", "_")
+    if "xhigh" in options and candidate in {"max", "high", "extra_high"}:
+        candidate = "xhigh"
     candidate = {
         "off": "none",
         "non_think": "none",
         "nothink": "no_think",
         "med": "medium",
-        "xhigh": "max",
+        "xhigh": "xhigh" if "xhigh" in options else "max",
         "extra_high": "max",
     }.get(candidate, candidate)
     if "true" in options:
@@ -367,20 +402,28 @@ def build_modelscope_openai_options(modelscope_config: Any, model_id: Optional[s
     if selected_id == "stepfun-ai/Step-3.7-Flash":
         template_kwargs = {"reasoning_effort": choice}
         temperature, top_p = 1.0, 0.95
-    elif selected_id == "ZhipuAI/GLM-5.2":
+    elif selected_id in {"ZhipuAI/GLM-5.2", "ZhipuAI/GLM-5.3", "ZhipuAI/GLM-5.3-Flash"}:
         template_kwargs = {"enable_thinking": choice != "none"}
         if choice != "none":
             template_kwargs["reasoning_effort"] = choice
         temperature, top_p = 1.0, 1.0
+    elif selected_id == "Qwen/Qwen3.8-27B":
+        template_kwargs = {"enable_thinking": choice != "none"}
+        temperature, top_p = 1.0, 0.95
+    elif (selected or {}).get("thinking_control") == "fixed":
+        return {"temperature": 1.0, "top_p": 1.0, "max_tokens": min(configured_limit, model_limit)}
     else:
         template_kwargs = {"reasoning_effort": choice == "true"}
         temperature, top_p = 1.0, 1.0
-    return {
+    options = {
         "temperature": temperature,
         "top_p": top_p,
         "max_tokens": min(configured_limit, model_limit),
         "extra_body": {"chat_template_kwargs": template_kwargs},
     }
+    if selected_id == "Qwen/Qwen3.8-27B" and choice != "none":
+        options["reasoning_effort"] = choice
+    return options
 
 
 def build_modelscope_anthropic_options(modelscope_config: Any, model_id: Optional[str] = None) -> Dict[str, Any]:

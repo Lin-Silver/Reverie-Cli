@@ -8,6 +8,8 @@
 
 2026-10-08 补充：本次仅对 Intelligent UI 相关源码做定向静态审查，并整理文档；没有重跑全部产品验收。已有 Markdown、`ui.event`、MCP 工具/资源和 Workbench，但没有生成式交互视图宿主、MCP Apps 桥及相应持久化链路。见 [Intelligent UI 规格](INTELLIGENT_UI_SPEC.md) 与 G33。此前各日期的验证已集中到 [验证历史](VERIFICATION_HISTORY.md)。
 
+2026-10-10 补充：GUI 启动时取消额外预热内核及管理内核自动索引；工作内核按需启动，最多一个空闲内核保留 30 秒。Windows CLI 默认恢复独立单 EXE；桌面包内部仍保留自己的运行文件。更新 Agnes / ModelScope 文本目录、About GitHub 链接和透明思考背景；内存采样、独立 EXE、界面和回归检查见 [本次验证](VERIFICATION_HISTORY.md#desktop-memory-2026-10-10)。并行开发的未提交 Intelligent UI 文件不计入本次验收。
+
 | 状态 | 含义 |
 | --- | --- |
 | 已实现并有验证 | 对应路径存在，且有注明范围的测试或运行证据；不代表所有模型、系统和数据规模都通过 |

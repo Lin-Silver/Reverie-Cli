@@ -162,7 +162,7 @@ cd ReverieCli-py
 .\build.bat --test-exe
 ```
 
-`build.bat` runs from `ReverieCli-py` and writes `dist\reverie.exe` with its companion `dist\reverie-runtime\` directory. Keep both together when copying the Windows terminal version; this avoids unpacking the runtime on every startup. Windows releases include both in `Reverie-CLI-windows-x64.zip`. Set `REVERIE_PYINSTALLER_MODE=onefile` before building only if a single EXE is required.
+`build.bat` runs from `ReverieCli-py` and writes a standalone `dist\reverie.exe` by default (`onefile`). Copy only that EXE to run the CLI/TUI: no adjacent runtime directory or installed Python is required. Embedded dependencies are extracted temporarily while it runs. Desktop packaging separately selects `ui-onedir` for its internal SDK kernel, keeping the GUI startup fast. Optional development builds can explicitly set `REVERIE_PYINSTALLER_MODE=onedir`; their runtime directory is required only for that build mode.
 Builds are incremental by default; use `--clean`, `--reinstall-deps`, `--refresh-browser`, or `--rebuild-plugins` when those parts need an explicit refresh.
 GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets.
 

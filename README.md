@@ -6,6 +6,8 @@ Current stable version: **v2.5.0** (released 2026-07-17).
 
 Current working-tree behavior and remaining gaps were reviewed on **2026-10-05**. Start with the [documentation index](docs/README.md), [feature status](docs/FEATURE_STATUS.md), [Desktop guide](docs/DESKTOP_GUIDE.md), and [roadmap](docs/ROADMAP.md). The dated audit distinguishes implementation from completed acceptance; local updates are not necessarily published releases.
 
+Updated **2026-10-10**: lower desktop startup memory, refreshed Agnes/ModelScope text models, transparent thought blocks, an About repository link, and a standalone Windows CLI EXE. See [the measured results](docs/VERIFICATION_HISTORY.md#desktop-memory-2026-10-10).
+
 **Reverie** is an open-source agentic coding assistant with terminal and Electron desktop interfaces for natural language interaction with your local codebase. Both use the Python core's multi-provider LLM access, Context Engine retrieval, sessions and tools; Desktop adds project/chat navigation, structured input, Git review and runtime evidence surfaces. Optional 3D/game, media and browser workflows have the boundaries documented below.
 
 - **Core function**: terminal-based AI coding assistant with local workspace tools, context retrieval, session continuity, and multi-provider LLM access
@@ -59,17 +61,19 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Kimi K3, DeepSeek V4 Pro/Flash, Muse Glimmer 30B, Nemotron 3.5 Lightning, Nemotron 3 Super/Ultra, MiniMax M3, Step-3.7-Flash, GPT-OSS-120B, Laguna XS 2.1 |
-| **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Step 3.7 Flash, GLM-5.2, DeepSeek V4 Pro, DeepSeek V4 Flash                                                                                                                            |
+| **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Qwen3.8-27B (default), GLM-5.3/Flash, DeepSeek V4.1 Flash, DeepSeek V4 Pro 0813, Step 3.7 Flash |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
 | **SenseNova**      | SenseTime SenseNova API with live model discovery and OpenAI-compatible transport                              | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.2, and SenseNova 6.8 Flash Lite                                                                                            |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
-| **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 2.5 Pro Alpha, Agnes 2.5 Flash, Agnes 2.0 Flash, image/video generation                                                                                                                |
+| **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 3.0 Flash (default), 3.0 Flash Max, stable 2.5 Pro; separate image/video profiles |
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
 | **Custom**         | Any endpoint you add with `/provider add` - OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages     | Read live from the provider's own model-list endpoint                                                                                                                                        |
 
 Provider transports support streaming where their model and endpoint implement the required protocol. A listed model, HTTP 200, or availability probe does not prove working content, complete SSE, tool calls or vision. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider; [current compatibility limits](docs/FEATURE_STATUS.md) and the [JDW sample](docs/VERIFICATION_HISTORY.md#reverie-cli-jdw-compatibility-2026-10-04) are recorded separately.
 
 Use `/provider list` to see every source at once with its API-key flag and a parallel availability probe, and `/provider add` to register your own gateway from four fields: name, base URL, API key, and API request format.
+
+The built-in Agnes and ModelScope text catalogs were reviewed against official documentation on **2026-10-10**: [Agnes Flash](https://wiki.agnes-ai.com/en/docs/agnes-30-flash), [Flash Max](https://wiki.agnes-ai.com/en/docs/agnes-30-flash-max), [stable Pro](https://wiki.agnes-ai.com/en/docs/agnes-25-pro), and [ModelScope's inference catalog](https://www.modelscope.cn/models?filter=inference_type&page=1&sort=default&tabKey=task). New configurations use the defaults above; existing selections keep their model IDs and reasoning settings. Flash uses an explicit thinking switch; Flash Max supports `low`, `medium`, and `xhigh`. The newer ModelScope DeepSeek entries use hosted reasoning defaults until their hosted parameter contract is verified. Catalog entries and conservative request limits do not guarantee account access or quota.
 
 A custom provider keeps two extra settings of its own:
 
@@ -221,15 +225,14 @@ Reverie-Cli/
 │   ├── setup.py
 │   └── ...
 └── dist/
-    ├── reverie.exe            ← Windows executable (packaged)
-    └── reverie-runtime/       ← Companion terminal runtime
+    └── reverie.exe            ← Standalone Windows CLI executable
 ```
 
 ---
 
 ## Installation & Setup
 
-### Prerequisites
+### Prerequisites for running from source
 
 - **Python 3.10+**
 - **Git** (for session history and Context Engine)
@@ -240,7 +243,7 @@ Reverie-Cli/
 
 The core/desktop Release is separate from the optional plugin Release:
 
-- Windows x64: `Reverie-CLI-windows-x64.zip` (EXE and runtime), the portable GUI executable, and the NSIS installer.
+- Windows x64: standalone `reverie.exe`, the portable GUI executable, and the NSIS installer.
 - Linux x64: `reverie`, AppImage, and Debian package. The Debian installer provides both `reverie` and `reverieui` commands.
 - macOS: explicitly named Apple Silicon (M-series) and Intel DMGs plus matching native CLI cores. Command-line tools remain an explicit user-installed symlink from the app bundle.
 - Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin paths additionally trigger their isolated plugin build while the rolling desktop prerelease is refreshed by every `main` push.
@@ -248,6 +251,20 @@ The core/desktop Release is separate from the optional plugin Release:
 Every push to `main` rebuilds the rolling `latest` tag as **Reverie CLI Latest (Prerelease)**. Version tags such as `v2.5.0` remain stable Releases. Release notes and upload labels group downloads as Windows, Linux, macOS Apple Silicon, then macOS Intel. `reverie-kernels.json` is the single optional verification file: GitHub already displays a digest for every asset, while this consolidated record additionally maps each kernel to its protocol, interface version, platform, architecture, commit, size, and SHA-256.
 
 `reverie` starts the TUI/core. `reverieui` starts the GUI in the current directory. Packaged GUIs start with their fast onedir kernel; the explicit portable `--tui` route may select a sibling kernel only when its SHA-256 appears in the build-time allowlist and its `--kernel-info` protocol handshake succeeds.
+
+### CLI, TUI, and Desktop GUI
+
+All three use the same Python core for providers, tools, permissions, sessions, and Context Engine:
+
+| Entry point | Interface | Distribution |
+| --- | --- | --- |
+| `reverie.exe` | Terminal CLI; interactive TUI by default | One EXE, without Electron, an adjacent runtime directory, or an installed Python environment |
+| TUI | Rich terminal interface inside the CLI | Included in `reverie.exe`; no separate TUI application is required |
+| `ReverieUI.exe` / `reverieui` | Electron/React desktop GUI | Calls a compiled internal CLI kernel through JSONL SDK bridge; desktop packages manage their own internal runtime |
+
+Download the [standalone CLI EXE](https://github.com/Lin-Silver/Reverie-Cli/releases/download/latest/reverie.exe) for terminal-only use. The one-file executable embeds its Python dependencies and extracts them to a temporary directory while running. It needs no external Python installation; normal configuration, session data, and optional tool resources are still written when used. GUI portable packaging is a separate download and manages its extracted application files under `.reverie/desktop/app-runtime`.
+
+Desktop startup creates one administration kernel and starts chat workers on demand. It postpones automatic indexing until a chat needs it or you explicitly request indexing. At most one completed chat worker stays warm for 30 seconds; active chats remain isolated with up to four concurrent workers. This bounds idle kernel retention; memory during active work still depends on workspace and conversation size. Windows measurements and their scope are recorded in [verification history](docs/VERIFICATION_HISTORY.md#desktop-memory-2026-10-10).
 
 ### Install from Source (Python)
 
@@ -270,7 +287,7 @@ py -m reverie
 
 ### Pre-built Executable
 
-Download `Reverie-CLI-windows-x64.zip`, extract it, and run `reverie.exe`. Keep the companion `reverie-runtime/` directory beside the EXE; the terminal starts without unpacking these files each time. No Python installation is required.
+Download `reverie.exe` and run it in your terminal. You can copy this one file to another directory and run it there. No companion `reverie-runtime/` directory or Python installation is required.
 
 ### First-Run Setup
 

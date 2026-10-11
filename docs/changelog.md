@@ -58,6 +58,14 @@ Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，�
 
 ## Unreleased
 
+### 2026-10-10 — 桌面内存、模型目录与独立 CLI EXE
+
+* 取消 GUI 启动时的第二个预热内核和管理内核的自动索引；聊天工作内核按需启动，最多保留一个空闲内核并在 30 秒后释放，保留四个活动运行的隔离与并发。Windows 当前仓库场景的进程树工作集峰值从 958 MiB 降到 522 MiB；测量边界见 [验证记录](VERIFICATION_HISTORY.md#desktop-memory-2026-10-10)。
+* About 页面新增项目 GitHub 链接；修复桌面样式覆盖透明思考区背景的问题，覆盖浅色 / 深色、工作区背景开关及活动思考状态。
+* Agnes 文本目录采用 3.0 Flash、3.0 Flash Max 和正式版 2.5 Pro；ModelScope 更新 Qwen3.8、GLM5.3 和 DeepSeek 新版目录。按模型提供思考控制，保留已有旧模型 ID、元数据与有效配置；官方目录核验不等于账户实测可用。
+* Windows 公开 CLI 构建恢复默认 `onefile`，发布独立 `reverie.exe`，取消必须附带外置运行目录的 CLI ZIP。桌面包继续使用内部 `ui-onedir` 核心；CI 增加只复制 EXE 到独立目录的握手与 SDK 测试。
+* README 明确核心、终端 TUI、桌面 GUI 的关系、下载和运行方式；版本号仍为 2.5.0，历史发布条目保留原记录。
+
 ### 2026-10-10 — GitHub Actions 全新检出与 Linux 测试修复
 
 * 修复 pytest 默认临时目录初始化：全新检出时先创建 `.runtime` 父目录，再由 pytest 创建独立测试目录；保留拒绝复用已有目录与显式 `--basetemp` 的原有行为。此前本地已有 `.runtime` 掩盖了问题，CI 的五组 Python 测试和覆盖率任务均在 fixture 初始化时失败。

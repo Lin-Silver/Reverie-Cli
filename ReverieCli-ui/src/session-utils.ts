@@ -1,5 +1,6 @@
-import type { SessionMessage, SessionState } from "./types";
+import type { SessionMessage, SessionState, ViewSegment } from "./types";
 import { isThinkTool } from "./thinking-tool";
+import { parseRenderViewResult } from "./view-events";
 
 export interface ToolCallRecord {
   name: string;
@@ -20,7 +21,7 @@ export function messageReasoningText(message: SessionMessage): string {
     message.thinking,
     message.reasoning,
     message.analysis,
-  ].map(textFragments).find((value) => value.trim())?.trim() ?? "";
+  ].map(textFragments).find((value) => value.trim()) ?? "";
 }
 
 export function visibleSessionMessages(messages: SessionMessage[]): SessionMessage[] {
@@ -29,22 +30,63 @@ export function visibleSessionMessages(messages: SessionMessage[]): SessionMessa
 
 export type TranscriptRow =
   | { kind: "message"; index: number; message: SessionMessage }
-  | { kind: "activity"; index: number; events: Array<Record<string, unknown>> };
+  | { kind: "activity"; index: number; events: Array<Record<string, unknown>> }
+  | { kind: "view"; index: number; view: ViewSegment };
 
-export function groupTranscriptMessages(messages: SessionMessage[]): TranscriptRow[] {
+// render_view and its aliases (see tools/render_view.py) announce an interactive
+// view rather than an ordinary tool result.
+const RENDER_VIEW_NAMES = new Set(["render_view", "show_view", "interactive_view"]);
+const isRenderViewName = (name: string | undefined): boolean => RENDER_VIEW_NAMES.has((name ?? "").trim());
+
+export function groupTranscriptMessages(messages: SessionMessage[], sessionId = ""): TranscriptRow[] {
   const rows: TranscriptRow[] = [];
   const calls = new Map<string, Record<string, unknown>>();
+  const renderViewCalls = new Set<string>();
+  const viewRowByViewId = new Map<string, number>();
   const appendEvent = (event: Record<string, unknown>, index: number) => {
     const last = rows.at(-1);
     if (last?.kind === "activity") last.events.push(event);
     else rows.push({ kind: "activity", index, events: [event] });
   };
+  // A view handle survives a reload only as the render_view result text; dedupe by
+  // viewId so the follow-up revisions (which reuse the id) collapse to one row at
+  // the highest revision, matching the live stream's in-place replacement.
+  const placeView = (index: number, view: ViewSegment) => {
+    const existing = viewRowByViewId.get(view.viewId);
+    if (existing !== undefined) {
+      const current = rows[existing];
+      if (current.kind === "view" && view.revision >= current.view.revision) {
+        rows[existing] = { kind: "view", index: current.index, view };
+      }
+      return;
+    }
+    viewRowByViewId.set(view.viewId, rows.length);
+    rows.push({ kind: "view", index, view });
+  };
   for (const [index, message] of messages.entries()) {
     if (message.role === "tool") {
-      const event = calls.get(message.tool_call_id ?? "") ?? {
-        tool_name: message.name || "tool", tool_call_id: message.tool_call_id,
+      const callId = message.tool_call_id ?? "";
+      const mcpViewResult = String(calls.get(callId)?.tool_name ?? message.name ?? "").startsWith("mcp_") && parseRenderViewResult(message.content);
+      if (renderViewCalls.has(callId) || mcpViewResult) {
+        const parsed = parseRenderViewResult(message.content);
+        if (parsed) {
+          placeView(index, {
+            sessionId,
+            viewId: parsed.viewId,
+            revision: parsed.revision,
+            title: parsed.title ?? "",
+            summary: parsed.summary ?? "",
+            status: "ready",
+          });
+          continue;
+        }
+        // render_view FAILED (no handle in the text): fall through so the failure
+        // stays a visible activity row and nothing fabricates a view.
+      }
+      const event = calls.get(callId) ?? {
+        tool_name: message.name || (renderViewCalls.has(callId) ? "render_view" : "tool"), tool_call_id: message.tool_call_id,
       };
-      if (!calls.has(message.tool_call_id ?? "")) appendEvent(event, index);
+      if (!calls.has(callId)) appendEvent(event, index);
       const success = !/^\s*(error|\[error|failed|exception)/i.test(textFragments(message.content));
       Object.assign(event, { event: "tool_result", output: message.content, success, status: success ? "success" : "error", detail: "" });
       continue;
@@ -58,6 +100,12 @@ export function groupTranscriptMessages(messages: SessionMessage[]): TranscriptR
     }
     for (const call of message.tool_calls ?? []) {
       const name = call.function?.name ?? "tool";
+      // A view call renders as its own `view` row at result time, never as a
+      // generic tool_start activity card.
+      if (call.id && isRenderViewName(name)) {
+        renderViewCalls.add(call.id);
+        continue;
+      }
       const event = {
         event: "tool_start", tool_name: name, message: name,
         tool_call_id: call.id, status: "warning", detail: "No saved result. This operation may have been interrupted.",

@@ -67,6 +67,7 @@ ReverieCli-py/ui-runtime/appdata/
 Reverie UI/artifacts/
 
 # Reverie Electron desktop local dependencies, output, and runtime state
+/node_modules/
 /ReverieCli-ui/node_modules/
 /ReverieCli-ui/.npm-cache/
 /ReverieCli-ui/.cache/

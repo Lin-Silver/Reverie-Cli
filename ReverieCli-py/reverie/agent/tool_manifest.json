@@ -9,9 +9,10 @@
   ],
   "calling_rules": [
     "Use exact tool names and exact schema field names.",
+    "Respect the user's stated tool scope. A visible schema describes capability, not authorization to use a tool outside that scope.",
     "Start with required fields, then add optional fields only when needed.",
     "Prefer narrow, reversible, read-only calls before high-impact calls.",
-    "Retrieve or inspect repository evidence before code edits; verify after code edits. For memory record operations, use the memory tools and their reported results.",
+    "Retrieve or inspect repository evidence before repository code edits; verify after code edits. A new self-contained view using supplied data follows its create_file/render_view workflow directly. For memory record operations, use the memory tools and their reported results.",
     "For a memory request with an exact memory_id, call memory_manager get, correct, or delete directly. Stop after the requested memory action succeeds; repository retrieval is unnecessary.",
     "For a direct save request, stop after a successful memory_manager remember result; do not call memory_retrieval, list, get, or status to verify the write.",
     "After any tool use, return a user-facing response instead of stopping at raw output."
@@ -46,6 +47,7 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "render_view",
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
@@ -82,6 +84,7 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "render_view",
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
@@ -129,16 +132,21 @@
         "skill_lookup",
         "list_mcp_resources",
         "read_mcp_resource",
+        "render_view",
         "media_generation_capabilities",
         "text_to_image",
         "text_to_video",
         "userInput",
         "switch_mode",
-        "atlas_delivery_orchestrator"
+        "atlas_delivery_orchestrator",
+        "task_manager"
       ]
     },
     "writer": {
       "title": "Writer Tool Surface",
+      "discovery_rules": [
+        "The active tool schemas are already visible in this request; choose directly from them instead of calling a catalog tool."
+      ],
       "workflow": [
         "For a novel or serial request, call `serial_novel` before drafting prose; infer safe creative defaults from the brief instead of forcing a questionnaire.",
         "Use `serial_novel` to persist project bibles, chapter control cards, committed chapters, continuity ledgers, resumable progress, and verified character totals.",
@@ -146,9 +154,6 @@
         "Use writer analysis tools after drafting, then commit every accepted chapter through `serial_novel`."
       ],
       "tools": [
-        "codebase-retrieval",
-        "str_replace_editor",
-        "create_file",
         "web_search",
         "web_fetch",
         "memory_retrieval",
@@ -197,7 +202,7 @@
   "tools": {
     "codebase-retrieval": {
       "purpose": "Primary Context Engine entrypoint; proactively use it for repository files, symbols, usages, dependencies, workspace memory, Git evidence, and LSP state.",
-      "use_when": "First tool for large repositories and any answer, plan, review, diagnosis, or edit that depends on repository state when the current turn has no Context Engine result yet. Prefer `task` for broad work, then use narrower queries only for unresolved details.",
+      "use_when": "First tool for large repositories and any answer, plan, review, diagnosis, or edit that depends on repository state when the current turn has no Context Engine result yet. Use `task` as the default first call for broad or uncertain work, then use narrower queries only for unresolved details. New self-contained interactive content does not require repository retrieval.",
       "parameters": {
         "query_type": "One of symbol, file, search, dependencies, outline, explore, task, memory, lsp. Use `task` as the default first call for broad or uncertain work.",
         "query": "The active task in the user's own words, or an exact symbol, file path, search text, or LSP target for a narrower follow-up.",
@@ -919,6 +924,20 @@
       "use_when": "The observed element advertises SetValue.",
       "parameters": {"app": "Observed app.", "element_index": "Settable element.", "value": "New value."},
       "examples": ["set_value(app=\"Notepad\", element_index=\"6\", value=\"hello\")"]
+    },
+    "render_view": {
+      "purpose": "Display an existing self-contained workspace HTML artifact as an interactive view in Reverie Desktop.",
+      "use_when": "The user requests an interactive view, or local filtering, comparison or simulation materially helps. Write the HTML with create_file first. Text-only clients receive the summary.",
+      "parameters": {
+        "artifact_path": "Existing in-workspace .html/.htm path; all CSS, scripts and assets must be self-contained and offline.",
+        "title": "Clear short title.",
+        "summary": "Short useful text equivalent for the conversation and text-only clients.",
+        "replaces_view_id": "Optional id from an earlier successful render_view result; stores a new revision.",
+        "callable_tools": "Optional narrow allow-list; host permissions and approvals still apply. Omit for local-only UI."
+      },
+      "examples": [
+        "render_view(artifact_path=\"artifacts/comparison.html\", title=\"Compare scenarios\", summary=\"Adjust parameters to compare the scenarios locally.\")"
+      ]
     }
   },
   "dynamic_tools": [

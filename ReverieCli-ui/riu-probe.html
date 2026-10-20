@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'none'; img-src 'self' data:; font-src 'none'; connect-src 'none'; frame-src reverie-view:; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Reverie isolation probe</title>
+  </head>
+  <body>
+    <h1>Reverie generative-view isolation probe</h1>
+    <p id="stage">idle</p>
+    <label for="chat">Chat composer (must stay usable while a view misbehaves)</label>
+    <textarea id="chat" rows="3" cols="60"></textarea>
+    <div id="slot"></div>
+    <script type="module" src="/src/riu-probe.ts"></script>
+  </body>
+</html>

@@ -84,4 +84,4 @@ def test_old_search_cache_is_rebuilt_from_the_authoritative_transcripts(tmp_path
     restarted=SessionManager(tmp_path / "state",project_root=tmp_path)
     assert restarted.search_sessions("authoritative target")[0]["session_id"]==session.id
     with sqlite3.connect(restarted._search_index.path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0]==1
+        assert db.execute("PRAGMA user_version").fetchone()[0]==2

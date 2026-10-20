@@ -1770,11 +1770,12 @@ def test_harness_prompt_guidance_mentions_task_ledger_and_recovery(tmp_path: Pat
     )
 
     assert "Harness Runtime" in guidance
-    assert "prompt engineering clarifies the ask" in guidance
+    assert "workspace telemetry for the current turn" in guidance
+    assert "confidence" not in guidance
     assert "Audit harness" in guidance
     assert "automatic checkpoints before user turns and tool calls" in guidance
     assert "Verification trail:" in guidance
-    assert "Recent harness runs:" in guidance
+    assert "Recent harness runs:" not in guidance
     assert "Closure gate:" in guidance
     assert "Recovery playbooks:" in guidance
 

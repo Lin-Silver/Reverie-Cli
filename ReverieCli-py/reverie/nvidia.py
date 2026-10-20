@@ -26,13 +26,8 @@ NVIDIA_COMPUTER_CONTROLLER_MODEL_ID = NVIDIA_DEFAULT_MODEL_ID
 NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME = NVIDIA_DEFAULT_MODEL_DISPLAY_NAME
 NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
-NVIDIA_DEFAULT_CONTEXT_TOKENS = 262_144
+NVIDIA_DEFAULT_CONTEXT_TOKENS = 131_072
 NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
-NVIDIA_STEP_FLASH_CONTEXT_TOKENS = 256_000
-NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS = 16_384
-NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS = 128_000
-NVIDIA_MINIMAX_M3_CONTEXT_TOKENS = 1_000_000
-NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS = 8_192
 NVIDIA_DEFAULT_REASONING_EFFORT = "high"
 NVIDIA_DEFAULT_REASONING_BUDGET = 16_384
 NVIDIA_REASONING_EFFORTS = ("max", "high", "medium", "low", "none")
@@ -109,19 +104,10 @@ NVIDIA_THINKING_TOGGLE_OPTIONS = (
     _thinking_option("true", "Thinking ON", "Enable provider-side thinking for this model."),
     _thinking_option("false", "Thinking OFF", "Disable provider-side thinking for faster direct replies."),
 )
-NVIDIA_REASONING_NONE_HIGH_OPTIONS = (
-    _thinking_option("high", "High", "Full reasoning mode for complex work."),
-    _thinking_option("none", "Non-think", "Disable reasoning for faster lightweight replies."),
-)
 NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS = (
     _thinking_option("high", "High", "Full reasoning mode."),
     _thinking_option("low", "Low", "Low-effort reasoning with fewer reasoning tokens."),
     _thinking_option("none", "Non-think", "Disable reasoning tokens."),
-)
-NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS = (
-    _thinking_option("none", "Non-think", "Disable reasoning for faster direct replies."),
-    _thinking_option("high", "High", "High reasoning mode."),
-    _thinking_option("max", "Max", "Maximum reasoning effort."),
 )
 NVIDIA_REASONING_LOW_HIGH_MAX_OPTIONS = (
     _thinking_option("low", "Low", "Use a shorter reasoning trace."),
@@ -180,6 +166,8 @@ def _request_model(
     thinking_options: Optional[List[Dict[str, str]]] = None,
     default_thinking_choice: str = "",
     vision_modalities: Optional[List[str]] = None,
+    default_max_tokens: Optional[int] = None,
+    preserve_reasoning_history: bool = False,
 ) -> Dict[str, Any]:
     profile_context_length = get_nvidia_profile_context_tokens(
         model_id,
@@ -198,8 +186,10 @@ def _request_model(
         "thinking": bool(thinking),
         "context_length": profile_context_length,
         "max_output_tokens": int(max_output_tokens) if max_output_tokens else None,
+        "default_max_tokens": int(default_max_tokens) if default_max_tokens else None,
         "tool_calling": bool(tool_calling),
         "system_message_first": bool(system_message_first),
+        "preserve_reasoning_history": bool(preserve_reasoning_history),
         "thinking_control": str(thinking_control or ("toggle" if thinking else "none")).strip().lower(),
         "profile": str(model_id).strip().lower(),
     }
@@ -273,7 +263,7 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         default_thinking_choice="high",
         context_length=131_072,
         max_output_tokens=16_384,
-        default_max_tokens=8_192,
+        default_max_tokens=16_384,
     ),
     _openai_model(
         "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -316,76 +306,66 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         default_max_tokens=8_192,
     ),
     _openai_model(
-        "deepseek-ai/deepseek-v4-flash-0731",
-        "DeepSeek V4 Flash 0731",
-        "OpenAI SDK transport with 1M context and selectable none/high/max chat-template reasoning.",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "Nemotron 3.5 Super VL 120B A12B",
+        "Multimodal OpenAI SDK transport with selectable none/low/high reasoning.",
+        vision=True,
         thinking=True,
         thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
+        thinking_options=list(NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS),
         default_thinking_choice="high",
-        context_length=1_048_576,
-        max_output_tokens=16_384,
+        vision_modalities=["image", "video"],
+        context_length=262_144,
+        max_output_tokens=131_072,
         default_max_tokens=16_384,
     ),
     _openai_model(
-        "deepseek-ai/deepseek-v4-pro-0813",
-        "DeepSeek V4 Pro 0813",
-        "OpenAI SDK transport with 1M context and selectable none/high/max chat-template reasoning.",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "DeepSeek V4.1 Flash",
+        "NVIDIA 可能尚未针对该模型进行多并发调用优化；本次验证多次超时。支持图像输入和 1M 上下文。",
+        vision=True,
         thinking=True,
-        thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_MAX_OPTIONS),
-        default_thinking_choice="none",
+        thinking_control="fixed",
         context_length=1_048_576,
-        max_output_tokens=16_384,
-        default_max_tokens=16_384,
+        max_output_tokens=1_048_576,
+        default_max_tokens=262_144,
     ),
     _openai_model(
-        "moonshotai/kimi-k3",
-        "Kimi K3",
-        "Multimodal OpenAI SDK transport with always-on low/high/max reasoning and preserved reasoning history.",
+        "z-ai/glm-5.3-flash",
+        "GLM 5.3 Flash",
+        "NVIDIA 可能尚未针对该模型进行多并发调用优化；本次验证多次超时。支持图像输入和 low/high/max 推理。",
         vision=True,
         thinking=True,
         thinking_control="effort",
         thinking_options=list(NVIDIA_REASONING_LOW_HIGH_MAX_OPTIONS),
         default_thinking_choice="max",
         context_length=1_048_576,
-        max_output_tokens=65_536,
+        max_output_tokens=1_048_576,
         default_max_tokens=16_384,
-        preserve_reasoning_history=True,
     ),
     _request_model(
-        "minimaxai/minimax-m3",
-        "MiniMax M3",
-        "Request transport with multimodal text, image, video input, and selectable chat-template thinking.",
-        vision=True,
-        thinking=True,
-        thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_HIGH_OPTIONS),
-        default_thinking_choice="high",
-        vision_modalities=["image", "video"],
-        context_length=NVIDIA_MINIMAX_M3_CONTEXT_TOKENS,
-        max_output_tokens=NVIDIA_MINIMAX_M3_MAX_OUTPUT_TOKENS,
-        tool_calling=True,
-    ),
-    _request_model(
-        "stepfun-ai/step-3.7-flash",
-        "Step-3.7-Flash",
-        "Request transport with multimodal image input and fixed provider-side reasoning.",
+        "stepfun-ai/step-5-preview",
+        "Step 5 Preview",
+        "Request transport with image input, fixed reasoning, and preserved reasoning history.",
         vision=True,
         thinking=True,
         thinking_control="fixed",
-        context_length=NVIDIA_STEP_FLASH_CONTEXT_TOKENS,
-        max_output_tokens=NVIDIA_STEP_37_FLASH_MAX_OUTPUT_TOKENS,
+        context_length=1_048_576,
+        max_output_tokens=1_048_576,
+        default_max_tokens=4_096,
+        preserve_reasoning_history=True,
     ),
     _openai_model(
-        "openai/gpt-oss-120b",
-        "GPT-OSS-120B",
+        "openai/gpt-oss-20b",
+        "GPT-OSS-20B",
         "OpenAI SDK transport with selectable low/medium/high reasoning_effort.",
         thinking=True,
         thinking_control="effort",
         thinking_options=list(NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS),
         default_thinking_choice="medium",
-        context_length=NVIDIA_GPT_OSS_120B_CONTEXT_TOKENS,
+        context_length=131_072,
+        max_output_tokens=4_096,
+        default_max_tokens=4_096,
     ),
 ]
 
@@ -643,6 +623,10 @@ def normalize_nvidia_config(raw_nvidia: Any) -> Dict[str, Any]:
         context_length = matched.get("context_length")
         if context_length:
             cfg["max_context_tokens"] = int(context_length)
+        if matched.get("default_max_tokens") and not (
+            isinstance(raw_nvidia, dict) and "max_tokens" in raw_nvidia
+        ):
+            cfg["max_tokens"] = int(matched["default_max_tokens"])
         max_output_tokens = matched.get("max_output_tokens")
         if max_output_tokens:
             try:
@@ -877,9 +861,14 @@ def build_nvidia_request_defaults(nvidia_config: Any, model_id: Optional[str] = 
         return {}
 
     try:
+        default_output = int(selected.get("default_max_tokens") or 0)
         output_limit = int(selected.get("max_output_tokens") or 0)
         context_length = int(selected.get("context_length") or 0)
-        if output_limit > 0:
+        if default_output > 0:
+            cfg["max_tokens"] = max(1, int(cfg.get("max_tokens", default_output) or default_output))
+            if output_limit > 0:
+                cfg["max_tokens"] = min(int(cfg["max_tokens"]), output_limit)
+        elif output_limit > 0:
             cfg["max_tokens"] = min(max(int(cfg.get("max_tokens", 0) or 0), output_limit), output_limit)
         else:
             cfg["max_tokens"] = max(int(cfg.get("max_tokens", 0) or 0), context_length)
@@ -906,14 +895,27 @@ def apply_nvidia_request_defaults(payload: Dict[str, Any], nvidia_config: Any) -
     return prepared
 
 
-def build_nvidia_openai_options(nvidia_config: Any, model_id: Optional[str] = None) -> Dict[str, Any]:
-    """Return OpenAI SDK request options for the selected NVIDIA model."""
+def build_nvidia_openai_options(
+    nvidia_config: Any,
+    model_id: Optional[str] = None,
+    *,
+    messages: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Return NVIDIA SDK options, including message-dependent sampling."""
     cfg = normalize_nvidia_config(nvidia_config)
     selected = get_nvidia_model_metadata(model_id or cfg.get("selected_model_id"))
     if not selected:
         selected = resolve_nvidia_selected_model(cfg)
     if not selected or str(selected.get("transport", "")).strip().lower() != "openai-sdk":
         return {}
+
+    cfg["has_visual_input"] = any(
+        part.get("type") in {"image_url", "video_url"}
+        for message in messages or []
+        if isinstance(message.get("content"), list)
+        for part in message["content"]
+        if isinstance(part, dict)
+    )
 
     try:
         default_output = int(selected.get("default_max_tokens") or 0)

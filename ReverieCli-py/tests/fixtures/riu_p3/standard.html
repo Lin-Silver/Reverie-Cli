@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>RIU P3 negative fixture</title></head>
+<body><h2>Standard transport fixture</h2><p id="ready">Waiting</p><pre id="meta"></pre><pre id="result"></pre><pre id="attacks"></pre>
+<button id="increment">App-only increment</button><button id="model-only">Reject model-only</button><button id="duplicate">Repeat request ID</button><button id="context">Model context</button><button id="message">Message proposal</button><button id="unknown">Unsupported method</button><button id="teardown">Request teardown</button>
+<script>
+const pending=new Map();let next=10;window.received=[];
+function send(method,params={},id=next++){const message={jsonrpc:'2.0',id,method,params};parent.postMessage(message,'*');return new Promise(resolve=>pending.set(id,resolve));}
+window.fixtureRequest=send;
+window.addEventListener('message',e=>{
+ if(e.source!==parent||e.data?.jsonrpc!=='2.0')return;const m=e.data;window.received.push(m);
+ if(m.method==='ui/resource-teardown'){document.getElementById('ready').textContent='Torn down';parent.postMessage({jsonrpc:'2.0',id:m.id,result:{}},'*');return;}
+ if(m.method==='ui/notifications/tool-input')window.initialInput=m.params;
+ if(m.method==='ui/notifications/tool-result'){window.initialResult=m.params;document.getElementById('meta').textContent=JSON.stringify(m.params._meta);}
+ if(m.id!==undefined&&pending.has(m.id)){pending.get(m.id)(m);pending.delete(m.id);document.getElementById('result').textContent=JSON.stringify(m);}
+});
+async function start(){
+ const init=await send('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'P3 negative fixture',version:'1'},appCapabilities:{availableDisplayModes:['inline']}});
+ if(init.error)return;parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');
+ document.getElementById('ready').textContent='Ready';
+ const attacks={node:typeof require,preload:typeof window.reverie,openai:typeof window.openai};
+ try{attacks.parent=parent.document.body.textContent;}catch{attacks.parent='blocked';}
+ fetch('http://127.0.0.1:9/PRIVATE_EXFILTRATION').then(()=>attacks.fetch='allowed',()=>{attacks.fetch='blocked';document.getElementById('attacks').textContent=JSON.stringify(attacks);});
+ document.getElementById('attacks').textContent=JSON.stringify(attacks);
+}
+document.getElementById('increment').onclick=()=>send('tools/call',{name:'increment',arguments:{}},'write-once');
+document.getElementById('duplicate').onclick=()=>send('tools/call',{name:'increment',arguments:{}},'write-once');
+document.getElementById('model-only').onclick=()=>send('tools/call',{name:'model-only',arguments:{}});
+document.getElementById('context').onclick=()=>send('ui/update-model-context',{content:[{type:'text',text:'P3_CONTEXT_PUBLIC_SELECTION'}],structuredContent:{selected:3}});
+document.getElementById('message').onclick=()=>send('ui/message',{role:'user',content:[{type:'text',text:'RIU_P3_CAPTURE'}],source:'user-gesture'});
+document.getElementById('unknown').onclick=()=>send('ui/open-link',{url:'file:///private'});
+document.getElementById('teardown').onclick=()=>parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/request-teardown'},'*');
+start();
+</script></body></html>

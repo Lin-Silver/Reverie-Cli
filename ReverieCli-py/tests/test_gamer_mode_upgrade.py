@@ -150,9 +150,11 @@ def test_reverie_gamer_workflow_and_discovery_profile_bias_toward_slice_executio
     profile = get_mode_tool_discovery_profile("reverie-gamer")
 
     assert "prompt-to-production flow" in workflow
-    assert 'game_design_orchestrator(action="compile_program")' in workflow
-    assert 'game_design_orchestrator(action="compile_request")' in workflow
-    assert 'game_project_scaffolder(action="generate_vertical_slice")' in workflow
+    # Runnable calls remain in the mode system prompt (checked above); the
+    # selection playbook no longer repeats native schemas and call examples.
+    assert "### `game_design_orchestrator`" in workflow
+    assert "### `game_project_scaffolder`" in workflow
+    assert "- Example calls:" not in workflow
     assert "artifacts/game_program.json" in workflow
     assert "artifacts/design_intelligence.json" in workflow
     assert "artifacts/campaign_program.json" in workflow

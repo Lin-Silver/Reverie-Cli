@@ -49,7 +49,7 @@ def _render_examples(examples: Iterable[Any]) -> List[str]:
     return rendered
 
 
-def _render_tool_entry(tool_name: str, tool_data: Dict[str, Any]) -> str:
+def _render_tool_entry(tool_name: str, tool_data: Dict[str, Any], *, include_call_details: bool = True) -> str:
     lines = [f"### `{tool_name}`"]
     purpose = str(tool_data.get("purpose", "") or "").strip()
     use_when = str(tool_data.get("use_when", "") or "").strip()
@@ -57,6 +57,9 @@ def _render_tool_entry(tool_name: str, tool_data: Dict[str, Any]) -> str:
         lines.append(f"- Purpose: {purpose}")
     if use_when:
         lines.append(f"- Use when: {use_when}")
+
+    if not include_call_details:
+        return "\n".join(lines)
 
     parameter_lines = _render_parameters(tool_data.get("parameters", {}) if isinstance(tool_data.get("parameters"), dict) else {})
     if parameter_lines:
@@ -99,7 +102,7 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
         lines.append(f"- {workflow_item}")
 
     lines.extend(["", "## Tool Discovery"])
-    for item in _format_list(manifest.get("discovery_rules", []) or []):
+    for item in _format_list(profile.get("discovery_rules", manifest.get("discovery_rules", [])) or []):
         lines.append(f"- {item}")
 
     lines.extend(["", "## Tool Calling Rules"])
@@ -111,12 +114,14 @@ def get_tool_descriptions_for_mode(mode: str) -> str:
     for tool_name in get_tool_names_for_mode(mode_key):
         tool_data = tools.get(tool_name)
         if isinstance(tool_data, dict):
-            lines.append(_render_tool_entry(tool_name, tool_data))
+            # The same request already carries native parameter schemas. Keep
+            # selection guidance here; retain the full manifest for diagnostics.
+            lines.append(_render_tool_entry(tool_name, tool_data, include_call_details=False))
         else:
             missing_tools.append(tool_name)
 
     dynamic_tools = manifest.get("dynamic_tools", []) or []
-    if dynamic_tools:
+    if dynamic_tools and mode_key != "writer":
         lines.extend(["", "## Dynamic Tools"])
         for item in dynamic_tools:
             if not isinstance(item, dict):

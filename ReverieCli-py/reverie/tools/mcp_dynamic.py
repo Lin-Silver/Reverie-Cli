@@ -59,17 +59,41 @@ class MCPDynamicTool(BaseTool):
 
     def execute(self, **kwargs) -> ToolResult:
         runtime = self._runtime()
+        binding = self.context.get("mcp_app_binding")
+        visibility = self.metadata.get("ui", {}).get("visibility", ["model", "app"])
+        if "model" not in visibility and not binding:
+            return ToolResult.fail("Tool visibility does not allow model calls.")
         try:
+            options = {"app_binding": binding} if binding else {}
             response = runtime.call_tool(
                 str(self.metadata.get("server_name", "") or ""),
                 str(self.metadata.get("tool_name", "") or ""),
                 kwargs,
+                **options,
             )
         except Exception as exc:
             return ToolResult.fail(str(exc))
 
         output = str(response.get("output", "") or "").strip()
         payload = response.get("data", {}) if isinstance(response.get("data"), dict) else {}
+        capture = self.context.get("mcp_app_result_handler")
+        if callable(capture):
+            capture(response.get("result"))
+        elif self.metadata.get("ui", {}).get("resourceUri"):
+            try:
+                from ..mcp_apps import publish_mcp_app
+                payload["view"] = publish_mcp_app(self.context, self.metadata, kwargs, response, output or "MCP tool completed.")
+                view = payload["view"]
+                reference = f"Interactive view ready (view_id={view['view_id']}, revision={view['revision']})."
+                output = f"{output}\n{reference}".strip()
+                payload.setdefault("message_content", []).append({"type": "text", "text": reference})
+            except Exception as exc:
+                # A UI failure must never destroy the tool's useful text result.
+                from ..diagnostics import report_suppressed_exception
+                report_suppressed_exception("MCP App unavailable")
+                fallback = f"UI unavailable: {exc}"
+                output = f"{output}\n{fallback}".strip()
+                payload.setdefault("message_content", []).append({"type": "text", "text": fallback})
         if response.get("success", True):
             return ToolResult.ok(output or "MCP tool completed successfully.", data=payload)
         result = ToolResult.fail(output or "MCP tool reported an error.")
@@ -80,7 +104,9 @@ class MCPDynamicTool(BaseTool):
         qualified_name = str(self.metadata.get("qualified_name", "") or self.name).strip()
         return f"Calling {qualified_name}..."
 
-    def visible_in_mode(self, mode: object) -> bool:
+    def visible_in_mode(self, mode: object, *, audience: str = "model") -> bool:
+        if audience not in self.metadata.get("ui", {}).get("visibility", ["model", "app"]):
+            return False
         normalized = normalize_mode(mode)
         if self.include_modes and normalized not in self.include_modes:
             return False

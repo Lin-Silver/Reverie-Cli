@@ -37,7 +37,7 @@ from ..context_engine.handoff import build_session_handoff_packet
 from ..inline_images import resolve_inline_image_content_for_request
 from ..memory import MEMORY_CONTEXT_PROMPT_HEADER, MemoryOS
 from ..modes import normalize_mode
-from ..config import model_source_display_name, normalize_model_provider
+from ..config import derive_model_display_name, model_source_display_name, normalize_model_provider
 from ..request_identity import apply_reverie_client_identity
 from ..provider_transport import provider_client, provider_post, check_cancel, interruptible_sleep, on_cancel
 from ..proxy import normalize_proxy_url, requests_proxy_dict, resolve_proxy_url
@@ -109,7 +109,6 @@ THINKING_CLOSE_TAG_LITERAL = "</think>"
 # replay of the user's message, which then shows the request twice in the UI and
 # twice in the saved transcript. Only replays of prompts at least this long are
 # stripped: below it, a coincidental match is more likely than a real echo.
-REASONING_ECHO_GUARD_MIN_CHARS = 12
 
 # Memory tools are useful for durable project context, but a greeting or other
 # one-off acknowledgement should never pay for a tool-result follow-up turn.
@@ -492,7 +491,7 @@ def _build_assistant_history_message(
     if isinstance(tool_calls, list):
         message["tool_calls"] = tool_calls
     if str(reasoning_content or "").strip():
-        message["reasoning_content"] = str(reasoning_content).strip()
+        message["reasoning_content"] = str(reasoning_content)
     return message
 
 
@@ -577,9 +576,6 @@ class _StreamingTurnState:
     content_tag_buffer: str = ""
     inline_thinking: bool = False
     token_to_hide: str = HIDDEN_STREAM_TOKEN
-    reasoning_echo_guard: str = ""
-    reasoning_echo_buffer: str = ""
-    reasoning_echo_resolved: bool = False
 
     @staticmethod
     def _find_tag(text: str, tag: str) -> int:
@@ -606,9 +602,6 @@ class _StreamingTurnState:
         reasoning_text = str(text or "")
         if not reasoning_text:
             return []
-        if self.reasoning_echo_guard and not self.reasoning_echo_resolved:
-            self.reasoning_echo_buffer += reasoning_text
-            return self._resolve_reasoning_echo(final=False)
         return self._emit_reasoning(reasoning_text)
 
     def _emit_reasoning(self, text: str) -> List[str]:
@@ -621,33 +614,6 @@ class _StreamingTurnState:
             self.thinking_started = True
         chunks.append(text)
         return chunks
-
-    def _resolve_reasoning_echo(self, *, final: bool) -> List[str]:
-        """Drop a verbatim echo of the prompt from the front of the reasoning trace.
-
-        Some hosted reasoning models replay the user's message as the first line
-        of ``reasoning_content``, which shows the request twice in the UI and
-        twice in the saved transcript. The echo can only be recognized once
-        enough of the trace has arrived, so the opening fragments are buffered
-        until they either match the guard or diverge from it.
-        """
-        guard = self.reasoning_echo_guard
-        pending = self.reasoning_echo_buffer
-        if not pending:
-            return []
-
-        candidate = pending.lstrip()
-        if not final and len(candidate) <= len(guard) and guard.startswith(candidate):
-            # Still undecided: the echo may continue in the next chunk. `<=` keeps
-            # a candidate that exactly fills the guard buffered too, so the
-            # whitespace that follows the echo is stripped with it.
-            return []
-
-        self.reasoning_echo_resolved = True
-        self.reasoning_echo_buffer = ""
-        if candidate.startswith(guard):
-            pending = candidate[len(guard):].lstrip()
-        return self._emit_reasoning(pending)
 
     def _add_visible_content(self, text: Any) -> List[str]:
         content_text = str(text or "")
@@ -816,8 +782,6 @@ class _StreamingTurnState:
         chunks: List[str] = []
         chunks.extend(self._drain_content_tag_buffer(final=True))
         self.inline_thinking = False
-        if self.reasoning_echo_buffer:
-            chunks.extend(self._resolve_reasoning_echo(final=True))
         if self.thinking_started:
             chunks.append(THINKING_END_MARKER)
             self.thinking_started = False
@@ -1463,7 +1427,9 @@ def _compact_tool_calls_for_history(tool_calls: list, *, mode: str = "") -> list
     return compacted
 
 
-def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _sanitize_messages_for_relay(
+    messages: List[Dict[str, Any]], *, preserve_assistant_reasoning: bool = False,
+) -> List[Dict[str, Any]]:
     """Normalize message payloads before sending them to proxied/native providers."""
     sanitized_messages: List[Dict[str, Any]] = []
 
@@ -1472,8 +1438,9 @@ def _sanitize_messages_for_relay(messages: List[Dict[str, Any]]) -> List[Dict[st
             continue
 
         sanitized = dict(message)
-        sanitized.pop("reasoning_content", None)
         role = str(sanitized.get("role", "") or "").strip().lower()
+        if not preserve_assistant_reasoning or role != "assistant":
+            sanitized.pop("reasoning_content", None)
         if role:
             sanitized["role"] = role
 
@@ -2146,7 +2113,7 @@ class ReverieAgent:
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
-        self.model_display_name = model_display_name or model
+        self.model_display_name = derive_model_display_name(model, model_display_name)
         self.project_root = project_root or Path.cwd()
         self.agent_id = str(agent_id or "main").strip() or "main"
         self.agent_color = str(agent_color or "").strip()
@@ -2225,6 +2192,7 @@ class ReverieAgent:
         
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
+            model_id=self.model,
             additional_rules=additional_rules,
             mode=self.mode,
             config=self.config,
@@ -2251,6 +2219,7 @@ class ReverieAgent:
         self.task_stage = "PLANNING"  # Reset stage on mode switch
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
+            model_id=self.model,
             additional_rules=self.additional_rules,
             mode=self.mode,
             config=self.config,
@@ -2277,7 +2246,7 @@ class ReverieAgent:
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
-        self.model_display_name = model_display_name or model
+        self.model_display_name = derive_model_display_name(model, model_display_name)
         self.additional_rules = additional_rules
         self.mode = mode
         self.task_stage = "PLANNING"
@@ -2323,6 +2292,7 @@ class ReverieAgent:
         self._last_context_safety_signature = None
         self.system_prompt = build_system_prompt(
             model_name=self.model_display_name,
+            model_id=self.model,
             additional_rules=self.additional_rules,
             mode=self.mode,
             config=self.config,
@@ -2745,7 +2715,13 @@ class ReverieAgent:
             prepared["stream_options"] = {**(prepared.get("stream_options") or {}), "include_usage": True}
         if isinstance(prepared.get("messages"), list):
             prepared["messages"] = _coalesce_system_messages_to_front(
-                _sanitize_messages_for_relay(prepared["messages"])
+                _sanitize_messages_for_relay(
+                    prepared["messages"],
+                    preserve_assistant_reasoning=(
+                        self._is_nvidia_request()
+                        and nvidia_model_requires_preserved_reasoning_history(prepared.get("model"))
+                    ),
+                )
             )
 
         if self._openai_request_fallback_active:
@@ -3042,6 +3018,18 @@ class ReverieAgent:
         last_user_index, user_text = self._writer_latest_user_turn()
         if last_user_index < 0 or not user_text:
             return None
+        if (
+            "render_view" in user_text
+            and "create_file" in user_text
+            and re.search(
+                r"(?:only\s+(?:use|call)\s+(?:the\s+)?|"
+                r"(?:仅|只)(?:允许|使用|用|调用)\s*(?:当前工作区的\s*)?)`?(?:create_file|render_view)\b",
+                user_text,
+            )
+        ):
+            # Negative file instructions still contain words such as "files"
+            # and "update". Do not force a third tool into a scoped view task.
+            return None
         direct_memory_request = re.match(
             r"^(?:please\s+|请\s*)?(?:"
             r"(?:call|invoke|use|调用|使用|用)\s*`?memory_(?:manager|retrieval)\b|"
@@ -3098,7 +3086,8 @@ class ReverieAgent:
         implementation_turn = any(signal in user_text for signal in broad_code_signals) and any(
             signal in user_text for signal in implementation_signals
         )
-        if not explicit_path and not (strong_repository_turn or implementation_turn):
+        path_inspection_turn = explicit_path and any(signal in user_text for signal in repository_question_signals)
+        if not (path_inspection_turn or strong_repository_turn or implementation_turn):
             return None
         return {"type": "function", "function": {"name": "codebase-retrieval"}}
 
@@ -3824,7 +3813,9 @@ class ReverieAgent:
         extra_body: Optional[Dict[str, Any]] = None
         
         if self._is_active_model_source("nvidia"):
-            provider_options = build_nvidia_openai_options(getattr(self.config, "nvidia", {}), model_for_sdk)
+            provider_options = build_nvidia_openai_options(
+                getattr(self.config, "nvidia", {}), model_for_sdk, messages=prepared_messages,
+            )
             if provider_options:
                 option_model = str(provider_options.get("model", "") or "").strip()
                 if option_model:
@@ -4402,30 +4393,11 @@ class ReverieAgent:
             return _coerce_text_fragments(message.get("content", "")).strip()
         return ""
 
-    def _reasoning_echo_guard(self) -> str:
-        """Return the prompt text that must not be replayed as reasoning.
-
-        Short prompts are ignored: dropping a handful of characters that merely
-        happen to match risks losing real reasoning, and the duplication is only
-        noticeable for prompts long enough to read as a repeat of the request.
-        """
-        prompt = self._latest_user_prompt_text()
-        return prompt if len(prompt) >= REASONING_ECHO_GUARD_MIN_CHARS else ""
-
     def _new_turn_state(self) -> _StreamingTurnState:
-        """Create a streaming turn state wired to this turn's echo guard."""
-        return _StreamingTurnState(reasoning_echo_guard=self._reasoning_echo_guard())
-
-    def _strip_reasoning_prompt_echo(self, reasoning_text: Any) -> str:
-        """Remove a leading verbatim replay of the prompt from a reasoning trace."""
-        text = str(reasoning_text or "")
-        guard = self._reasoning_echo_guard()
-        if not guard:
-            return text
-        candidate = text.lstrip()
-        if not candidate.startswith(guard):
-            return text
-        return candidate[len(guard):].lstrip()
+        """Preserve native reasoning verbatim, including repeated instructions."""
+        state = _StreamingTurnState()
+        self._pending_stream_state = state
+        return state
 
     def _emit_ui_event(
         self,
@@ -4686,6 +4658,7 @@ class ReverieAgent:
         usage: Any = None,
     ) -> tuple[str, str]:
         """Store the finalized turn and report which follow-up path to take."""
+        self._pending_stream_state = None
         self._record_model_usage(
             request_messages=request_messages,
             assistant_text=state.cleaned_content(),
@@ -4740,6 +4713,11 @@ class ReverieAgent:
             )
             return "content", clean_content
 
+        if state.collected_thinking:
+            # An unsuccessful response still has a real, user-visible trace.
+            # Keep each attempt before recovery can replace the live timeline.
+            self.messages.append(_build_assistant_history_message(None, reasoning_content=state.collected_thinking))
+            self._persist_history_to_session()
         return "empty", clean_content
 
     def _prepare_tool_call_review(
@@ -5522,12 +5500,28 @@ class ReverieAgent:
         memory_context = self._memory_context_package_message()
         if memory_context:
             messages.append(memory_context)
+        # View-authored summaries are transient user data, never system rules or history.
+        from ..views import ViewStore, model_context_message
+        manager = self.tool_executor.context.get("session_manager")
+        session = manager.get_current_session() if manager is not None else None
+        if session is not None:
+            context = model_context_message(ViewStore.for_project(self.project_root), session.id, session.messages)
+            if context:
+                messages.append(context)
         preserve_nvidia_reasoning = (
             self._is_active_model_source("nvidia")
             and nvidia_model_requires_preserved_reasoning_history(self.model)
         )
         for message in self._select_prompt_history():
             if not isinstance(message, dict):
+                continue
+            if (
+                message.get("role") == "assistant"
+                and not message.get("content")
+                and not message.get("tool_calls")
+            ):
+                # Retained in transcript/UI; an answerless attempt is not a
+                # valid assistant content/tool message for the next API call.
                 continue
             normalized = dict(message)
             if not include_reasoning and not preserve_nvidia_reasoning:
@@ -5577,6 +5571,17 @@ class ReverieAgent:
             Response chunks (or full response if not streaming)
         """
         self._pinned_turn_guidance = ""
+        # RIU: mint a per-turn provenance id so an interactive view rendered this
+        # turn is bound to the turn by the kernel, never chosen by the model.
+        # This is provenance / visual-grouping only -- the security-critical
+        # identity is the session id (ownership + storage path) and the
+        # crypto-random view id. A resumed request keeps the turn it resumes.
+        try:
+            existing_turn = str(self.tool_executor.context.get("turn_id") or "").strip()
+            if not (resume and existing_turn):
+                self.tool_executor.context["turn_id"] = "t" + uuid.uuid4().hex
+        except Exception:
+            report_suppressed_exception("RIU turn provenance minting", logger=logger)
         skills = self.tool_executor.context.get("skills_manager")
         if skills is not None:
             loaded = skills.load_pinned_instructions()
@@ -5640,6 +5645,7 @@ class ReverieAgent:
             self._reset_think_tool_budget()
 
         # Call model with tools
+        self._pending_stream_state = None
         try:
             self._check_and_compress_context(session_id=session_id)
             if stream:
@@ -5684,6 +5690,13 @@ class ReverieAgent:
                 yield failed_event
             yield error_msg
         finally:
+            pending = self._pending_stream_state
+            self._pending_stream_state = None
+            if pending is not None and pending.collected_thinking:
+                # A failed/cancelled stream can have already shown a real trace.
+                # Retain it without turning unfinished tool arguments into calls.
+                self.messages.append(_build_assistant_history_message(None, reasoning_content=pending.collected_thinking))
+                self._persist_history_to_session()
             self._cleanup_completed_task_artifacts()
 
     def _cleanup_completed_task_artifacts(self) -> None:
@@ -5961,6 +5974,7 @@ class ReverieAgent:
                 provider_options = build_nvidia_openai_options(
                     getattr(self.config, "nvidia", {}),
                     model_for_sdk,
+                    messages=messages,
                 )
                 option_model = str(provider_options.get("model", "") or "").strip()
                 if option_model:
@@ -6608,6 +6622,7 @@ class ReverieAgent:
                 provider_options = build_nvidia_openai_options(
                     getattr(self.config, "nvidia", {}),
                     model_for_sdk,
+                    messages=messages,
                 )
                 option_model = str(provider_options.get("model", "") or "").strip()
                 if option_model:
@@ -6716,13 +6731,11 @@ class ReverieAgent:
             choice = response.choices[0]
             message = choice.message
             message_content = _coerce_text_fragments(getattr(message, "content", None))
-            message_reasoning = self._strip_reasoning_prompt_echo(
-                _extract_text_from_candidates(
-                    message,
-                    "reasoning_content",
-                    "thinking",
-                    "reasoning",
-                )
+            message_reasoning = _extract_text_from_candidates(
+                message,
+                "reasoning_content",
+                "thinking",
+                "reasoning",
             )
             
             # Check for tool calls
@@ -6944,13 +6957,11 @@ class ReverieAgent:
             choice = choices[0]
             message = choice.get("message", {})
             message_content = _extract_text_from_candidates(message, "content")
-            message_reasoning = self._strip_reasoning_prompt_echo(
-                _extract_text_from_candidates(
-                    message,
-                    "reasoning_content",
-                    "thinking",
-                    "reasoning",
-                )
+            message_reasoning = _extract_text_from_candidates(
+                message,
+                "reasoning_content",
+                "thinking",
+                "reasoning",
             )
             
             # Check for tool calls

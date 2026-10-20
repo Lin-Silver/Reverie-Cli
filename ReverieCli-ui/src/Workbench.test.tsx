@@ -2,11 +2,33 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Workbench } from "./Workbench";
+import { ViewPresentationProvider, useViewPresentation } from "./ViewPresentation";
 
 afterEach(()=>cleanup());
 const snapshot={root:"C:/project",version:"captured-version",indexVersion:"index",head:"head",branch:"main",scope:"working",base:"",conflicts:[],files:[{path:"src/bug.ts",status:"M",binary:false,additions:1,deletions:1}]};
 const props={root:"C:/project",sessionId:"first",running:false,onDraft:vi.fn(),onReview:vi.fn(async()=>"not JSON")};
 function reply(operation:string){return operation==="list-directory"?{directory:".",entries:[],truncated:false}:operation==="reviews"?{reviews:[]}:operation==="runs"?{runs:[]}:snapshot;}
+
+function ViewModeButtons(){const view=useViewPresentation();return <><button onClick={()=>view.select("view","View","fullscreen")}>test-fullscreen</button><button onClick={()=>view.select("view","View","inline")}>test-inline</button></>;}
+it("restores the prior panel on inline return and respects an explicit tab or close",async()=>{
+  Object.defineProperty(window,"reverie",{configurable:true,value:{workbench:vi.fn(async(operation:string)=>reply(operation))}});
+  const {container}=render(<ViewPresentationProvider><ViewModeButtons/><Workbench {...props}/></ViewPresentationProvider>);
+  fireEvent.click(screen.getByRole("button",{name:"test-fullscreen"}));
+  await waitFor(()=>expect(container.querySelector(".workbench-panel")?.getAttribute("aria-hidden")).toBeNull());
+  fireEvent.click(screen.getByRole("button",{name:"test-inline"}));
+  await waitFor(()=>expect(container.querySelector(".workbench-panel")?.getAttribute("aria-hidden")).toBe("true"));
+  fireEvent.click(screen.getByRole("button",{name:"工作面板"}));
+  fireEvent.click(screen.getByRole("button",{name:"文件"}));
+  fireEvent.click(screen.getByRole("button",{name:"test-fullscreen"}));
+  fireEvent.click(screen.getByRole("button",{name:"test-inline"}));
+  await waitFor(()=>expect(screen.getByRole("button",{name:"文件"}).getAttribute("aria-pressed")).toBe("true"));
+  fireEvent.click(screen.getByRole("button",{name:"test-fullscreen"}));
+  fireEvent.click(screen.getByRole("button",{name:"Git 改动"}));
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Git 改动"}).getAttribute("aria-pressed")).toBe("true"));
+  fireEvent.click(screen.getByRole("button",{name:"test-fullscreen"}));
+  fireEvent.click(screen.getByRole("button",{name:"收起右侧栏"}));
+  await waitFor(()=>expect(container.querySelector(".workbench-panel")?.getAttribute("aria-hidden")).toBe("true"));
+});
 
 it("does not replace the current checkout with a prior owner's Git response",async()=>{
   let finish!:(value:unknown)=>void;

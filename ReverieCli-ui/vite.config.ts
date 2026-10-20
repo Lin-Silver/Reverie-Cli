@@ -10,6 +10,14 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      // The isolation probe is a second trusted page with its own strict CSP; it is only
+      // ever loaded by `--riu-isolation-probe` and shares no module graph with the app shell.
+      input: {
+        index: path.resolve(__dirname, "index.html"),
+        "riu-probe": path.resolve(__dirname, "riu-probe.html"),
+      },
+    },
   },
   resolve: {
     alias: {

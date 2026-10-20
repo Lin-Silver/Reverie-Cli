@@ -384,6 +384,9 @@ class ToolExecutor:
 
         try:
             definitions = runtime.get_tool_definitions(force_refresh=False)
+            app_definitions = getattr(runtime, "get_app_tool_definitions", None)
+            if callable(app_definitions):
+                definitions = list({item["name"]: item for item in [*definitions, *app_definitions()]}.values())
             generation = int(runtime.get_generation())
         except Exception as exc:
             logger.debug("Failed to sync MCP tools: %s", exc, exc_info=True)
@@ -518,6 +521,8 @@ class ToolExecutor:
         normalized_mode = normalize_mode(mode) if mode is not None else ""
         visible: List[str] = []
         for name, tool in self._tools.items():
+            if isinstance(tool, MCPDynamicTool) and "model" not in tool.metadata.get("ui", {}).get("visibility", ["model", "app"]):
+                continue
             if normalized_mode and not self._tool_is_visible(name, tool, normalized_mode):
                 continue
             if permission_denial(tool, self._configured_permission_level()) and not callable(self.context.get("tool_approval_handler")):
@@ -1049,6 +1054,7 @@ class ToolExecutor:
         Returns None to let the call run, or the ToolResult that blocks it.
         """
         mode = normalize_permission_mode(security.get("permission_mode"))
+        view_call = bool(self.context.get("desktop_view_call"))
         verdict: Optional[ToolCallVerdict] = None
         reason = ""
         risk = ""
@@ -1057,7 +1063,7 @@ class ToolExecutor:
             reason = denial
             risk = "high"
         elif mode == "strict":
-            if bool(getattr(tool, "read_only", False)) and strict_allows_read_only(security):
+            if bool(getattr(tool, "read_only", False)) and strict_allows_read_only(security) and not view_call:
                 return None
             reason = "Strict mode: every tool call needs your explicit approval."
             risk = heuristic_risk_prior(tool, arguments)
@@ -1067,15 +1073,19 @@ class ToolExecutor:
                 tool, arguments, tool_call_id, review, permission_level
             )
             if verdict is None:
+                if not view_call:
+                    return None
+            risk = verdict.risk if verdict else heuristic_risk_prior(tool, arguments)
+            if verdict and not risk_requires_approval(verdict.risk, review.get("approve_risk_at")) and not view_call:
                 return None
-            risk = verdict.risk
-            if not risk_requires_approval(verdict.risk, review.get("approve_risk_at")):
-                return None
-            reason = verdict.reason or f"Auto Check rated this call '{verdict.risk}'."
+            reason = (verdict.reason or f"Auto Check rated this call '{verdict.risk}'.") if verdict else "Component request needs host approval."
         else:
-            return None
+            if not view_call:
+                return None
+            reason = "Component request needs host approval; the component cannot attest a user gesture."
+            risk = heuristic_risk_prior(tool, arguments)
 
-        if tool.name in self._session_approved_tools:
+        if tool.name in self._session_approved_tools and not view_call:
             return None
 
         details = {
@@ -1093,7 +1103,8 @@ class ToolExecutor:
         decision, message = self._ask_tool_approval(tool, arguments, reason, details)
 
         if decision == "session":
-            self._session_approved_tools.add(tool.name)
+            if not view_call:
+                self._session_approved_tools.add(tool.name)
             return None
         if decision == "once":
             return None
@@ -1149,6 +1160,8 @@ class ToolExecutor:
             return result
         
         normalized_arguments = self._normalize_arguments(tool, arguments)
+        if isinstance(tool, MCPDynamicTool) and "model" not in tool.metadata.get("ui", {}).get("visibility", ["model", "app"]) and not self.context.get("mcp_app_binding"):
+            return ToolResult.fail("Tool visibility does not allow model calls.")
         control = self.context.get("desktop_run_control")
         if control is not None:
             control.check_cancel()

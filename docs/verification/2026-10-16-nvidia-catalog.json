@@ -1,0 +1,484 @@
+{
+  "verified_on": "2026-10-16",
+  "generated_at": "2026-10-16T14:04:05.897045+00:00",
+  "catalog_count": 10,
+  "added_count": 5,
+  "removed_count": 6,
+  "official_inventory_url": "https://integrate.api.nvidia.com/v1/models",
+  "offline_catalog": {
+    "verified_on": "2026-10-16",
+    "live_inventory_count": 81,
+    "catalog_count": 10,
+    "results": [
+      {
+        "model": "deepseek-ai/deepseek-v4.1-flash",
+        "transport": "openai-sdk",
+        "context_length": 1048576,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "max_tokens": 262144
+        },
+        "status": "error",
+        "error_type": "APITimeoutError",
+        "http_status": null,
+        "elapsed_seconds": 40.41
+      },
+      {
+        "model": "meta/muse-glimmer-30b",
+        "transport": "openai-sdk",
+        "context_length": 131072,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "max_tokens": 16384,
+          "extra_body": {
+            "reasoning_effort": "high"
+          }
+        },
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 196,
+        "status": "ok",
+        "answer": "OK",
+        "finish_reason": "stop",
+        "elapsed_seconds": 13.69
+      },
+      {
+        "model": "nvidia/nemotron-3-super-120b-a12b",
+        "transport": "openai-sdk",
+        "context_length": 1000000,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "max_tokens": 1000000,
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true,
+              "force_nonempty_content": true
+            }
+          }
+        },
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 127,
+        "status": "ok",
+        "answer": "OK",
+        "finish_reason": "stop",
+        "elapsed_seconds": 8.59
+      },
+      {
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "transport": "openai-sdk",
+        "context_length": 1000000,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "max_tokens": 16384,
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            },
+            "reasoning_budget": 16384
+          }
+        },
+        "status": "error",
+        "error_type": "APITimeoutError",
+        "http_status": null,
+        "elapsed_seconds": 40.53
+      },
+      {
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "transport": "openai-sdk",
+        "context_length": 1048576,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "max_tokens": 16384,
+          "extra_body": {
+            "chat_template_kwargs": {
+              "enable_thinking": true
+            },
+            "reasoning_budget": 16384
+          }
+        },
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 188,
+        "status": "error",
+        "error_type": "ReadTimeout",
+        "http_status": null,
+        "elapsed_seconds": 73.97
+      },
+      {
+        "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "transport": "openai-sdk",
+        "context_length": 262144,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "max_tokens": 16384,
+          "extra_body": {
+            "reasoning_effort": "high"
+          }
+        },
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 157,
+        "status": "ok",
+        "answer": "OK",
+        "finish_reason": "stop",
+        "elapsed_seconds": 2.47
+      },
+      {
+        "model": "openai/gpt-oss-20b",
+        "transport": "openai-sdk",
+        "context_length": 131072,
+        "request_defaults": {
+          "temperature": 1.0,
+          "top_p": 1.0,
+          "max_tokens": 4096,
+          "extra_body": {
+            "reasoning_effort": "medium"
+          }
+        },
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 122,
+        "status": "ok",
+        "answer": "OK",
+        "finish_reason": "stop",
+        "elapsed_seconds": 4.05
+      },
+      {
+        "model": "poolside/laguna-xs-2.1",
+        "transport": "openai-sdk",
+        "context_length": 262000,
+        "request_defaults": {},
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 0,
+        "status": "ok",
+        "answer": "OK",
+        "finish_reason": "stop",
+        "elapsed_seconds": 11.84
+      },
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "transport": "request",
+        "context_length": 1048576,
+        "request_defaults": {
+          "temperature": 0.5,
+          "top_p": 1.0,
+          "max_tokens": 4096
+        },
+        "tool_finish": "tool_calls",
+        "reasoning_characters": 0,
+        "status": "ok",
+        "answer": "OK",
+        "finish_reason": "stop",
+        "elapsed_seconds": 3.75
+      },
+      {
+        "model": "z-ai/glm-5.3-flash",
+        "transport": "openai-sdk",
+        "context_length": 1048576,
+        "request_defaults": {
+          "temperature": 0.5,
+          "top_p": 1.0,
+          "max_tokens": 16384,
+          "extra_body": {
+            "reasoning_effort": "max",
+            "chat_template_kwargs": {
+              "clear_thinking": true
+            }
+          }
+        },
+        "status": "error",
+        "error_type": "APITimeoutError",
+        "http_status": null,
+        "elapsed_seconds": 40.31
+      }
+    ]
+  },
+  "retired_endpoint_checks": [
+    {
+      "model": "deepseek-ai/deepseek-v4-flash-0731",
+      "http_status": 410,
+      "provider_reported_end_of_life": "2026-09-21T08:00:00Z"
+    },
+    {
+      "model": "deepseek-ai/deepseek-v4-pro-0813",
+      "http_status": 410,
+      "provider_reported_end_of_life": "2026-09-14T08:00:00Z"
+    },
+    {
+      "model": "moonshotai/kimi-k3",
+      "http_status": 410,
+      "provider_reported_end_of_life": "2026-10-15T08:00:00Z"
+    },
+    {
+      "model": "minimaxai/minimax-m3",
+      "http_status": 410,
+      "provider_reported_end_of_life": "2026-09-09T09:00:00Z"
+    },
+    {
+      "model": "stepfun-ai/step-3.7-flash",
+      "http_status": 410,
+      "provider_reported_end_of_life": "2026-08-28T08:00:00Z"
+    },
+    {
+      "model": "openai/gpt-oss-120b",
+      "http_status": 410,
+      "provider_reported_end_of_life": "2026-09-03T08:00:00Z"
+    }
+  ],
+  "bridge_checks": [
+    {
+      "runtime": "source",
+      "exit_code": 0,
+      "catalog_count": 10,
+      "model_ids": [
+        "meta/muse-glimmer-30b",
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "poolside/laguna-xs-2.1",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash",
+        "stepfun-ai/step-5-preview",
+        "openai/gpt-oss-20b"
+      ],
+      "selected_models": [
+        "stepfun-ai/step-5-preview",
+        "deepseek-ai/deepseek-v4.1-flash"
+      ],
+      "deepseek_saved_output_budget": 262144,
+      "errors": [],
+      "shutdown": true,
+      "concurrency_warning_models": [
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "runtime": "packaged",
+      "exit_code": 0,
+      "catalog_count": 10,
+      "model_ids": [
+        "meta/muse-glimmer-30b",
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "poolside/laguna-xs-2.1",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash",
+        "stepfun-ai/step-5-preview",
+        "openai/gpt-oss-20b"
+      ],
+      "selected_models": [
+        "stepfun-ai/step-5-preview",
+        "deepseek-ai/deepseek-v4.1-flash"
+      ],
+      "deepseek_saved_output_budget": 262144,
+      "errors": [],
+      "shutdown": true,
+      "concurrency_warning_models": [
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash"
+      ]
+    },
+    {
+      "runtime": "cli",
+      "exit_code": 0,
+      "catalog_count": 10,
+      "model_ids": [
+        "meta/muse-glimmer-30b",
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "poolside/laguna-xs-2.1",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash",
+        "stepfun-ai/step-5-preview",
+        "openai/gpt-oss-20b"
+      ],
+      "selected_models": [
+        "stepfun-ai/step-5-preview",
+        "deepseek-ai/deepseek-v4.1-flash"
+      ],
+      "deepseek_saved_output_budget": 262144,
+      "errors": [],
+      "shutdown": true,
+      "concurrency_warning_models": [
+        "deepseek-ai/deepseek-v4.1-flash",
+        "z-ai/glm-5.3-flash"
+      ]
+    }
+  ],
+  "vision_checks": [
+    {
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "status": 200,
+      "answer": "Red",
+      "finish_reason": "stop"
+    },
+    {
+      "model": "stepfun-ai/step-5-preview",
+      "status": 200,
+      "answer": "Red",
+      "finish_reason": "stop"
+    },
+    {
+      "model": "meta/muse-glimmer-30b",
+      "status": 200,
+      "answer": "red",
+      "finish_reason": "stop"
+    }
+  ],
+  "retry_checks": [
+    {
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "http_status": 200,
+      "content": "OK",
+      "finish_reason": "stop"
+    },
+    {
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "error_type": "ReadTimeout"
+    }
+  ],
+  "step_5_reasoning_history": {
+    "model": "stepfun-ai/step-5-preview",
+    "scope": "Real source agent payload preparation and authenticated two-turn tool conversation",
+    "assistant_reasoning_characters": 350,
+    "status": "ok",
+    "reasoning_preserved_in_sent_payload": true,
+    "final_answer": "5017",
+    "finish_reason": "stop"
+  },
+  "local_effective_configuration": {
+    "active_source_preserved": "opencode",
+    "selected_nvidia_model": "stepfun-ai/step-5-preview",
+    "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "transport": "request",
+    "context_tokens": 1048576,
+    "output_budget": 8192,
+    "stored_timeout": 300,
+    "global_timeout": 60,
+    "effective_nvidia_timeout": 60,
+    "key_configured": true,
+    "effective_request_parameters": {
+      "max_tokens": 8192,
+      "temperature": 0.5,
+      "top_p": 1.0
+    },
+    "thinking_template_override_sent": false
+  },
+  "final_cli_prompts": [
+    {
+      "model": "stepfun-ai/step-5-preview",
+      "exit_code": 0,
+      "report_exists": true,
+      "binary_sha256": "b9af2d7ae4a2d13d057a2916b95cbc8bfbdd5b286e26eff0a48b5a602b7cca6a",
+      "stdout_tail": "OK\n",
+      "stderr_tail": "Provider rejected prompt-cache hints; retrying once without them\n",
+      "report_keys": [
+        "success",
+        "prompt",
+        "output_text",
+        "mode",
+        "project_root",
+        "model_display_name",
+        "provider_label",
+        "session_id",
+        "session_name",
+        "started_at",
+        "ended_at",
+        "duration_seconds",
+        "thinking_text",
+        "error",
+        "context_engine_initialized",
+        "auto_followup_count",
+        "activity_events",
+        "ui_events",
+        "harness_report"
+      ],
+      "output_text": "OK",
+      "success": true,
+      "model_display_name": "Step 5 Preview",
+      "provider_label": "NVIDIA"
+    },
+    {
+      "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "exit_code": 0,
+      "report_exists": true,
+      "binary_sha256": "b9af2d7ae4a2d13d057a2916b95cbc8bfbdd5b286e26eff0a48b5a602b7cca6a",
+      "stdout_tail": "OK\n",
+      "stderr_tail": "",
+      "report_keys": [
+        "success",
+        "prompt",
+        "output_text",
+        "mode",
+        "project_root",
+        "model_display_name",
+        "provider_label",
+        "session_id",
+        "session_name",
+        "started_at",
+        "ended_at",
+        "duration_seconds",
+        "thinking_text",
+        "error",
+        "context_engine_initialized",
+        "auto_followup_count",
+        "activity_events",
+        "ui_events",
+        "harness_report"
+      ],
+      "output_text": "OK",
+      "success": true,
+      "model_display_name": "Nemotron 3.5 Super VL 120B A12B",
+      "provider_label": "NVIDIA"
+    }
+  ],
+  "earlier_cli_retest_limit": "An earlier concurrent CLI verification exceeded its 70-second process deadline; final checks use fresh isolated profiles, serial requests, a 20-second provider timeout and no automatic API retries.",
+  "renderer_visual_check": {
+    "scope": "Headless production renderer with real source SDK bridge; native Electron window controls are stubbed",
+    "checks": [
+      {
+        "viewport_width": 1200,
+        "warning_count": 2,
+        "no_clipping": true
+      },
+      {
+        "viewport_width": 900,
+        "warning_count": 2,
+        "no_clipping": true
+      }
+    ],
+    "page_errors": []
+  },
+  "tests": {
+    "python_unique_tests_passed": 444,
+    "latest_reasoning_sanitizer_regression_run_passed": 324,
+    "desktop_interaction_tests_passed": 104,
+    "desktop_typecheck": "passed",
+    "python_compileall": "passed"
+  },
+  "builds": {
+    "standalone_cli": {
+      "path": "dist/reverie.exe",
+      "sha256": "b9af2d7ae4a2d13d057a2916b95cbc8bfbdd5b286e26eff0a48b5a602b7cca6a"
+    },
+    "desktop_kernel": {
+      "path": "ReverieCli-ui/.kernel/reverie/reverie.exe",
+      "sha256": "f368ad84093c6746a12e0bb74069fbf4fa53cfa6804e0d33c2fcf22c32945165"
+    },
+    "desktop_renderer": "npm run build passed"
+  },
+  "limits": [
+    "DeepSeek V4.1 Flash, GLM 5.3 Flash and Nemotron 3 Ultra timed out; live availability is not confirmed.",
+    "NVIDIA concurrency optimization is an unconfirmed possible explanation, not an established cause.",
+    "Maximum context/output sizes and video inputs were not exhaustively tested.",
+    "Visual verification uses a real source bridge and production renderer with native Electron window controls stubbed; an installed GUI release/installer was not replaced."
+  ]
+}

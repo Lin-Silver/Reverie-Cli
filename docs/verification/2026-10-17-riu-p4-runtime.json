@@ -1,0 +1,837 @@
+{
+  "scope": "Production Windows package; synthetic loopback model; no external provider",
+  "checks": [
+    {
+      "name": "artifact-registration-to-interactive-p95-under-1s",
+      "passed": true,
+      "detail": {
+        "n": 20,
+        "p50_ms": 144.73,
+        "p95_ms": 182.238,
+        "max_ms": 183.869,
+        "samples_ms": [
+          168.43505859375,
+          141.261962890625,
+          163.74609375,
+          147.499755859375,
+          145.61474609375,
+          182.23779296875,
+          136.736083984375,
+          183.868896484375,
+          156.134033203125,
+          135.52783203125,
+          144.72998046875,
+          143.869140625,
+          130.900146484375,
+          136.261962890625,
+          146.498779296875,
+          136.514892578125,
+          148.460205078125,
+          138.215087890625,
+          141.196044921875,
+          154.89599609375
+        ]
+      }
+    },
+    {
+      "name": "same-js-document-fullscreen",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "same-js-document-pip",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "same-js-document-inline",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "card-carousel-is-content-layout",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "invalid-display-mode-explicit-error",
+      "passed": true,
+      "detail": {
+        "code": -32602,
+        "message": "Unknown display mode. Card and carousel are content layouts."
+      }
+    },
+    {
+      "name": "iframe-escape-returns-host-focus",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "tab-enter-escape-host-navigation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "theme-AA-light",
+      "passed": true,
+      "detail": {
+        "bg": "rgb(249, 249, 252)",
+        "fg": "rgb(34, 36, 45)",
+        "contrast": 14.712859554795893
+      }
+    },
+    {
+      "name": "theme-AA-dark",
+      "passed": true,
+      "detail": {
+        "bg": "rgb(21, 22, 28)",
+        "fg": "rgb(243, 243, 247)",
+        "contrast": 16.30906414343467
+      }
+    },
+    {
+      "name": "live-language-without-reload",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "reduced-motion-context-and-css",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1080x700-composer-visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1080x700-no-horizontal-overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "empty-data-text-equivalent",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "upper-bound-data-and-recoverable-error",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "local-input-p95-under-100ms",
+      "passed": true,
+      "detail": {
+        "n": 60,
+        "p50_ms": 24.6,
+        "p95_ms": 28.1,
+        "max_ms": 43.3,
+        "samples_ms": [
+          25.900000000023283,
+          28.099999999976717,
+          25.099999999976717,
+          24.900000000023283,
+          24.800000000046566,
+          23.5,
+          29.199999999953434,
+          23.900000000023283,
+          23.70000000006985,
+          23.29999999993015,
+          26.100000000093132,
+          24.599999999976717,
+          22.900000000023283,
+          23.5,
+          23.70000000006985,
+          25.400000000023283,
+          24.79999999993015,
+          22.800000000046566,
+          23,
+          25.900000000023283,
+          24.099999999976717,
+          22.900000000023283,
+          23.400000000023283,
+          24.300000000046566,
+          26.5,
+          24.5,
+          25.900000000023283,
+          24.400000000023283,
+          29.800000000046566,
+          28,
+          43.300000000046566,
+          25.300000000046566,
+          25.399999999906868,
+          27.599999999976717,
+          25.900000000023283,
+          24.5,
+          23.599999999976717,
+          26.900000000023283,
+          27,
+          23.699999999953434,
+          24.099999999976717,
+          24.900000000023283,
+          27.099999999976717,
+          25.699999999953434,
+          23.699999999953434,
+          23.70000000006985,
+          26.599999999976717,
+          27,
+          23.199999999953434,
+          23,
+          24,
+          25.800000000046566,
+          24.099999999976717,
+          23.5,
+          23.599999999976717,
+          26.599999999976717,
+          26.099999999976717,
+          23.300000000046566,
+          24.400000000023283,
+          25
+        ]
+      }
+    },
+    {
+      "name": "refresh-restores-display-and-private-state",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "process-restart-restores-view-and-private-state",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "followup-produces-traceable-new-revision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "revision-state-isolated",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "missing-file-retains-summary-and-retry",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "missing-file-retry-recovers",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "100-history-views-lazily-mounted",
+      "passed": true,
+      "detail": {
+        "frame_counts": [
+          2,
+          0,
+          0
+        ],
+        "total_view_rows": 100
+      }
+    },
+    {
+      "name": "close-releases-frame-and-resource-token",
+      "passed": true,
+      "detail": {
+        "new_frame_url": ""
+      }
+    },
+    {
+      "name": "closed-view-does-not-stop-chat",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "private-ui-state-and-html-not-in-followups",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "packaged-plain-client-summary-fallback",
+      "passed": true,
+      "detail": {
+        "exit_code": 0
+      }
+    }
+  ],
+  "measurements": {
+    "artifact_creation_to_commit_ms": [
+      1.5659999999999998,
+      1.024,
+      2.079,
+      1.822,
+      2.525,
+      2.589,
+      2.798,
+      1.571,
+      1.004,
+      1.508,
+      0.503,
+      1.506,
+      1.638,
+      1.795,
+      1.785,
+      1.5130000000000001,
+      1.2630000000000001,
+      2.008,
+      2.6519999999999997,
+      2.729
+    ],
+    "render_phases": [
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223253963.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223253972.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223254068.4001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223254070.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223255044.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223255050.1
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223255135.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223255138.9001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223256578
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223256583.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223256678.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223256683.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223258016.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223258021.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223258106.3
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223258109.9001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223259511.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223259517.1
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223259599.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223259602.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223260949.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223260958.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223261076.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223261080.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223262447
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223262451.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223262531.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223262535.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223263918.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223263924.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223264041.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223264046.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223265620.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223265626.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223265715.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223265721.8
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223267517.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223267523
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223267604.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223267608.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223269438.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223269444.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223269525.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223269529.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223272632.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223272638.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223272723.5
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223272726.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223275512.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223275517.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223275596.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223275600.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223277657.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223277662.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223277742.5
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223277747.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223280638.9001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223280644.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223280731.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223280734.7002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223284070.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223284075.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223284156.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223284160.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223287385.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223287390.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223287475.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223287486.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223290499.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223290504.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223290583.8
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223290587
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223292741.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223292747.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223292827
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223292830.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1792223294628.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1792223294633.4001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1792223294731.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1792223294736.3
+        }
+      ]
+    ],
+    "registration_to_interactive_upper_bound": {
+      "n": 20,
+      "p50_ms": 144.73,
+      "p95_ms": 182.238,
+      "max_ms": 183.869,
+      "samples_ms": [
+        168.43505859375,
+        141.261962890625,
+        163.74609375,
+        147.499755859375,
+        145.61474609375,
+        182.23779296875,
+        136.736083984375,
+        183.868896484375,
+        156.134033203125,
+        135.52783203125,
+        144.72998046875,
+        143.869140625,
+        130.900146484375,
+        136.261962890625,
+        146.498779296875,
+        136.514892578125,
+        148.460205078125,
+        138.215087890625,
+        141.196044921875,
+        154.89599609375
+      ]
+    },
+    "local_input_to_two_animation_frames_1000_rows": {
+      "n": 60,
+      "p50_ms": 24.6,
+      "p95_ms": 28.1,
+      "max_ms": 43.3,
+      "samples_ms": [
+        25.900000000023283,
+        28.099999999976717,
+        25.099999999976717,
+        24.900000000023283,
+        24.800000000046566,
+        23.5,
+        29.199999999953434,
+        23.900000000023283,
+        23.70000000006985,
+        23.29999999993015,
+        26.100000000093132,
+        24.599999999976717,
+        22.900000000023283,
+        23.5,
+        23.70000000006985,
+        25.400000000023283,
+        24.79999999993015,
+        22.800000000046566,
+        23,
+        25.900000000023283,
+        24.099999999976717,
+        22.900000000023283,
+        23.400000000023283,
+        24.300000000046566,
+        26.5,
+        24.5,
+        25.900000000023283,
+        24.400000000023283,
+        29.800000000046566,
+        28,
+        43.300000000046566,
+        25.300000000046566,
+        25.399999999906868,
+        27.599999999976717,
+        25.900000000023283,
+        24.5,
+        23.599999999976717,
+        26.900000000023283,
+        27,
+        23.699999999953434,
+        24.099999999976717,
+        24.900000000023283,
+        27.099999999976717,
+        25.699999999953434,
+        23.699999999953434,
+        23.70000000006985,
+        26.599999999976717,
+        27,
+        23.199999999953434,
+        23,
+        24,
+        25.800000000046566,
+        24.099999999976717,
+        23.5,
+        23.599999999976717,
+        26.599999999976717,
+        26.099999999976717,
+        23.300000000046566,
+        24.400000000023283,
+        25
+      ]
+    },
+    "history": {
+      "view_count": 100,
+      "message_count": 200,
+      "first_session_load_to_interactive_ms": 269.3753999999444,
+      "earlier_page_load_ms": [
+        144.5946000000049,
+        150.94030000000203
+      ],
+      "mounted_frames": [
+        2,
+        0,
+        0
+      ]
+    },
+    "method": "Nearest-rank quantiles. Commit-to-ready starts at the trusted view_ready.committed_at timestamp after atomic persistence. HTML/model generation and artifact persistence are excluded and recorded separately. Input samples measure local input dispatch, rendering and two requestAnimationFrame callbacks, excluding CDP roundtrip and all model wait; not physical display/photon latency. History includes core I/O and host render; no model request."
+  },
+  "fixture": {
+    "html_bytes": 7472,
+    "max_data_rows": 1000,
+    "sha256": "1786633df13f7f8a1805f731d9b8d17a408b5850e31103c1ab40420f57cad021"
+  },
+  "hardware": {
+    "platform": "Windows-10-10.0.26300-SP0",
+    "cpu": "",
+    "logical_cpus": 12
+  },
+  "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\packaged-final-v4",
+  "build": {
+    "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\packaged-final-v4\\workspace",
+    "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+    "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\packaged-final-v4\\app-root",
+    "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\packaged-final-v4\\desktop-home\\.reverie\\desktop",
+    "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+    "desktopBuild": {
+      "version": "2.5.0",
+      "id": "6198938667318762",
+      "builtAt": "2026-10-17T07:21:18.245Z",
+      "platform": "win32",
+      "arch": "x64"
+    }
+  },
+  "source_retrieval": {
+    "fixture_source_evidence_request_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41
+    ],
+    "full_html_request_indices": [],
+    "note": "Initial generation and explicit revisions may retrieve original workspace source snippets through FastContext. This is distinct from reattaching a registered artifact or private runtime state."
+  },
+  "passed": true,
+  "native_inspection": {
+    "pid": 10448,
+    "title": "Reverie",
+    "workspace": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\packaged-final-v4\\workspace"
+  }
+}

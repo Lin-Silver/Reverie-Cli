@@ -1,0 +1,310 @@
+{
+  "scope": "production packaged Electron + loopback model; no external provider",
+  "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3",
+  "checks": [
+    {
+      "name": "composer-observed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "startup-message-only-proposes",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "automatic-message-does-not-call-model",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "allowed-tool-result",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "approved-write-exists",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "duplicate-rejected",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "denied-no-side-effect",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "schema-error-no-approval",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "stop-during-approval",
+      "passed": true,
+      "detail": {
+        "jsonrpc": "2.0",
+        "id": "stopped-once",
+        "error": {
+          "code": -32000,
+          "message": "Stopped. Check the authoritative tool state before starting a new operation."
+        }
+      }
+    },
+    {
+      "name": "private-state-saved",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "host-followup-reaches-model-with-summary",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "private-state-always-excluded-from-model",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "registered-html-not-reinjected-on-followup",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "model-run-blocks-view-callback",
+      "passed": true,
+      "detail": {
+        "jsonrpc": "2.0",
+        "id": "busy-once",
+        "error": {
+          "code": -32000,
+          "message": "Error invoking remote method 'core:request': Error: This conversation already has a running or queued task."
+        }
+      }
+    },
+    {
+      "name": "busy-followup-retains-proposal",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "slow-tool-side-effect-before-crash",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "restart-restores-private-state",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "restart-shows-unknown-write",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "unknown-write-never-replayed",
+      "passed": true,
+      "detail": {
+        "jsonrpc": "2.0",
+        "id": "slow-once",
+        "error": {
+          "code": -32000,
+          "message": "Execution outcome is unknown. Check the authoritative tool state; this request will not be replayed."
+        }
+      }
+    },
+    {
+      "name": "fork-copies-private-state-without-call-replay",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "old-instance-cross-session-rejected",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "rewind-hides-later-view",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "delete-fork-preserves-original",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "approvals-owned-by-execution-worker",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "generationInputBoundary": "Initial workspace retrieval may contain the source HTML before registration. It remains real model input; no zero-token claim. The follow-up must not re-add it.",
+  "approvalOwners": [
+    {
+      "event": {
+        "at": "2026-10-17T07:53:34.417Z",
+        "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "session_id": "20261017_035324_129918",
+        "run_id": "3393b983-5dbd-4f35-a82d-abc2cecd1acc",
+        "view_id": "vae70a064a143b64c",
+        "view_title": "RIU P2 fixture",
+        "call_id": "denied-once",
+        "source": "component",
+        "type": "approval.request",
+        "approval_id": "3ad8d251ec69410f8e85137efb84f10e",
+        "tool": "create_file",
+        "message": "Component request needs host approval; the component cannot attest a user gesture.",
+        "risk": "medium",
+        "permission_mode": "default",
+        "concerns": [],
+        "review_source": "policy",
+        "read_only": false,
+        "arguments": {
+          "path": "denied.txt",
+          "content": "DENIED"
+        },
+        "command": "",
+        "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "paths": [
+          "denied.txt"
+        ],
+        "network": "unknown / tool declaration",
+        "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+        "scopes": [
+          "once"
+        ]
+      },
+      "owner": {
+        "id": "3393b983-5dbd-4f35-a82d-abc2cecd1acc",
+        "sessionId": "20261017_035324_129918",
+        "pid": 23380
+      }
+    },
+    {
+      "event": {
+        "at": "2026-10-17T07:53:31.947Z",
+        "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "session_id": "20261017_035324_129918",
+        "run_id": "7e480cc8-57e6-4f4d-b585-4ec2ab1630fe",
+        "view_id": "vae70a064a143b64c",
+        "view_title": "RIU P2 fixture",
+        "call_id": "write-once",
+        "source": "component",
+        "type": "approval.request",
+        "approval_id": "2b625c1b17954f60add66afa85902318",
+        "tool": "create_file",
+        "message": "Component request needs host approval; the component cannot attest a user gesture.",
+        "risk": "medium",
+        "permission_mode": "default",
+        "concerns": [],
+        "review_source": "policy",
+        "read_only": false,
+        "arguments": {
+          "path": "approved.txt",
+          "content": "APPROVED_ONCE",
+          "overwrite": true
+        },
+        "command": "",
+        "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "paths": [
+          "approved.txt"
+        ],
+        "network": "unknown / tool declaration",
+        "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+        "scopes": [
+          "once"
+        ]
+      },
+      "owner": {
+        "id": "7e480cc8-57e6-4f4d-b585-4ec2ab1630fe",
+        "sessionId": "20261017_035324_129918",
+        "pid": 23380
+      }
+    },
+    {
+      "event": {
+        "at": "2026-10-17T07:53:43.559Z",
+        "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "session_id": "20261017_035324_129918",
+        "run_id": "7f78ab93-a8b8-4df4-a756-d12b923054b7",
+        "view_id": "vae70a064a143b64c",
+        "view_title": "RIU P2 fixture",
+        "call_id": "slow-once",
+        "source": "component",
+        "type": "approval.request",
+        "approval_id": "1f4b428219f04edd9f9e536d56a83357",
+        "tool": "command_exec",
+        "message": "Component request needs host approval; the component cannot attest a user gesture.",
+        "risk": "high",
+        "permission_mode": "default",
+        "concerns": [],
+        "review_source": "policy",
+        "read_only": false,
+        "arguments": {
+          "command": "python slow_write.py",
+          "timeout": 90
+        },
+        "command": "python slow_write.py",
+        "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "paths": [],
+        "network": "unknown / tool declaration",
+        "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+        "scopes": [
+          "once"
+        ]
+      },
+      "owner": {
+        "id": "7f78ab93-a8b8-4df4-a756-d12b923054b7",
+        "sessionId": "20261017_035324_129918",
+        "pid": 23380
+      }
+    },
+    {
+      "event": {
+        "at": "2026-10-17T07:53:37.513Z",
+        "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "session_id": "20261017_035324_129918",
+        "run_id": "8351981b-8a00-452d-98e3-a16dcc8151ab",
+        "view_id": "vae70a064a143b64c",
+        "view_title": "RIU P2 fixture",
+        "call_id": "stopped-once",
+        "source": "component",
+        "type": "approval.request",
+        "approval_id": "cf8647fd5f4d4727b1088bbbd9d4aa1c",
+        "tool": "create_file",
+        "message": "Component request needs host approval; the component cannot attest a user gesture.",
+        "risk": "medium",
+        "permission_mode": "default",
+        "concerns": [],
+        "review_source": "policy",
+        "read_only": false,
+        "arguments": {
+          "path": "stopped.txt",
+          "content": "STOPPED"
+        },
+        "command": "",
+        "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p2-final-v3\\workspace",
+        "paths": [
+          "stopped.txt"
+        ],
+        "network": "unknown / tool declaration",
+        "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+        "scopes": [
+          "once"
+        ]
+      },
+      "owner": {
+        "id": "8351981b-8a00-452d-98e3-a16dcc8151ab",
+        "sessionId": "20261017_035324_129918",
+        "pid": 23380
+      }
+    }
+  ],
+  "passed": true
+}

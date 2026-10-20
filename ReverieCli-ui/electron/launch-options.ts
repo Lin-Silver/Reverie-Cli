@@ -5,6 +5,8 @@ export type DesktopLaunchOptions = {
   gui: boolean;
   tui: boolean;
   tuiArgs: string[];
+  isolationProbe: boolean;
+  isolationProbeReport: string | null;
 };
 
 export type DesktopStartupMode = "gui" | "tui";
@@ -16,6 +18,8 @@ export function parseDesktopLaunchOptions(
   let projectRoot: string | null = null;
   let gui = false;
   let tui = false;
+  let isolationProbe = false;
+  let isolationProbeReport: string | null = null;
   const tuiArgs: string[] = [];
 
   for (let index = 1; index < argv.length; index += 1) {
@@ -38,10 +42,23 @@ export function parseDesktopLaunchOptions(
       tui = false;
       continue;
     }
+    // Isolation-probe switches drive the trusted host itself, so they never reach the TUI.
+    if (argument === "--riu-isolation-probe") {
+      isolationProbe = true;
+      continue;
+    }
+    if (argument === "--riu-probe-report") {
+      const value = argv[index + 1];
+      if (value && !value.startsWith("--")) {
+        isolationProbeReport = path.resolve(cwd, value);
+        index += 1;
+      }
+      continue;
+    }
     if (tui) tuiArgs.push(argument);
   }
 
-  return { projectRoot, gui, tui, tuiArgs };
+  return { projectRoot, gui, tui, tuiArgs, isolationProbe, isolationProbeReport };
 }
 
 export function resolveDesktopStartupMode(

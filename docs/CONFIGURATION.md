@@ -323,14 +323,21 @@ Reverie also reads `NVIDIA_API_KEY` from the environment when it is present, and
 Some NVIDIA models expose provider-side thinking controls. These are model-specific fixed choices, not prompt instructions:
 
 - Toggle models, such as Nemotron 3.5 Lightning, store the choice as `enable_thinking`.
-- Effort models, such as Kimi K3, DeepSeek V4, Muse Glimmer, Nemotron 3 Super, MiniMax M3, and GPT-OSS, store the choice as `reasoning_effort`.
-- Dedicated thinking models, such as Nemotron 3 Ultra and Step-3.7-Flash, expose no extra toggle because the provider always emits reasoning.
+- Effort models, such as GLM 5.3 Flash, Muse Glimmer, Nemotron 3 Super, Nemotron 3.5 Super VL, and GPT-OSS-20B, store the choice as `reasoning_effort`.
+- Dedicated thinking models, such as Nemotron 3 Ultra and Step 5 Preview, expose no extra toggle because the provider always emits reasoning.
 
-Kimi K3 always reasons and accepts only `low`, `high`, or `max`. Reverie sends that value as NVIDIA's top-level `reasoning_effort` field and preserves prior assistant `reasoning_content` alongside tool calls for multi-turn requests.
+GLM 5.3 Flash accepts `low`, `high`, or `max`, sent as NVIDIA's top-level `reasoning_effort` field, with `chat_template_kwargs.clear_thinking=true` for chat. Nemotron 3.5 Super VL accepts `none`, `low`, or `high`. Step 5 Preview preserves prior assistant `reasoning_content` alongside tool calls for multi-turn requests.
+
+DeepSeek V4.1 Flash follows NVIDIA's hosted SDK example without the retired V4 models' chat-template thinking fields. Its default output budget is 262,144 tokens. Model selection applies each model's default budget consistently in the CLI and desktop; selecting the same model again in the desktop preserves its configured budget. See the [NVIDIA catalog verification](NVIDIA_CATALOG.md) for the current offline list, hosted limits, and verification boundaries.
+
+Every bundled NVIDIA model has a dedicated sampling profile based on its publisher's recommended settings. The legacy shared sampling fields in `nvidia` do not override those model-specific defaults. In particular, GLM 5.3 Flash and Step 5 Preview use temperature 1.0 / top-p 0.95, Muse uses top-k 64, and Laguna uses temperature 1.0 / top-p 1.0 / top-k 20 / min-p 0.0. Nemotron 3.5 Super VL automatically uses temperature 0.6 when the outgoing conversation contains images or video, otherwise 1.0. See the [sampling table and official sources](NVIDIA_CATALOG.md#model-specific-sampling). Other sources are unchanged.
+
+The NVIDIA settings page omits the ineffective shared temperature/top-p inputs. Existing saved values remain compatible but are not manual overrides; API credentials, endpoint, timeout, output budgets, and model-specific reasoning controls remain configured independently.
 
 Use `/nvidia model` or `/nvidia model <model-id>` to select the model. When the selected model has configurable thinking, Reverie immediately opens a fixed choice selector for that model. Use `/nvidia thinking` to reopen the selector for the active NVIDIA model.
 
 NVIDIA request timeouts default to 60 seconds and follow the global `/setting timeout` unless the `nvidia.timeout` value is explicitly set to another value.
+Legacy saved `nvidia.timeout=300` values are treated as the old default and also follow the global timeout.
 
 NVIDIA's hosted catalog includes `nvidia/nemotron-3-ultra-550b-a55b`; it uses the OpenAI-compatible SDK transport with fixed thinking enabled and a 16,384-token reasoning budget.
 

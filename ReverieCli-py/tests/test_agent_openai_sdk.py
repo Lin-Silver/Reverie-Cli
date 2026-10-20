@@ -864,7 +864,7 @@ def test_openai_sdk_stream_emits_connecting_event_before_request(monkeypatch, tm
 
     create_kwargs = seen["create_kwargs"]
     assert create_kwargs["timeout"] == 23
-    assert create_kwargs["extra_body"] == {"reasoning_effort": "max"}
+    assert create_kwargs["extra_body"] == {"reasoning_effort": "max", "top_k": 64}
     assert create_kwargs["messages"][0]["role"] == "system"
     assert all(message["role"] != "system" for message in create_kwargs["messages"][1:])
 
@@ -1071,23 +1071,22 @@ def test_nvidia_short_turn_keeps_full_tools_and_reasoning(monkeypatch, tmp_path)
 
     create_kwargs = seen["create_kwargs"]
     assert create_kwargs["tools"] == [tool_schema]
-    assert create_kwargs["extra_body"] == {"reasoning_effort": "max"}
+    assert create_kwargs["extra_body"] == {"reasoning_effort": "max", "top_k": 64}
     assert create_kwargs["max_tokens"] == 16384
 
 
-def test_nvidia_kimi_k3_replays_reasoning_history_and_uses_native_effort(tmp_path):
+def test_nvidia_step_5_replays_reasoning_history_with_request_defaults(tmp_path):
     config = _nvidia_config()
     config.nvidia = {
-        "selected_model_id": "moonshotai/kimi-k3",
-        "selected_model_display_name": "Kimi K3",
-        "reasoning_effort": "max",
+        "selected_model_id": "stepfun-ai/step-5-preview",
+        "selected_model_display_name": "Step 5 Preview",
     }
     agent = ReverieAgent(
-        base_url="https://integrate.api.nvidia.com/v1",
+        base_url="https://integrate.api.nvidia.com/v1/chat/completions",
         api_key="x",
-        model="moonshotai/kimi-k3",
+        model="stepfun-ai/step-5-preview",
         project_root=tmp_path,
-        provider="openai-sdk",
+        provider="request",
         config=config,
     )
     agent.messages.extend(
@@ -1103,18 +1102,23 @@ def test_nvidia_kimi_k3_replays_reasoning_history_and_uses_native_effort(tmp_pat
 
     messages = agent._build_messages()
     prior_assistant = next(message for message in messages if message["role"] == "assistant")
-    kwargs = agent._build_openai_chat_completion_kwargs(messages=messages, tools=[], stream=True)
+    payload = agent._prepare_request_payload({"model": agent.model, "messages": messages, "stream": True})
 
     assert prior_assistant["reasoning_content"] == "I also selected 215 and 222."
-    assert kwargs["extra_body"] == {"reasoning_effort": "max"}
-    assert kwargs["temperature"] == 1.0
-    assert kwargs["max_tokens"] == 16_384
-    assert "top_p" not in kwargs
+    prepared_assistant = next(message for message in payload["messages"] if message["role"] == "assistant")
+    assert prepared_assistant["reasoning_content"] == "I also selected 215 and 222."
+    assert "chat_template_kwargs" not in payload
+    assert payload["temperature"] == 1.0
+    assert payload["max_tokens"] == 4096
+    assert payload["top_p"] == 0.95
+    assert payload["top_k"] == 0
 
     agent.model = "meta/muse-glimmer-30b"
-    replay_without_kimi = agent._build_messages()
-    ordinary_assistant = next(message for message in replay_without_kimi if message["role"] == "assistant")
+    replay_without_step = agent._build_messages()
+    ordinary_assistant = next(message for message in replay_without_step if message["role"] == "assistant")
     assert "reasoning_content" not in ordinary_assistant
+    ordinary_payload = agent._prepare_request_payload({"model": agent.model, "messages": messages})
+    assert all("reasoning_content" not in message for message in ordinary_payload["messages"])
 
 
 def test_repository_turn_requires_one_context_engine_call_then_returns_to_auto(tmp_path):
@@ -1219,20 +1223,20 @@ def test_general_programming_explanation_does_not_force_repository_tool(tmp_path
 def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     config = _nvidia_config()
     config.nvidia = {
-        "selected_model_id": "stepfun-ai/step-3.7-flash",
-        "selected_model_display_name": "Step-3.7-Flash",
+        "selected_model_id": "stepfun-ai/step-5-preview",
+        "selected_model_display_name": "Step 5 Preview",
         "max_tokens": 16384,
     }
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1/chat/completions",
         api_key="x",
-        model="stepfun-ai/step-3.7-flash",
+        model="stepfun-ai/step-5-preview",
         project_root=tmp_path,
         provider="request",
         config=config,
     )
     payload = {
-        "model": "stepfun-ai/step-3.7-flash",
+        "model": "stepfun-ai/step-5-preview",
         "messages": [
             {"role": "system", "content": "system" * 2000},
             {"role": "user", "content": "hello" * 4000},
@@ -1254,30 +1258,30 @@ def test_nvidia_request_provider_clamps_output_to_remaining_context(tmp_path):
     assert prepared["max_tokens"] == 16384
 
 
-def test_nvidia_minimax_m3_request_payload_uses_thinking_mode_and_stream_reasoning(tmp_path):
+def test_nvidia_step_5_request_payload_uses_fixed_thinking_and_stream_reasoning(tmp_path):
     config = _nvidia_config()
     config.nvidia = {
-        "selected_model_id": "minimaxai/minimax-m3",
-        "selected_model_display_name": "MiniMax M3",
+        "selected_model_id": "stepfun-ai/step-5-preview",
+        "selected_model_display_name": "Step 5 Preview",
         "reasoning_effort": "high",
     }
     agent = ReverieAgent(
         base_url="https://integrate.api.nvidia.com/v1/chat/completions",
         api_key="x",
-        model="minimaxai/minimax-m3",
+        model="stepfun-ai/step-5-preview",
         project_root=tmp_path,
         provider="request",
         config=config,
     )
     payload = agent._prepare_request_payload(
         {
-            "model": "minimaxai/minimax-m3",
+            "model": "stepfun-ai/step-5-preview",
             "messages": [{"role": "user", "content": "hello"}],
             "stream": True,
         }
     )
 
-    assert payload["chat_template_kwargs"] == {"thinking_mode": "enabled"}
+    assert "chat_template_kwargs" not in payload
     assert "reasoning_effort" not in payload
 
     class FakeResponse:

@@ -94,6 +94,8 @@ import { ComposerSuggestions } from "./ComposerSuggestions";
 import { composerToken, slashOptions, type CompletionOption } from "./composer-completion";
 import remarkGfm from "remark-gfm";
 import { FileChanges } from "./FileChanges";
+import { InteractiveView } from "./InteractiveView";
+import { ViewPresentationProvider } from "./ViewPresentation";
 import type {
   CommandRecord,
   ConfigField,
@@ -175,6 +177,7 @@ import {
   type LiveTurnBatch,
 } from "./live-stream";
 import { isThinkTool, thinkToolText } from "./thinking-tool";
+import { isViewEventRecord, parseViewEvent, toViewSegment } from "./view-events";
 import {
   CUSTOM_SOURCE_ID,
   activeSourceId,
@@ -967,7 +970,7 @@ function ModelPicker({
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索模型")} autoFocus />
             </div>
           </div>
-          <div className="model-option-list">
+          <div className="model-option-list" data-source={source.id}>
             {models.map((model) => (
               <button
                 type="button"
@@ -1425,7 +1428,9 @@ const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { 
             ? preferences.showLiveActivity && <ActivityGroup key={index} events={segment.events} />
             : segment.kind === "reasoning"
               ? preferences.showReasoning && <HistoryReasoning key={index} text={segment.text} defaultExpanded={preferences.expandReasoning} active={running && index === (turn.segments?.length ?? 0) - 1} />
-              : <StreamingMarkdown key={index} running={running}>{visibleOutput(segment.text)}</StreamingMarkdown>)}
+              : segment.kind === "view"
+                ? <InteractiveView key={`view-${segment.view.viewId || index}`} segment={segment.view} />
+                : <StreamingMarkdown key={index} running={running}>{visibleOutput(segment.text)}</StreamingMarkdown>)}
           {!turn.segments?.length && turn.assistantText && <StreamingMarkdown running={running}>{visibleOutput(turn.assistantText)}</StreamingMarkdown>}
           {running && <div className="typing"><span /><span /><span /></div>}
           {turn.error && <InlineError detail={turn.error} />}
@@ -1898,16 +1903,17 @@ function Composer({
 
 const HISTORY_PAGE_SIZE = 60;
 
-const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey }: {
+const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey, sessionId }: {
   messages: SessionMessage[];
   preferences: UiPreferences;
   transcript: RefObject<HTMLDivElement | null>;
   readingKey: string;
+  sessionId: string;
 }) {
   const { t } = useI18n();
   const [start, setStart] = useState(() => readingPositions.get(readingKey)?.first ?? Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const first = Math.min(start, Math.max(0, messages.length - HISTORY_PAGE_SIZE));
-  const rows = useMemo(() => groupTranscriptMessages(messages.slice(first)), [messages, first]);
+  const rows = useMemo(() => groupTranscriptMessages(messages.slice(first), sessionId), [messages, first, sessionId]);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
   useLayoutEffect(() => {
     readingPositions.set(readingKey, { top: 0, follow: true, ...readingPositions.get(readingKey), first });
@@ -1938,7 +1944,9 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
     {first > 0 && <button type="button" className="history-load-earlier" onClick={loadEarlier}>{t("加载更早的消息")}</button>}
     {rows.map(row => row.kind === "activity"
       ? (preferences.showToolCalls || preferences.showToolResults) && <ActivityGroup key={`activity-${first + row.index}`} events={row.events.map(event => ({ ...event, ...(!preferences.showToolCalls ? { arguments: undefined } : {}), ...(!preferences.showToolResults ? { output: undefined } : {}) }))} defaultExpanded={preferences.expandToolResults} />
-      : <Message key={`${row.message.role}-${first + row.index}`} message={row.message} preferences={preferences} />)}
+      : row.kind === "view"
+        ? <InteractiveView key={`view-${row.view.viewId || first + row.index}`} segment={row.view} />
+        : <Message key={`${row.message.role}-${first + row.index}`} message={row.message} preferences={preferences} />)}
   </>;
 });
 
@@ -2089,7 +2097,7 @@ function ChatView({
           <WelcomeHeader workspace={projectNameFromPath(inputOwner?.projectRoot || "")} />
         ) : (
           <div className="message-column" ref={transcriptContent}>
-            <HistoryMessages key={`history:${readingKey}`} messages={visibleMessages} preferences={preferences} transcript={transcript} readingKey={readingKey} />
+            <HistoryMessages key={`history:${readingKey}`} messages={visibleMessages} preferences={preferences} transcript={transcript} readingKey={readingKey} sessionId={session?.id ?? ""} />
             {liveTurn && <LiveMessage key={`live:${readingKey}`} turn={liveTurn} running={running} preferences={preferences} />}
           </div>
         )}
@@ -4837,6 +4845,7 @@ function ApprovalPanel({ approval, resolve }: { approval: Record<string, unknown
       <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong>{riskLabel && <span className={riskClass}>{riskLabel}</span>}</div>
       <p id="approval-message" className="approval-message">{t(String(approval.message ?? "此工具超出当前权限级别。"))}</p>
       <dl className="approval-scope">
+        {approval.view_id != null && <><dt>{t("来源视图")}</dt><dd>{String(approval.view_title || approval.view_id)} · {String(approval.view_id)}</dd></>}
         <dt>{t("所属会话与运行")}</dt><dd>{String(approval.session_id || "—")} · {String(approval.run_id || "—")}</dd>
         <dt>{t("实际命令与目录")}</dt><dd><code>{String(approval.command || "—")}</code><br />{String(approval.cwd || approval.project_root || "未知")}</dd>
         <dt>{t("已知目标路径")}</dt><dd>{Array.isArray(approval.paths) && approval.paths.length ? approval.paths.map(String).join("\n") : t("未知或工具声明")}</dd>
@@ -5295,6 +5304,10 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = window.reverie.onEvent((message) => {
+      if (message.type === "desktop.preferences") {
+        setUiPreferences(current => normalizeUiPreferences({ ...current, ...asRecord(message.preferences) }));
+        return;
+      }
       const event = asRecord(message.event);
       const type = String(event.type ?? "");
       if (message.type === "executors.changed") {
@@ -5305,6 +5318,15 @@ export default function App() {
       const eventOwner = ownerKey(String(event.project_root || draftOwner.current.root), String(event.session_id || draftOwner.current.id));
       const currentOwner = ownerKey(draftOwner.current.root, draftOwner.current.id);
       const runtime = runtimeViews.current.get(eventOwner);
+      if (type === "view.run") {
+        const active = event.state === "running";
+        if (active) runtimeViews.current.set(eventOwner, { running: true, live: null, approval: null });
+        else if (runtime) { runtime.running = false; runtime.approval = null; }
+        setSessionStates(current => ({ ...current, [eventOwner]: active ? "running" : "" }));
+        if (eventOwner === currentOwner) { setRunning(active); setApproval(null); acceptLiveEvents.current = active; }
+        return;
+      }
+      if (type === "approval.request" && event.view_id && runtime) runtime.approval = event;
       if (type === "run.started" && typeof event.history_message_count === "number") {
         if (runtime?.live) runtime.live = { ...runtime.live, historyMessageCount: event.history_message_count };
         if (eventOwner === currentOwner) setLiveTurn(current => current ? { ...current, historyMessageCount: event.history_message_count as number } : current);
@@ -5376,6 +5398,19 @@ export default function App() {
         if (thinking) {
           batch.reasoningText += `${batch.reasoningText ? "\n\n" : ""}${thinking}`;
           batch.ordered?.push({ kind: "reasoning", text: thinking });
+        }
+        else if (isViewEventRecord(inner)) {
+          // A kernel-minted view announcement becomes its own timeline segment,
+          // never an activity row. The event carries only an opaque handle; the
+          // bytes are fetched later through getView, so a well-formed forgery in
+          // model text resolves to nothing. A malformed shape (parse -> null)
+          // falls back to an ordinary activity row so nothing is dropped.
+          const parsed = parseViewEvent(inner);
+          if (parsed) batch.ordered?.push({ kind: "view", view: toViewSegment(parsed) });
+          else {
+            batch.events.push(inner);
+            batch.ordered?.push({ kind: "activity", event: inner });
+          }
         }
         else {
           batch.events.push(inner);
@@ -5793,6 +5828,20 @@ export default function App() {
       if (ownsView()) { setRunning(false); setControlStatus(""); }
     }
   }, [flushLiveBatch, projectRoot, resetLiveBatch, session, state, t]);
+
+  useEffect(() => {
+    const followup = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId: string; text: string }>).detail;
+      if (!detail || detail.sessionId !== session?.id || running || sessionBusy) {
+        event.preventDefault();
+        toast(t("会话正忙，请稍后发送追问。"), "info");
+        return;
+      }
+      void runPromptText(detail.text);
+    };
+    window.addEventListener("reverie:view-followup", followup);
+    return () => window.removeEventListener("reverie:view-followup", followup);
+  }, [runPromptText, session?.id, running, sessionBusy, t, toast]);
 
   const sendPrompt = useCallback(async (behaviorOverride?: "queue" | "steer") => {
     const text = prompt.trim();
@@ -6676,6 +6725,7 @@ export default function App() {
 
   return (
     <I18nProvider language={uiPreferences.language}>
+    <ViewPresentationProvider scope={projectRoot} persisted={uiPreferences.viewPresentations}>
     <InputContext.Provider value={{
       projectRoot, sessionId: session?.id ?? "", behavior: sendBehavior, setBehavior: setSendBehavior,
       streaming, streamReady: Boolean(streamSetting), streamSettingBusy, streamRequired, toggleStreaming: () => void updateSetting("stream_responses", !streaming),
@@ -6764,6 +6814,7 @@ export default function App() {
       <Toasts items={toasts} onDismiss={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
     </div>
     </InputContext.Provider>
+    </ViewPresentationProvider>
     </I18nProvider>
   );
 }

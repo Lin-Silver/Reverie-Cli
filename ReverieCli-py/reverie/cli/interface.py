@@ -74,7 +74,7 @@ from ..stream_protocol import (
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration, IndexConfig
 from ..context_engine import LSPManager
 from ..memory import MemoryOS
-from ..modes import get_mode_display_name, normalize_mode
+from ..modes import REPOSITORY_MODES, get_mode_display_name, normalize_mode
 from ..nvidia import (
     build_nvidia_computer_controller_runtime_model_data,
     get_nvidia_model_vision_modalities,
@@ -400,16 +400,12 @@ def _configure_stdio_for_terminal_output() -> None:
 
 
 def _sanitize_prompt_output_text(output_text: str, thinking_text: str) -> str:
-    """Strip leaked `<think>` blocks or duplicated reasoning from batch prompt output."""
+    """Separate explicit legacy thinking tags without guessing from answer prose."""
     cleaned = str(output_text or "").strip()
     if not cleaned:
         return ""
 
     cleaned = re.sub(r"(?is)<think>.*?</think>", "", cleaned).strip()
-
-    normalized_thinking = str(thinking_text or "").replace(HIDDEN_STREAM_TOKEN, "").strip()
-    if normalized_thinking and cleaned.startswith(normalized_thinking):
-        cleaned = cleaned[len(normalized_thinking):].lstrip()
 
     if cleaned.lower().startswith("</think>"):
         cleaned = cleaned[len("</think>"):].lstrip()
@@ -417,8 +413,6 @@ def _sanitize_prompt_output_text(output_text: str, thinking_text: str) -> str:
         tail = cleaned.rsplit("</think>", 1)[-1].strip()
         if tail:
             cleaned = tail
-
-    cleaned = _strip_leaked_prompt_reasoning_prefix(cleaned)
 
     return cleaned.strip()
 
@@ -433,72 +427,6 @@ def _split_prompt_error(output_text: str) -> tuple[str, str]:
     return user_output, cleaned[marker_index:].strip()
 
 
-def _strip_leaked_prompt_reasoning_prefix(output_text: str) -> str:
-    cleaned = str(output_text or "").strip()
-    if not cleaned:
-        return ""
-
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", cleaned) if part.strip()]
-    if len(paragraphs) < 2:
-        return cleaned
-
-    first = paragraphs[0]
-    tail = "\n\n".join(paragraphs[1:]).strip()
-    if not tail:
-        return cleaned
-
-    first_lower = first.lower()
-    leakage_prefixes = (
-        "the user ",
-        "user is ",
-        "user has ",
-        "the request ",
-        "this is a simple ",
-        "this is a straightforward ",
-        "i need ",
-        "i should ",
-        "let me ",
-        "we need ",
-    )
-    leakage_markers = (
-        " asking",
-        " asked",
-        " wants",
-        " requested",
-        " should ",
-        " respond",
-        " reply",
-        " output",
-        " prompt",
-        " request",
-    )
-    if any(first_lower.startswith(prefix) for prefix in leakage_prefixes) and any(
-        marker in first_lower for marker in leakage_markers
-    ):
-        return tail
-
-    final = paragraphs[-1]
-    prefix_text = "\n\n".join(paragraphs[:-1]).lower()
-    if len(final) <= 240 and any(
-        marker in prefix_text
-        for marker in (
-            "user is asking",
-            "user wants",
-            "the user wants",
-            "the user asked",
-            "i should simply",
-            "i should respond",
-            "i should reply",
-            "i'll just output",
-            "let me output",
-            "workspace global memory",
-        )
-    ):
-        return final
-
-    return cleaned
-
-
 def _json_safe_value(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -511,7 +439,7 @@ def _json_safe_value(value: Any) -> Any:
     return str(value)
 
 
-def _build_batch_prompt_rules(*, read_only_review: bool = False) -> str:
+def _build_batch_prompt_rules(*, read_only_review: bool = False, runtime_surface: str = "terminal") -> str:
     """Runtime-only rules for one-shot `-p/--prompt` execution."""
     if read_only_review:
         return """
@@ -520,6 +448,8 @@ def _build_batch_prompt_rules(*, read_only_review: bool = False) -> str:
 - Do not modify files, run commands, or continue into implementation or document generation.
 - Report missing evidence as a review limitation. File edits and test execution are not completion requirements for this review.
 """.strip()
+    if runtime_surface == "desktop":
+        return ""
     return """
 ## Non-Interactive Prompt Mode
 - This run was started through Reverie's one-shot prompt mode. There will be no follow-up turn.
@@ -2328,8 +2258,6 @@ class ReverieInterface:
             return False, "No NVIDIA model is currently selected."
 
         model_name = str(selected.get("display_name") or selected.get("id") or "the current model").strip()
-        if str(selected.get("transport", "") or "").strip().lower() != "request":
-            return False, f"{model_name} uses the OpenAI SDK path and does not accept inline image input."
         if not bool(selected.get("vision")):
             return False, f"{model_name} is not marked as vision-capable."
         return True, ""
@@ -3814,6 +3742,7 @@ class ReverieInterface:
         self.agent.additional_rules = self._build_additional_rules_with_tti(config)
         self.agent.system_prompt = self._build_system_prompt(
             model_name=self.agent.model_display_name,
+            model_id=getattr(self.agent, "model", ""),
             additional_rules=self.agent.additional_rules,
             mode=self.agent.mode,
             config=config,
@@ -3825,6 +3754,7 @@ class ReverieInterface:
             return
         self.agent.config = config
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
+        self.agent.tool_executor.update_context('refresh_agent_prompt_guidance', self._refresh_agent_prompt_guidance)
         self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
         # Dynamic catalogs can involve external MCP transports. Keep them off
         # the startup critical path; ToolExecutor synchronizes them lazily on
@@ -4243,11 +4173,12 @@ class ReverieInterface:
                 )
 
             self.agent.additional_rules = "\n\n".join(
-                part for part in [self.agent.additional_rules, _build_batch_prompt_rules(read_only_review=read_only_review)] if str(part).strip()
+                part for part in [self.agent.additional_rules, _build_batch_prompt_rules(read_only_review=read_only_review, runtime_surface=self.runtime_surface)] if str(part).strip()
             )
             self.agent.goal_context = goal_context
             self.agent.system_prompt = self._build_system_prompt(
                 model_name=self.agent.model_display_name,
+                model_id=getattr(self.agent, "model", ""),
                 additional_rules=self.agent.additional_rules,
                 mode=self.agent.mode,
                 config=getattr(self.agent, "config", None),
@@ -4310,7 +4241,10 @@ class ReverieInterface:
             }
             self.session_manager.save_session(session)
 
-            context_initialized = self.ensure_context_engine(announce=False)
+            context_was_ready = self._context_engine_ready
+            # Desktop retrieval tools already initialize and await their index.
+            # Ordinary replies and generated views need no repository startup.
+            context_initialized = self.ensure_context_engine(announce=False) if self.runtime_surface != "desktop" else False
             thinking_parts: List[str] = []
             output_text = ""
             error_text = ""
@@ -4363,7 +4297,7 @@ class ReverieInterface:
                             _emit({"type": "assistant.delta", "text": chunk})
 
                 _persist_history_if_changed()
-                turn_thinking = "".join(thinking_chunks).strip()
+                turn_thinking = "".join(thinking_chunks)
                 streamed_output = "".join(output_chunks).strip()
                 final_assistant_output = ""
                 for history_message in reversed(self.agent.get_history()):
@@ -4392,7 +4326,7 @@ class ReverieInterface:
                     error_text = turn_error
                     break
 
-                if read_only_review or resume or auto_followup_count >= 3:
+                if self.runtime_surface == "desktop" or read_only_review or resume or auto_followup_count >= 3:
                     break
 
                 followup_message = _build_prompt_followup_message(
@@ -4426,7 +4360,8 @@ class ReverieInterface:
                 )
                 active_prompt = followup_message
 
-            thinking_text = "\n\n".join(part for part in thinking_parts if part).strip()
+            thinking_text = "\n\n".join(part for part in thinking_parts if part)
+            context_initialized = context_initialized or (not context_was_ready and self._context_engine_ready)
 
             if not error_text and not read_only_review and normalize_mode(base_config.mode) == "writer":
                 writer_progress = _writer_project_progress(self.project_root, prompt_text)
@@ -4544,13 +4479,16 @@ class ReverieInterface:
         memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"
 
         lsp_lines = [
-            "## Context Engine Enhancements",
+            "## Context Engine Enhancements" if normalized_mode in REPOSITORY_MODES else "## Workspace Continuity",
             f"- {memory_title}: {'enabled' if self.memory_indexer else 'disabled'}",
-            f"- Optional LSP bridge: {'available' if self.lsp_manager and self.lsp_manager.build_status_report().get('available') else 'on-demand (initialize only when needed)'}",
-            "- If LSP data is available, prefer it for diagnostics, definitions, workspace symbols, and reference-oriented navigation.",
-            "- After implementation work, run the relevant build/test/verification commands before concluding.",
-            "- After tool use, always produce a user-visible textual response instead of stopping at tool output only.",
         ]
+        if normalized_mode in REPOSITORY_MODES:
+            lsp_lines.extend([
+                f"- Optional LSP bridge: {'available' if self.lsp_manager and self.lsp_manager.build_status_report().get('available') else 'on-demand (initialize only when needed)'}",
+                "- If LSP data is available, prefer it for diagnostics, definitions, workspace symbols, and reference-oriented navigation.",
+                "- After implementation work, run the relevant build/test/verification commands before concluding.",
+            ])
+        lsp_lines.append("- After tool use, always produce a user-visible textual response instead of stopping at tool output only.")
 
         workspace_memory = (
             self.memory_indexer.build_memory_summary(max_fragments=6, max_chars=2200, title=memory_title)
@@ -4592,7 +4530,7 @@ class ReverieInterface:
                 skills_manager=self.skills_manager if include_discovery_status else None,
                 mcp_runtime=self.mcp_runtime,
             )
-            if include_harness_guidance
+            if include_harness_guidance and normalized_mode in REPOSITORY_MODES
             else ""
         )
 
@@ -4611,8 +4549,8 @@ class ReverieInterface:
             for tti_block in [
                 "\n".join(lsp_lines),
                 harness_guidance,
-                self.mcp_runtime.describe_for_prompt(),
-                self.runtime_plugin_manager.describe_for_prompt(normalized_mode) if include_discovery_status else "",
+                self.mcp_runtime.describe_for_prompt() if normalized_mode != "writer" else "",
+                self.runtime_plugin_manager.describe_for_prompt(normalized_mode) if include_discovery_status and normalized_mode != "writer" else "",
                 skills_block,
                 atlas_block,
                 memory_block,

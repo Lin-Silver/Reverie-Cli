@@ -47,6 +47,7 @@ if (!existsSync(path.join(unpackedRoot, "ReverieUI.exe")) || !existsSync(path.jo
 }
 
 const buildHash = createHash("sha256");
+buildHash.update(readFileSync(fileURLToPath(import.meta.url)));
 for (const file of walkFiles(unpackedRoot).sort()) {
   const stats = statSync(file);
   buildHash.update(path.relative(unpackedRoot, file).replaceAll(path.sep, "/"));
@@ -61,6 +62,14 @@ const scriptPath = path.join(cacheRoot, "portable.nsi");
 writeFileSync(markerSource, `${packageJson.version}\n${buildId}\n`, "utf8");
 
 const nsisPath = (value) => path.resolve(value).replaceAll("/", "\\");
+const extraction = walkFiles(unpackedRoot).sort().map((file) => {
+  const directory = path.dirname(path.relative(unpackedRoot, file));
+  const suffix = directory === "." ? "" : `\\${directory.replaceAll(path.sep, "\\").replaceAll("$", () => "$$")}`;
+  return `  SetOutPath "\\\\?\\$INSTDIR${suffix}"
+  ClearErrors
+  File "/oname=${path.basename(file).replaceAll("$", () => "$$")}" "${nsisPath(file)}"
+  IfErrors extract_failed`;
+}).join("\n");
 const numericVersion = `${packageJson.version}.0`.split(".").slice(0, 4).join(".");
 const script = `Unicode true
 RequestExecutionLevel user
@@ -86,9 +95,16 @@ Section
   IfFileExists "$INSTDIR\\.reverie-build-${buildId}" launch
   RMDir /r "$INSTDIR"
   CreateDirectory "$INSTDIR"
-  SetOutPath "$INSTDIR"
-  File /r "${nsisPath(unpackedRoot)}\\*.*"
+${extraction}
+  SetOutPath "\\\\?\\$INSTDIR"
+  ClearErrors
   File /oname=.reverie-build-${buildId} "${nsisPath(markerSource)}"
+  IfErrors extract_failed
+  Goto launch
+
+extract_failed:
+  SetErrorLevel 2
+  Quit
 
 launch:
   CreateDirectory "$EXEDIR\\.reverie\\desktop\\temp"

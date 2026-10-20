@@ -11,6 +11,7 @@ import logging
 import os
 import queue
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -21,6 +22,7 @@ import requests
 from .config import get_app_root
 from .diagnostics import report_suppressed_exception
 from .modes import normalize_mode
+from .mcp_apps import MCP_APP_MIME, normalize_tool_ui, public_mcp_result, validate_ui_resource
 from .security_utils import write_json_secure
 from .version import __version__
 
@@ -421,6 +423,10 @@ def format_mcp_call_result(result: Any) -> Tuple[str, Dict[str, Any], bool]:
         text = str(result or "").strip()
         return text, {"raw_result": result}, False
 
+    # Only this projection may enter ToolResult, transcripts, search or model relay.
+    # The original _meta stays on the transport result and the private UI channel.
+    result = public_mcp_result(result)
+
     text_parts: List[str] = []
     message_parts: List[Dict[str, Any]] = []
     content = result.get("content", [])
@@ -484,10 +490,7 @@ def format_mcp_call_result(result: Any) -> Tuple[str, Dict[str, Any], bool]:
     if structured is not None:
         message_parts.append({"type": "text", "text": json.dumps(structured, ensure_ascii=False)})
     if not output:
-        try:
-            output = json.dumps(result, ensure_ascii=False, indent=2)
-        except Exception:
-            output = str(result)
+        output = "MCP tool reported an error." if result.get("isError") else "MCP tool completed without model-visible content."
 
     is_error = bool(result.get("isError"))
     metadata = {
@@ -672,9 +675,17 @@ class BaseMCPClient:
         self.project_root = Path(project_root).resolve() if project_root is not None else None
         self._lock = threading.RLock()
         self._initialized = False
+        self.server_capabilities: Optional[Dict[str, Any]] = None
+        self.protocol_version = MCP_PROTOCOL_VERSION
         self._catalog_dirty = True
         self._discovery_cache: Optional[Dict[str, Any]] = None
         self._last_error = ""
+        self.connection_generation = secrets.token_hex(16)
+        self._bound_generation: Optional[str] = None
+
+    @property
+    def connection_live(self) -> bool:
+        return self._initialized
 
     @property
     def catalog_dirty(self) -> bool:
@@ -720,19 +731,27 @@ class BaseMCPClient:
 
     def initialize(self, timeout_ms: Optional[int] = None) -> None:
         with self._lock:
-            if self._initialized:
+            if self._initialized and self.connection_live:
                 return
-            self.request(
+            if self._bound_generation is not None:
+                raise MCPClientError("MCP app connection expired; automatic reconnect is forbidden for this call.")
+            initialized = self.request(
                 "initialize",
                 {
                     "protocolVersion": MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
+                    "capabilities": {"extensions": {"io.modelcontextprotocol/ui": {"mimeTypes": [MCP_APP_MIME]}}},
                     "clientInfo": dict(MCP_CLIENT_INFO),
                 },
                 timeout_ms=timeout_ms,
                 expect_response=True,
             )
+            negotiated = initialized.get("protocolVersion", MCP_PROTOCOL_VERSION)
+            if negotiated not in {"2025-06-18", "2025-11-25"}:
+                raise MCPClientError(f"Unsupported MCP protocol version: {negotiated}")
+            self.protocol_version = negotiated
+            self.server_capabilities = initialized.get("capabilities") if isinstance(initialized.get("capabilities"), dict) else None
             self.request("notifications/initialized", {}, timeout_ms=timeout_ms, expect_response=False)
+            self.connection_generation = secrets.token_hex(16)
             self._initialized = True
 
     def _list_pages(self, method: str, field: str, timeout_ms: Optional[int]) -> List[Dict[str, Any]]:
@@ -781,17 +800,20 @@ class BaseMCPClient:
                 return dict(self._discovery_cache)
 
             try:
-                tools = self._list_pages("tools/list", "tools", timeout_ms)
+                if self.server_capabilities is None or "tools" in self.server_capabilities:
+                    tools = self._list_pages("tools/list", "tools", timeout_ms)
             except Exception as exc:
                 errors.append(f"tools/list: {exc}")
 
             try:
-                resources = self._list_pages("resources/list", "resources", timeout_ms)
+                if self.server_capabilities is None or "resources" in self.server_capabilities:
+                    resources = self._list_pages("resources/list", "resources", timeout_ms)
             except Exception as exc:
                 errors.append(f"resources/list: {exc}")
 
             try:
-                prompts = self._list_pages("prompts/list", "prompts", timeout_ms)
+                if self.server_capabilities is None or "prompts" in self.server_capabilities:
+                    prompts = self._list_pages("prompts/list", "prompts", timeout_ms)
             except Exception as exc:
                 errors.append(f"prompts/list: {exc}")
 
@@ -806,11 +828,18 @@ class BaseMCPClient:
             }
             return dict(self._discovery_cache)
 
-    def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        self.initialize()
-        params = {"name": str(tool_name or "").strip(), "arguments": arguments or {}}
-        result = self.request("tools/call", params, expect_response=True)
-        return result if isinstance(result, dict) else {"content": [{"type": "text", "text": str(result)}]}
+    def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None, *, expected_generation: Optional[str] = None) -> Dict[str, Any]:
+        with self._lock:
+            if expected_generation is not None and (not self.connection_live or self.connection_generation != expected_generation):
+                raise MCPClientError("MCP app connection expired; the call was not replayed.")
+            self._bound_generation = expected_generation
+            try:
+                self.initialize()
+                params = {"name": str(tool_name or "").strip(), "arguments": arguments or {}}
+                result = self.request("tools/call", params, expect_response=True)
+                return result if isinstance(result, dict) else {"content": [{"type": "text", "text": str(result)}]}
+            finally:
+                self._bound_generation = None
 
     def read_resource(self, uri: str) -> Dict[str, Any]:
         self.initialize()
@@ -844,6 +873,10 @@ class StdioMCPClient(BaseMCPClient):
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._stderr_tail: List[str] = []
+
+    @property
+    def connection_live(self) -> bool:
+        return self._initialized and self._process is not None and self._process.poll() is None
 
     def close(self) -> None:
         process = self._process
@@ -935,6 +968,9 @@ class StdioMCPClient(BaseMCPClient):
         process = self._process
         if process is not None and process.poll() is None:
             return
+
+        if self._bound_generation is not None:
+            raise MCPClientError("MCP app connection expired; automatic reconnect is forbidden for this call.")
 
         self.close()
         command = str(self.server_config.get("command", "") or "").strip()
@@ -1068,7 +1104,7 @@ class HttpMCPClient(BaseMCPClient):
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+            "MCP-Protocol-Version": self.protocol_version,
         }
         if self._session_id:
             headers[MCP_SESSION_HEADER] = self._session_id
@@ -1184,6 +1220,10 @@ class SseMCPClient(BaseMCPClient):
         self._last_event_id = ""
         self._incoming_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
         self._pending_responses: Dict[Any, Dict[str, Any]] = {}
+
+    @property
+    def connection_live(self) -> bool:
+        return self._initialized and self._stream_response is not None and self._stream_thread is not None and self._stream_thread.is_alive()
 
     def close(self) -> None:
         with self._lock:
@@ -1311,6 +1351,8 @@ class SseMCPClient(BaseMCPClient):
                         f"Failed to establish SSE endpoint for MCP server '{self.server_name}': {self._stream_error}"
                     )
 
+        if self._bound_generation is not None:
+            raise MCPClientError("MCP app connection expired; automatic SSE reconnect is forbidden for this call.")
         self._close_stream_locked(close_session=False)
         self._stream_stop = threading.Event()
         self._endpoint_ready = threading.Event()
@@ -1766,6 +1808,9 @@ class MCPRuntime:
                     "trust": bool(server_cfg.get("trust", False)),
                     "include_modes": _normalize_string_list(server_cfg.get("includeModes", [])),
                     "exclude_modes": _normalize_string_list(server_cfg.get("excludeModes", [])),
+                    "_meta": dict(tool.get("_meta") or {}) if isinstance(tool.get("_meta"), dict) else {},
+                    "ui": normalize_tool_ui(tool),
+                    "output_schema": tool.get("outputSchema"),
                 }
                 catalog.append(metadata)
                 lookup[synthetic_name] = metadata
@@ -1784,9 +1829,11 @@ class MCPRuntime:
         self,
         force_refresh: bool = False,
         timeout_ms: Optional[int] = MCP_STARTUP_DISCOVERY_TIMEOUT_MS,
+        *,
+        audience: str = "model",
     ) -> List[Dict[str, Any]]:
         if not force_refresh and self._background_discovery_running:
-            return [dict(item) for item in self._tool_catalog]
+            return self._visible_tool_definitions(audience)
         needs_background_refresh = False
         with self._lock:
             if self._catalog_ready and not force_refresh:
@@ -1803,13 +1850,42 @@ class MCPRuntime:
                             any_dirty = True
                             break
                     if not any_dirty:
-                        return [dict(item) for item in self._tool_catalog]
+                        return self._visible_tool_definitions(audience)
                     needs_background_refresh = True
             if force_refresh:
-                return self._rebuild_catalog_locked(force_refresh=True, timeout_ms=timeout_ms)
+                self._rebuild_catalog_locked(force_refresh=True, timeout_ms=timeout_ms)
+                return self._visible_tool_definitions(audience)
         if needs_background_refresh or not self._catalog_ready:
             self.start_background_discovery(force_refresh=False)
-        return [dict(item) for item in self._tool_catalog]
+        return self._visible_tool_definitions(audience)
+
+    def _visible_tool_definitions(self, audience: str) -> List[Dict[str, Any]]:
+        return [dict(item) for item in self._tool_catalog if audience in item.get("ui", {}).get("visibility", ["model", "app"])]
+
+    def get_app_tool_definitions(self) -> List[Dict[str, Any]]:
+        return self.get_tool_definitions(audience="app")
+
+    def app_identity(self, server_name: str) -> Dict[str, Any]:
+        """A live transport identity, never a URI-only or process-persistent grant."""
+        with self._lock:
+            self._refresh_config_locked(force=False)
+            cfg = self._get_effective_servers_locked().get(server_name)
+            client = self._clients.get(server_name)
+            if not cfg or not client or not client.connection_live or self._server_health.get(server_name, {}).get("state") != "healthy":
+                raise MCPClientError("MCP app connection expired; run the original tool again after discovery.")
+            server_id = hashlib.sha256(_stable_json_signature([server_name, cfg]).encode()).hexdigest()
+            return {"server_name": server_name, "server_id": server_id, "connection_generation": client.connection_generation}
+
+    def require_app_identity(self, server_name: str, binding: Dict[str, Any]) -> None:
+        current = self.app_identity(server_name)
+        if any(binding.get(key) != value for key, value in current.items()):
+            raise MCPClientError("MCP app connection expired; run the original tool again. Operations are never replayed.")
+
+    def read_ui_resource(self, server_name: str, uri: str, binding: Dict[str, Any]) -> Dict[str, Any]:
+        self.require_app_identity(server_name, binding)
+        result = self.read_resource(server_name, uri)
+        self.require_app_identity(server_name, binding)
+        return validate_ui_resource(result, uri, binding)
 
     def resolve_tool(self, synthetic_name: str) -> Optional[Dict[str, Any]]:
         wanted = str(synthetic_name or "").strip()
@@ -1836,7 +1912,7 @@ class MCPRuntime:
                 return str(server_name)
         return ""
 
-    def call_tool(self, server_name: str, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def call_tool(self, server_name: str, tool_name: str, arguments: Optional[Dict[str, Any]] = None, *, app_binding: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         with self._lock:
             self._refresh_config_locked(force=False)
             effective_servers = self._get_effective_servers_locked()
@@ -1846,9 +1922,16 @@ class MCPRuntime:
             health = self._server_health.get(server_name, {})
             if str(health.get("state", "")).lower() != "healthy":
                 raise MCPClientError(f"MCP server '{server_name}' has not passed background discovery.")
+            descriptor = next((item for item in self._tool_catalog if item["server_name"] == server_name and item["tool_name"] == tool_name), None)
+            audience = "app" if app_binding is not None else "model"
+            if not descriptor or audience not in descriptor["ui"]["visibility"]:
+                raise MCPClientError("Tool visibility does not allow this caller.")
+            if app_binding is not None:
+                self.require_app_identity(server_name, app_binding)
             client = self._get_client_locked(server_name, server_cfg)
 
-        result = client.call_tool(tool_name, arguments or {})
+        options = {"expected_generation": app_binding["connection_generation"]} if app_binding is not None else {}
+        result = client.call_tool(tool_name, arguments or {}, **options)
         output, metadata, is_error = format_mcp_call_result(result)
         return {
             "success": not is_error,

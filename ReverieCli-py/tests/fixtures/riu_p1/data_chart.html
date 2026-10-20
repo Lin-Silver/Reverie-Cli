@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Q3 sales by region</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #fff; color: #1a1a28; }
+  main { padding: 16px; max-width: 560px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: #4a4a5e; }
+  .bar { fill: #2f6df6; }
+  .bar:nth-child(even) { fill: #8ab4ff; }
+  .label { font-size: 11px; fill: #4a4a5e; }
+  .value { font-size: 11px; fill: #1a1a28; font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; margin-top: 12px; font-size: 12px; width: 100%; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #ececf4; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Q3 sales by region</h1>
+  <p>Offline data chart — rendered entirely from the inline dataset below; it loads no network resource.</p>
+  <svg id="chart" width="520" height="220" role="img" aria-label="Bar chart of Q3 sales by region"></svg>
+  <table id="grid"><thead><tr><th>Region</th><th class="n">Q3 ($K)</th></tr></thead><tbody></tbody></table>
+</main>
+<script>
+  (function () {
+    var DATA = [
+      { region: "North", value: 182 },
+      { region: "South", value: 143 },
+      { region: "East", value: 211 },
+      { region: "West", value: 167 },
+      { region: "Central", value: 98 }
+    ];
+    var svg = document.getElementById("chart"), W = 520, H = 220, pad = 28;
+    var peak = Math.max.apply(null, DATA.map(function (d) { return d.value; }));
+    var bandWidth = (W - pad * 2) / DATA.length, barWidth = bandWidth * 0.62;
+    var ns = "http://www.w3.org/2000/svg";
+    function el(name, attrs, text) {
+      var node = document.createElementNS(ns, name);
+      Object.keys(attrs).forEach(function (key) { node.setAttribute(key, attrs[key]); });
+      if (text != null) node.textContent = text;
+      return node;
+    }
+    DATA.forEach(function (d, index) {
+      var height = Math.round(((H - pad * 2) * d.value) / peak);
+      var x = pad + index * bandWidth + (bandWidth - barWidth) / 2;
+      var y = H - pad - height;
+      svg.appendChild(el("rect", { class: "bar", x: x, y: y, width: barWidth, height: height, rx: 3 }));
+      svg.appendChild(el("text", { class: "value", x: x + barWidth / 2, y: y - 4, "text-anchor": "middle" }, d.value));
+      svg.appendChild(el("text", { class: "label", x: x + barWidth / 2, y: H - pad + 14, "text-anchor": "middle" }, d.region));
+    });
+    svg.appendChild(el("line", { x1: pad, y1: H - pad, x2: W - pad, y2: H - pad, stroke: "#d6d6e2" }));
+    var body = document.querySelector("#grid tbody");
+    DATA.forEach(function (d) {
+      var row = document.createElement("tr");
+      row.appendChild(Object.assign(document.createElement("td"), { textContent: d.region }));
+      var cell = document.createElement("td"); cell.className = "n"; cell.textContent = d.value;
+      row.appendChild(cell); body.appendChild(row);
+    });
+  })();
+</script>
+</body>
+</html>

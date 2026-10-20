@@ -12,6 +12,12 @@ describe("desktop core request timeouts", () => {
     expect(coreRequestTimeoutMs("indexWorkspace")).toBe(0);
   });
 
+  it("lets a view tool call wait out its approval gate without a transport deadline", () => {
+    // callViewTool runs the gated executor on the admin bridge; a human approval
+    // can block well past any ordinary deadline, so it must stream like a prompt.
+    expect(coreRequestTimeoutMs("callViewTool")).toBe(0);
+  });
+
   it("retains bounded deadlines for ordinary requests", () => {
     expect(coreRequestTimeoutMs("getSession")).toBe(15_000);
     expect(coreRequestTimeoutMs("listTools")).toBe(60_000);

@@ -1,12 +1,16 @@
 # Reverie Intelligent UI：调研、技术规格与 AI 开发交接
 
-调研与源码核对日期：**2026-10-08**。状态：**提案，尚未实现**。适用基线：当前未提交工作树，核心与 Desktop 版本均为 `2.5.0`，核心接口版本为 `1.0`；不能用 Git HEAD 或已发布安装包代替这份工作树。
+初版调研日期：**2026-10-08**；P3 官方契约复核：**2026-10-16**；产品体验资料再次复核：**2026-10-20**。P0–P2 已在 Windows 本地验证，P3 当前实现的协议范围见下方 profile；P4 已实现并完成 2026-10-17 Windows 本地验收，后续提示词修复与真实模型生成质量见 [续验记录](VERIFICATION_HISTORY.md#riu-prompt-quality-2026-10-17)。适用基线：本轮 RIU 续修源码及 [Cloud 暂停交接](CLOUD_CODEX_RIU_HANDOFF.md)，核心与 Desktop 版本均为 `2.5.0`，核心接口版本为 `1.0`；不能用旧 HEAD 或已发布安装包代替这些源码。
 
 本文定义待开发能力、实现约束、分期验收和可直接复制的 AI 提示词。当前能力以 [FEATURE_STATUS](FEATURE_STATUS.md) 为准，排期及状态只在 [ROADMAP](ROADMAP.md) 维护。本文中的模块名、动作、字段与限制是 **Reverie 设计约定**，除特别注明外均不是 OpenAI 的内部实现或公开 API。
 
 ## 1. 联网核实：ChatGPT 的相关能力是什么
 
-本次用官方文档搜索与网页搜索检索了 `ChatGPT intelligent UI`、交互式可视化、MCP Apps、插件扩展及桥接协议，并实际读取下列官方页面。**没有在本次检索到的官方资料中确认“Intelligent UI”是一个正式发布名称**；也没有证据把这些能力归到同一次新发布。本文将这个词用作 Reverie 的产品代号 RIU，而不宣称复刻一个同名 OpenAI API。
+2026-10-08 初版用官方文档搜索与网页搜索检索了 `ChatGPT intelligent UI`、交互式可视化、MCP Apps、插件扩展及桥接协议，并实际读取下列官方页面。**当时没有在所检索的官方资料中确认“Intelligent UI”是一个正式发布名称**，也没有证据把这些能力归到同一次新发布；保留这一历史调研范围。
+
+2026-10-20 重新读取 [Intelligent UI in ChatGPT](https://help.openai.com/en/articles/20001598-intelligent-ui-in-chatgpt)：官方当前用 Intelligent UI 描述按任务自动组织文本、视觉与交互内容的产品体验，简单问题仍可用文本。它不是供任意模型直接复刻该效果的兼容协议或质量保证。Reverie 的目标是用户不必刻意说 HTML/页面，模型也能在有实际交互价值时选择合适形式；当前实现和提示词不能据此宣称功能对等或超越。最新 [UI 指南](https://developers.openai.com/plugins/concepts/ui-guidelines)支持轻量任务内容与按空间需求选择展示位置；约 400px PiP 中应优先结果和关键控件，不能以大仪表盘模板替代任务需求。
+
+最新自动选择指导、Harness 与 Markdown 排版修复尚未打包，见 [暂停证据](VERIFICATION_HISTORY.md#riu-cloud-handoff-2026-10-20)。原生思考按原始内容保存，Markdown 块布局使用正常空白规则、代码块保留缩进；这不授权删除/隐藏思考。完整请求、首输出、有效工具、工具执行和本地帧渲染按各自计时边界记录，不能只用提示词字符数解释生成耗时。
 
 | 官方能力 | 已核实的产品行为 | Reverie 对标范围 |
 | --- | --- | --- |
@@ -31,11 +35,11 @@ DevDay 页面列出了 Plugin Extensions，但这不能证明 ChatGPT 的可视�
 | `connectDomains` / `resourceDomains` / `frameDomains` | [Security & Privacy](https://developers.openai.com/plugins/guides/security-privacy) | 服务端声明是权限请求，不是自动授权；嵌套页面有自己的 CSP，外层 allowlist 不约束其全部请求 |
 | inline、fullscreen、pip；card、carousel | [UI guidelines](https://developers.openai.com/plugins/concepts/ui-guidelines) | 前三者为展示模式，后两者是内容布局；不应把 carousel 当标准 display mode |
 
-读取日期统一为 2026-10-08。实施时复核对应页面和 SDK 版本；本次未安装插件或调用付费模型验证 ChatGPT 账户侧行为。
+初次读取日期为 2026-10-08。2026-10-16 实施 P3 前重新读取 [UI](https://developers.openai.com/plugins/build/chatgpt-ui)、[quickstart](https://developers.openai.com/plugins/build/app-quickstart)、[reference](https://developers.openai.com/plugins/reference) 全文，并对照 [ext-apps v2.0.3 类型契约](https://github.com/modelcontextprotocol/ext-apps/blob/v2.0.3/src/spec.types.ts) 和 [发布说明](https://github.com/modelcontextprotocol/ext-apps/releases/tag/v2.0.3)。SDK 固定 `2.0.3`，UI 协议固定 `2026-01-26`，测试依赖及传递依赖固定在 [fixture lockfile](../scripts/verification/fixtures/mcp-apps/package-lock.json)。没有安装 ChatGPT 插件或调用付费模型验证账户侧行为。
 
 ## 2. 当前项目审查与差距
 
-以下是本次直接读取源码的结论，属于静态审查，不是重新运行完整软件后的验收结果。
+以下保留 2026-10-08 初版源码审查基线，描述实现前的差距；当前状态见第 4.4 节 P3 profile、[FEATURE_STATUS](FEATURE_STATUS.md) 与集中验证记录。
 
 | 层 | 已有实现与源码入口 | RIU 缺口 |
 | --- | --- | --- |
@@ -144,7 +148,7 @@ UI 的事件标记只通知“有产物可读”，不是权限凭证。任意�
 
 内部 payload 命名沿用现有 TypeScript `sessionId` 等约定；持久层可用 snake_case。跨层映射显式编写并测试。追问复用正常 `runPrompt`；不要增加可以绕过现有调度器的第二条聊天入口。
 
-握手新增可选 capabilities，例如 `views: {schema_version: 1, inline: true, mcp_apps: false}`。feature detection 决定工具是否提供可视化能力；TUI仍可生成文件并返回摘要。新增兼容字段不应盲目改动 `CORE_INTERFACE_VERSION`：先验证旧新内核组合；真正破坏协议时才升版并同步可信内核元数据、打包与兼容性测试。
+握手用可选 `views` capability 探测能力。P0–P2 的 `mcp_apps` 为 false；P3 的现行值为 true，并附 `mcp_apps_protocol: "2026-01-26"`、`mcp_apps_sdk: "2.0.3"`、`profile: "offline-server-tools-v1"`。TUI 仍只返回文本与产物引用。新增字段保持 `CORE_INTERFACE_VERSION` 为 1.0；真正破坏协议时才升版并同步可信内核元数据、打包与兼容性测试。
 
 ### 4.3 渲染隔离：必须先验证的技术门
 
@@ -181,6 +185,66 @@ object-src 'none'; base-uri 'none'; form-action 'none'
 
 iframe 模式验证 `event.source === registeredFrame.contentWindow`；opaque origin 的 `"null"` 本身不是身份。绑定随机实例 capability、session/view/revision、请求 id 和握手状态；导航、重载、切换会话时使旧实例失效。发送给 opaque frame 时若必须用 `targetOrigin="*"`，仍必须限定目标 window，且不发送宿主密钥。独立 WebContents 模式使用相同约束的受控消息通道。对消息大小、速率、并发、超时、重复和取消均有上限。
 
+**P2 实施 profile（2026-10-15）**：方法与文本内容形状对照固定的 [ext-apps v1.2.0 类型契约](https://github.com/modelcontextprotocol/ext-apps/blob/v1.2.0/src/spec.types.ts)，协议版本 `2026-01-26`。当前只承载内置离线生成视图：`initialize/initialized`、`tools/call`、文本 `ui/message`、文本/JSON `ui/update-model-context` 和私有 `reverie/view-state`；旧私有 `reverie/call-tool` 保留为别名。握手的 experimental capability 标明内置工具与私有状态；不声明 `serverTools`，核心 `mcp_apps` 仍为 false。第三方资源、服务器/连接代次/app visibility 绑定、工具初始输入/结果通知、动态 hostContext、展示模式协商仍按 P3/P4 验收，不能由此宣称标准组件完全兼容。
+
+组件的 `source` 不能证明用户动作。工具请求始终以 component 来源进入现有 executor / security_policy / permission_review / 审批 gate，并逐次等待宿主审批；会话批准不能替代这次确认。`ui/message` 只形成宿主建议，用户点击宿主“发送追问”后才进入正常 `runPrompt`；组件启动消息与定时消息不会自动调用模型。上下文摘要只在后续模型请求中作为带 view/revision 来源的不可信 user 数据临时注入，不写入系统指令或消息历史。
+
+P2 固化的上限：HTML 2 MiB、资源包 8 MiB、私有 JSON 状态 64 KiB、模型摘要合计 8 KiB、桥消息 256 KiB、每实例同时等待 8 个请求、每秒 64 条消息、每实例最多 1,024 个请求 ID。普通请求超时 10 秒，审批工具请求 330 秒；超时释放宿主执行实例并拒绝迟到结果。状态包含内容 revision 和乐观 `baseRevision`；状态、摘要与写前收据位于可执行 HTML 目录之外。写前收据最多 1,024 条/8 MiB，完成、拒绝、Stop 都消耗操作 ID；崩溃/断连留下的 unknown 收据只能查询，不能自动重放。新操作需显式使用新的操作 ID。
+
+#### P3 固定兼容 profile：offline-server-tools-v1
+
+P3 对照 ext-apps `2.0.3` / UI 协议 `2026-01-26`。Reverie 宿主直接接收标准 JSON-RPC over postMessage，不要求标准组件加入 capability、sessionId 或 `riu/*` 字段；身份由已注册 frame 的 Window、宿主实例租约、会话与 revision 约束。原有生成视图保留 P2 capability envelope。MCP 核心 transport 请求 `2025-06-18`，接受并固定服务器返回的 `2025-06-18` 或 `2025-11-25`，HTTP 后续头使用协商值；其他核心版本拒绝。原版官方示例的实际版本和包内证据见 [P3 验证](VERIFICATION_HISTORY.md#riu-p3-interop-2026-10-16)。
+
+| 协议 / 数据面 | 实现与边界 | 状态 |
+| --- | --- | --- |
+| 工具 `_meta.ui.resourceUri`、`visibility` | MCP 目录保留原描述元数据；默认 model/app；app-only 不进入模型 schemas、tool_catalog/search/list，也拒绝模型猜名执行；非法 visibility 隐藏 | 支持 |
+| `openai/outputTemplate` | 仅作为资源指针别名，标准 `resourceUri` 优先；不会注入 `window.openai` | 支持 |
+| `resources/read` + `ui://` | 单个自包含 `text/html;profile=mcp-app` 文本资源，HTML 上限 2 MiB；URI 与实际响应一致；错误 MIME、路径、缺资源、超限回退工具文本 | 支持 |
+| CSP / permissions | 分别保存资源请求的 UI 策略与宿主空授权；继续使用隔离宿主离线 CSP。请求非空外部 origins、嵌套 frame、浏览器权限或 legacy CSP 均拒绝，保留文本结果 | 拒绝扩权 |
+| 缓存身份 | server/config 摘要、真实 transport connection nonce、资源 URI、HTML hash 和资源 UI 策略共同组成身份；不把同 URI 或重连视为同授权 | 支持 |
+| `content` / `structuredContent` / `_meta` | 前两者给模型；结果 `_meta` 只随私有 hydration/工具回调给组件，不进入 ToolResult.data、模型请求、公共 view reference、工具审计事件或对话。只有 `_meta` 时提供通用文本，不 dump raw result | 支持 |
+| hydration / 恢复 | 输入与原始结果合计上限 200 KiB，存于可服务目录之外；getView 的私有部分只给宿主/组件；fork 复制快照，删除移除；MCP 结果引用可恢复为时间线视图 | 支持 |
+| `ui/initialize` / `ui/notifications/initialized` | 固定版本与 appInfo/capabilities 校验；只声明 serverTools、text message、text/JSON model-context、离线 sandbox；就绪前不发送私有输入/结果 | 支持 |
+| `ui/notifications/tool-input` / `tool-result` | initialized 后按顺序发送完整 arguments 和原始 CallToolResult，包含组件私有 `_meta`；每实例一次；回调直接返回原始结果 | 支持 |
+| `tools/call` | 仅绑定服务器、原连接代次、当前模式、app visibility 与初始 allowlist 的交集，最多 32 个工具；Writer 模式拒绝 MCP 回调；进入原 coordinator/worker/executor/security_policy/permission_review/审批链；每实例请求 ID 命名空间与持久收据阻止重放 | 支持 |
+| 工具错误 / 拒绝 | 服务器 `isError` 原样作为工具结果；宿主拒绝、旧连接和非法调用给 JSON-RPC 错误；迟到结果不投递 | 支持 |
+| `ui/message` | 仅 user 角色文本，8 KiB；返回接受的建议并等待宿主用户确认。组件自报 user-gesture 不触发模型 | 支持 |
+| `ui/update-model-context` | text/JSON 合并摘要 8 KiB；只保留最后一次，临时作为带来源的不可信 user 数据加入下一轮，不写 system、不自动启动模型 | 支持 |
+| `ui/notifications/size-changed` | 仅有限 inline 高度，120–800 px；沿用消息大小、速率上限 | 支持有限子集 |
+| `ui/notifications/request-teardown` / `ui/resource-teardown` | 宿主立即撤销执行权限，发送标准 teardown，等待 ack 最多 500 ms；收起与组件主动销毁可完整握手。强制卸载/进程终止只能尽力通知，安全撤销不等 ack | 支持，强制退出无 ack 保证 |
+| `ui/open-link`、download、sampling、resources proxy、UI `tools/list`、未知方法 | 不声明能力；请求返回明确 JSON-RPC 错误，通知无响应 | 拒绝 |
+| host-context 动态更新、display mode 切换 | P4 增加主题/语言/尺寸/styles.variables 更新与 inline/fullscreen/pip 协商；card/carousel 仅是内容布局。实际验收状态见 G33 与验证历史 | 已实现，按 P4 证据限定验收 |
+| partial input、tool-cancelled 通知、所有内容模态 | 当前完成工具后才加载组件；不声明流式工具输入或全部内容模态兼容 | 未实现 / 独立 profile |
+| `window.openai`、Plugin Extensions、OAuth、外部模型/真实远程服务、非 Windows | 未声明完整兼容；不能由单个官方示例推导 | 未验证 / 范围外 |
+
+当前回调需要原 worker 的 MCP 连接存活。空闲 worker 可能在 30 秒后回收；进程重启、连接替换或配置改变后，旧视图仍可显示已保存快照，但回调明确报连接过期。用户须重新调用原工具生成新绑定，刷新旧 HTML 不会隐式重连或重放写入。这是本 profile 的可用性边界，不能据此声称持久连接代理已实现。
+
+标准 JSON-RPC 请求 ID 按实例命名空间隔离，不是跨重启的业务幂等键。生成视图需要跨重启查询同一写操作时，使用已有 `reverie/call-tool` 的显式持久 `callId`；unknown 收据不会重新执行。新实例发起的新操作仍逐次经过宿主审批，不能把组件按钮或同名 RPC ID 当作已获授权。
+
+本次真实 MCP 服务仅验收 stdio / 核心协议 `2025-06-18`；HTTP/SSE UI 互操作及实际 `2025-11-25` 服务器未验证。失败资源仍给模型和用户保留原工具文本；不把通用完成提示当成服务器未提供的业务数据。
+
+`structuredContent` 是服务端明确给模型的业务数据，内部同名字段不是结果顶层私有 `_meta`。工具描述 `_meta`、资源内容 `_meta.ui` 和结果 `_meta` 分层保存，不能把任一 `_meta` 当作授权或宿主凭据容器。实现入口为 [mcp.py](../ReverieCli-py/reverie/mcp.py)、[mcp_apps.py](../ReverieCli-py/reverie/mcp_apps.py)、[mcp_dynamic.py](../ReverieCli-py/reverie/tools/mcp_dynamic.py)、[标准生命周期](../ReverieCli-ui/src/mcp-app-lifecycle.ts)。
+
+#### P4 展示与资源生命周期
+
+2026-10-18 续修将提示词中的工具选择指导与 API 参数 schema 分开：模式 manifest 保留工具名称、用途、适用场景、发现与调用约束，参数由同一请求的原生 schema 提供；完整 manifest 仍可用于诊断。Desktop 生成指导保留可运行的初始化、主题与串行私有状态示例；普通问答和使用给定数据的单文件视图无需引入工程阶段或仓库检索。显式限定 create_file/render_view 的请求不会因否定读取文件的措辞而被宿主强制加入第三个检索工具；真正的代码分析/修改仍走原检索策略。摘要描述用户结果和操作，窄视图把主结果与关键控件放在前部。`rules.txt` 按其声明忽略以 `#` 开头的注释，不把默认示例当成已启用规则。流式失败响应只有原生思考时也逐次保存到会话并供界面恢复；后续 API 请求不发送无正文/工具的空 assistant 消息，但不删除或改写会话中的思考。以上均不裁剪原生工具能力。
+
+生成质量使用 [固定任务集](../scripts/verification/fixtures/riu-quality-tasks.json) 与 [真实打包基准](../scripts/verification/riu_quality_benchmark.py) 单独记录。每个模型/任务至少三次独立会话，区分初次成功、工具反馈后的模型修复、违规、超时、服务/网络及验证器错误；失败的 SSE、会话、文件与截图不得覆盖。请求体字节、系统消息、schema、首个思考/正文/完整工具参数、上游响应结束和宿主轮结束分别计时。响应头等待包含网络及上游排队，不能当作纯推理耗时。浏览器恢复、业务断言、版本链和视觉检查也不能由注册成功替代。
+
+本轮重新读取 [官方 UI](https://developers.openai.com/plugins/build/chatgpt-ui)、[quickstart](https://developers.openai.com/plugins/build/app-quickstart)、[reference](https://developers.openai.com/plugins/reference) 与固定 [ext-apps 2.0.3 类型](https://github.com/modelcontextprotocol/ext-apps/blob/v2.0.3/src/spec.types.ts)，保持 UI `2026-01-26` 和既有离线 profile，不扩展协议支持范围。
+
+`ConversationDisplay` 提供三种位置控件，Workbench 承载 fullscreen，宿主右上角承载 pip。固定 React portal target 通过 Electron 41 的 `Element.moveBefore` 在始终连接的容器间原子移动，避免 `appendChild`/切换 portal target 导致 iframe 文档重载。一次只放大/固定一个视图；关闭面板、返回 inline、切换会话均走宿主已有生命周期，不授予组件新的执行能力。
+
+视图运行实例由宿主按项目/会话/视图/revision 归一化；live 和历史位置只持有引用。单次 React commit 内的引用交接使用连接中的临时停放容器，不重建 frame；没有引用时立即拒绝桥消息和迟到结果，在 commit 后释放运行实例，不引入跨会话或长期后台缓存。
+
+标准 `ui/request-display-mode` 只接受 `inline/fullscreen/pip`，返回实际采用模式；未知值给 `-32602`。初始化提供 availableDisplayModes、主题、语言、Desktop 平台、容器尺寸和标准 CSS variables；后续变化以 `ui/notifications/host-context-changed` 去重并按 animation frame 合并。`hostContext.reverie.reducedMotion` 是有名字空间的 Reverie 扩展，不冒充 ext-apps 2.0.3 的标准字段。标准组件也可直接使用系统 `prefers-reduced-motion`。
+
+宿主 Tab/Enter/Escape 与焦点返回独立于组件业务逻辑。跨进程 iframe 的 Escape 使用固定宿主键盘监听转发，只允许同一注册 source 返回 inline；不改第三方 HTML、不开启子帧 Node/preload，不经过工具执行或审批旁路。原有权限、session/revision/capability 和 teardown 限制继续适用。
+
+历史按需加载与关闭会销毁离屏实例，释放资源及动画；聚焦/工具执行/放大/画中画实例保留。内置 UI 私有状态仍须主动持久化；第三方未保存的临时 JS 状态不能跨销毁恢复。三种位置之间移动保留原实例，因此没有这一重建限制。宿主展示偏好单独按项目/会话/视图/revision 存储，不进入模型或默认导出。
+
+生成视图的 `view_ready.committed_at` 在原子持久化完成后由工具写入，供本地验收分隔“HTML 生成、写盘”和“提交到可交互”；它不是来自组件自报的计时。控件延迟使用本地 input 到后续绘制帧的样本，历史加载单独计时。真实模型的整轮请求耗时不能称为渲染耗时。
+
 ### 4.5 工具调用、权限和状态
 
 视图不是新的授权主体。权限取“用户已授予的权限、当前模式/工作区策略、组件允许范围”的交集；`readOnlyHint`、组件声明与隐藏 `_meta` 都不能绕过审批。用户点删除按钮不应在 iframe 内伪造一个确认框就算通过；复用宿主审批，展示服务器、工具、目标、来源视图，审批回到正确的 worker。
@@ -206,6 +270,16 @@ MVP 自包含且离线。MCP 阶段如需联网，将资源声明的域名与用
 加载时按需挂载，离屏动画暂停；不因流式文字变化不断重挂。关闭视图要释放监听器、MessagePort、计时器和资源。建议验收目标：固定 Windows 主机、小型离线样例（HTML ≤200 KiB、数据 ≤1,000 行），产物提交到可交互 P95 ≤1 s；本地控件输入到绘制 P95 ≤100 ms；100 条历史视图仅挂载可见/活动实例。记录硬件、样本数与 P50/P95；这是待测目标，不是目前性能承诺，也不含模型生成耗时。
 
 主题由 hostContext/CSS tokens 提供；对比度按 WCAG AA 设计，控制有名称/键盘焦点/文本等价，尊重 reduced motion、语言切换和 1080×700 产品窗口。carousel 的项目数量与卡片操作数量参照官方指南，但不机械禁止所有内部滚动、自定义视觉或大数据视图；重点是清楚的宿主导航与可访问性。
+
+### 4.7 模型提示词与生成质量
+
+提示词按实际注册工具、当前模式和运行界面构建。原始模型标识符与展示名称分开；Writer 不接收代码工程、媒体或 MCP 工作流，Atlas 的任务账本必须对应实际可调用的 `task_manager`。空工作区不注入完成信心、历史成功率等自我评价。Desktop 的持续对话不使用 CLI 单次运行的“没有下一轮”规则，也不自动插入用户批准来跨过文档审阅门。
+
+自动工具选择只在明确的仓库分析/修改意图下强制 Context Engine；单纯出现 HTML 或其他产物路径不触发检索。注册已有视图时，模型可以直接调用 `render_view`。这不删除检索工具，也不放宽任何执行权限。
+
+Desktop 的生成视图说明包括可采用的离线宿主集成代码：标准 `ui/initialize/initialized`、动态 hostContext、私有状态恢复及带 `baseRevision` 的串行保存。该代码由模型写入 HTML，宿主没有凭空注入新的全局 API；真实权限、执行器、审批和会话锁继续生效。opaque-origin frame 不支持 localStorage/sessionStorage；宿主主题不能由 OS 颜色偏好代替。长摘要可以展开查看，摘要展开不重载 iframe。
+
+生成质量与宿主功能分别验收。真实模型必须自行创建 HTML 并调用 `render_view`；随后检查业务计算、控件、主题、展示切换和重载恢复。工具对 inline JavaScript 中明显的 localStorage/sessionStorage 方法调用返回静态 authoring warning，让模型可以通过正常文件/工具链修正；不改写 HTML，不授予额外权限，也不把这种提示称为 JavaScript 执行验证。工具注册成功只证明产物已持久化，不能证明脚本没有错误。身份问答还需人工检查原生思考和最终回答；关键词检查通过不能证明没有指令复述、营销措辞或能力夸大。保留原始失败，不过滤思考或人为截短答案来制造通过结果。
 
 ## 5. 分期与验收门
 
@@ -330,8 +404,8 @@ VERIFICATION_HISTORY，附 build ID/产物/命令/测试总数/风险与下一�
 不得复制历史通过数字，不提交或推送。
 ```
 
-## 7. 本次文档交付边界
+## 7. 初版文档交付边界（2026-10-08）
 
-此次完成官方资料调研、当前源码映射、开发规格、AI 提示词和文档整合；**没有实现 RIU、没有新增产品依赖、没有替换安装包**。原有草案的“官方绝无此功能”“HTML 绝不进上下文”“所有 MCP Apps 原样运行”“Workbench 等于扩展宿主”等绝对表述已改成可验证的范围和约束。
+2026-10-08 初版只完成官方资料调研、当时源码映射、开发规格、AI 提示词和文档整合，未实现或打包 RIU。之后的 P0–P4 实施状态以第 4.4 节、FEATURE_STATUS、ROADMAP 和集中验证为准。原有草案的“官方绝无此功能”“HTML 绝不进上下文”“所有 MCP Apps 原样运行”“Workbench 等于扩展宿主”等绝对表述已改成可验证的范围和约束。
 
 历史规格与验证内容分别集中在 [DEVELOPMENT_HISTORY](DEVELOPMENT_HISTORY.md) 和 [VERIFICATION_HISTORY](VERIFICATION_HISTORY.md)，版本日志集中在 [changelog](changelog.md)。后续直接维护本规格及这几个入口，不再为每次研究或提示词新增一份顶层日期文档。

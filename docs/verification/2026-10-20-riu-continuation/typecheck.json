@@ -1,0 +1,6 @@
+{
+  "original_file": "typecheck.log",
+  "original_sha256": "730efcee279855f3d0f3e1fd2675f57f86a59d98748880fa4259f259c264d938",
+  "encoding": "utf-8",
+  "text": "npm notice run reverie@2.5.0 typecheck\r\nnpm notice run npm run check:i18n && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit\r\nnpm notice run reverie@2.5.0 check:i18n\r\nnpm notice run node scripts/check-i18n-keys.mjs\r\ni18n keys resolved (1041 translations, 82 templates).\r\n"
+}

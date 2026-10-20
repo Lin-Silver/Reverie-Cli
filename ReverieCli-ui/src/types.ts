@@ -624,7 +624,60 @@ export interface PromptResult {
 
 export type TurnSegment =
   | { kind: "assistant" | "reasoning"; text: string }
-  | { kind: "activity"; events: Array<Record<string, unknown>> };
+  | { kind: "activity"; events: Array<Record<string, unknown>> }
+  | { kind: "view"; view: ViewSegment };
+
+/** Opaque handle to one stored interactive view revision. Never carries HTML or
+ *  a filesystem path -- the bytes live in the kernel's restricted ViewStore and
+ *  are only ever fetched through the authoritative `getView` core action. */
+export interface ViewRef {
+  sessionId: string;
+  viewId: string;
+  revision: number;
+}
+
+/** A view's place on the turn timeline. `summary`/`title` are the degradation
+ *  text shown before (or instead of) the live view; `status` flips to "error"
+ *  when the kernel reported a `view_error` or the host could not resolve it. */
+export interface ViewSegment extends ViewRef {
+  title: string;
+  summary: string;
+  status: "ready" | "error";
+  error?: string;
+  replacesViewId?: string;
+  createdAt?: string;
+  schemaVersion?: number;
+}
+
+/** One persisted display-state revision for a view, as the kernel's ViewStore
+ *  keeps it. Opaque to the host: the renderer owns its shape. */
+export interface ViewStateEnvelope {
+  revision: number;
+  state: Record<string, unknown>;
+  updated_at: string;
+}
+
+/** What the renderer receives for a resolved view: the model-safe reference plus
+ *  the opaque `reverie-view:` url the host bound and the policy it was bound
+ *  under. It NEVER carries a filesystem path -- the main process strips the
+ *  authoritative directory/entry/viewsRoot before this crosses the IPC boundary
+ *  (see electron/view-resolve.ts). */
+export interface ResolvedViewRef extends ViewRef {
+  /** Private host-to-frame hydration; never part of a ViewRef or model transcript. */
+  mcpApp?: { toolInput: Record<string, unknown>; toolResult: Record<string, unknown> } | null;
+  interactionId?: string;
+  callableTools?: string[];
+  toolCalls?: { callId: string; status: string }[];
+  title: string;
+  summary: string;
+  mimeType: string;
+  policyId: string;
+  url: string;
+  schemaVersion?: number;
+  createdAt?: string;
+  replacesViewId?: string | null;
+  state: ViewStateEnvelope | null;
+}
 
 export interface LiveTurn {
   stopped?: boolean;

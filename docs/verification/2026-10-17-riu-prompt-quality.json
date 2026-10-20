@@ -1,0 +1,5938 @@
+{
+  "date": "2026-10-17 America/New_York",
+  "scope": "Uncommitted working tree; Windows local source, packaged Desktop and standalone CLI. Model quality is separate from host correctness.",
+  "python": {
+    "tests": 2061,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2,
+    "passed": 2059
+  },
+  "python_skips": [
+    {
+      "test": "test_symlink_escape_rejected",
+      "reason": "symlink creation not permitted on this host"
+    },
+    {
+      "test": "test_resource_rejects_absolute_and_symlink_escape",
+      "reason": "Creating symbolic links is unavailable on this host"
+    }
+  ],
+  "desktop": {
+    "passed": 380,
+    "skipped": 1,
+    "note": "Full Desktop suite includes the summary, controls and historical lazy-loading height fixes."
+  },
+  "typecheck": {
+    "passed": true,
+    "translations": 1041,
+    "templates": 82
+  },
+  "artifact_source_match": {
+    "passed": true,
+    "frozen_modules": [
+      {
+        "module": "reverie.mcp",
+        "matches_current_source": true,
+        "source_sha256": "b80555fe59d30cf0fd5720053df082321f11a12d5dcb67d85a6a1e71803b0062"
+      },
+      {
+        "module": "reverie.mcp_apps",
+        "matches_current_source": true,
+        "source_sha256": "744396e430dc73cefd8302f9b6c9948cb85115dd3ada361510c5dff5fb86403e"
+      },
+      {
+        "module": "reverie.views",
+        "matches_current_source": true,
+        "source_sha256": "a874342672c75073d5ad65a9a1c96e294a6419b6da6a534e650b35e719f63c20"
+      },
+      {
+        "module": "reverie.view_execution",
+        "matches_current_source": true,
+        "source_sha256": "21a964e9886844583e36a0e6a011ef9ad33090eb617dfc4049ccc5f0361febe6"
+      },
+      {
+        "module": "reverie.tools.mcp_dynamic",
+        "matches_current_source": true,
+        "source_sha256": "4840fc7f413403147973c8cdf6c5606704c94bea9234efc776734e82fc9bae2b"
+      },
+      {
+        "module": "reverie.agent.tool_executor",
+        "matches_current_source": true,
+        "source_sha256": "a989fca41fd11059dd8cc2d3a20a7563a7d658c78b6b1ec0f1ae8514f49441ec"
+      },
+      {
+        "module": "reverie.sdk_bridge",
+        "matches_current_source": true,
+        "source_sha256": "5d00a27665bb4958c8d706ad45327ab70592339c0edf682ca69fd39524e4a1a6"
+      },
+      {
+        "module": "reverie.tools.render_view",
+        "matches_current_source": true,
+        "source_sha256": "eb327581778e2fe693fb4d98fa55492e1c2887d567af299b297d5fa2783b0c24"
+      },
+      {
+        "module": "reverie.agent.system_prompt",
+        "matches_current_source": true,
+        "source_sha256": "6bf8b3c20101813bde5d5c4b5b7270aa012801034862f3675adecb2877aa4d79"
+      },
+      {
+        "module": "reverie.modes",
+        "matches_current_source": true,
+        "source_sha256": "68ccd0a5d04efbe4164f0dd3e97b2903215f2833ce3ae7a676147b5d7f24d7d7"
+      },
+      {
+        "module": "reverie.agent.agent",
+        "matches_current_source": true,
+        "source_sha256": "99c551f00f30c243a3fe6b9e27de66e271007c273a582763051887d87400dd81"
+      },
+      {
+        "module": "reverie.agent.tool_descriptions",
+        "matches_current_source": true,
+        "source_sha256": "9146be24a8d670893d79c330cd23807b97442ff4f45cb5c2665717d9308de46f"
+      },
+      {
+        "module": "reverie.cli.interface",
+        "matches_current_source": true,
+        "source_sha256": "b6d3f600497e8ae63726954fc938b71e01e9dbf1186defa0d15596413150edf8"
+      },
+      {
+        "module": "reverie.harness",
+        "matches_current_source": true,
+        "source_sha256": "18892ba0badaabe80396664c4a602d6f591543678e1b992ac41ca737bca6bb80"
+      },
+      {
+        "module": "reverie.tools.registry",
+        "matches_current_source": true,
+        "source_sha256": "cf4b73fbe0079218635545e6a85ce4367a852aff0eadb42bdbfc5ae77997d7d9"
+      },
+      {
+        "module": "reverie.tools.mode_switch",
+        "matches_current_source": true,
+        "source_sha256": "947f8b10cf6171abf28c6fabe1f8db523a41a0b76b338a5e4dd5cb6488ee1346"
+      },
+      {
+        "module": "reverie.media_capabilities",
+        "matches_current_source": true,
+        "source_sha256": "6c8c439c55687492e28a7a66427c7460b165eb96b23518e09eafae0553c784a8"
+      },
+      {
+        "module": "reverie.session.manager",
+        "matches_current_source": true,
+        "source_sha256": "1fe575ad1219739d3da36fc9e601fd6435758ad809350fe65508220ccd434214"
+      }
+    ],
+    "data_files": [
+      {
+        "file": "reverie/agent/tool_manifest.json",
+        "matches_current_source": true,
+        "source_sha256": "e033ce91ec8c16b4dd5fa2cae4dc00ad0af10638160cf959e302482241369090"
+      }
+    ],
+    "ui": {
+      "files": [
+        {
+          "file": "dist/assets/index-B_6ZjNys.css",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/index-D8xbDYDQ.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/index-D8xbDYDQ.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/pdf.worker.min-Dswkl-cV.mjs",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/PdfPreview-D0frH87_.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/PdfPreview-D0frH87_.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/riu-probe-BpXUtagd.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/riu-probe-BpXUtagd.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/view-bridge-Bk2F8R7B.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/view-bridge-Bk2F8R7B.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/backgrounds/aurora-archive.webp",
+          "matches": true
+        },
+        {
+          "file": "dist/backgrounds/ember-manuscript.webp",
+          "matches": true
+        },
+        {
+          "file": "dist/backgrounds/moss-library.webp",
+          "matches": true
+        },
+        {
+          "file": "dist/index.html",
+          "matches": true
+        },
+        {
+          "file": "dist/reverie-mark.png",
+          "matches": true
+        },
+        {
+          "file": "dist/riu-probe.html",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/appearance.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/appearance.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/attachments.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/attachments.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-actions.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-actions.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-timeouts.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-timeouts.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/execution-coordinator.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/execution-coordinator.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/git-workspace.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/git-workspace.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/isolated-workspaces.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/isolated-workspaces.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/kernel-resolver.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/kernel-resolver.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/launch-options.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/launch-options.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/main.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/main.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preferences.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preferences.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preload.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preload.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/reverie-build.json",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/riu-probe-preload.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/riu-probe-preload.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/runtime-paths.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/runtime-paths.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/session-workspace.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/session-workspace.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-display-preferences.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-display-preferences.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-fixtures.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-fixtures.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-host.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-host.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-interactions.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-interactions.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-probe.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-probe.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-runner.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-runner.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-resolve.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-resolve.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-session.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-session.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/window-tray.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/window-tray.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workbench.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workbench.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/worker-pool.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/worker-pool.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workspace-lifecycle.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workspace-lifecycle.js.map",
+          "matches": true
+        }
+      ],
+      "build": {
+        "version": "2.5.0",
+        "id": "a802526c1487ccb8",
+        "builtAt": "2026-10-18T01:40:55.622Z",
+        "platform": "win32",
+        "arch": "x64"
+      },
+      "trusted": {
+        "schema": "reverie.trusted-kernels.v1",
+        "generated_at": "2026-10-18T01:14:15.180Z",
+        "kernels": [
+          {
+            "sha256": "d33c0bca29123a23fd8cd197462a007b82628e22c3554e434bc9edbe917f14e5",
+            "platform": "win32",
+            "arch": "x64",
+            "version": "2.5.0",
+            "bridge_protocol": "sdk-bridge.v1"
+          }
+        ]
+      }
+    },
+    "artifacts": [
+      {
+        "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "bytes": 223114752,
+        "sha256": "0709f001063dfd5f54628f810a7d0d74e4fef031ab90eef95fbd4a92be868eec"
+      },
+      {
+        "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "bytes": 14141713,
+        "sha256": "34a790b56f0a17f025e9318757b049d85d250714b77668dddd47d3ad8a1a873d"
+      },
+      {
+        "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\resources\\app.asar",
+        "bytes": 81394421,
+        "sha256": "1c1aaefe9c1ab7509fffcf9269b4ba289c5a2139b6ebc5dacb18ca7b5b282c87"
+      }
+    ]
+  },
+  "standalone_cli": {
+    "scope": "Final standalone CLI and Desktop trusted-kernel manifest",
+    "passed": true,
+    "checks": [
+      {
+        "module": "reverie.mcp",
+        "matches": true
+      },
+      {
+        "module": "reverie.mcp_apps",
+        "matches": true
+      },
+      {
+        "module": "reverie.views",
+        "matches": true
+      },
+      {
+        "module": "reverie.view_execution",
+        "matches": true
+      },
+      {
+        "module": "reverie.tools.mcp_dynamic",
+        "matches": true
+      },
+      {
+        "module": "reverie.agent.tool_executor",
+        "matches": true
+      },
+      {
+        "module": "reverie.sdk_bridge",
+        "matches": true
+      },
+      {
+        "module": "reverie.tools.render_view",
+        "matches": true
+      },
+      {
+        "module": "reverie.agent.system_prompt",
+        "matches": true
+      },
+      {
+        "module": "reverie.modes",
+        "matches": true
+      },
+      {
+        "module": "reverie.agent.agent",
+        "matches": true
+      },
+      {
+        "module": "reverie.agent.tool_descriptions",
+        "matches": true
+      },
+      {
+        "module": "reverie.cli.interface",
+        "matches": true
+      },
+      {
+        "module": "reverie.harness",
+        "matches": true
+      },
+      {
+        "module": "reverie.tools.registry",
+        "matches": true
+      },
+      {
+        "module": "reverie.tools.mode_switch",
+        "matches": true
+      },
+      {
+        "module": "reverie.media_capabilities",
+        "matches": true
+      },
+      {
+        "module": "reverie.session.manager",
+        "matches": true
+      },
+      {
+        "data": "tool_manifest.json",
+        "matches": true
+      },
+      {
+        "check": "desktop-trusts-current-standalone-cli",
+        "matches": true
+      }
+    ],
+    "kernel_info": {
+      "schema": "reverie.kernel.v1",
+      "version": "2.5.0",
+      "bridge_protocol": "sdk-bridge.v1",
+      "interface_version": "1.0",
+      "platform": "win32",
+      "arch": "x64",
+      "frozen": true
+    },
+    "sha256": "d33c0bca29123a23fd8cd197462a007b82628e22c3554e434bc9edbe917f14e5",
+    "bytes": 328933782
+  },
+  "p2": {
+    "scope": "production packaged Electron + loopback model; no external provider",
+    "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final",
+    "checks": [
+      {
+        "name": "composer-observed",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "startup-message-only-proposes",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "automatic-message-does-not-call-model",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "allowed-tool-result",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "approved-write-exists",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "duplicate-rejected",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "denied-no-side-effect",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "schema-error-no-approval",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "stop-during-approval",
+        "passed": true,
+        "detail": {
+          "jsonrpc": "2.0",
+          "id": "stopped-once",
+          "error": {
+            "code": -32000,
+            "message": "Stopped. Check the authoritative tool state before starting a new operation."
+          }
+        }
+      },
+      {
+        "name": "private-state-saved",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "host-followup-reaches-model-with-summary",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "private-state-always-excluded-from-model",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "registered-html-not-reinjected-on-followup",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "model-run-blocks-view-callback",
+        "passed": true,
+        "detail": {
+          "jsonrpc": "2.0",
+          "id": "busy-once",
+          "error": {
+            "code": -32000,
+            "message": "Error invoking remote method 'core:request': Error: This conversation already has a running or queued task."
+          }
+        }
+      },
+      {
+        "name": "busy-followup-retains-proposal",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "slow-tool-side-effect-before-crash",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "restart-restores-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "restart-shows-unknown-write",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "unknown-write-never-replayed",
+        "passed": true,
+        "detail": {
+          "jsonrpc": "2.0",
+          "id": "slow-once",
+          "error": {
+            "code": -32000,
+            "message": "Execution outcome is unknown. Check the authoritative tool state; this request will not be replayed."
+          }
+        }
+      },
+      {
+        "name": "fork-copies-private-state-without-call-replay",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "old-instance-cross-session-rejected",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "rewind-hides-later-view",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "delete-fork-preserves-original",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "approvals-owned-by-execution-worker",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "generationInputBoundary": "Initial workspace retrieval may contain the source HTML before registration. It remains real model input; no zero-token claim. The follow-up must not re-add it.",
+    "approvalOwners": [
+      {
+        "event": {
+          "at": "2026-10-18T01:45:03.214Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "session_id": "20261017_214451_513153",
+          "run_id": "3b636578-d95d-4323-bbe1-2fcc153776a1",
+          "view_id": "vec032514ac66b2c3",
+          "view_title": "RIU P2 fixture",
+          "call_id": "denied-once",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "662192207f29452bb4bd8cc45dfdef28",
+          "tool": "create_file",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "medium",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "path": "denied.txt",
+            "content": "DENIED"
+          },
+          "command": "",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "paths": [
+            "denied.txt"
+          ],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "3b636578-d95d-4323-bbe1-2fcc153776a1",
+          "sessionId": "20261017_214451_513153",
+          "pid": 7752
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-18T01:45:00.129Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "session_id": "20261017_214451_513153",
+          "run_id": "5be6f66c-cee8-40c2-bc9c-f77fea48b4c2",
+          "view_id": "vec032514ac66b2c3",
+          "view_title": "RIU P2 fixture",
+          "call_id": "write-once",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "d44cf05dde124d7489eba36624085994",
+          "tool": "create_file",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "medium",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "path": "approved.txt",
+            "content": "APPROVED_ONCE",
+            "overwrite": true
+          },
+          "command": "",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "paths": [
+            "approved.txt"
+          ],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "5be6f66c-cee8-40c2-bc9c-f77fea48b4c2",
+          "sessionId": "20261017_214451_513153",
+          "pid": 7752
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-18T01:45:05.453Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "session_id": "20261017_214451_513153",
+          "run_id": "79435c4a-b61c-43ae-a33d-730899c9f623",
+          "view_id": "vec032514ac66b2c3",
+          "view_title": "RIU P2 fixture",
+          "call_id": "stopped-once",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "36f03bd305a047e89d2450082abf43a5",
+          "tool": "create_file",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "medium",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "path": "stopped.txt",
+            "content": "STOPPED"
+          },
+          "command": "",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "paths": [
+            "stopped.txt"
+          ],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "79435c4a-b61c-43ae-a33d-730899c9f623",
+          "sessionId": "20261017_214451_513153",
+          "pid": 7752
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-18T01:45:10.379Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "session_id": "20261017_214451_513153",
+          "run_id": "fa6ff795-81a4-44b4-a83e-aff12b6f72ea",
+          "view_id": "vec032514ac66b2c3",
+          "view_title": "RIU P2 fixture",
+          "call_id": "slow-once",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "41eb8b1f3ac5465a9da01f6d272bb121",
+          "tool": "command_exec",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "high",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "command": "python slow_write.py",
+            "timeout": 90
+          },
+          "command": "python slow_write.py",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p2-history-final\\workspace",
+          "paths": [],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "fa6ff795-81a4-44b4-a83e-aff12b6f72ea",
+          "sessionId": "20261017_214451_513153",
+          "pid": 7752
+        }
+      }
+    ],
+    "passed": true
+  },
+  "p3": {
+    "scope": "Windows production packaged Electron + unchanged official stdio MCP example + local negative fixtures; loopback model",
+    "versions": {
+      "ext_apps": "2.0.3",
+      "ui_protocol": "2026-01-26",
+      "mcp_core": "2025-06-18"
+    },
+    "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p3-history-final",
+    "official_html_sha256": "bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53",
+    "checks": [
+      {
+        "name": "packaged-hello-profile",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-sdk-initialize-and-notifications",
+        "passed": true,
+        "detail": [
+          null,
+          "ui/notifications/tool-input",
+          "ui/notifications/tool-result",
+          "ui/notifications/host-context-changed",
+          "ui/notifications/host-context-changed"
+        ]
+      },
+      {
+        "name": "official-transparent-canvas-text-readable",
+        "passed": true,
+        "detail": {
+          "background": "rgb(21, 22, 28)",
+          "foreground": "rgb(243, 243, 247)",
+          "contrast": 16.30906414343467
+        }
+      },
+      {
+        "name": "official-unchanged-component-tool-callback",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-callback-denial",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-message-proposal-no-automatic-model-turn",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-html-byte-identical",
+        "passed": true,
+        "detail": "bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53"
+      },
+      {
+        "name": "official-graceful-teardown-ack",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "private-meta-delivered-only-to-component",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "hostile-parent-preload-node-network-blocked",
+        "passed": true,
+        "detail": {
+          "node": "undefined",
+          "preload": "undefined",
+          "openai": "undefined",
+          "parent": "blocked",
+          "fetch": "blocked"
+        }
+      },
+      {
+        "name": "app-only-through-normal-approval-executor",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "duplicate-does-not-replay-write",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "model-only-rejected-from-app",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "unsupported-standard-method-explicit-error",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "model-context-does-not-trigger-model",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "model-context-untrusted-user-data",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "no-private-meta-or-app-only-descriptor-in-model",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "app-requested-teardown",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-text-fallback",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "bad-mime-text-fallback",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "wrong-uri-text-fallback",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "network-text-fallback",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "oversize-text-fallback",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "output-template-resource-alias",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-distribution-unmodified",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "model-privacy-after-all-negative-fixtures",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "kernel_hello": {
+      "id": "p3-hello",
+      "type": "ready",
+      "protocol_version": 1,
+      "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p3-history-final\\workspace",
+      "capabilities": {
+        "views": {
+          "schema_version": 1,
+          "inline": true,
+          "mcp_apps": true,
+          "mcp_apps_protocol": "2026-01-26",
+          "mcp_apps_sdk": "2.0.3",
+          "profile": "offline-server-tools-v1"
+        }
+      }
+    },
+    "passed": true
+  },
+  "p4": {
+    "scope": "Production Windows package; synthetic loopback model; no external provider",
+    "checks": [
+      {
+        "name": "artifact-registration-to-interactive-p95-under-1s",
+        "passed": true,
+        "detail": {
+          "n": 20,
+          "p50_ms": 186.338,
+          "p95_ms": 244.925,
+          "max_ms": 411.419,
+          "samples_ms": [
+            411.4189453125,
+            221.263916015625,
+            199.75,
+            155.181884765625,
+            224.3330078125,
+            166.773193359375,
+            178.60302734375,
+            244.925048828125,
+            237.9541015625,
+            226.89111328125,
+            183.552001953125,
+            175.502197265625,
+            157.585205078125,
+            166.362060546875,
+            171.94482421875,
+            185.122802734375,
+            218.280029296875,
+            243.742919921875,
+            186.338134765625,
+            189.880859375
+          ]
+        }
+      },
+      {
+        "name": "display-mode-buttons-at-least-32px",
+        "passed": true,
+        "detail": [
+          {
+            "label": "返回对话内",
+            "height": 32
+          },
+          {
+            "label": "在工作面板中放大",
+            "height": 32
+          },
+          {
+            "label": "画中画",
+            "height": 32
+          }
+        ]
+      },
+      {
+        "name": "same-js-document-fullscreen",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "same-js-document-pip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "same-js-document-inline",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "card-carousel-is-content-layout",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "invalid-display-mode-explicit-error",
+        "passed": true,
+        "detail": {
+          "code": -32602,
+          "message": "Unknown display mode. Card and carousel are content layouts."
+        }
+      },
+      {
+        "name": "iframe-escape-returns-host-focus",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "tab-enter-escape-host-navigation",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "theme-AA-light",
+        "passed": true,
+        "detail": {
+          "bg": "rgb(249, 249, 252)",
+          "fg": "rgb(34, 36, 45)",
+          "contrast": 14.712859554795893
+        }
+      },
+      {
+        "name": "theme-AA-dark",
+        "passed": true,
+        "detail": {
+          "bg": "rgb(21, 22, 28)",
+          "fg": "rgb(243, 243, 247)",
+          "contrast": 16.30906414343467
+        }
+      },
+      {
+        "name": "live-language-without-reload",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "reduced-motion-context-and-css",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "1080x700-composer-visible",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "1080x700-no-horizontal-overflow",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "empty-data-text-equivalent",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "upper-bound-data-and-recoverable-error",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "local-input-p95-under-100ms",
+        "passed": true,
+        "detail": {
+          "n": 60,
+          "p50_ms": 35.5,
+          "p95_ms": 43.5,
+          "max_ms": 59.7,
+          "samples_ms": [
+            36.80000000074506,
+            32.80000000074506,
+            36.5,
+            38.700000000186265,
+            40.19999999925494,
+            35.5,
+            40.59999999962747,
+            33.200000000186265,
+            32.799999999813735,
+            33.19999999925494,
+            40.200000000186265,
+            37,
+            27.5,
+            34.10000000055879,
+            34.5,
+            43.5,
+            40.90000000037253,
+            30.5,
+            31.09999999962747,
+            38.799999999813735,
+            35.5,
+            31.299999999813735,
+            30.90000000037253,
+            31.5,
+            38.299999999813735,
+            32.799999999813735,
+            31.90000000037253,
+            30.59999999962747,
+            39.5,
+            36.89999999944121,
+            28.200000000186265,
+            31,
+            34.5,
+            37.90000000037253,
+            35.19999999925494,
+            29,
+            36.89999999944121,
+            40.59999999962747,
+            37,
+            55.200000000186265,
+            51.299999999813735,
+            59.700000000186265,
+            43.200000000186265,
+            37.09999999962747,
+            34.39999999944121,
+            38.60000000055879,
+            37.59999999962747,
+            34.299999999813735,
+            29.799999999813735,
+            35,
+            37,
+            37.799999999813735,
+            31.399999999441206,
+            28.700000000186265,
+            32.799999999813735,
+            37.299999999813735,
+            37.89999999944121,
+            30.600000000558794,
+            32.700000000186265,
+            36
+          ]
+        }
+      },
+      {
+        "name": "refresh-restores-display-and-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "process-restart-restores-view-and-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "followup-produces-traceable-new-revision",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "revision-state-isolated",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-file-retains-summary-and-retry",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-file-retry-recovers",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "latest-history-view-stays-visible-after-lazy-load",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "100-history-views-lazily-mounted",
+        "passed": true,
+        "detail": {
+          "frame_counts": [
+            2,
+            0,
+            0
+          ],
+          "total_view_rows": 100
+        }
+      },
+      {
+        "name": "long-summary-expands-without-reloading-view",
+        "passed": true,
+        "detail": {
+          "collapsed_height": 107.5625,
+          "expanded_height": 165.125,
+          "text": {
+            "height": 57.5625,
+            "lineHeight": 19.2
+          },
+          "same_document": true
+        }
+      },
+      {
+        "name": "close-releases-frame-and-resource-token",
+        "passed": true,
+        "detail": {
+          "new_frame_url": ""
+        }
+      },
+      {
+        "name": "closed-view-does-not-stop-chat",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "private-ui-state-and-html-not-in-followups",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "packaged-plain-client-summary-fallback",
+        "passed": true,
+        "detail": {
+          "exit_code": 0
+        }
+      }
+    ],
+    "measurements": {
+      "artifact_creation_to_commit_ms": [
+        43.977000000000004,
+        18.686999999999998,
+        12.645999999999999,
+        11.897,
+        13.297,
+        13.181999999999999,
+        14.994,
+        17.171,
+        11.994,
+        12.155,
+        16.848,
+        12.434000000000001,
+        17.368000000000002,
+        10.306,
+        15.013,
+        14.391,
+        16.36,
+        19.147000000000002,
+        14.437,
+        17.645999999999997
+      ],
+      "render_phases": [
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287792172.2002
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287792192.8
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287792490.6
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287792493.1
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287795541.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287795559.2002
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287795722.6
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287795734
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287798589.1
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287798599
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287798742.9001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287798747.2002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287804484.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287804491.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287804593.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287804596.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287808696.9001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287808704
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287808874.4001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287808878.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287812067
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287812073
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287812186.7002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287812190.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287816884.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287816891
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287817015.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287817019.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287820453.7002
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287820466.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287820653.7002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287820656.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287824535.6
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287824543.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287824732.2002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287824744.4001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287827861
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287827868.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287828044.5
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287828053.3
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287830502.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287830516.4001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287830643.4001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287830650.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287832588.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287832599.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287832717.5
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287832727.5
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287836200.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287836207.8
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287836327.7002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287836333
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287838327.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287838338.2002
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287838448.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287838452.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287840897.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287840904.2002
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287841023.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287841027.2002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287843195.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287843202.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287843336.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287843341.6
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287845159
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287845167.2002
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287845325.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287845328.6
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287847824.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287847832.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287848021
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287848026.3
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287850005.1
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287850012.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287850134.9001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287850142.2002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287852371.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287852381
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287852525.3
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287852529.2002
+          }
+        ]
+      ],
+      "registration_to_interactive_upper_bound": {
+        "n": 20,
+        "p50_ms": 186.338,
+        "p95_ms": 244.925,
+        "max_ms": 411.419,
+        "samples_ms": [
+          411.4189453125,
+          221.263916015625,
+          199.75,
+          155.181884765625,
+          224.3330078125,
+          166.773193359375,
+          178.60302734375,
+          244.925048828125,
+          237.9541015625,
+          226.89111328125,
+          183.552001953125,
+          175.502197265625,
+          157.585205078125,
+          166.362060546875,
+          171.94482421875,
+          185.122802734375,
+          218.280029296875,
+          243.742919921875,
+          186.338134765625,
+          189.880859375
+        ]
+      },
+      "local_input_to_two_animation_frames_1000_rows": {
+        "n": 60,
+        "p50_ms": 35.5,
+        "p95_ms": 43.5,
+        "max_ms": 59.7,
+        "samples_ms": [
+          36.80000000074506,
+          32.80000000074506,
+          36.5,
+          38.700000000186265,
+          40.19999999925494,
+          35.5,
+          40.59999999962747,
+          33.200000000186265,
+          32.799999999813735,
+          33.19999999925494,
+          40.200000000186265,
+          37,
+          27.5,
+          34.10000000055879,
+          34.5,
+          43.5,
+          40.90000000037253,
+          30.5,
+          31.09999999962747,
+          38.799999999813735,
+          35.5,
+          31.299999999813735,
+          30.90000000037253,
+          31.5,
+          38.299999999813735,
+          32.799999999813735,
+          31.90000000037253,
+          30.59999999962747,
+          39.5,
+          36.89999999944121,
+          28.200000000186265,
+          31,
+          34.5,
+          37.90000000037253,
+          35.19999999925494,
+          29,
+          36.89999999944121,
+          40.59999999962747,
+          37,
+          55.200000000186265,
+          51.299999999813735,
+          59.700000000186265,
+          43.200000000186265,
+          37.09999999962747,
+          34.39999999944121,
+          38.60000000055879,
+          37.59999999962747,
+          34.299999999813735,
+          29.799999999813735,
+          35,
+          37,
+          37.799999999813735,
+          31.399999999441206,
+          28.700000000186265,
+          32.799999999813735,
+          37.299999999813735,
+          37.89999999944121,
+          30.600000000558794,
+          32.700000000186265,
+          36
+        ]
+      },
+      "history": {
+        "view_count": 100,
+        "message_count": 200,
+        "first_session_load_to_interactive_ms": 336.86200000011013,
+        "earlier_page_load_ms": [
+          179.9962000004598,
+          117.68660000052478
+        ],
+        "mounted_frames": [
+          2,
+          0,
+          0
+        ]
+      },
+      "method": "Nearest-rank quantiles. Commit-to-ready starts at the trusted view_ready.committed_at timestamp after atomic persistence. HTML/model generation and artifact persistence are excluded and recorded separately. Input samples measure local input dispatch, rendering and two requestAnimationFrame callbacks, excluding CDP roundtrip and all model wait; not physical display/photon latency. History includes core I/O and host render; no model request."
+    },
+    "fixture": {
+      "html_bytes": 7472,
+      "max_data_rows": 1000,
+      "sha256": "1786633df13f7f8a1805f731d9b8d17a408b5850e31103c1ab40420f57cad021"
+    },
+    "hardware": {
+      "platform": "Windows-10-10.0.26300-SP0",
+      "cpu": "",
+      "logical_cpus": 12
+    },
+    "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final-pass",
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final-pass\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final-pass\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final-pass\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "a802526c1487ccb8",
+        "builtAt": "2026-10-18T01:40:55.622Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "source_retrieval": {
+      "fixture_source_evidence_request_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41
+      ],
+      "full_html_request_indices": [],
+      "note": "Initial generation and explicit revisions may retrieve original workspace source snippets through FastContext. This is distinct from reattaching a registered artifact or private runtime state."
+    },
+    "passed": true
+  },
+  "earlier_p4_encoding_failure": {
+    "scope": "Production Windows package; synthetic loopback model; no external provider",
+    "checks": [
+      {
+        "name": "artifact-registration-to-interactive-p95-under-1s",
+        "passed": true,
+        "detail": {
+          "n": 20,
+          "p50_ms": 139.298,
+          "p95_ms": 151.571,
+          "max_ms": 2556.658,
+          "samples_ms": [
+            151.571044921875,
+            149.525146484375,
+            138.808837890625,
+            140.495849609375,
+            2556.657958984375,
+            145.31689453125,
+            147.9580078125,
+            129.905029296875,
+            144.607177734375,
+            143.844970703125,
+            133.488037109375,
+            134.841796875,
+            130.5009765625,
+            135.33984375,
+            139.2978515625,
+            135.73095703125,
+            139.8701171875,
+            128.481201171875,
+            138.39111328125,
+            140.07080078125
+          ]
+        }
+      },
+      {
+        "name": "display-mode-buttons-at-least-32px",
+        "passed": true,
+        "detail": [
+          {
+            "label": "返回对话内",
+            "height": 32
+          },
+          {
+            "label": "在工作面板中放大",
+            "height": 32
+          },
+          {
+            "label": "画中画",
+            "height": 32
+          }
+        ]
+      }
+    ],
+    "measurements": {
+      "artifact_creation_to_commit_ms": [
+        18.887,
+        10.609,
+        10.512,
+        7.894,
+        9.084,
+        9.790999999999999,
+        9.001999999999999,
+        9.714,
+        7.915,
+        8.966,
+        8.253,
+        20.931,
+        10.439,
+        9.802999999999999,
+        10.681,
+        9.091999999999999,
+        9.459999999999999,
+        14.614,
+        7.592,
+        8.992999999999999
+      ],
+      "render_phases": [
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286642980.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286642987.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286643079.4001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286643082
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286646001.2
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286646007.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286646104.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286646108.6
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286647353
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286647358.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286647449.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286647453.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286648783.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286648788.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286648877.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286648883
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286651492.2
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286651497.7
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286654002.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286654005.5
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286658952.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286658958.4001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286659044.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286659048.7
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286662067.9001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286662075.8
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286662166
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286662170.4001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286665340.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286665347
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286665429.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286665433.4001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286667680.1
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286667685.8
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286667777.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286667781
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286670268.1
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286670277.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286670365.9001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286670367.7
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286673698.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286673705.1
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286673789.9001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286673791.7
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286676915.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286676922.7
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286677016.9001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286677020.3
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286680467.9001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286680473.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286680553.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286680561.3
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286682504.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286682510.2
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286682595.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286682598.8
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286685426
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286685432.4001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286685523.5
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286685524.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286689518.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286689523.1
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286689610.4001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286689613.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286693740.9001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286693746.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286693832.6
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286693835.6
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286696905.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286696912.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286697001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286697004.8
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286700437.9001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286700443.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286700529.4001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286700533
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286703880.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286703886.4001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286703974.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286703978
+          }
+        ]
+      ],
+      "registration_to_interactive_upper_bound": {
+        "n": 20,
+        "p50_ms": 139.298,
+        "p95_ms": 151.571,
+        "max_ms": 2556.658,
+        "samples_ms": [
+          151.571044921875,
+          149.525146484375,
+          138.808837890625,
+          140.495849609375,
+          2556.657958984375,
+          145.31689453125,
+          147.9580078125,
+          129.905029296875,
+          144.607177734375,
+          143.844970703125,
+          133.488037109375,
+          134.841796875,
+          130.5009765625,
+          135.33984375,
+          139.2978515625,
+          135.73095703125,
+          139.8701171875,
+          128.481201171875,
+          138.39111328125,
+          140.07080078125
+        ]
+      }
+    },
+    "fixture": {
+      "html_bytes": 7472,
+      "max_data_rows": 1000,
+      "sha256": "1786633df13f7f8a1805f731d9b8d17a408b5850e31103c1ab40420f57cad021"
+    },
+    "hardware": {
+      "platform": "Windows-10-10.0.26300-SP0",
+      "cpu": "",
+      "logical_cpus": 12
+    },
+    "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final",
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "d95f23fdb005e9cd",
+        "builtAt": "2026-10-18T01:14:23.415Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "passed": false,
+    "error": "UnicodeEncodeError('charmap', '{\"name\": \"display-mode-buttons-at-least-32px\", \"passed\": true, \"detail\": [{\"label\": \"返回对话内\", \"height\": 32}, {\"label\": \"在工作面板中放大\", \"height\": 32}, {\"label\": \"画中画\", \"height\": 32}]}', 85, 90, 'character maps to <undefined>')"
+  },
+  "earlier_p4_container_height_failure": {
+    "scope": "Production Windows package; synthetic loopback model; no external provider",
+    "checks": [
+      {
+        "name": "artifact-registration-to-interactive-p95-under-1s",
+        "passed": true,
+        "detail": {
+          "n": 20,
+          "p50_ms": 141.97,
+          "p95_ms": 162.142,
+          "max_ms": 163.012,
+          "samples_ms": [
+            162.141845703125,
+            141.14404296875,
+            146.366943359375,
+            139.071044921875,
+            139.51708984375,
+            134.9150390625,
+            146.654052734375,
+            152.75,
+            144.903076171875,
+            129.778076171875,
+            139.220947265625,
+            143.6630859375,
+            156.82421875,
+            126.55078125,
+            148.5810546875,
+            141.969970703125,
+            163.011962890625,
+            140.013916015625,
+            150.401123046875,
+            141.38134765625
+          ]
+        }
+      },
+      {
+        "name": "display-mode-buttons-at-least-32px",
+        "passed": true,
+        "detail": [
+          {
+            "label": "返回对话内",
+            "height": 32
+          },
+          {
+            "label": "在工作面板中放大",
+            "height": 32
+          },
+          {
+            "label": "画中画",
+            "height": 32
+          }
+        ]
+      },
+      {
+        "name": "same-js-document-fullscreen",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "same-js-document-pip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "same-js-document-inline",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "card-carousel-is-content-layout",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "invalid-display-mode-explicit-error",
+        "passed": true,
+        "detail": {
+          "code": -32602,
+          "message": "Unknown display mode. Card and carousel are content layouts."
+        }
+      },
+      {
+        "name": "iframe-escape-returns-host-focus",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "tab-enter-escape-host-navigation",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "theme-AA-light",
+        "passed": true,
+        "detail": {
+          "bg": "rgb(249, 249, 252)",
+          "fg": "rgb(34, 36, 45)",
+          "contrast": 14.712859554795893
+        }
+      },
+      {
+        "name": "theme-AA-dark",
+        "passed": true,
+        "detail": {
+          "bg": "rgb(21, 22, 28)",
+          "fg": "rgb(243, 243, 247)",
+          "contrast": 16.30906414343467
+        }
+      },
+      {
+        "name": "live-language-without-reload",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "reduced-motion-context-and-css",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "1080x700-composer-visible",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "1080x700-no-horizontal-overflow",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "empty-data-text-equivalent",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "upper-bound-data-and-recoverable-error",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "local-input-p95-under-100ms",
+        "passed": true,
+        "detail": {
+          "n": 60,
+          "p50_ms": 25.8,
+          "p95_ms": 30.8,
+          "max_ms": 34,
+          "samples_ms": [
+            25.5,
+            25.100000000093132,
+            29.899999999906868,
+            31.899999999906868,
+            28,
+            29.899999999906868,
+            26.800000000279397,
+            34,
+            26.399999999906868,
+            27.100000000093132,
+            25.799999999813735,
+            25.799999999813735,
+            24.59999999962747,
+            25.5,
+            29.299999999813735,
+            26.699999999720603,
+            26.199999999720603,
+            25.399999999906868,
+            28.100000000093132,
+            25.299999999813735,
+            24.199999999720603,
+            24.799999999813735,
+            26,
+            32.39999999990687,
+            28.100000000093132,
+            24.600000000093132,
+            25.199999999720603,
+            27,
+            25.5,
+            28.299999999813735,
+            24.299999999813735,
+            24.600000000093132,
+            28.899999999906868,
+            28,
+            24.899999999906868,
+            25.300000000279397,
+            27.40000000037253,
+            24.199999999720603,
+            24.699999999720603,
+            24.399999999906868,
+            25.800000000279397,
+            27.200000000186265,
+            25.40000000037253,
+            25.100000000093132,
+            24.799999999813735,
+            27.399999999906868,
+            25.100000000093132,
+            24.299999999813735,
+            24.09999999962747,
+            25.699999999720603,
+            27.899999999906868,
+            25.5,
+            27.800000000279397,
+            24.899999999906868,
+            28.800000000279397,
+            26.100000000093132,
+            30.799999999813735,
+            26,
+            26.100000000093132,
+            26.899999999906868
+          ]
+        }
+      },
+      {
+        "name": "refresh-restores-display-and-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "process-restart-restores-view-and-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "followup-produces-traceable-new-revision",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "revision-state-isolated",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-file-retains-summary-and-retry",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-file-retry-recovers",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "100-history-views-lazily-mounted",
+        "passed": true,
+        "detail": {
+          "frame_counts": [
+            2,
+            1,
+            2
+          ],
+          "total_view_rows": 100
+        }
+      },
+      {
+        "name": "long-summary-expands-without-reloading-view",
+        "passed": false,
+        "detail": {
+          "collapsed_height": 107.5625,
+          "expanded_height": 165.125
+        }
+      }
+    ],
+    "measurements": {
+      "artifact_creation_to_commit_ms": [
+        8.675,
+        9.523,
+        12.157,
+        9.492,
+        14.829,
+        10.424,
+        11.17,
+        11.112,
+        9.514999999999999,
+        15.818999999999999,
+        10.517,
+        12.133,
+        9.587,
+        10.246,
+        15.086,
+        12.261,
+        10.368,
+        9.175,
+        9.495999999999999,
+        9.001999999999999
+      ],
+      "render_phases": [
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286853916.1
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286853924.4001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286854017.6
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286854029.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286856976.1
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286856982.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286857069.2002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286857073.5
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286859563.6
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286859570.6
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286859668.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286859671.1
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286861102.9001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286861109.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286861196.5
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286861200
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286863225.7002
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286863232.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286863329.8
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286863333.2002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286868235.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286868241.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286868331.2002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286868333.1
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286871666.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286871673
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286871768.2002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286871771.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286874531.6
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286874539
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286874637.7002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286874641.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286877018.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286877024.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286877116.7002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286877119.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286880275.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286880281
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286880366.3
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286880369.8
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286883655.2002
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286883660.8
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286883749.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286883751.3
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286887219.4001
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286887224.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286887315.9001
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286887317.8
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286889441.7002
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286889451.3
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286889548.6
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286889551.5
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286891892.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286891897.8
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286891981.3
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286891982.9001
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286895415.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286895420.7002
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286895521.6
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286895526
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286898741
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286898746.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286898841.2002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286898846.7002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286902436
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286902443.2002
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286902553.2002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286902558.3
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286906355.8
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286906363.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286906449.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286906461.2002
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286908988.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286908994.9001
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286909095.1
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286909098.1
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792286911569.3
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792286911575.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792286911667.7002
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792286911669.8
+          }
+        ]
+      ],
+      "registration_to_interactive_upper_bound": {
+        "n": 20,
+        "p50_ms": 141.97,
+        "p95_ms": 162.142,
+        "max_ms": 163.012,
+        "samples_ms": [
+          162.141845703125,
+          141.14404296875,
+          146.366943359375,
+          139.071044921875,
+          139.51708984375,
+          134.9150390625,
+          146.654052734375,
+          152.75,
+          144.903076171875,
+          129.778076171875,
+          139.220947265625,
+          143.6630859375,
+          156.82421875,
+          126.55078125,
+          148.5810546875,
+          141.969970703125,
+          163.011962890625,
+          140.013916015625,
+          150.401123046875,
+          141.38134765625
+        ]
+      },
+      "local_input_to_two_animation_frames_1000_rows": {
+        "n": 60,
+        "p50_ms": 25.8,
+        "p95_ms": 30.8,
+        "max_ms": 34,
+        "samples_ms": [
+          25.5,
+          25.100000000093132,
+          29.899999999906868,
+          31.899999999906868,
+          28,
+          29.899999999906868,
+          26.800000000279397,
+          34,
+          26.399999999906868,
+          27.100000000093132,
+          25.799999999813735,
+          25.799999999813735,
+          24.59999999962747,
+          25.5,
+          29.299999999813735,
+          26.699999999720603,
+          26.199999999720603,
+          25.399999999906868,
+          28.100000000093132,
+          25.299999999813735,
+          24.199999999720603,
+          24.799999999813735,
+          26,
+          32.39999999990687,
+          28.100000000093132,
+          24.600000000093132,
+          25.199999999720603,
+          27,
+          25.5,
+          28.299999999813735,
+          24.299999999813735,
+          24.600000000093132,
+          28.899999999906868,
+          28,
+          24.899999999906868,
+          25.300000000279397,
+          27.40000000037253,
+          24.199999999720603,
+          24.699999999720603,
+          24.399999999906868,
+          25.800000000279397,
+          27.200000000186265,
+          25.40000000037253,
+          25.100000000093132,
+          24.799999999813735,
+          27.399999999906868,
+          25.100000000093132,
+          24.299999999813735,
+          24.09999999962747,
+          25.699999999720603,
+          27.899999999906868,
+          25.5,
+          27.800000000279397,
+          24.899999999906868,
+          28.800000000279397,
+          26.100000000093132,
+          30.799999999813735,
+          26,
+          26.100000000093132,
+          26.899999999906868
+        ]
+      },
+      "history": {
+        "view_count": 100,
+        "message_count": 200,
+        "first_session_load_to_interactive_ms": 20551.518600000236,
+        "earlier_page_load_ms": [
+          340.02909999981057,
+          124.62569999979678
+        ],
+        "mounted_frames": [
+          2,
+          1,
+          2
+        ]
+      }
+    },
+    "fixture": {
+      "html_bytes": 7472,
+      "max_data_rows": 1000,
+      "sha256": "1786633df13f7f8a1805f731d9b8d17a408b5850e31103c1ab40420f57cad021"
+    },
+    "hardware": {
+      "platform": "Windows-10-10.0.26300-SP0",
+      "cpu": "",
+      "logical_cpus": 12
+    },
+    "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-verified",
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-verified\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-verified\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-verified\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "d95f23fdb005e9cd",
+        "builtAt": "2026-10-18T01:14:23.415Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "passed": false,
+    "error": "AssertionError('long-summary-expands-without-reloading-view')"
+  },
+  "earlier_p4_history_layout_failure": {
+    "scope": "Production Windows package; synthetic loopback model; no external provider",
+    "checks": [
+      {
+        "name": "artifact-registration-to-interactive-p95-under-1s",
+        "passed": true,
+        "detail": {
+          "n": 20,
+          "p50_ms": 147.343,
+          "p95_ms": 162.582,
+          "max_ms": 180.898,
+          "samples_ms": [
+            180.89794921875,
+            154.93798828125,
+            147.343017578125,
+            137.97998046875,
+            162.581787109375,
+            135.86181640625,
+            155.384033203125,
+            140.057861328125,
+            139.23876953125,
+            145.802001953125,
+            137.6357421875,
+            144.929931640625,
+            149.830078125,
+            134.053955078125,
+            149.757080078125,
+            149.31884765625,
+            134.99072265625,
+            155.509033203125,
+            151.844970703125,
+            152.701171875
+          ]
+        }
+      },
+      {
+        "name": "display-mode-buttons-at-least-32px",
+        "passed": true,
+        "detail": [
+          {
+            "label": "返回对话内",
+            "height": 32
+          },
+          {
+            "label": "在工作面板中放大",
+            "height": 32
+          },
+          {
+            "label": "画中画",
+            "height": 32
+          }
+        ]
+      },
+      {
+        "name": "same-js-document-fullscreen",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "same-js-document-pip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "same-js-document-inline",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "card-carousel-is-content-layout",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "invalid-display-mode-explicit-error",
+        "passed": true,
+        "detail": {
+          "code": -32602,
+          "message": "Unknown display mode. Card and carousel are content layouts."
+        }
+      },
+      {
+        "name": "iframe-escape-returns-host-focus",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "tab-enter-escape-host-navigation",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "theme-AA-light",
+        "passed": true,
+        "detail": {
+          "bg": "rgb(249, 249, 252)",
+          "fg": "rgb(34, 36, 45)",
+          "contrast": 14.712859554795893
+        }
+      },
+      {
+        "name": "theme-AA-dark",
+        "passed": true,
+        "detail": {
+          "bg": "rgb(21, 22, 28)",
+          "fg": "rgb(243, 243, 247)",
+          "contrast": 16.30906414343467
+        }
+      },
+      {
+        "name": "live-language-without-reload",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "reduced-motion-context-and-css",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "1080x700-composer-visible",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "1080x700-no-horizontal-overflow",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "empty-data-text-equivalent",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "upper-bound-data-and-recoverable-error",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "local-input-p95-under-100ms",
+        "passed": true,
+        "detail": {
+          "n": 60,
+          "p50_ms": 28.8,
+          "p95_ms": 34,
+          "max_ms": 51.7,
+          "samples_ms": [
+            29.5,
+            28.600000000093132,
+            29.399999999906868,
+            31.100000000093132,
+            27.600000000093132,
+            30.399999999906868,
+            26.600000000093132,
+            24.299999999813735,
+            24.300000000279397,
+            29.899999999906868,
+            34,
+            30.899999999906868,
+            35.89999999990687,
+            51.6999999997206,
+            31.399999999906868,
+            29.600000000093132,
+            26.699999999720603,
+            26.799999999813735,
+            30.200000000186265,
+            29.899999999906868,
+            26.600000000093132,
+            25.100000000093132,
+            26.699999999720603,
+            29.5,
+            31.199999999720603,
+            27.700000000186265,
+            29.399999999906868,
+            32.5,
+            31.100000000093132,
+            27.800000000279397,
+            27,
+            26.899999999906868,
+            30.59999999962747,
+            27.100000000093132,
+            25.59999999962747,
+            25.299999999813735,
+            27.100000000093132,
+            25.199999999720603,
+            24.399999999906868,
+            32.299999999813735,
+            27.199999999720603,
+            29.399999999906868,
+            30.800000000279397,
+            31.799999999813735,
+            27.40000000037253,
+            31.200000000186265,
+            30.299999999813735,
+            28.299999999813735,
+            34.60000000009313,
+            28.800000000279397,
+            31.700000000186265,
+            27.5,
+            27.799999999813735,
+            26.699999999720603,
+            31.799999999813735,
+            28.600000000093132,
+            26.399999999906868,
+            26.699999999720603,
+            32.1999999997206,
+            32.89999999990687
+          ]
+        }
+      },
+      {
+        "name": "refresh-restores-display-and-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "process-restart-restores-view-and-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "followup-produces-traceable-new-revision",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "revision-state-isolated",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-file-retains-summary-and-retry",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "missing-file-retry-recovers",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "measurements": {
+      "artifact_creation_to_commit_ms": [
+        8.556,
+        10.76,
+        10.619,
+        10.003,
+        11.159,
+        10.359,
+        10.657,
+        9.717,
+        10.177999999999999,
+        12.286,
+        10.819,
+        10.029,
+        9.154,
+        18.523999999999997,
+        9.799999999999999,
+        11.536,
+        13.136999999999999,
+        12.728,
+        13.736,
+        11.573
+      ],
+      "render_phases": [
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287036588.7998
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287036596.4
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287036714.7998
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287036717.2
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287038046.2998
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287038052.2
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287038152.5999
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287038156
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287039538.9
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287039546.7
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287039642.5
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287039651.5999
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287041101
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287041106.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287041193.0999
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287041196.7
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287042562
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287042574.2
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287042679.9
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287042684
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287044059.4
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287044064.9
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287044153.5
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287044157
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287049361.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287049367.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287049461.5999
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287049468.7
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287050678.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287050684.5999
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287050771.4
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287050774.7998
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287052192.5999
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287052198.9
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287052283.2998
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287052286.9
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287053743.5
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287053749.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287053839.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287053842.7998
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287055222.7
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287055229.0999
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287055319.5999
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287055322.0999
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287056731.4
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287056737.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287056827.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287056830.2
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287058247.2
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287058253
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287058345
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287058348.4
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287059784.2998
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287059792.0999
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287059883.7
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287059885.2
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287061339
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287061344.7
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287061432.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287061436.2998
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287062852.7998
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287062858.9
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287062950.7998
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287062955.4
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287064392.9
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287064398.5
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287064484.0999
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287064487.7998
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287066138.7
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287066145.2
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287066244.7
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287066248.5999
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287067841
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287067848.2
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287067945.5999
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287067950.9
+          }
+        ],
+        [
+          {
+            "phase": "resolve-start",
+            "epoch": 1792287069356
+          },
+          {
+            "phase": "resolved",
+            "epoch": 1792287069362.4
+          },
+          {
+            "phase": "frame-initialize",
+            "epoch": 1792287069463.2
+          },
+          {
+            "phase": "interactive",
+            "epoch": 1792287069466.9
+          }
+        ]
+      ],
+      "registration_to_interactive_upper_bound": {
+        "n": 20,
+        "p50_ms": 147.343,
+        "p95_ms": 162.582,
+        "max_ms": 180.898,
+        "samples_ms": [
+          180.89794921875,
+          154.93798828125,
+          147.343017578125,
+          137.97998046875,
+          162.581787109375,
+          135.86181640625,
+          155.384033203125,
+          140.057861328125,
+          139.23876953125,
+          145.802001953125,
+          137.6357421875,
+          144.929931640625,
+          149.830078125,
+          134.053955078125,
+          149.757080078125,
+          149.31884765625,
+          134.99072265625,
+          155.509033203125,
+          151.844970703125,
+          152.701171875
+        ]
+      },
+      "local_input_to_two_animation_frames_1000_rows": {
+        "n": 60,
+        "p50_ms": 28.8,
+        "p95_ms": 34,
+        "max_ms": 51.7,
+        "samples_ms": [
+          29.5,
+          28.600000000093132,
+          29.399999999906868,
+          31.100000000093132,
+          27.600000000093132,
+          30.399999999906868,
+          26.600000000093132,
+          24.299999999813735,
+          24.300000000279397,
+          29.899999999906868,
+          34,
+          30.899999999906868,
+          35.89999999990687,
+          51.6999999997206,
+          31.399999999906868,
+          29.600000000093132,
+          26.699999999720603,
+          26.799999999813735,
+          30.200000000186265,
+          29.899999999906868,
+          26.600000000093132,
+          25.100000000093132,
+          26.699999999720603,
+          29.5,
+          31.199999999720603,
+          27.700000000186265,
+          29.399999999906868,
+          32.5,
+          31.100000000093132,
+          27.800000000279397,
+          27,
+          26.899999999906868,
+          30.59999999962747,
+          27.100000000093132,
+          25.59999999962747,
+          25.299999999813735,
+          27.100000000093132,
+          25.199999999720603,
+          24.399999999906868,
+          32.299999999813735,
+          27.199999999720603,
+          29.399999999906868,
+          30.800000000279397,
+          31.799999999813735,
+          27.40000000037253,
+          31.200000000186265,
+          30.299999999813735,
+          28.299999999813735,
+          34.60000000009313,
+          28.800000000279397,
+          31.700000000186265,
+          27.5,
+          27.799999999813735,
+          26.699999999720603,
+          31.799999999813735,
+          28.600000000093132,
+          26.399999999906868,
+          26.699999999720603,
+          32.1999999997206,
+          32.89999999990687
+        ]
+      }
+    },
+    "fixture": {
+      "html_bytes": 7472,
+      "max_data_rows": 1000,
+      "sha256": "1786633df13f7f8a1805f731d9b8d17a408b5850e31103c1ab40420f57cad021"
+    },
+    "hardware": {
+      "platform": "Windows-10-10.0.26300-SP0",
+      "cpu": "",
+      "logical_cpus": 12
+    },
+    "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-accepted",
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-accepted\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-accepted\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-accepted\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "d95f23fdb005e9cd",
+        "builtAt": "2026-10-18T01:14:23.415Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "passed": false,
+    "error": "TimeoutError('Locator.element_handle: Timeout 30000ms exceeded.\\nCall log:\\n  - waiting for locator(\"iframe[title=\\\\\"History 099 · 中文长标题与比较卡片\\\\\"]\")\\n')"
+  },
+  "isolation": {
+    "version": 1,
+    "packaged": true,
+    "platform": "win32",
+    "electron": "41.2.1",
+    "container": "sandboxed-iframe",
+    "startedAt": "2026-10-18T01:48:53.380Z",
+    "metrics": {
+      "hostPingDuringFloodMs": 1,
+      "hostPingDuringLoopMs": 1,
+      "viewTeardownMs": 2,
+      "hostPingAfterTeardownMs": 1
+    },
+    "checks": [
+      {
+        "id": "node-integration-disabled",
+        "passed": true,
+        "detail": "nodeGlobalsAbsent=true leaked=\"\" origin=file://"
+      },
+      {
+        "id": "context-isolation-enabled",
+        "passed": true,
+        "detail": "bridge=true keys=\"failed,onCommand,reply\" nodeGlobalsAbsent=true"
+      },
+      {
+        "id": "view-entry-loaded",
+        "passed": true,
+        "detail": "reason=state handshaken=true"
+      },
+      {
+        "id": "restricted-channel-round-trip",
+        "passed": true,
+        "detail": "echoed=initialized"
+      },
+      {
+        "id": "view-out-of-process",
+        "passed": true,
+        "detail": "host=4 view=5 osPid=31408"
+      },
+      {
+        "id": "traversal-request-blocked",
+        "passed": true,
+        "detail": "raw=404 encoded=400 via session.fetch"
+      },
+      {
+        "id": "foreign-token-blocked",
+        "passed": true,
+        "detail": "status=404"
+      },
+      {
+        "id": "script-mime-unmappable",
+        "passed": true,
+        "detail": "status=415"
+      },
+      {
+        "id": "unbound-directory-blocked",
+        "passed": true,
+        "detail": "status=404"
+      },
+      {
+        "id": "download-blocked",
+        "passed": true,
+        "detail": "attempted=1 cancelled=1"
+      },
+      {
+        "id": "host-clipboard-allowed",
+        "passed": true,
+        "detail": "result=riu-probe-clipboard"
+      },
+      {
+        "id": "node-api-absent",
+        "passed": true,
+        "detail": "evaluated"
+      },
+      {
+        "id": "preload-bridge-absent",
+        "passed": true,
+        "detail": "evaluated"
+      },
+      {
+        "id": "parent-dom-blocked",
+        "passed": true,
+        "detail": "evaluated"
+      },
+      {
+        "id": "top-window-access-blocked",
+        "passed": true,
+        "detail": "evaluated"
+      },
+      {
+        "id": "opaque-origin-enforced",
+        "passed": true,
+        "detail": "window=null document=undefined protocol=reverie-view:"
+      },
+      {
+        "id": "storage-apis-blocked",
+        "passed": true,
+        "detail": "evaluated"
+      },
+      {
+        "id": "network-fetch-blocked",
+        "passed": true,
+        "detail": "TypeError"
+      },
+      {
+        "id": "websocket-blocked",
+        "passed": true,
+        "detail": "error without open"
+      },
+      {
+        "id": "remote-subresource-blocked",
+        "passed": true,
+        "detail": "blocked"
+      },
+      {
+        "id": "window-open-blocked",
+        "passed": true,
+        "detail": "evaluated"
+      },
+      {
+        "id": "form-submission-blocked",
+        "passed": true,
+        "detail": "href unchanged"
+      },
+      {
+        "id": "frame-navigation-blocked",
+        "passed": true,
+        "detail": "blocked=1 allowed=1 targets=reverie-view://c352856334ece3d0642351dbbe737555/payload.txt"
+      },
+      {
+        "id": "permission-requests-denied",
+        "passed": true,
+        "detail": "viewRequests=2 granted=0 seen=notifications,background-sync"
+      },
+      {
+        "id": "flood-rate-limited",
+        "passed": true,
+        "detail": "rateLimited=2939 accepted=3"
+      },
+      {
+        "id": "host-responsive-after-flood",
+        "passed": true,
+        "detail": "answered=3/3 worst=0ms"
+      },
+      {
+        "id": "forged-bridge-source-rejected",
+        "passed": true,
+        "detail": "window.postMessage with a valid capability"
+      },
+      {
+        "id": "missing-capability-rejected",
+        "passed": true,
+        "detail": "no capability"
+      },
+      {
+        "id": "stale-instance-rejected",
+        "passed": true,
+        "detail": "revision 99"
+      },
+      {
+        "id": "unsupported-method-rejected",
+        "passed": true,
+        "detail": "files/delete"
+      },
+      {
+        "id": "oversize-message-rejected",
+        "passed": true,
+        "detail": "262145 bytes"
+      },
+      {
+        "id": "host-responsive-during-loop",
+        "passed": true,
+        "detail": "answered=6/6 worst=1ms"
+      },
+      {
+        "id": "chat-input-usable-during-loop",
+        "passed": true,
+        "detail": "value=\"ok-while-looping\""
+      },
+      {
+        "id": "view-destroyed-after-loop",
+        "passed": true,
+        "detail": "closed=true frameGone=true in 2ms"
+      },
+      {
+        "id": "view-process-exited",
+        "passed": true,
+        "detail": "osPid=30224 exited=true"
+      },
+      {
+        "id": "host-responsive-after-teardown",
+        "passed": true,
+        "detail": "answered=3/3 worst=1ms"
+      }
+    ],
+    "notes": [
+      "POST on a bound entry answered 405 via session.fetch",
+      "blocked network requests during the hostile phase: none observed",
+      "loop fixture mount: handshake"
+    ],
+    "guards": {
+      "permissions": [
+        {
+          "permission": "media",
+          "granted": false,
+          "isMainFrame": true,
+          "origin": "",
+          "kind": "check"
+        },
+        {
+          "permission": "media",
+          "granted": false,
+          "isMainFrame": true,
+          "origin": "",
+          "kind": "check"
+        },
+        {
+          "permission": "web-app-installation",
+          "granted": false,
+          "isMainFrame": true,
+          "origin": "",
+          "kind": "check"
+        },
+        {
+          "permission": "geolocation",
+          "granted": false,
+          "isMainFrame": true,
+          "origin": "",
+          "kind": "check"
+        },
+        {
+          "permission": "clipboard-sanitized-write",
+          "granted": true,
+          "isMainFrame": true,
+          "origin": "file:///<repo>/ReverieCli-ui/release/win-unpacked/resources/app.asar/dist/riu-probe.html",
+          "kind": "request"
+        },
+        {
+          "permission": "clipboard-read",
+          "granted": true,
+          "isMainFrame": true,
+          "origin": "file:///<repo>/ReverieCli-ui/release/win-unpacked/resources/app.asar/dist/riu-probe.html",
+          "kind": "request"
+        },
+        {
+          "permission": "notifications",
+          "granted": false,
+          "isMainFrame": false,
+          "origin": "reverie-view://c352856334ece3d0642351dbbe737555/index.html",
+          "kind": "request"
+        },
+        {
+          "permission": "background-sync",
+          "granted": false,
+          "isMainFrame": false,
+          "origin": "",
+          "kind": "check"
+        }
+      ],
+      "navigations": [
+        {
+          "url": "reverie-view://028a4b269973842fe4d03620b21b04e1/index.html",
+          "frameUrl": "about:blank",
+          "verdict": "allow"
+        },
+        {
+          "url": "reverie-view://c352856334ece3d0642351dbbe737555/index.html",
+          "frameUrl": "about:blank",
+          "verdict": "allow"
+        },
+        {
+          "url": "reverie-view://c352856334ece3d0642351dbbe737555/payload.txt",
+          "frameUrl": "reverie-view://c352856334ece3d0642351dbbe737555/index.html",
+          "verdict": "block"
+        },
+        {
+          "url": "reverie-view://ec0f3eba4b533b7fea6f64294d351110/index.html",
+          "frameUrl": "about:blank",
+          "verdict": "allow"
+        },
+        {
+          "url": "reverie-view://3037420a434da69690df124208ce079d/index.html",
+          "frameUrl": "about:blank",
+          "verdict": "allow"
+        },
+        {
+          "url": "reverie-view://f8861131e7c500d2689abe05810baccf/index.html",
+          "frameUrl": "about:blank",
+          "verdict": "allow"
+        }
+      ],
+      "downloads": [
+        {
+          "url": "reverie-view://028a4b269973842fe4d03620b21b04e1/payload.txt",
+          "cancelled": true
+        }
+      ],
+      "windowOpens": [],
+      "blockedRequests": []
+    },
+    "evaluation": {
+      "passed": true,
+      "failures": [],
+      "missing": []
+    }
+  },
+  "real_generated_current_turn": {
+    "status": "verified",
+    "scope": "Real configured external model; production Windows package; synthetic workspace",
+    "source": "nvidia",
+    "model": "stepfun-ai/step-5-preview",
+    "cases": [
+      "generated"
+    ],
+    "checks": [
+      {
+        "name": "model-authored-html-through-real-tools",
+        "passed": true,
+        "detail": [
+          "create_file",
+          "create_file",
+          "codebase-retrieval",
+          "render_view",
+          "render_view"
+        ]
+      },
+      {
+        "name": "model-respects-requested-tool-scope-this-turn",
+        "passed": true,
+        "detail": [
+          "render_view"
+        ]
+      },
+      {
+        "name": "generated-compound-interest-is-correct",
+        "passed": true,
+        "detail": {
+          "years": 10.0,
+          "a": 13439.16,
+          "b": 19546.74
+        }
+      },
+      {
+        "name": "generated-controls-recompute-locally",
+        "passed": true,
+        "detail": 18061.11
+      },
+      {
+        "name": "generated-both-rate-controls-recompute",
+        "passed": true,
+        "detail": {
+          "a": 21911.23,
+          "b": 38485.63
+        }
+      },
+      {
+        "name": "generated-same-document-fullscreen",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-same-document-pip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-same-document-inline",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-applies-live-host-theme",
+        "passed": true,
+        "detail": {
+          "before": {
+            "background": "rgb(249, 249, 252)",
+            "color": "rgb(34, 36, 45)"
+          },
+          "after": {
+            "background": "rgb(21, 22, 28)",
+            "color": "rgb(243, 243, 247)"
+          }
+        }
+      },
+      {
+        "name": "generated-restores-private-state-after-reload",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-has-no-page-errors",
+        "passed": true,
+        "detail": []
+      }
+    ],
+    "stages": [
+      {
+        "case": "generated",
+        "model_turn_ms": 59650.82
+      }
+    ],
+    "fixture_html": false,
+    "manual_quality_review_required": true,
+    "generation_origin": "Current source Desktop core authored the HTML; this run continues that real conversation in the production package. No test-authored HTML.",
+    "resumed_source_record": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\source-report.json",
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "d95f23fdb005e9cd",
+        "builtAt": "2026-10-18T01:14:23.415Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "historical_tool_scope_violations": [
+      "codebase-retrieval"
+    ]
+  },
+  "real_generated_final_ui_inspection": {
+    "status": "verified",
+    "scope": "Production package UI inspection of a saved real-model artifact; no model request in this run.",
+    "source": "nvidia",
+    "model": "stepfun-ai/step-5-preview",
+    "cases": [
+      "generated"
+    ],
+    "checks": [
+      {
+        "name": "model-authored-html-through-real-tools",
+        "passed": true,
+        "detail": [
+          "create_file",
+          "create_file",
+          "codebase-retrieval",
+          "render_view",
+          "render_view"
+        ]
+      },
+      {
+        "name": "model-respects-requested-tool-scope-this-turn",
+        "passed": true,
+        "detail": [
+          "render_view"
+        ]
+      },
+      {
+        "name": "generated-compound-interest-is-correct",
+        "passed": true,
+        "detail": {
+          "years": 20.0,
+          "a": 21911.23,
+          "b": 38485.63
+        }
+      },
+      {
+        "name": "generated-controls-recompute-locally",
+        "passed": true,
+        "detail": 22787.68
+      },
+      {
+        "name": "generated-both-rate-controls-recompute",
+        "passed": true,
+        "detail": {
+          "a": 22787.68,
+          "b": 40794.76
+        }
+      },
+      {
+        "name": "generated-same-document-fullscreen",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-same-document-pip",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-same-document-inline",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-applies-live-host-theme",
+        "passed": true,
+        "detail": {
+          "before": {
+            "background": "rgb(21, 22, 28)",
+            "color": "rgb(243, 243, 247)"
+          },
+          "after": {
+            "background": "rgb(249, 249, 252)",
+            "color": "rgb(34, 36, 45)"
+          }
+        }
+      },
+      {
+        "name": "generated-restores-private-state-after-reload",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "generated-has-no-page-errors",
+        "passed": true,
+        "detail": []
+      }
+    ],
+    "stages": [],
+    "fixture_html": false,
+    "manual_quality_review_required": true,
+    "generation_origin": "Current source Desktop core authored the HTML; this run continues that real conversation in the production package. No test-authored HTML.",
+    "resumed_source_record": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\source-report.json",
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "a802526c1487ccb8",
+        "builtAt": "2026-10-18T01:40:55.622Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "historical_tool_scope_violations": [
+      "codebase-retrieval"
+    ]
+  },
+  "real_mcp": {
+    "status": "verified",
+    "scope": "Real configured external model; production Windows package; synthetic workspace",
+    "source": "nvidia",
+    "model": "openai/gpt-oss-20b",
+    "cases": [
+      "mcp"
+    ],
+    "checks": [
+      {
+        "name": "real-model-to-official-mcp-app",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-mcp-callback-through-host-approval",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "stages": [
+      {
+        "case": "mcp",
+        "model_turn_ms": 55598.71
+      }
+    ],
+    "fixture_html": false,
+    "manual_quality_review_required": true,
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-ui-final\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-ui-final\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-ui-final\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "a802526c1487ccb8",
+        "builtAt": "2026-10-18T01:40:55.622Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    }
+  },
+  "real_mcp_before_history_fix": {
+    "status": "verified",
+    "scope": "Real configured external model; production Windows package; synthetic workspace",
+    "source": "nvidia",
+    "model": "openai/gpt-oss-20b",
+    "cases": [
+      "mcp"
+    ],
+    "checks": [
+      {
+        "name": "real-model-to-official-mcp-app",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "official-mcp-callback-through-host-approval",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "stages": [
+      {
+        "case": "mcp",
+        "model_turn_ms": 36330.69
+      }
+    ],
+    "fixture_html": false,
+    "manual_quality_review_required": true,
+    "build": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-final\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-final\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-final\\desktop-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "d95f23fdb005e9cd",
+        "builtAt": "2026-10-18T01:14:23.415Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    }
+  },
+  "artifact_before_history_fix": {
+    "passed": true,
+    "frozen_modules": [
+      {
+        "module": "reverie.mcp",
+        "matches_current_source": true,
+        "source_sha256": "b80555fe59d30cf0fd5720053df082321f11a12d5dcb67d85a6a1e71803b0062"
+      },
+      {
+        "module": "reverie.mcp_apps",
+        "matches_current_source": true,
+        "source_sha256": "744396e430dc73cefd8302f9b6c9948cb85115dd3ada361510c5dff5fb86403e"
+      },
+      {
+        "module": "reverie.views",
+        "matches_current_source": true,
+        "source_sha256": "a874342672c75073d5ad65a9a1c96e294a6419b6da6a534e650b35e719f63c20"
+      },
+      {
+        "module": "reverie.view_execution",
+        "matches_current_source": true,
+        "source_sha256": "21a964e9886844583e36a0e6a011ef9ad33090eb617dfc4049ccc5f0361febe6"
+      },
+      {
+        "module": "reverie.tools.mcp_dynamic",
+        "matches_current_source": true,
+        "source_sha256": "4840fc7f413403147973c8cdf6c5606704c94bea9234efc776734e82fc9bae2b"
+      },
+      {
+        "module": "reverie.agent.tool_executor",
+        "matches_current_source": true,
+        "source_sha256": "a989fca41fd11059dd8cc2d3a20a7563a7d658c78b6b1ec0f1ae8514f49441ec"
+      },
+      {
+        "module": "reverie.sdk_bridge",
+        "matches_current_source": true,
+        "source_sha256": "5d00a27665bb4958c8d706ad45327ab70592339c0edf682ca69fd39524e4a1a6"
+      },
+      {
+        "module": "reverie.tools.render_view",
+        "matches_current_source": true,
+        "source_sha256": "eb327581778e2fe693fb4d98fa55492e1c2887d567af299b297d5fa2783b0c24"
+      },
+      {
+        "module": "reverie.agent.system_prompt",
+        "matches_current_source": true,
+        "source_sha256": "6bf8b3c20101813bde5d5c4b5b7270aa012801034862f3675adecb2877aa4d79"
+      },
+      {
+        "module": "reverie.modes",
+        "matches_current_source": true,
+        "source_sha256": "68ccd0a5d04efbe4164f0dd3e97b2903215f2833ce3ae7a676147b5d7f24d7d7"
+      },
+      {
+        "module": "reverie.agent.agent",
+        "matches_current_source": true,
+        "source_sha256": "99c551f00f30c243a3fe6b9e27de66e271007c273a582763051887d87400dd81"
+      },
+      {
+        "module": "reverie.agent.tool_descriptions",
+        "matches_current_source": true,
+        "source_sha256": "9146be24a8d670893d79c330cd23807b97442ff4f45cb5c2665717d9308de46f"
+      },
+      {
+        "module": "reverie.cli.interface",
+        "matches_current_source": true,
+        "source_sha256": "b6d3f600497e8ae63726954fc938b71e01e9dbf1186defa0d15596413150edf8"
+      },
+      {
+        "module": "reverie.harness",
+        "matches_current_source": true,
+        "source_sha256": "18892ba0badaabe80396664c4a602d6f591543678e1b992ac41ca737bca6bb80"
+      },
+      {
+        "module": "reverie.tools.registry",
+        "matches_current_source": true,
+        "source_sha256": "cf4b73fbe0079218635545e6a85ce4367a852aff0eadb42bdbfc5ae77997d7d9"
+      },
+      {
+        "module": "reverie.tools.mode_switch",
+        "matches_current_source": true,
+        "source_sha256": "947f8b10cf6171abf28c6fabe1f8db523a41a0b76b338a5e4dd5cb6488ee1346"
+      },
+      {
+        "module": "reverie.media_capabilities",
+        "matches_current_source": true,
+        "source_sha256": "6c8c439c55687492e28a7a66427c7460b165eb96b23518e09eafae0553c784a8"
+      },
+      {
+        "module": "reverie.session.manager",
+        "matches_current_source": true,
+        "source_sha256": "1fe575ad1219739d3da36fc9e601fd6435758ad809350fe65508220ccd434214"
+      }
+    ],
+    "data_files": [
+      {
+        "file": "reverie/agent/tool_manifest.json",
+        "matches_current_source": true,
+        "source_sha256": "e033ce91ec8c16b4dd5fa2cae4dc00ad0af10638160cf959e302482241369090"
+      }
+    ],
+    "ui": {
+      "files": [
+        {
+          "file": "dist/assets/index-CiAQtVBb.css",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/index-ziWdFkTH.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/index-ziWdFkTH.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/pdf.worker.min-Dswkl-cV.mjs",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/PdfPreview-C4QTVkfO.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/PdfPreview-C4QTVkfO.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/riu-probe-BpXUtagd.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/riu-probe-BpXUtagd.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/view-bridge-Bk2F8R7B.js",
+          "matches": true
+        },
+        {
+          "file": "dist/assets/view-bridge-Bk2F8R7B.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist/backgrounds/aurora-archive.webp",
+          "matches": true
+        },
+        {
+          "file": "dist/backgrounds/ember-manuscript.webp",
+          "matches": true
+        },
+        {
+          "file": "dist/backgrounds/moss-library.webp",
+          "matches": true
+        },
+        {
+          "file": "dist/index.html",
+          "matches": true
+        },
+        {
+          "file": "dist/reverie-mark.png",
+          "matches": true
+        },
+        {
+          "file": "dist/riu-probe.html",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/appearance.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/appearance.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/attachments.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/attachments.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-actions.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-actions.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-timeouts.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/core-timeouts.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/execution-coordinator.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/execution-coordinator.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/git-workspace.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/git-workspace.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/isolated-workspaces.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/isolated-workspaces.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/kernel-resolver.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/kernel-resolver.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/launch-options.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/launch-options.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/main.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/main.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preferences.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preferences.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preload.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/preload.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/reverie-build.json",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/riu-probe-preload.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/riu-probe-preload.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/runtime-paths.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/runtime-paths.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/session-workspace.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/session-workspace.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-display-preferences.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-display-preferences.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-fixtures.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-fixtures.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-host.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-host.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-interactions.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-interactions.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-probe.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-probe.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-runner.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-isolation-runner.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-resolve.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-resolve.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-session.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/view-session.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/window-tray.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/window-tray.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workbench.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workbench.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/worker-pool.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/worker-pool.js.map",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workspace-lifecycle.js",
+          "matches": true
+        },
+        {
+          "file": "dist-electron/workspace-lifecycle.js.map",
+          "matches": true
+        }
+      ],
+      "build": {
+        "version": "2.5.0",
+        "id": "d95f23fdb005e9cd",
+        "builtAt": "2026-10-18T01:14:23.415Z",
+        "platform": "win32",
+        "arch": "x64"
+      },
+      "trusted": {
+        "schema": "reverie.trusted-kernels.v1",
+        "generated_at": "2026-10-18T01:14:15.180Z",
+        "kernels": [
+          {
+            "sha256": "d33c0bca29123a23fd8cd197462a007b82628e22c3554e434bc9edbe917f14e5",
+            "platform": "win32",
+            "arch": "x64",
+            "version": "2.5.0",
+            "bridge_protocol": "sdk-bridge.v1"
+          }
+        ]
+      }
+    },
+    "artifacts": [
+      {
+        "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "bytes": 223114752,
+        "sha256": "1bb34b96e4a5f3d4d6ec802d3f767f41ee4357a553344a3946ff1c1e8ea91efc"
+      },
+      {
+        "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "bytes": 14141713,
+        "sha256": "34a790b56f0a17f025e9318757b049d85d250714b77668dddd47d3ad8a1a873d"
+      },
+      {
+        "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\resources\\app.asar",
+        "bytes": 81394167,
+        "sha256": "c13f50b5ae21d0cf9bfe8e5e49da6a2c07c50b221e27582e03205ba3ab4ac7a8"
+      }
+    ]
+  },
+  "manual_current_visual_review": {
+    "scope": "Screenshots of the real Step 5 savings comparator in workbench and PiP; basic hierarchy, spacing and controls only. Arithmetic, state and lifecycle are verified separately by browser interactions. Not a full accessibility or cross-template design audit.",
+    "observed": "Workbench has readable result hierarchy and labeled controls. PiP stacks cards and scrolls internally; controls require scrolling. The model summary still mentions an HTML output element and should use clearer product language.",
+    "full_visual_acceptance": false,
+    "test_authored_or_repaired_html": false
+  },
+  "manual_earlier_model_review": {
+    "scope": "Human review of unfiltered native reasoning, final answers and actual rendered output. Automated checks alone are insufficient for quality acceptance.",
+    "runs": [
+      {
+        "run": "real-step5-v2",
+        "model": "stepfun-ai/step-5-preview",
+        "automated_checks": "4/4 before adding the Chinese compliance-narration pattern",
+        "manual_quality_accepted": false,
+        "improvements": [
+          "Correct Desktop versus CLI backend identity",
+          "Exact configured model identifier",
+          "No explicit system-prompt reference in this sample"
+        ],
+        "remaining": [
+          "Final answer still says it is following rules",
+          "Capability inventory is longer than needed",
+          "Enabled media configuration is described more strongly than its missing prerequisites justify"
+        ]
+      },
+      {
+        "run": "real-gptoss-v2",
+        "model": "openai/gpt-oss-20b",
+        "automated_checks": "3/4",
+        "manual_quality_accepted": false,
+        "remaining": [
+          "Native reasoning quotes the runtime identity/model instruction blocks",
+          "Final answer advertises media capability without exposing missing configuration"
+        ]
+      },
+      {
+        "run": "real-gptoss-views",
+        "model": "openai/gpt-oss-20b",
+        "manual_quality_accepted": false,
+        "improvements": [
+          "Real create_file and render_view calls produced a new HTML artifact"
+        ],
+        "remaining": [
+          "Uses unavailable localStorage and throws a sandbox error",
+          "No host handshake, host theme or durable private state",
+          "An extra non-interactive aria-label also caused an overly broad test locator to fail"
+        ],
+        "response": "Preserve original output; add concrete host integration reference to the authoring prompt; select actual controls in the verifier; regenerate with the real model without editing its HTML."
+      }
+    ],
+    "reasoning_filtering_or_truncation": false
+  },
+  "earlier_real_cases": {
+    "real-nvidia": {
+      "status": "failed",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "stepfun-ai/step-5-preview",
+      "cases": [
+        "identity",
+        "generated",
+        "mcp"
+      ],
+      "checks": [
+        {
+          "name": "identity-uses-configured-id",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-stays-on-desktop",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-has-no-tools",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-does-not-recite-runtime-instructions",
+          "passed": true,
+          "detail": []
+        }
+      ],
+      "stages": [
+        {
+          "case": "identity",
+          "model_turn_ms": 78693.23
+        }
+      ],
+      "fixture_html": false,
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-nvidia\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-nvidia\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-nvidia\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "ca8eab3640018b45",
+          "builtAt": "2026-10-17T14:05:13.060Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "identity_reasoning_characters": 6066,
+      "error": "TimeoutError('Locator.wait_for: Timeout 240000ms exceeded.\\nCall log:\\n  - waiting for get_by_role(\"button\", name=\"停止\", exact=True) to be hidden\\n    466 × locator resolved to visible <button type=\"button\" class=\"stop-button\">…</button>\\n')"
+    },
+    "real-step5-v2": {
+      "status": "verified",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "stepfun-ai/step-5-preview",
+      "cases": [
+        "identity"
+      ],
+      "checks": [
+        {
+          "name": "identity-uses-configured-id",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-stays-on-desktop",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-has-no-tools",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-does-not-recite-runtime-instructions",
+          "passed": true,
+          "detail": []
+        }
+      ],
+      "stages": [
+        {
+          "case": "identity",
+          "model_turn_ms": 75308.66
+        }
+      ],
+      "fixture_html": false,
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-v2\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-v2\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-v2\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "84da35a902d46dc2",
+          "builtAt": "2026-10-17T14:19:07.524Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "identity_reasoning_characters": 1143
+    },
+    "real-gptoss-v2": {
+      "status": "failed",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "openai/gpt-oss-20b",
+      "cases": [
+        "identity",
+        "generated",
+        "mcp"
+      ],
+      "checks": [
+        {
+          "name": "identity-uses-configured-id",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-stays-on-desktop",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-has-no-tools",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "identity-does-not-recite-runtime-instructions",
+          "passed": false,
+          "detail": [
+            "system prompt"
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "case": "identity",
+          "model_turn_ms": 47604.58
+        }
+      ],
+      "fixture_html": false,
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-v2\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-v2\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-v2\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "84da35a902d46dc2",
+          "builtAt": "2026-10-17T14:19:07.524Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "identity_reasoning_characters": 4374,
+      "error": "AssertionError('identity-does-not-recite-runtime-instructions')"
+    },
+    "real-gptoss-views": {
+      "status": "failed",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "openai/gpt-oss-20b",
+      "cases": [
+        "generated",
+        "mcp"
+      ],
+      "checks": [
+        {
+          "name": "model-authored-html-through-real-tools",
+          "passed": true,
+          "detail": [
+            "create_file",
+            "render_view"
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "case": "generated",
+          "model_turn_ms": 106527.52
+        }
+      ],
+      "fixture_html": false,
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-views\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-views\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-views\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "84da35a902d46dc2",
+          "builtAt": "2026-10-17T14:19:07.524Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "page_errors": [
+        "Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag."
+      ],
+      "error": "Error('Locator.wait_for: Error: strict mode violation: get_by_label(\"年份\", exact=True) resolved to 2 elements:\\n    1) <span aria-label=\"年份\"></span> aka locator(\"span\")\\n    2) <input min=\"1\" id=\"years\" value=\"10\" type=\"number\" aria-label=\"年份\"/> aka get_by_role(\"spinbutton\", name=\"年份\")\\n\\nCall log:\\n  - waiting for get_by_label(\"年份\", exact=True) to be visible\\n')"
+    },
+    "real-gptoss-bootstrap": {
+      "status": "failed",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "openai/gpt-oss-20b",
+      "cases": [
+        "generated",
+        "mcp"
+      ],
+      "checks": [
+        {
+          "name": "model-authored-html-through-real-tools",
+          "passed": true,
+          "detail": [
+            "file_ops",
+            "file_ops",
+            "create_file",
+            "render_view",
+            "file_ops",
+            "create_file",
+            "render_view"
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "case": "generated",
+          "model_turn_ms": 405668.13
+        }
+      ],
+      "fixture_html": false,
+      "manual_quality_review_required": true,
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-bootstrap\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-bootstrap\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-gptoss-bootstrap\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "f7706cae7601ffad",
+          "builtAt": "2026-10-18T00:36:47.191Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "error": "TimeoutError('Locator.wait_for: Timeout 30000ms exceeded.\\nCall log:\\n  - waiting for locator(\".interactive-view iframe\").last to be visible\\n')"
+    },
+    "real-step5-packaged-continue-v2": {
+      "status": "failed",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "stepfun-ai/step-5-preview",
+      "cases": [
+        "generated"
+      ],
+      "checks": [
+        {
+          "name": "model-authored-html-through-real-tools",
+          "passed": true,
+          "detail": [
+            "create_file",
+            "create_file",
+            "codebase-retrieval",
+            "render_view"
+          ]
+        },
+        {
+          "name": "model-respects-requested-tool-scope",
+          "passed": false,
+          "detail": [
+            "create_file",
+            "create_file",
+            "codebase-retrieval",
+            "render_view"
+          ]
+        },
+        {
+          "name": "generated-compound-interest-is-correct",
+          "passed": true,
+          "detail": {
+            "a": 13439.16,
+            "b": 19546.74
+          }
+        },
+        {
+          "name": "generated-controls-recompute-locally",
+          "passed": true,
+          "detail": 18061.11
+        }
+      ],
+      "stages": [
+        {
+          "case": "generated",
+          "model_turn_ms": 63069.91
+        }
+      ],
+      "fixture_html": false,
+      "manual_quality_review_required": true,
+      "generation_origin": "Current source Desktop core authored the HTML; this run continues that real conversation in the production package. No test-authored HTML.",
+      "resumed_source_record": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\source-report.json",
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "9040f7afd51b2c01",
+          "builtAt": "2026-10-18T00:52:50.416Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      },
+      "error": "TimeoutError('Locator.click: Timeout 30000ms exceeded.\\nCall log:\\n  - waiting for locator(\".interactive-view\").filter(has=locator(\".interactive-view iframe\").last).locator(\"[data-view-mode=\\\\\"fullscreen\\\\\"]\")\\n')"
+    },
+    "step5-saved-ui": {
+      "status": "failed",
+      "scope": "Production package UI inspection of a saved real-model artifact; no model request in this run.",
+      "source": "nvidia",
+      "model": "stepfun-ai/step-5-preview",
+      "cases": [
+        "generated"
+      ],
+      "checks": [
+        {
+          "name": "model-authored-html-through-real-tools",
+          "passed": true,
+          "detail": [
+            "create_file",
+            "create_file",
+            "codebase-retrieval",
+            "render_view"
+          ]
+        },
+        {
+          "name": "model-respects-requested-tool-scope",
+          "passed": false,
+          "detail": [
+            "create_file",
+            "create_file",
+            "codebase-retrieval",
+            "render_view"
+          ]
+        },
+        {
+          "name": "generated-compound-interest-is-correct",
+          "passed": true,
+          "detail": {
+            "years": 20.0,
+            "a": 18061.11,
+            "b": 31839.57
+          }
+        },
+        {
+          "name": "generated-controls-recompute-locally",
+          "passed": true,
+          "detail": 18602.95
+        },
+        {
+          "name": "generated-same-document-fullscreen",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "generated-same-document-pip",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "generated-same-document-inline",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "generated-applies-live-host-theme",
+          "passed": true,
+          "detail": {
+            "before": {
+              "background": "rgb(21, 22, 28)",
+              "color": "rgb(243, 243, 247)"
+            },
+            "after": {
+              "background": "rgb(249, 249, 252)",
+              "color": "rgb(34, 36, 45)"
+            }
+          }
+        },
+        {
+          "name": "generated-restores-private-state-after-reload",
+          "passed": true,
+          "detail": null
+        }
+      ],
+      "stages": [],
+      "fixture_html": false,
+      "manual_quality_review_required": true,
+      "generation_origin": "Current source Desktop core authored the HTML; this run continues that real conversation in the production package. No test-authored HTML.",
+      "resumed_source_record": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\source-report.json",
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-step5-source\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "9040f7afd51b2c01",
+          "builtAt": "2026-10-18T00:52:50.416Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      }
+    },
+    "real-mcp-complete": {
+      "status": "verified",
+      "scope": "Real configured external model; production Windows package; synthetic workspace",
+      "source": "nvidia",
+      "model": "openai/gpt-oss-20b",
+      "cases": [
+        "mcp"
+      ],
+      "checks": [
+        {
+          "name": "real-model-to-official-mcp-app",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "official-mcp-callback-through-host-approval",
+          "passed": true,
+          "detail": null
+        }
+      ],
+      "stages": [
+        {
+          "case": "mcp",
+          "model_turn_ms": 64826.21
+        }
+      ],
+      "fixture_html": false,
+      "manual_quality_review_required": true,
+      "build": {
+        "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-complete\\workspace",
+        "kernelPath": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+        "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-complete\\app-root",
+        "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\real-mcp-complete\\desktop-home\\.reverie\\desktop",
+        "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+        "desktopBuild": {
+          "version": "2.5.0",
+          "id": "9040f7afd51b2c01",
+          "builtAt": "2026-10-18T00:52:50.416Z",
+          "platform": "win32",
+          "arch": "x64"
+        }
+      }
+    }
+  },
+  "source_model_trials": {
+    "real-step5-source": {
+      "scope": "Real current source Desktop core with normal executor; no browser validation yet",
+      "model": "stepfun-ai/step-5-preview",
+      "success": true,
+      "seconds": 512.8335942000001,
+      "tools": [
+        "create_file",
+        "create_file"
+      ],
+      "session_id": "20261017_204956_332165",
+      "auto_followup_count": 0,
+      "html_files": []
+    },
+    "real-nemotron-source": {
+      "scope": "Real current source Desktop core with normal executor; no browser validation yet",
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "success": true,
+      "seconds": 376.9781714999999,
+      "tools": [],
+      "session_id": "20261017_205321_652321",
+      "auto_followup_count": 0,
+      "html_files": []
+    }
+  },
+  "archive_native": {
+    "platform": "nt",
+    "scope": "Real local filesystem; synthetic archives only; legacy workspace identity normalization preserved",
+    "checks": [
+      {
+        "name": "archive-retention-limit",
+        "passed": true
+      },
+      {
+        "name": "outside-archive-directory-preserved",
+        "passed": true
+      },
+      {
+        "name": "non-archive-file-preserved",
+        "passed": true
+      },
+      {
+        "name": "duplicate-delete-is-idempotent",
+        "passed": true
+      },
+      {
+        "name": "archive-metadata-survives-restart",
+        "passed": true
+      }
+    ],
+    "passed": true
+  },
+  "prompt_size_baseline": {
+    "system_characters": 52077,
+    "duplicated_manifest_characters": 24940,
+    "tool_schemas_characters": 67271,
+    "tool_count": 29,
+    "scope": "Static default Desktop prompt and built-in schemas; not the complete configured API request; no causal claim about empty streams."
+  },
+  "network_trials": {
+    "opencode": "Old and current official endpoints returned 403 FreeTierError; no client spoofing.",
+    "minimal_tool_nonstream": [
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "status_code": 200,
+        "seconds": 1.77,
+        "tool_calls": [
+          {
+            "id": "chatcmpl-tool-a4ff8ec969613fc0",
+            "type": "function",
+            "function": {
+              "name": "echo",
+              "arguments": "{\"text\": \"OK\"}"
+            }
+          }
+        ],
+        "finish_reason": "tool_calls",
+        "error": ""
+      },
+      {
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "status_code": 200,
+        "seconds": 14.08,
+        "tool_calls": [
+          {
+            "id": "call-c8a2b3e1-e59e-4cf4-9c89-eeebfa7ebfff",
+            "type": "function",
+            "function": {
+              "name": "echo",
+              "arguments": "{\"text\":\"OK\"}"
+            }
+          }
+        ],
+        "finish_reason": "tool_calls",
+        "error": ""
+      }
+    ],
+    "minimal_tool_stream": [
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "chunks": 20,
+        "tool_events": [
+          [
+            {
+              "index": 0,
+              "id": "chatcmpl-tool-90e999d7a19fdd40",
+              "type": "function",
+              "function": {
+                "name": "echo",
+                "arguments": ""
+              }
+            }
+          ],
+          [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"text\": \"OK"
+              }
+            }
+          ],
+          [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "\"}"
+              }
+            }
+          ]
+        ],
+        "reasoning_characters": 0,
+        "http_status": 200,
+        "finish_reason": "tool_calls",
+        "seconds": 2.86
+      },
+      {
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "chunks": 45,
+        "tool_events": [
+          [
+            {
+              "index": 0,
+              "id": "call-0ef16d32-b76d-4305-a4f2-57cefcb466cd",
+              "type": "function",
+              "function": {
+                "name": "echo",
+                "arguments": "{\"text\":\"OK\"}"
+              }
+            }
+          ]
+        ],
+        "reasoning_characters": 183,
+        "http_status": 200,
+        "finish_reason": "tool_calls",
+        "seconds": 39.98
+      }
+    ]
+  },
+  "introduced_reasoning_filtering_or_response_length_cap": false,
+  "hardware": {
+    "os_version": "10.0.26300",
+    "architecture": "64-bit",
+    "processors": [
+      {
+        "name": "AMD Ryzen 5 5600X 6-Core Processor             ",
+        "logical_processors": 12
+      }
+    ],
+    "memory_bytes": 25653493760
+  },
+  "portable_first_launch": {
+    "passed": true,
+    "launcher": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\portable-smoke-home\\Reverie-Portable-2.5.0-x64.exe",
+    "checks": [
+      {
+        "name": "payload-same-frame-fullscreen",
+        "passed": true
+      },
+      {
+        "name": "payload-same-frame-pip",
+        "passed": true
+      },
+      {
+        "name": "payload-same-frame-inline",
+        "passed": true
+      }
+    ],
+    "scope": "Actual Windows payload, existing synthetic artifact, no model request",
+    "portable_runtime_marker_present_before_launch": false,
+    "paths": {
+      "projectRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final-pass\\workspace",
+      "kernelPath": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\portable-smoke-home\\.reverie\\desktop\\app-runtime\\reverie.exe",
+      "coreAppRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\p4-final-pass\\app-root",
+      "runtimeRoot": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\portable-smoke-home\\.reverie\\desktop",
+      "desktopExecutable": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\portable-smoke-home\\.reverie\\desktop\\app-runtime\\ReverieUI.exe",
+      "desktopBuild": {
+        "version": "2.5.0",
+        "id": "a802526c1487ccb8",
+        "builtAt": "2026-10-18T01:40:55.622Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    "launcher_to_restored_view_ms_includes_extraction_and_core_startup": 17148.665800000344
+  },
+  "earlier_portable_first_launch_failure": {
+    "passed": false,
+    "launcher": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-prompt-update-20261017-093759\\portable-smoke-home\\Reverie-Portable-2.5.0-x64.exe",
+    "checks": [],
+    "scope": "Actual Windows payload, existing synthetic artifact, no model request",
+    "portable_runtime_marker_present_before_launch": false,
+    "error": "RuntimeError('Launcher exited with 2 before GUI startup.')"
+  },
+  "portable_disk_full_recovery": {
+    "automatic_review": "Combined recursive cleanup rejected as blocked by policy; narrowed nonrecursive single-file cleanup succeeded",
+    "failed_report": "portable-smoke-final/report.json",
+    "free_bytes_after_single_copy_removal": 502034432,
+    "manual_cleanup": "Removed only the task-owned duplicate carrier file; incomplete extracted directory retained",
+    "cause": "G drive had zero free bytes during first extraction"
+  },
+  "credential_cleanup": {
+    "scope": "Only this task's repository-local isolated profiles, text evidence and config backups; original provider config unchanged.",
+    "scanned_text_files": 1951,
+    "changed": [
+      {
+        "path": "real-gptoss-bootstrap\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-gptoss-v2\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-gptoss-views\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-mcp-complete\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-mcp-final\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-mcp-ui-final\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-nemotron-source\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-nvidia\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-step5-source\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      },
+      {
+        "path": "real-step5-v2\\app-root\\.reverie\\config.json",
+        "action": "cleared-isolated-provider-key"
+      }
+    ],
+    "copied_provider_keys_removed": true
+  },
+  "earlier_full_suite_failure": {
+    "log": {
+      "path": ".runtime/riu-prompt-update-20261017-093759/python-complete.log",
+      "bytes": 5179,
+      "sha256": "4834c0b65b2eb5d792b274f62aec46ca327a946ee257dcba12c5a019b80437ac"
+    },
+    "test": "test_first_paint_rules_skip_expensive_harness_enrichment",
+    "cause": "Old fixture required Writer plugin guidance. The producer now correctly hides it; the first-paint performance fixture uses Reverie and dedicated Writer tests retain pins while rejecting unavailable MCP/plugins."
+  },
+  "not_claimed": [
+    "Perfect RIU or OpenAI parity",
+    "Stable prompt obedience across all models",
+    "Zero tokens for model-authored HTML",
+    "Full window.openai or Plugin Extensions",
+    "Complete installer/uninstaller or non-Windows acceptance"
+  ],
+  "carriers": [
+    {
+      "path": "dist/reverie.exe",
+      "bytes": 328933782,
+      "sha256": "d33c0bca29123a23fd8cd197462a007b82628e22c3554e434bc9edbe917f14e5"
+    },
+    {
+      "path": "ReverieCli-ui/release/Reverie-Setup-2.5.0-x64.exe",
+      "bytes": 441340435,
+      "sha256": "f978d15f91d0d5fdb99e32af8afc54637afee3e0e127153a275a58347dcf8e1e"
+    },
+    {
+      "path": "dist/Reverie-Portable-2.5.0-x64.exe",
+      "bytes": 502088204,
+      "sha256": "fcacd03f59862a85b88907631a7106079ffb048f2cd774cb19c03d59a9f84141"
+    }
+  ],
+  "logs": [
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/python-delivery.log",
+      "bytes": 2688,
+      "sha256": "afd3b50b2268fb3c5ddb967c2eb4550f56e11c74541b3393e60f93db9de6c9c8"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/python-delivery.xml",
+      "bytes": 395889,
+      "sha256": "0361b130e87afa2abb1b7dfdfad81944db989c670f7bf8cd9cfd7477403dd62d"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/desktop-final.log",
+      "bytes": 4831,
+      "sha256": "6c1d5bd015db5426d0c7b09fd6496751fe472c784465783b17fc38c8d8863e1b"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/typecheck-final.log",
+      "bytes": 295,
+      "sha256": "730efcee279855f3d0f3e1fd2675f57f86a59d98748880fa4259f259c264d938"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/cli-delivery.log",
+      "bytes": 12415,
+      "sha256": "b5fc8bf8abbcdcd352c04c1f7fdadd7c2b599c1a1388835674e98e0db89063b6"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/pack-delivery.log",
+      "bytes": 19868,
+      "sha256": "8bbd024c8b09878f0e6466b7459120941da3489d451ca1ba2ddc0aa6bf555918"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/ui-history-build.log",
+      "bytes": 1965,
+      "sha256": "76767873a7909059711faf3e51b788080ff4e93d012caaa8f23f0c2041df6f8d"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/pack-history-build.log",
+      "bytes": 5509,
+      "sha256": "aef238113aa99d0e9df5b457e86c56ad9c4b4f5648d9b2b9fcd4d76333447f96"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/installer-history-final.log",
+      "bytes": 567,
+      "sha256": "1e8b6e9d44c4b6a3fdb63e68e1832abe15d2484c939cfc617d38bdca23221868"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/portable-history-final.log",
+      "bytes": 872,
+      "sha256": "8baa0e6fb82e1d772e271e9ad5835524e35bfabe56ae2842ac55ddc8f90267f7"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/portable-smoke-final.log",
+      "bytes": 380,
+      "sha256": "4a00e9033933ac25a0dbba3fcae363cfafe887d682c9996d665797bd2e49f041"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/portable-smoke-recovered.log",
+      "bytes": 1381,
+      "sha256": "d4e537556888fb17bb5d78879c8eeffba5e0a65e0cfc56ea1f702deef4fe7ab8"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/p2-history-final.log",
+      "bytes": 2447,
+      "sha256": "76d22e6484b491acb62790000241fadee6363d6996f936b3bccbbcce91c42772"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/p3-history-final.log",
+      "bytes": 2554,
+      "sha256": "e18618736b95fd5266b19dbc76ae68f3a01f4f0c8cddd53eab32f0509bc0b29f"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/p4-final.log",
+      "bytes": 1308,
+      "sha256": "0409a021a6d0e8c5ce33f7f99339f552e57df17f139f736fea20e63b4dcd5288"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/p4-verified.log",
+      "bytes": 4706,
+      "sha256": "dec6921c07fb5a0b0a54bc21e45e0d2b37f6c031f81899bacc77604964683d2b"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/p4-accepted.log",
+      "bytes": 5615,
+      "sha256": "265f7876e63e63dcad12516122248d662e226aa8de89e14b2d717405fa190cdc"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/p4-final-pass.log",
+      "bytes": 4472,
+      "sha256": "1d1f783ec45e066815eddf791ff3ba466493326f5699349cb450faff98801a74"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/isolation-final.log",
+      "bytes": 380,
+      "sha256": "bba541d5ace2d460293a3eb6096c33bce5da882130e016dcd075736b8922edb7"
+    },
+    {
+      "path": ".runtime/riu-prompt-update-20261017-093759/docs-check.json",
+      "bytes": 16691,
+      "sha256": "ed025def8b683e13791c52143a694c0c47092049da40cf01e7ea6325efac9d8e"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "docs/verification/2026-10-17-riu-prompt-generated.png",
+      "bytes": 107013,
+      "sha256": "bfc1e6994318eb12df1d2c9d0d6441bfcfe5e77668875d02cf8f8be47e12abdf"
+    },
+    {
+      "path": "docs/verification/2026-10-17-riu-prompt-generated-pip.png",
+      "bytes": 90154,
+      "sha256": "1b5eb36a274f161300f54823437fe16381602f10ca57b2fd2779a746493e2a89"
+    },
+    {
+      "path": "docs/verification/2026-10-17-riu-prompt-mcp-approval.png",
+      "bytes": 120745,
+      "sha256": "2f5d4fda90eabbd49b053d396a460d4091b0ae367883b406cbce2e2002a85d7b"
+    },
+    {
+      "path": "docs/verification/2026-10-17-riu-prompt-summary.png",
+      "bytes": 99812,
+      "sha256": "117bb02108c23f14a0c84b884cdeffcaef01e7d25ece1e0407234bcf7f823ec7"
+    }
+  ]
+}

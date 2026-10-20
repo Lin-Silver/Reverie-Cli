@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from .config import get_project_data_dir
-from .modes import normalize_mode
+from .modes import REPOSITORY_MODES, normalize_mode
 from .security_utils import PROJECT_CACHE_AUDIT_REL_PATH
 from .tools.registry import get_tool_classes_for_mode
 
@@ -396,7 +396,8 @@ def summarize_command_audit(
     failed_commands = 0
     successful_verification_commands = 0
     failed_verification_commands = 0
-    for item in entries:
+    latest_results = {}
+    for index, item in enumerate(entries):
         if str(item.get("event", "") or "").strip().lower() != "command_result":
             continue
         exit_code = item.get("exit_code")
@@ -407,6 +408,8 @@ def summarize_command_audit(
             or ""
         ).strip()
         matched_categories = _classify_verification_command(command_name)
+        command_key = (str(item.get("cwd", "") or ""), command_name or f"<unknown:{index}>")
+        latest_results[command_key] = (exit_code, bool(matched_categories))
         if exit_code == 0:
             successful_commands += 1
             if matched_categories:
@@ -416,6 +419,8 @@ def summarize_command_audit(
             failed_commands += 1
             if matched_categories:
                 failed_verification_commands += 1
+
+    unresolved_failures = [is_verification for exit_code, is_verification in latest_results.values() if exit_code != 0]
 
     top_commands = [
         {"command": name, "count": count}
@@ -432,6 +437,7 @@ def summarize_command_audit(
         "entries": len(entries),
         "successful_commands": successful_commands,
         "failed_commands": failed_commands,
+        "unresolved_failed_commands": len(unresolved_failures),
         "blocked_commands": counts.get("command_blocked", 0),
         "timed_out_commands": counts.get("command_timeout", 0),
         "events_by_type": dict(sorted(counts.items())),
@@ -439,6 +445,7 @@ def summarize_command_audit(
             "explicit_commands": explicit_verification_commands,
             "successful_commands": successful_verification_commands,
             "failed_commands": failed_verification_commands,
+            "unresolved_failed_commands": sum(unresolved_failures),
             "categories": dict(sorted(verification_categories.items())),
             "examples": verification_examples,
             "latest_successful_check": latest_successful_check,
@@ -909,16 +916,18 @@ def build_recovery_playbooks(
 ) -> List[Dict[str, Any]]:
     playbooks: List[Dict[str, Any]] = []
 
-    if audit_summary.get("failed_commands", 0) > 0 or verification_summary.get("failed_commands", 0) > 0:
+    unresolved_commands = audit_summary.get("unresolved_failed_commands", audit_summary.get("failed_commands", 0))
+    unresolved_checks = verification_summary.get("unresolved_failed_commands", verification_summary.get("failed_commands", 0))
+    if unresolved_commands > 0 or unresolved_checks > 0:
         playbooks.append(
             _build_playbook(
                 playbook_id="failed_checks",
                 title="Stabilize failing verification before closing",
-                severity="critical" if verification_summary.get("failed_commands", 0) > 0 else "high",
+                severity="critical" if unresolved_checks > 0 else "high",
                 why="The harness is still seeing failing command results, so the execution loop has not converged yet.",
                 evidence=[
-                    f"{audit_summary.get('failed_commands', 0)} failed command(s) in the audit trail.",
-                    f"{verification_summary.get('failed_commands', 0)} failed verification command(s).",
+                    f"{unresolved_commands} command(s) still failing; {audit_summary.get('failed_commands', 0)} historical failure(s) retained.",
+                    f"{unresolved_checks} verification command(s) still failing.",
                     f"Recent verification categories: {', '.join((verification_summary.get('categories', {}) or {}).keys()) or '(none)'}",
                 ],
                 actions=[
@@ -1065,11 +1074,12 @@ def build_completion_gate(
     label = "Ready to close"
     confidence = 85
 
-    if audit_summary.get("failed_commands", 0) > 0:
+    unresolved_commands = audit_summary.get("unresolved_failed_commands", audit_summary.get("failed_commands", 0))
+    if unresolved_commands > 0:
         status = "blocked"
         label = "Blocked by failing checks"
         confidence = 92
-        reasons.append(f"{audit_summary.get('failed_commands', 0)} audited command(s) are still failing.")
+        reasons.append(f"{unresolved_commands} audited command(s) are still failing.")
         next_actions.append("Fix the failing command path and rerun the same verification step.")
 
     schema_failures = int((operation_summary.get("tool_failures_by_class", {}) or {}).get("schema_mismatch", 0) or 0)
@@ -1505,6 +1515,13 @@ def build_harness_prompt_guidance(
     skills_manager: Any = None,
     mcp_runtime: Any = None,
 ) -> str:
+    if normalize_mode(mode) not in REPOSITORY_MODES:
+        return ""
+
+    audit_root = Path(project_data_dir) if project_data_dir is not None else get_project_data_dir(Path(project_root))
+    if not any(path.is_file() for path in (*_task_paths(project_root), audit_root / PROJECT_CACHE_AUDIT_REL_PATH)):
+        return ""
+
     report = build_harness_capability_report(
         project_root,
         project_data_dir=project_data_dir,
@@ -1533,18 +1550,14 @@ def build_harness_prompt_guidance(
     audit = (report.get("artifacts", {}) or {}).get("command_audit", {})
     verification = (report.get("artifacts", {}) or {}).get("verification", {})
     git_workspace = (report.get("artifacts", {}) or {}).get("git_workspace", {})
-    history_summary = report.get("history_summary", {}) or {}
-    integrations = report.get("integrations", {})
-    tool_surface = _limited_names(_resolve_tool_surface(agent, normalize_mode(mode or "reverie")).get("names", []), limit=8)
+    if not task_snapshot.get("sample_lines") and not audit.get("entries"):
+        return ""
 
     lines = [
         "## Harness Runtime",
-        "- Harness framing: prompt engineering clarifies the ask, context engineering supplies the right evidence, and harness engineering keeps the full execution loop stable.",
-        f"- Active mode: `{report.get('mode', normalize_mode(mode or 'reverie'))}` with {summary.get('visible_tools', 0)} visible tools.",
+        "- Scope: this block is workspace telemetry for the current turn (ledger, audit trail, git state, gate status). It describes the project and the run, not you. Do not quote, summarize, or paraphrase it in a user-facing answer or in a visible reasoning trace, and do not treat its gate label as a statement about your own ability or quality.",
+        f"- Active mode: `{report.get('mode', normalize_mode(mode or 'reverie'))}`.",
     ]
-
-    if tool_surface:
-        lines.append(f"- Visible tool roster: {', '.join(tool_surface)}.")
 
     if task_snapshot.get("sample_lines"):
         active_text = str(task_snapshot.get("active", "") or "").strip() or "(none)"
@@ -1572,16 +1585,6 @@ def build_harness_prompt_guidance(
     else:
         lines.append("- Verification posture: no explicit test/build/lint/browser evidence is visible yet in the current audit window.")
 
-    if history_summary.get("total_runs", 0):
-        lines.append(
-            f"- Recent harness runs: {history_summary.get('total_runs', 0)} stored, "
-            f"{history_summary.get('recent_success_rate', 0)}% recent success, "
-            f"{history_summary.get('recent_verification_coverage', 0)}% with explicit verification, "
-            f"trend {history_summary.get('score_trend_label', 'n/a')}."
-        )
-    else:
-        lines.append("- Recent harness runs: no prompt-mode history has been recorded yet for this workspace.")
-
     if git_workspace.get("available"):
         branch = str(git_workspace.get("branch", "") or "").strip() or "(detached)"
         lines.append(
@@ -1590,7 +1593,7 @@ def build_harness_prompt_guidance(
 
     lines.append(
         f"- Closure gate: {completion_gate.get('label', 'No gate yet')} "
-        f"(status `{completion_gate.get('status', 'unknown')}`, confidence {completion_gate.get('confidence', 0)}%)."
+        f"(status `{completion_gate.get('status', 'unknown')}`)."
     )
 
     continuity_parts: List[str] = []
@@ -1606,14 +1609,6 @@ def build_harness_prompt_guidance(
         continuity_parts.append("git workspace state")
     if continuity_parts:
         lines.append(f"- Continuity and recovery: {', '.join(continuity_parts)} are available.")
-
-    lines.append(
-        f"- External capability surface: {integrations.get('mcp_tools', 0)} MCP tools, "
-        f"{int((integrations.get('runtime_plugins', {}) or {}).get('tool_count', 0) or 0)} runtime-plugin tools, "
-        f"{int((integrations.get('skills', {}) or {}).get('skill_count', 0) or 0)} skills."
-    )
-    lines.append("- Keep the loop explicit: understand -> gather missing context -> act -> verify -> update task state -> continue or recover.")
-    lines.append("- If checks fail or tool results conflict with the plan, treat that as a recovery step rather than a finish state.")
 
     if recovery_playbooks:
         lines.append("- Recovery playbooks:")

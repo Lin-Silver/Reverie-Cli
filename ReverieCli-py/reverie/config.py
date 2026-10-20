@@ -167,6 +167,34 @@ def model_source_display_name(value: Any) -> str:
     return MODEL_SOURCE_DISPLAY_NAMES[source]
 
 
+def derive_model_display_name(model_id: Any, explicit: Any = "") -> str:
+    """Return a clean label for a model, stripping provider-id prefixes.
+
+    Identity prompts interpolate this label into text such as
+    ``You are powered by {label}.`` while also forbidding the model from
+    inferring a vendor from its name. Passing a raw id like
+    ``stepfun-ai/step-5-preview`` satisfies neither rule: the model has to
+    name its vendor and decline to characterize it at the same time. Only
+    provider-prefixed ids are rewritten; plain ids such as ``gpt-4o`` are
+    returned unchanged so catalog labels stay stable.
+    """
+    label = str(explicit or "").strip()
+    raw = str(model_id or "").strip()
+    if label and label != raw:
+        return label
+    if "/" not in raw:
+        return label or raw
+    tail = raw.rsplit("/", 1)[-1].strip() or raw
+    tail = tail.split(":", 1)[0]
+    words = []
+    for chunk in tail.replace("_", "-").split("-"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        words.append(chunk if chunk[0].isdigit() else chunk[0].upper() + chunk[1:])
+    return " ".join(words) or raw
+
+
 def normalize_tool_output_style(value: Any, default: str = "compact") -> str:
     """Normalize persisted tool-result display preference."""
     candidate = str(value or "").strip().lower()
@@ -855,7 +883,9 @@ class ModelConfig:
 
         return cls(
             model=data.get('model', ''),
-            model_display_name=data.get('model_display_name', data.get('model', '')),
+            model_display_name=derive_model_display_name(
+                data.get('model', ''), data.get('model_display_name', '')
+            ),
             base_url=data.get('base_url', ''),
             api_key=data.get('api_key', ''),
             max_context_tokens=data.get('max_context_tokens'),

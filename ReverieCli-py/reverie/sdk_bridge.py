@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 
-_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "resumePrompt", "compactContext", "workspaceMentions", "indexWorkspace"})
+_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "resumePrompt", "compactContext", "workspaceMentions", "indexWorkspace", "callViewTool"})
 
 
 def _interactive_context_worker_limit(cpu_count: Optional[int] = None) -> int:
@@ -400,7 +400,7 @@ class ReverieSdkBridge:
                 "paths": [str(arguments[key]) for key in ("path", "file_path", "target") if arguments.get(key)],
                 "network": "unknown / tool declaration",
                 "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
-                "scopes": ["once", "session"],
+                "scopes": ["once"] if self._run_identity.get("view_id") else ["once", "session"],
             },
         )
         deadline = time.monotonic() + 300
@@ -684,6 +684,32 @@ class ReverieSdkBridge:
             )
         return {"id": request_id, "type": "prompt.result", "result": _json_safe(result.to_dict()), "sessions": self.sessions_payload(), "recovery": self.recovery_payload(), **self._run_identity}
 
+    def _view_store(self) -> Any:
+        """The restricted RIU view store for this project (kernel-side authority)."""
+        from .views import ViewStore
+
+        return ViewStore.for_project(self.project_root)
+
+    def _run_view_tool(self, request_id: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+        from .view_execution import run_view_tool
+
+        return run_view_tool(self, request_id, payload)
+
+    def _fork_view_artifacts(self, from_session: str, to_session: str, visible=None) -> None:
+        """Copy a session's visible view revisions onto a fork and rebind identity."""
+        if not from_session or not to_session or from_session == to_session:
+            return
+        store = self._view_store()
+        visible = store.list_view_revisions(from_session) if visible is None else visible
+        if visible:
+            store.fork_session(from_session, to_session, visible)
+
+    def _drop_view_artifacts(self, session_id: str) -> None:
+        """Remove every view artifact for a deleted session."""
+        if not session_id:
+            return
+        self._view_store().delete_session(session_id)
+
     def dispatch(self, message: Dict[str, Any]) -> Dict[str, Any]:
         action = str(message.get("action") or "").strip()
         payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
@@ -695,6 +721,11 @@ class ReverieSdkBridge:
                 "type": "ready",
                 "protocol_version": 1,
                 "project_root": str(self.project_root),
+                # RIU P1 capability probe (docs/INTELLIGENT_UI_SPEC.md §6.2): the
+                # kernel serves inline views through the restricted ViewStore and
+                # never advertises MCP-apps, so a client knows which pipeline to use.
+                "capabilities": {"views": {"schema_version": 1, "inline": True, "mcp_apps": True,
+                                           "mcp_apps_protocol": "2026-01-26", "mcp_apps_sdk": "2.0.3", "profile": "offline-server-tools-v1"}},
             }
         if action == "initialize":
             interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
@@ -1143,6 +1174,7 @@ class ReverieSdkBridge:
                 session = manager.load_session(session_id)
                 if session is not None and manager.delete_session(session.id):
                     deleted_ids.append(session.id)
+                    self._drop_view_artifacts(session.id)
 
             deleted_id_set = set(deleted_ids)
             if previous_session is not None and previous_session.id not in deleted_id_set:
@@ -1181,6 +1213,7 @@ class ReverieSdkBridge:
                 if not bool(payload.get("confirmed", False)):
                     raise ValueError("Deleting a session requires confirmed=true.")
                 manager.delete_session(session.id)
+                self._drop_view_artifacts(session.id)
                 if previous_session is not None and previous_session.id != session.id:
                     session = manager.load_session(previous_session.id)
                 else:
@@ -1188,14 +1221,22 @@ class ReverieSdkBridge:
                     session = manager.load_session(remaining[0].id) if remaining else None
             elif action == "forkSession":
                 count = payload.get("messageCount")
+                source_session_id = session.id
                 session = manager.fork_current_session(
                     int(count) if count is not None else None,
                     str(payload.get("name") or "").strip() or None,
                 )
+                if session is not None and session.id != source_session_id:
+                    # Carry the source session's visible views onto the fork,
+                    # rebinding each manifest's identity to the new session.
+                    from .views import visible_view_references
+                    self._fork_view_artifacts(source_session_id, session.id, visible_view_references(session.messages))
             else:
                 if not bool(payload.get("confirmed", False)):
                     raise ValueError("Rewinding a session requires confirmed=true.")
                 session = manager.rewind_current_session(int(payload.get("messageCount", 0)))
+                from .views import visible_view_references
+                self._view_store().restrict_visible(session.id, visible_view_references(session.messages))
             if session is not None and interface.agent is not None:
                 interface.agent.set_history(session.messages)
             return {
@@ -1587,6 +1628,99 @@ class ReverieSdkBridge:
                 "data": _json_safe(result.data),
                 "status": str(getattr(result.status, "value", result.status)),
             }
+        if action == "getView":
+            # Authoritative dereference of a kernel-minted view id. Identity is
+            # the kernel's current session -- NEVER the payload -- so a forged
+            # event cannot reach another session's views, and a view id the
+            # kernel never minted has no manifest and raises here (defeated at
+            # lookup, not in a shape parser). The camelCase ``view`` block is
+            # model-safe (no HTML, no sha256, no path); the on-disk paths live
+            # only in ``resolved``, which the host consumes and never forwards
+            # to the renderer.
+            view_id = str(payload.get("viewId") or "").strip()
+            if not view_id:
+                raise ValueError("getView requires a viewId.")
+            revision = payload.get("revision")
+            if revision is not None and (type(revision) is not int or revision < 1):
+                raise ValueError("View revision must be a positive integer.")
+            session = self.ensure_interface().session_manager.get_current_session()
+            session_id = str(getattr(session, "id", "") or "")
+            store = self._view_store()
+            if payload.get("sessionId") and payload["sessionId"] != session_id:
+                raise ValueError("View belongs to a different session.")
+            entry_path, manifest = store.resolve_entry(session_id, view_id, revision)
+            state = store.read_state(session_id, view_id, manifest.revision)
+            return {
+                "id": request_id,
+                "type": "view.resolved",
+                "view": {
+                    "schemaVersion": manifest.schema_version,
+                    "viewId": manifest.view_id,
+                    "revision": manifest.revision,
+                    "sessionId": manifest.session_id,
+                    "title": manifest.title,
+                    "summary": manifest.summary,
+                    "mimeType": manifest.mime_type,
+                    "policyId": manifest.policy_id,
+                    "createdAt": manifest.created_at,
+                    "replacesViewId": manifest.replaces_view_id,
+                    "state": state,
+                    "toolCalls": store.call_receipts(session_id, view_id, manifest.revision),
+                    "callableTools": list(manifest.callable_tools),
+                    "mcpApp": store.read_mcp_app(session_id, view_id, manifest.revision),
+                },
+                "resolved": {
+                    "directory": str(entry_path.parent),
+                    "entry": manifest.entry,
+                    "viewsRoot": str(store.views_root),
+                },
+            }
+        if action == "setViewState":
+            # Persist a view's private display state under the kernel's current
+            # session. ``baseRevision`` guards against a lost update; the store
+            # returns the new monotonic revision.
+            view_id = str(payload.get("viewId") or "").strip()
+            if not view_id:
+                raise ValueError("setViewState requires a viewId.")
+            state = payload.get("state")
+            if not isinstance(state, dict):
+                raise ValueError("setViewState requires a state object.")
+            base_revision = payload.get("baseRevision")
+            if base_revision is not None and (type(base_revision) is not int or base_revision < 0):
+                raise ValueError("State baseRevision must be a non-negative integer.")
+            session = self.ensure_interface().session_manager.get_current_session()
+            session_id = str(getattr(session, "id", "") or "")
+            store = self._view_store()
+            if payload.get("sessionId") and payload["sessionId"] != session_id:
+                raise ValueError("View belongs to a different session.")
+            revision = store.write_state(session_id, view_id, state=state, base_revision=base_revision, revision=payload.get("revision"))
+            return {"id": request_id, "type": "view.state", "revision": revision}
+        if action == "callViewTool":
+            # Runs through the gated executor (see _run_view_tool). Missing field
+            # and cross-session ids RAISE; busy/restricted/cancelled/success and
+            # the idempotent duplicate RETURN a terminal result dict.
+            return self._run_view_tool(request_id, payload)
+        if action == "updateViewModelContext":
+            # A view's model-facing summary: untrusted user data, 8 KiB-capped,
+            # tagged trust="untrusted-user-data" by the store and kept apart from
+            # the private setViewState display state -- never a system/role turn.
+            view_id = str(payload.get("viewId") or "").strip()
+            if not view_id:
+                raise ValueError("updateViewModelContext requires a viewId.")
+            summary = payload.get("summary")
+            if summary is None:
+                raise ValueError("updateViewModelContext requires a summary.")
+            source = str(payload.get("source") or "component").strip() or "component"
+            session = self.ensure_interface().session_manager.get_current_session()
+            session_id = str(getattr(session, "id", "") or "")
+            store = self._view_store()
+            if payload.get("sessionId") and payload["sessionId"] != session_id:
+                raise ValueError("View belongs to a different session.")
+            store.current_manifest(session_id, view_id, payload.get("revision"))
+            if not isinstance(summary, str):
+                raise ValueError("View summary must be a string.")
+            store.write_model_context(session_id, view_id, summary=summary, source="component")
+            return {"id": request_id, "type": "view.model_context", "status": "stored"}
         if action == "shutdown":
             self.rats_runtime.shutdown()
             return {"id": request_id, "type": "shutdown"}

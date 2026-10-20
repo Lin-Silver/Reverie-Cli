@@ -75,7 +75,7 @@ class _FakeAgent:
             handler({"kind": "tool_progress", "tool_name": "command_exec", "message": "running"})
         yield "Hello "
         yield THINKING_START_MARKER
-        yield "plan first"
+        yield "  plan first\n"
         yield THINKING_END_MARKER
         yield "world //END//"
         self.messages.append({"role": "assistant", "content": "Hello world //END//"})
@@ -102,6 +102,36 @@ class _SpecAutoContinueAgent(_FakeAgent):
             self.turn += 1
             yield "Created design.md and tasks.md //END//"
         self.messages.append({"role": "assistant", "content": "completed"})
+
+
+def test_desktop_prompt_turn_keeps_atlas_review_for_the_user(tmp_path, monkeypatch):
+    interface = ReverieInterface(tmp_path, headless=True, runtime_surface="desktop")
+    config = Config(
+        models=[ModelConfig(model="fake-model", model_display_name="Fake Model", base_url="https://example.com/v1", api_key="test-key")],
+        active_model_index=0,
+        mode="reverie-atlas",
+    )
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+
+    def init_agent(config_override=None, persist_config_changes=True):
+        interface.agent = _SpecAutoContinueAgent(tmp_path)
+    monkeypatch.setattr(interface, "_init_agent", init_agent)
+    events = []
+    result = interface.run_prompt_once(
+        "Create requirements.md, design.md, and tasks.md; let me review each phase.",
+        mode_override="reverie-atlas", no_index=True, event_callback=events.append,
+    )
+
+    assert result.success
+    assert result.auto_followup_count == 0
+    assert "Non-Interactive Prompt Mode" not in interface.agent.additional_rules
+    assert "There will be no follow-up turn" not in interface.agent.additional_rules
+    assert not any(event["type"] == "run.auto_followup" for event in events)
+    assert not (tmp_path / "artifacts/specs/sample-feature/design.md").exists()
 
 
 class _WriterAutoContinueAgent(_FakeAgent):
@@ -206,8 +236,9 @@ def test_failed_verification_does_not_satisfy_completion_gate():
     assert "actual file edits" not in message
 
 
-def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
-    interface = ReverieInterface(tmp_path, headless=True)
+@pytest.mark.parametrize("runtime_surface", ["terminal", "desktop"])
+def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch, runtime_surface):
+    interface = ReverieInterface(tmp_path, headless=True, runtime_surface=runtime_surface)
     config = Config(
         models=[
             ModelConfig(
@@ -221,7 +252,8 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(interface.config_manager, "load", lambda: config)
-    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    context_calls = []
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: context_calls.append("initialize") or True)
     monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
     monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
@@ -240,8 +272,9 @@ def test_run_prompt_once_collects_output_and_events(tmp_path, monkeypatch):
     assert result.success is True
     assert result.mode == "writer"
     assert result.output_text == "Hello world //END//"
-    assert result.thinking_text == "plan first"
-    assert result.context_engine_initialized is True
+    assert result.thinking_text == "  plan first\n"
+    assert result.context_engine_initialized is (runtime_surface == "terminal")
+    assert context_calls == (["initialize"] if runtime_surface == "terminal" else [])
     assert result.session_id
     assert result.ui_events
     assert result.ui_events[0]["kind"] == "tool_progress"
@@ -449,7 +482,7 @@ def test_sanitize_prompt_output_text_removes_leaked_thinking():
     assert cleaned == "OK"
 
 
-def test_sanitize_prompt_output_text_removes_untagged_reasoning_prefix():
+def test_sanitize_prompt_output_text_preserves_untagged_reasoning_prefix():
     output_text = (
         "user is asking me to reply with only OK for a startup smoke test. "
         "This is a straightforward request and I should simply respond with OK.\n\n"
@@ -458,10 +491,10 @@ def test_sanitize_prompt_output_text_removes_untagged_reasoning_prefix():
 
     cleaned = _sanitize_prompt_output_text(output_text, "")
 
-    assert cleaned == "OK"
+    assert cleaned == output_text
 
 
-def test_sanitize_prompt_output_text_removes_memory_replay_reasoning_prefix():
+def test_sanitize_prompt_output_text_preserves_memory_replay_reasoning_prefix():
     output_text = (
         "This is exactly what the system prompt says in the workspace global memory: "
         '"user is asking me to reply with only OK". I should simply respond with OK.\n\n'
@@ -471,7 +504,12 @@ def test_sanitize_prompt_output_text_removes_memory_replay_reasoning_prefix():
 
     cleaned = _sanitize_prompt_output_text(output_text, "")
 
-    assert cleaned == "OK"
+    assert cleaned == output_text
+
+
+def test_answer_prefix_is_not_removed_because_it_matches_native_thinking():
+    output_text = "The total is 3168.\n\nThis uses twelve months."
+    assert _sanitize_prompt_output_text(output_text, "The total is 3168.") == output_text
 
 
 def test_prompt_run_result_to_dict_is_json_serializable_with_paths(tmp_path: Path):

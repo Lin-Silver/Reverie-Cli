@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RIU P4 data lab</title>
+<style>
+*{box-sizing:border-box}html{color-scheme:dark}body{margin:0;padding:20px;background:var(--color-background-primary,#17181c);color:var(--color-text-primary,#f2f3f7);font:14px/1.5 system-ui}h1{font-size:20px;margin:0 0 4px}p{margin:4px 0 16px;color:var(--color-text-secondary,#c4c6d0)}.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}label{display:grid;gap:5px}button,input,select{font:inherit;min-width:0;color:inherit;background:var(--color-background-secondary,#24262e);border:1px solid var(--color-border-primary,#656775);border-radius:6px;padding:7px}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #8d98ff;outline-offset:3px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:18px 0}.cards.carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory}.cards.carousel article{flex:0 0 200px;scroll-snap-align:start}article{padding:16px;border:1px solid var(--color-border-primary,#656775);border-radius:8px}article strong{display:block;font-size:22px}.scroll{max-height:160px;overflow:auto}table{width:100%;border-collapse:collapse}td,th{padding:4px 8px;text-align:left;border-bottom:1px solid var(--color-border-primary,#656775)}output{font-variant-numeric:tabular-nums}#error{color:var(--color-text-danger,#ffb5b5)}.pulse{width:8px;height:8px;display:inline-block;background:#8d98ff;border-radius:50%;animation:pulse 1s ease-in-out infinite}@keyframes pulse{50%{opacity:.35}}html[data-reduced-motion=true] *{animation:none!important;transition:none!important}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<h1 id="heading">参数与比较</h1><p id="description">本地筛选、模拟与比较；无需请求模型。</p>
+<div class="controls">
+<label><span id="filter-label">筛选</span><input id="filter" aria-label="Filter" placeholder="Row 1"></label>
+<label><span id="rate-label">增长率</span><input id="rate" aria-label="Growth rate" type="range" min="1" max="100" value="25"><output id="rate-value">25%</output></label>
+<label><span>Layout</span><select id="layout" aria-label="Content layout"><option value="card">Card</option><option value="carousel">Carousel</option></select></label>
+<label><span>Data size</span><select id="size" aria-label="Data size"><option value="3">3 rows</option><option value="0">Empty</option><option value="1000">1,000 rows</option></select></label>
+</div>
+<div id="cards" class="cards" aria-label="Comparisons" tabindex="0"></div>
+<p><span class="pulse"></span> <output id="count" aria-live="polite"></output> · <output id="context"></output></p>
+<div class="scroll" tabindex="0" aria-label="Data table"><table><thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="rows"></tbody></table></div>
+<p id="empty" role="status" hidden>暂无数据。请调整筛选条件。</p>
+<button id="save">Save private UI state</button><output id="saved" aria-live="polite"></output>
+<button id="error-button">Show recoverable error</button><p id="error" role="alert" hidden>数据暂不可用。修改筛选条件后重试。</p>
+<script>
+// RIU_P4_PRIVATE_HTML: never include this source or private UI state in model requests.
+const $ = id => document.getElementById(id);
+const probe = window.__p4 = { instance: crypto.randomUUID(), contexts: [], samples: [], ready: false, tick: 0 };
+let capability, stateRevision = 0, sequence = 0;
+function rpc(method, params) {
+  const id = 'p4-' + (++sequence);
+  return new Promise((resolve,reject) => {
+    const listener = event => {
+      if(event.source !== parent || event.data?.id !== id) return;
+      removeEventListener('message',listener);
+      event.data.error ? reject(event.data.error) : resolve(event.data.result);
+    };
+    addEventListener('message',listener);
+    parent.postMessage({jsonrpc:'2.0',id,method,params,capability},'*');
+  });
+}
+function render() {
+  const rate = Number($('rate').value), query = $('filter').value.toLowerCase(), size = Number($('size').value);
+  $('rate-value').textContent = rate + '%';
+  const rows = Array.from({length:size}, (_,i) => ({name:'Row '+(i+1),value:(i+1)*rate})).filter(item=>item.name.toLowerCase().includes(query));
+  $('rows').replaceChildren(...rows.map(item=>{const row=document.createElement('tr');for(const value of [item.name,item.value]){const td=document.createElement('td');td.textContent=value;row.append(td)}return row}));
+  $('count').textContent = rows.length + ' rows'; $('empty').hidden = rows.length > 0;
+  $('cards').className = 'cards ' + $('layout').value;
+  $('cards').replaceChildren(...rows.slice(0,3).map(item=>{const card=document.createElement('article');const visual=document.createElement('strong');visual.textContent=item.value;card.textContent=item.name;card.append(visual);return card}));
+  $('error').hidden = true;
+}
+function context(value) {
+  probe.contexts.push(value); if(probe.contexts.length>100)probe.contexts.shift();
+  document.documentElement.dataset.theme=value.theme;
+  document.documentElement.dataset.reducedMotion=String(!!value.reverie?.reducedMotion);
+  document.documentElement.style.colorScheme=value.theme;
+  document.documentElement.lang=value.locale;
+  for(const [key,css] of Object.entries(value.styles?.variables || {}))document.documentElement.style.setProperty(key,css);
+  $('heading').textContent=value.locale?.startsWith('en')?'Parameters & comparisons':'参数与比较';
+  $('context').textContent=[value.theme,value.locale,value.displayMode].join(' · ');
+}
+for(const id of ['filter','rate','layout','size'])$(id).addEventListener('input',render);
+$('error-button').onclick=()=>{$('error').hidden=false};
+$('save').onclick=async()=>{
+  const state={filter:$('filter').value,rate:$('rate').value,layout:$('layout').value,size:$('size').value,private:probe.privateSentinel || 'UI only'};
+  const result=await rpc('reverie/view-state',{baseRevision:stateRevision,state});stateRevision=result.revision;$('saved').textContent='Saved '+stateRevision;
+};
+addEventListener('message',event=>{if(event.source===parent && event.data?.method==='ui/notifications/host-context-changed')context(event.data.params)});
+probe.measureInput=async value=>{
+  const start=performance.now();$('rate').value=String(value);$('rate').dispatchEvent(new Event('input',{bubbles:true}));
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  const elapsed=performance.now()-start;probe.samples.push(elapsed);return elapsed;
+};
+probe.rpc=rpc;
+setInterval(()=>probe.tick++,250);
+rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'riu-p4',version:'1'},appCapabilities:{availableDisplayModes:['inline','fullscreen','pip']}}).then(result=>{
+  capability=result.capability;stateRevision=result.reverieViewState?.revision || 0;
+  probe.privateSentinel=result.reverieViewState?.state?.private;
+  for(const [key,value] of Object.entries(result.reverieViewState?.state || {}))if($(key))$(key).value=value;
+  context(result.hostContext);render();parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized',capability},'*');
+  requestAnimationFrame(()=>{probe.ready=true;probe.readyEpoch=performance.timeOrigin+performance.now()});
+});
+</script></html>

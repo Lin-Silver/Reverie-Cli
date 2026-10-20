@@ -1,0 +1,9 @@
+{
+  "name": "reverie-riu-p3-interop-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "@modelcontextprotocol/server-basic-vanillajs": "2.0.3"
+  }
+}

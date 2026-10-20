@@ -6,6 +6,15 @@ import { DEFAULT_UI_PREFERENCES as RENDERER_DEFAULTS } from "../src/preferences"
 const RENDERER_ONLY_KEYS = new Set(["backgroundUrl", "backgroundName"]);
 
 describe("desktop UI preferences", () => {
+  it("merges durable view display patches, bounds history and excludes component data", () => {
+    const first = mergeUiPreferences({}, { viewPresentations: { first: { mode: "pip", expanded: true, updatedAt: 1, state: "PRIVATE" } } });
+    const next = mergeUiPreferences(first, { viewPresentations: { second: { mode: "inline", expanded: false, updatedAt: 2 } } });
+    expect(next.viewPresentations).toEqual({ first: { mode: "pip", expanded: true, updatedAt: 1 }, second: { mode: "inline", expanded: false, updatedAt: 2 } });
+    const many = normalizeUiPreferences({ viewPresentations: Object.fromEntries(Array.from({length:250}, (_,i)=>[String(i),{mode:"inline",expanded:false,updatedAt:i}])) });
+    expect(Object.keys(many.viewPresentations)).toHaveLength(200);
+    expect(many.viewPresentations["0"]).toBeUndefined();
+    expect(normalizeUiPreferences({ viewPresentations: { bad: { mode: "carousel" } } }).viewPresentations).toEqual({});
+  });
   it("uses readable defaults and shows the reasoning the trace bar counts", () => {
     expect(normalizeUiPreferences(null)).toEqual(DEFAULT_UI_PREFERENCES);
     expect(DEFAULT_UI_PREFERENCES.showReasoning).toBe(true);

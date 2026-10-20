@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import { readFileSync } from "node:fs";
 import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences, type UiPreferences } from "./preferences";
 import type { ContextUsage, CustomProviderRecord, DesktopState, ImageModelSourcesState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
 
@@ -3201,6 +3202,30 @@ describe("desktop GUI interactions", () => {
     await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(false));
     await user.keyboard("{Control>}{Shift>}b{/Shift}{/Control}");
     await waitFor(() => expect(shell?.classList.contains("with-inspector")).toBe(true));
+  });
+
+  it("lays out native reasoning as Markdown without preserving inter-block whitespace", async () => {
+    const native = "Consider the costs.\n\n1. Check the inputs.\n\n2. Compare totals.\n\n```text\n  keep indentation\n\n  and the blank line\n```";
+    const style = document.createElement("style");
+    style.textContent = readFileSync("src/styles.css", "utf8");
+    document.head.append(style);
+    try {
+      installDesktopApi({
+        initialPreferences: { expandReasoning: true },
+        initialSession: { ...baseSession, messages: [
+          { role: "user", content: "Compare the costs" },
+          { role: "assistant", content: "The total is 3168.", reasoning_content: native },
+        ] },
+      });
+      render(<App />);
+      await screen.findByText("The total is 3168.");
+      const markdown = document.querySelector(".reasoning-content .markdown") as HTMLElement;
+      expect(markdown.querySelectorAll("li")).toHaveLength(2);
+      expect(getComputedStyle(markdown).whiteSpace).toBe("normal");
+      expect(markdown.querySelector("pre code")?.textContent).toBe("  keep indentation\n\n  and the blank line\n");
+    } finally {
+      style.remove();
+    }
   });
 
   it("renders a streaming Thinking Tool call as reasoning instead of a silent activity row", async () => {

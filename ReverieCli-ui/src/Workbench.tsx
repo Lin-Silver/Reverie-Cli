@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FileText, GitBranch, PanelRightClose, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import type { DiffScope, FilePatch, GitFile, GitSnapshot, PushPlan } from "../electron/workbench";
 import { useI18n } from "./i18n";
 
 import { FileBrowser } from "./FileBrowser";
+import { useViewPresentation } from "./ViewPresentation";
 export { parseFileLink } from "./file-links";
 
 const statusLabels: Record<string, string> = { M: "已修改", A: "已新增", D: "已删除", R: "已重命名", C: "已复制", "?": "未跟踪", U: "冲突" };
@@ -51,6 +52,8 @@ function patchRows(text:string,seed:FilePatch) {
 }
 export function Workbench({root,sessionId,running,onDraft,onReview,children,open:controlledOpen,onOpenChange,changesPanel,contextPanel,activityPanel}:{root:string;sessionId:string;running:boolean;onDraft:(value:string)=>void;onReview:(text:string)=>Promise<string>;children?:React.ReactNode;open?:boolean;onOpenChange?:(open:boolean)=>void;changesPanel?:React.ReactNode;contextPanel?:React.ReactNode;activityPanel?:React.ReactNode}) {
   const {t}=useI18n();
+  const presentation=useViewPresentation();
+  const beforeView=useRef<{open:boolean;tab:string}|null>(null);
   const [localOpen,setLocalOpen]=useState(false);const open=controlledOpen ?? localOpen;const setOpen=useCallback((value:boolean)=>{if(onOpenChange)onOpenChange(value);else setLocalOpen(value);},[onOpenChange]);const [tab,setTab]=useState("git");const [fileVisited,setFileVisited]=useState(false);const [requestedFile,setRequestedFile]=useState<{path:string;line:number;sequence:number;owner:string}|null>(null);const [requestedSessionTab,setRequestedSessionTab]=useState("");
   const [scope,setScope]=useState<DiffScope>("working");const [base,setBase]=useState("main");
   const [snapshot,setSnapshot]=useState<GitSnapshot|null>(null);const [patch,setPatch]=useState<FilePatch|null>(null);
@@ -89,12 +92,18 @@ export function Workbench({root,sessionId,running,onDraft,onReview,children,open
     }catch(e){if(owner.current===expected && !(e instanceof StaleRequest))setError(e instanceof Error?e.message:String(e));}finally{if(owner.current===expected)setReviewBusy(false);}};
   const updateFinding=async(review:ReviewRecord,index:number,key:"viewed"|"resolved")=>{const next=reviews.map(value=>value.id===review.id?{...value,findings:value.findings.map((finding,i)=>i===index?{...finding,[key]:!finding[key]}:finding)}:value);await action(async()=>{await call("save-reviews",{reviews:next});setReviews(next);});};
   useEffect(()=>{const saved=(event:Event)=>{if((event as CustomEvent).detail?.root===root && open && tab==="git")void refresh();};window.addEventListener("reverie:file-saved",saved);return()=>window.removeEventListener("reverie:file-saved",saved);},[root,open,tab,refresh]);
-  const close=()=>{setOpen(false);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus());};
+  useEffect(()=>{
+    if(presentation.active?.mode==="fullscreen"){beforeView.current ??= {open,tab};setOpen(true);setTab("view");}
+    else if(beforeView.current){const previous=beforeView.current;beforeView.current=null;setOpen(previous.open);setTab(previous.tab);}
+  },[presentation.active?.key,presentation.active?.mode,setOpen]);
+  useEffect(()=>{if(presentation.active?.mode==="fullscreen" && (!open || tab!=="view")){beforeView.current=null;presentation.select(presentation.active.key,presentation.active.title,"inline");}},[open,tab]);
+  useLayoutEffect(()=>{if(open && tab==="view" && presentation.active?.mode==="fullscreen")presentation.fullscreenSlot?.querySelector<HTMLButtonElement>("[data-view-mode=inline]")?.focus({preventScroll:true});},[open,tab,presentation.active?.key,presentation.active?.mode,presentation.fullscreenSlot]);
+  const close=()=>{if(presentation.active?.mode==="fullscreen"){const previous=beforeView.current;beforeView.current=null;setTab(previous?.tab || "git");presentation.select(presentation.active.key,presentation.active.title,"inline");}setOpen(false);requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus());};
   return <>
     {controlledOpen===undefined && <button type="button" className="workbench-trigger" aria-label={t("工作面板")} aria-expanded={open} onClick={()=>setOpen(!open)}><GitBranch size={15}/>{t("工作面板")}</button>}
-    <section className={`workbench-panel inspector ${open?"open":""}`} aria-label={t("工作面板")} aria-hidden={!open || undefined} inert={!open || undefined} onKeyDown={event=>{if(event.key==="Escape" && !confirmation){event.stopPropagation();close();}}}>
+    <section className={`workbench-panel inspector ${open?"open":""} ${tab==="view" && presentation.active?.mode==="fullscreen"?"with-view":""}`} aria-label={t("工作面板")} aria-hidden={!open || undefined} inert={!open || undefined} onKeyDown={event=>{if(event.key==="Escape" && !confirmation){event.stopPropagation();close();}}}>
       <header className="workbench-header"><nav aria-label={t("工作面板")} onKeyDown={event=>{if(!["ArrowLeft","ArrowRight","Home","End"].includes(event.key))return;const buttons=[...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];const current=buttons.indexOf(document.activeElement as HTMLButtonElement);const next=event.key==="Home"?0:event.key==="End"?buttons.length-1:(current+(event.key==="ArrowRight"?1:-1)+buttons.length)%buttons.length;event.preventDefault();buttons[next]?.focus();buttons[next]?.click();}}>
-        {[ ["git","Git 改动"],["file","文件"],["review","只读审查"],["session","运行与终端"],...(changesPanel?[["changes","AI 改动"]]:[]),...(contextPanel?[["context","上下文"]]:[]),...(activityPanel?[["activity","活动"]]:[]) ].map(([value,label])=><button type="button" key={value} className={tab===value?"active":""} aria-pressed={tab===value} onClick={()=>{setTab(value);if(value==="file")setFileVisited(true);}}>{t(label)}</button>)}
+        {[ ["git","Git 改动"],["file","文件"],["review","只读审查"],["session","运行与终端"],...(changesPanel?[["changes","AI 改动"]]:[]),...(contextPanel?[["context","上下文"]]:[]),...(activityPanel?[["activity","活动"]]:[]),...(presentation.active?.mode==="fullscreen"?[["view","交互式视图"]]:[]) ].map(([value,label])=><button type="button" key={value} className={tab===value?"active":""} aria-pressed={tab===value} onClick={()=>{setTab(value);if(value==="file")setFileVisited(true);}}>{t(label)}</button>)}
       </nav><button type="button" className="icon-button" aria-label={t("收起右侧栏")} onClick={close}><PanelRightClose size={16}/></button></header>
 
       {error && <div role="alert" className="persistent-error">{error}<button type="button" onClick={()=>void refresh()}>{t("重试")}</button></div>}
@@ -131,6 +140,7 @@ export function Workbench({root,sessionId,running,onDraft,onReview,children,open
       {tab==="changes" && changesPanel}
       {tab==="context" && contextPanel}
       {tab==="activity" && activityPanel}
+      <div className="workbench-view-slot" ref={presentation.setFullscreenSlot} hidden={tab!=="view"} inert={tab!=="view" || undefined} />
       {confirmation && <div className="workbench-confirm" role="alertdialog" aria-label={t("确认操作")} aria-modal="true" onKeyDown={e=>{if(e.key==="Escape"){e.stopPropagation();setConfirmation(null);}}}><pre>{confirmation.description}</pre><button type="button" autoFocus onClick={()=>setConfirmation(null)}>{t("取消")}</button><button type="button" disabled={busy} onClick={()=>{const current=confirmation;setConfirmation(null);void current.action();}}>{t("确认")}</button></div>}
     </section>
   </>;

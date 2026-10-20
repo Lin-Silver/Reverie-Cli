@@ -5,7 +5,19 @@ import {
   emptyLiveTurnBatch,
   mergeLiveTurnBatch,
 } from "./live-stream";
-import type { LiveTurn } from "./types";
+import type { LiveTurn, ViewSegment } from "./types";
+
+function viewSegment(overrides: Partial<ViewSegment> = {}): ViewSegment {
+  return {
+    sessionId: "sess-1",
+    viewId: "v0123456789abcdef",
+    revision: 1,
+    title: "Sales chart",
+    summary: "A bar chart.",
+    status: "ready",
+    ...overrides,
+  };
+}
 
 const turn: LiveTurn = {
   userText: "hello",
@@ -111,5 +123,72 @@ describe("live stream batching", () => {
       { event: "model_response", activity_id: "model-1", status: "success" },
       { event: "tool_result", tool_call_id: "call-1", status: "success", success: true },
     ]);
+  });
+});
+
+describe("live stream view segments", () => {
+  it("places a view update as its own timeline segment, interleaved in order", () => {
+    const merged = mergeLiveTurnBatch({ ...turn, assistantText: "", reasoningText: "", segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [
+        { kind: "assistant", text: "Here is the chart." },
+        { kind: "view", view: viewSegment() },
+      ],
+    });
+    expect(merged.segments?.map(segment => segment.kind)).toEqual(["assistant", "view"]);
+    expect(merged.segments?.[1]).toMatchObject({ kind: "view", view: { viewId: "v0123456789abcdef", revision: 1 } });
+  });
+
+  it("replaces a view segment in place when a higher revision of the same view arrives", () => {
+    const existing = mergeLiveTurnBatch({ ...turn, segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [{ kind: "view", view: viewSegment({ revision: 1, title: "v1" }) }],
+    });
+    const merged = mergeLiveTurnBatch(existing, {
+      ...emptyLiveTurnBatch(),
+      ordered: [{ kind: "view", view: viewSegment({ revision: 2, title: "v2", replacesViewId: "v0123456789abcdef" }) }],
+    });
+    const views = merged.segments?.filter(segment => segment.kind === "view") ?? [];
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({ kind: "view", view: { revision: 2, title: "v2" } });
+  });
+
+  it("does not downgrade a view segment when a stale lower revision is replayed", () => {
+    const existing = mergeLiveTurnBatch({ ...turn, segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [{ kind: "view", view: viewSegment({ revision: 2, title: "v2" }) }],
+    });
+    const merged = mergeLiveTurnBatch(existing, {
+      ...emptyLiveTurnBatch(),
+      ordered: [{ kind: "view", view: viewSegment({ revision: 1, title: "v1" }) }],
+    });
+    const views = merged.segments?.filter(segment => segment.kind === "view") ?? [];
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({ kind: "view", view: { revision: 2, title: "v2" } });
+  });
+
+  it("turns a view into an error state in place without adding a second segment", () => {
+    const existing = mergeLiveTurnBatch({ ...turn, segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [{ kind: "view", view: viewSegment({ revision: 1 }) }],
+    });
+    const merged = mergeLiveTurnBatch(existing, {
+      ...emptyLiveTurnBatch(),
+      ordered: [{ kind: "view", view: viewSegment({ revision: 1, status: "error", error: "gone" }) }],
+    });
+    const views = merged.segments?.filter(segment => segment.kind === "view") ?? [];
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({ kind: "view", view: { status: "error", error: "gone" } });
+  });
+
+  it("keeps distinct views as distinct segments", () => {
+    const merged = mergeLiveTurnBatch({ ...turn, segments: [] }, {
+      ...emptyLiveTurnBatch(),
+      ordered: [
+        { kind: "view", view: viewSegment({ viewId: "vaaaaaaaaaaaaaaa1" }) },
+        { kind: "view", view: viewSegment({ viewId: "vbbbbbbbbbbbbbbb2" }) },
+      ],
+    });
+    expect(merged.segments?.filter(segment => segment.kind === "view")).toHaveLength(2);
   });
 });

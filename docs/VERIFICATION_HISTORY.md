@@ -1,6 +1,6 @@
 # 验证与审查历史
 
-2026-10-08 整理，2026-10-09–10 补充提交前验证。集中保留历次审查、复现、测试、构建、性能采样及明确未验证范围。各章节的结果仅对应原日期、平台和工作树，不能累计为一次全量通过。结构化原始摘要继续保留在 `docs/verification/`；`.runtime/`、截图与安装包是本地材料，不要求随 Git 克隆分发。
+2026-10-08 整理，2026-10-09–10 补充提交前验证，2026-10-16 补充 RIU P3 互操作，2026-10-17 补充 P4 展示与交付验收。集中保留历次审查、复现、测试、构建、性能采样及明确未验证范围。各章节的结果仅对应原日期、平台和工作树，不能累计为一次全量通过。结构化原始摘要继续保留在 `docs/verification/`；`.runtime/`、截图与安装包是本地材料，不要求随 Git 克隆分发。
 
 ## 目录与迁移索引
 
@@ -8,6 +8,14 @@
 
 | 日期 | 主题 | 证据边界 |
 | --- | --- | --- |
+| 2026-10-20 | [自动 UI、Harness 与 Cloud 暂停交接](#riu-cloud-handoff-2026-10-20) | 最新源码与旧包分开；Python 2098/2/1，Desktop 383/1；真实思考 CSS 对照；免费 source 续修与模型矩阵仍待完成 |
+| 2026-10-18–20 | [RIU 请求去重、真实任务矩阵与便携包续验](#riu-quality-2026-10-20) | 保留脏工作树基线、完整请求与原生思考；源码回归、最终目录包、长路径真实解压分别验收；模型质量矩阵及失败归因单独记录 |
+| 2026-10-17 | [RIU 提示词、真实模型与生成质量续验](#riu-prompt-quality-2026-10-17) | 模式/工具/运行时修复、原生思考人工复核、真实模型新写 HTML 与业务交互；成功、失败和静态提示分别记录 |
+| 2026-10-17 | [RIU P4 展示与 Windows 交付验收](#riu-p4-delivery-2026-10-17) | P4 28/28、P2 24/24、P3 26/26、隔离 36/36；20/60 次渲染/输入采样；NSIS 载荷与便携实际运行。Python 全量 1 失败、真实模型 403/404/400/429、完整安装/卸载及其他平台保持未通过或未验证 |
+| 2026-10-16 | [Intelligent UI P3 MCP Apps 互操作](#riu-p3-interop-2026-10-16) | Windows 最终目录包、原样官方 ext-apps 2.0.3 示例与失败/恶意 fixtures；26/26 互操作、36/36 隔离；离线 inline profile，实际 stdio / 核心协议 2025-06-18；完整 window.openai、Plugin Extensions、HTTP/SSE UI 与其他平台未验收 |
+| 2026-10-15 | [Intelligent UI P2 交互与生命周期](#riu-p2-interactions-2026-10-15) | Windows 实际 packaged Electron + loopback 模型，24/24 交互与 34/34 隔离；审批归属、Stop、崩溃未知写状态不重放、私有状态与摘要、fork/rewind/delete；MCP 兼容与其他平台未验收 |
+| 2026-10-11 | [Intelligent UI P1 流水线](#riu-p1-pipeline-2026-10-11) | render_view→受限存储→宿主→重启/fork/rewind/delete→TUI 全链路；两 fixture 的 Python e2e、渲染层重建、打包探针重跑 34/34；身份内核绑定、先持久化后显示、HTML 不重入模型请求；Linux/macOS 与实机模型驱动生成未验证，不宣称 HTML 零 token |
+| 2026-10-11 | [Intelligent UI P0 隔离宿主](#riu-p0-isolation-2026-10-11) | Windows 打包 Electron 隔离探针 34/34、死循环与洪泛下宿主可用；仅 P0 可信宿主，Linux/macOS 未验证，P1 未实现 |
 | 2026-10-10 | [桌面内存与独立 EXE](#desktop-memory-2026-10-10) | Windows 打包进程树采样、内核生命周期、界面及本地回归；模型目录不等于账户实测 |
 | 2026-10-09–10 | [提交前验证](#publish-validation-2026-10-09) | 当前源码回归、Windows 构建和隔离应用检查；不替代远端 CI 或真实服务验收 |
 | 2026-10-08 | [API 兼容](#reverie-cli-api-compatibility-2026-10-08) | 源码模型流程与编译后的上游失败分别记录 |
@@ -15,6 +23,256 @@
 | 2026-10-06 | [Workbench](#reverie-cli-workbench-repairs-2026-10-06) | 面板、文件编辑和本地请求耗时 |
 | 2026-10-05 | [功能审查](#reverie-cli-feature-audit-2026-10-05)、[功能修复](#reverie-cli-feature-repairs-2026-10-05)、[请求修复](#reverie-cli-request-profile-repairs-2026-10-05) | 修复前后分开；MCP/平台附录仍保留未验证项 |
 | 更早 | 下方完整原文件索引 | 原日期与原测量保留，不累计为当前的一次通过 |
+
+<a id="riu-cloud-handoff-2026-10-20"></a>
+
+### 2026-10-20 — 自动 UI、Harness 与 Cloud 暂停交接
+
+用户因本机将关机要求暂停实现，将当前全部相关源码提交推送 GitHub，并编写 [Cloud Codex 完整续修提示词](CLOUD_CODEX_RIU_HANDOFF.md)。该请求新增了保存源码的 Git 授权，没有授权版本升级或 Release。此前“未提交/未推送”属于当时历史状态，保留原文；实际暂停提交以包含本文件和交接文件的 Git 记录为准。
+
+最新源码改动包括：任务驱动的自动视图选择与业务初值/控件指导；Desktop 在实际检索时初始化 Context Engine；空 Harness 在诊断扫描前返回；以同一 cwd/命令最新结果判定未解决失败，同时保留历史失败；思考 Markdown 恢复正常块布局。实际 App 测试保留 fenced code 原始缩进，不过滤/隐藏/截短原生思考。源码 focused 85 passed；`npm test` **383 passed / 1 skipped，86.33s**；`npm run typecheck` 通过。完整 Python 命令仍为 `python -m pytest -q -c ReverieCli-py/pytest.ini ReverieCli-py/tests`，结果 **2098 passed / 2 skipped / 1 failed，449.56s**；`test_windows_prompt_editor_paste_preserves_single_newline` 出现 `IndexError: pop from an empty deque`，单独重跑1 passed / 0.18s。输入处理产品文件本轮未修改，尚未确定失败根因；原始全量失败不能用单测重跑覆盖。
+
+同一份已保存 Nemotron 原生思考在真实旧包中仅切换宿主 CSS：21 个列表项，Markdown 高度 **2318.421875→1078.671875px**，DOM 文本完全相同。前后截图、文本哈希和测试日志见[结构化暂停记录](verification/2026-10-20-riu-continuation.json)。这是旧包 CSS 实验，不是最终消费者构建验收；第一版回放因测试进程未设置 loopback NO_PROXY 而连接失败，修正测试设置后通过。最新源码尚未重建独立 CLI、Desktop 核心、目录包或便携载体；下方 `2cfd719ac18e73a4` 是此前已验证构建，不包含这些修改。
+
+本机 SenseNova `sensenova-6.8-flash-lite` 自然语言计算器基线，经旧包真实 executor 执行：录制正确的一次耗时约147557.2965ms、4个请求，首请求125555字节/system56137字符，原生schema65683字符/27工具；上游响应合计约139秒，不能把网络与提供商推理混同成本地 Harness。首轮碰到已有6144-token配置限制，空 create_file 参数经正常反馈恢复。另一次录制器误用 SenseNova base_url 字段而请求绕过录制器；保留该失败，不引用其完整API计时。两次均 generation-only，旧报告将0项语义检查误标为first_pass/repaired_success，正确归类是 **registered_unvalidated**；验证器已修复，原报告不改写。
+
+旧 NVIDIA 矩阵在用户改模型时于样本间停止，计划36条（30生成+6文本）、完成10条，失败和清理记录保留；未完成自然语言修改、重启和跨模板质量验收。用户随后要求 Cloud 优先自行核对 OpenCode 匿名免费模型（如当时可用的 Space Bunny），遇API错误继续定位并修复各 source 客户端路径。官方目录并非匿名可用性证明；过去403不能预判未来，也不得通过伪装客户端绕过。Cloud 应以 live catalog 和真实生产请求建立新证据；本机 SenseNova/NVIDIA 凭据及 `.runtime/` 原始材料不会随 Git 上传。安装器生命周期、其他平台及广泛协议能力仍未验收。
+
+<a id="riu-quality-2026-10-20"></a>
+
+### 2026-10-18–20 — RIU 请求去重、真实任务矩阵与便携包续验
+
+本轮基线是 `main` / `0bcbddadb55c24742dff35ff0b6045c0ea938034` 加当时全部未提交、未跟踪源码，不是单独 HEAD。保存了状态、原始 tracked patch、150 个源码文件快照及哈希；继续保留原有 RIU、模式与权限工作。版本仍为 **2.5.0**，没有提交、推送或发布。独立证据根目录为 `G:\Reverie\Reverie-Cli\.runtime\riu-quality-20261018-060708`，旧日期的失败记录没有被覆盖。
+
+按实际初始化、复用、模式切换、固定 Skill、异步 MCP/插件刷新与每轮请求链路审查提示词。模式 manifest 保留用途、适用条件和调用约束，移除与同次原生 schema 重复的参数/示例手册；完整诊断和可运行 RIU 握手、主题、串行私有状态示例保留。修正默认 `rules.txt` 注释示例被当成有效规则，以及“不要读取文件”反而触发强制检索的问题。真正的代码分析/修改仍保留检索。原生思考的语义过滤、前缀缓冲及 CLI 猜测删段逻辑已移除；失败/中断时保存已收到的原生文本和空白，不执行半截工具参数。用户固定 Skill、实际工具能力、安全审批、私有元数据和沙箱边界均保留。
+
+首个匹配 Nemotron 计算器请求的旧包/新包实测为 **137345 / 123317 字节**，system **70175 / 56742 字符**；两者原生 schemas 均 **65683 字符、27 个工具**。这只是同一隔离配置的首请求比较，不代表全部用户配置或后续增长的历史请求；不能据此解释历史 Step 5 的 512.83 秒。完整构成和计时边界见证据根目录 `request-construction-audit.md`；原始请求与 SSE 位于各次样本目录。原生思考仍可能复述说明或预演代码，不通过过滤、删除或新增长度上限制造改善。
+
+源码与交付验证分开：
+
+| 范围 | 原始结果 / 证据 |
+| --- | --- |
+| Python 产品回归 | `python-full-stable.log`：2081 passed / 2 skipped，545.98s；此前 2079/2/1 的 Gamer 旧 manifest 断言失败保留。后加验证器 focused tests 另记，不加到这次全量数字中 |
+| Desktop 全量与类型 | 最后一次 `desktop-full-delivery.log`：382 passed / 1 skipped，86.20s；`typecheck-delivery.log` 通过。更早的真实 Git fixture 超时/清理争用及原生空白断言失败保留 |
+| 最终核心与目录包 | 独立 CLI 先构建，再生成 Desktop 信任清单；`artifacts-final.json` 核对 16 个冻结模块、manifest 和 71 个编译 UI 文件。Desktop **2.5.0 / 2cfd719ac18e73a4**。独立启动 90s 超时与后续 300s 允许窗口内通过的 18 项检查分别保留 |
+| 最终目录包 GUI | `p2-final` 24/24、`p3-final` 26/26、`p4-final` 31/31、`isolation-final.json` 36/36；固定 SDK ext-apps **2.0.3** / UI **2026-01-26**，原始官方组件不改写 |
+| 本地渲染与输入 | P4 20 次本地渲染 P95 **345.467ms**、最大 **499.104ms**；60 次输入到两帧 P95 **68.8ms**、最大 **73.8ms**。比前次 244.925/411.419ms 更高，不宣称渲染加速；模型生成、落盘、宿主事件和本地帧初始化分别记录 |
+| Windows 原生归档 | `archive-native/report.json` 真实文件系统检查 5/5；不代表模型或安装器验收 |
+| 便携包 | 见下方真实缺件失败与修复后全新提取；`portable-long-path/report.json` 3/3 同实例切换，`final-delivery-long-path.json` 完整载荷 1084/1084、既有不可变载体 78/78 哈希匹配 |
+| 安装器与其他平台 | NSIS 从已验证目录包生成；无可用干净 Windows VM/Sandbox，未在主机安装或卸载。PATH、快捷方式、卸载及 Linux/macOS 原生验证仍未完成 |
+
+便携包最初冷启动有一次视图按钮选择超时，后续暖启动及另一全新目录分别 3/3，原超时原因仍未确定。随后完整字节检查发现 **19 个深路径内置 Skill 文件缺失**：GUI 通过不等于载荷完整。原 `final-delivery.json`、错误载体及解压目录保留。原生 NSIS fixture 先复现，再验证逐文件扩展长度路径提取；安装编译器 3.0.4.1 不支持 `ManifestLongPathAware`，没有擅自升级。启动器现在检查每次文件写入，全部成功才保存标记，脚本变化参与缓存身份。首次 `/oname` 引号编译错误保留；正确语法构建后的全新提取 **19414.1342ms** 包含解压、核心启动及恢复，不能当作模型或纯渲染耗时。
+
+本轮最初 G 盘仅约 941MB 可用。自动审批拒绝递归删除已核对的 PyInstaller 缓存，返回 `blocked by policy`；未执行该删除。后来仅对 SHA-256 相同的不可变重复载体建立硬链接，保留用户配置、原失败证据、模型会话和 HTML；其他宿主活动带来的空间变化未归因于本轮清理。
+
+真实任务固定于 `matrix-contract.json` 与[任务集](../scripts/verification/fixtures/riu-quality-tasks.json)，通过[生产 Desktop 验证器](../scripts/verification/riu_quality_benchmark.py)运行：两条已配置 NVIDIA 模型、五类生成任务各三次独立全新会话，文本对照另记。10 月 20 日预探测中 Laguna 先返回 503 worker 额度耗尽，85 秒后返回 200；生成阶段再次出现 HTTP 200 中的 SSE 500，均保留。模型错误、宿主错误和验证器错误分开归因；页面重载后事件订阅丢失及表格降序选择器已先复现后修正，旧失败不覆盖。矩阵结果、自然语言修改、版本/重启和人工视觉复核仍须按逐样本证据判断；注册成功、主题变色及漂亮截图均不关闭生成质量门。
+
+<a id="riu-prompt-quality-2026-10-17"></a>
+
+### 2026-10-17 — RIU 提示词、真实模型与生成质量续验
+
+续修用户提供的 Opus 记录。此前将 Writer 失败归为“提示词预期冲突”不足以解释实际问题：主提示词、工具 manifest 和运行时附加块之间确实存在能力不一致。本轮按真实工具注册表分配工程/媒体/Context Engine/harness 指导，给 Atlas 实际注册任务账本，去掉 Writer 不可调用的文件/发现工具和动态 MCP/插件说明，保留用户固定 Skill。模式切换保存后刷新指导。原始模型 ID 与显示名称分开，媒体摘要区分开关、模型/凭据缺失及服务未验证；不由历史成功率或空 harness 推导智能水平。
+
+发现并修正 Desktop 调用 `run_prompt_once` 时继承 CLI 单次规则的问题：Desktop 不再宣称没有后续对话，也不自动发送“Approved. Continue…”来跨过 Atlas 审阅阶段。真实工具执行、security_policy、permission_review、审批 owner 和会话锁未被替换。离线视图指导增加完整握手/主题/串行状态保存示例；`render_view` 对可执行 inline script 中明显的浏览器存储调用给出常量警告，让模型可继续修正，既不改写原 HTML，也不把静态提示当运行验证。
+
+真实续轮还发现：注册 `artifacts/savings-comparator.html` 时多出的 `codebase-retrieval` 来自后端 `_context_engine_native_tool_choice`，原规则仅凭文件扩展名就强制检索，不能将该调用归因于模型自行偏离。改为同时要求仓库分析/修改意图；三种英中视图产物请求不再强制检索，真正的代码修改和解释请求仍保留强制检索。续轮的工具范围按当前用户轮断言，并单独保留历史违规，不从历史中删除原调用。
+
+| UI 项 | 之前 | 之后 | 原因 |
+| --- | --- | --- | --- |
+| 位置按钮 | 22 px 高，激活位置仍以长提示为主 | 最少 32 px，激活按钮显示简短位置名称 | 更容易定位和操作 |
+| 长摘要 | 全部展开挤压视图空间 | 默认三行，提供展开/收起；画中画更紧凑 | 保留全文与可访问控件，摘要操作不重载 iframe |
+| 历史懒加载 | 未加载占位很短，加载相邻视图后把最新视图推离屏幕 | 占位预留默认或组件上报的高度，卸载后保留高度 | 在 100 视图会话中稳定滚动位置，继续只挂载可见实例 |
+
+真实测试使用仓库内隔离配置和合成会话，仅复制选定来源的必要凭据。OpenCode `nemotron-3.5-lightning-free` 在旧、新官方路由均返回 **403 FreeTierError：免费层仅允许 OpenCode 内使用**；没有伪造客户端或绕过限制。随后测试已配置的 NVIDIA 开发接口，使用 `stepfun-ai/step-5-preview` 和 `openai/gpt-oss-20b`。它们的可用性、生成耗时与本地渲染性能分别记录，不把小型 HTTP 探针成功当完整 UI 通过。
+
+保留的负面证据：第一轮 Step 5 身份问答的窄关键词检查曾给出通过，人工阅读仍发现明确引用系统提示词，因此另存否定结论并加严检测。后续 Step 5 不再明确引用系统提示词，但仍有“按规则”的措辞与过长能力罗列；GPT OSS 20B 的原生思考仍复述运行时说明。两次 GPT OSS 20B 生成均真实写文件并注册视图，但仍采用不支持的 localStorage；较长一轮还调用了请求范围外的 file_ops。测试脚本另有过宽标签选择器和未滚动到懒加载视图的问题，均与模型缺陷分开记录并修正。没有过滤或删改这些思考、替模型改写 HTML、隐藏失败或加入答案长度上限。
+
+源码、冻结包、界面业务验证与人工质量结论分别列入本轮证据。协议范围仍是 ext-apps 2.0.3 / UI 2026-01-26 的离线 profile；一例成功不能证明所有模型都稳定，也不证明与 OpenAI 的完整智能 UI 对等。完整安装/卸载、Linux/macOS、原生 IME/屏幕阅读器、HTTP/SSE UI、OAuth 及完整 `window.openai` / Plugin Extensions 继续按原边界标为未验收或范围外。
+
+最终目录包为 **2.5.0 / `a802526c1487ccb8`**，仍是当前未提交工作树，无版本提升或推送。[结构化证据](verification/2026-10-17-riu-prompt-quality.json)保留原始失败、当前结果、日志与交付文件 SHA-256。
+
+| 验证层 | 最终结果 | 限定范围 |
+| --- | --- | --- |
+| Python 全量 | 2059 passed / 2 skipped | 两项符号链接能力检查因当前 Windows 环境跳过 |
+| Desktop 全量与类型 | 380 passed / 1 skipped；typecheck PASS | 1041 个翻译、82 个模板；包含摘要、按钮和懒加载高度修复 |
+| 包与源码 | 18 个冻结模块、71 个 UI 编译文件及 manifest 一致 | 独立 CLI 另做 20 项核对，Desktop 信任其当前 SHA-256 |
+| 最终包 P2 / P3 / P4 | 24/24、26/26、31/31 | P2/P4 使用合成 loopback 模型；P3 使用未改写的官方 SDK 组件与恶意夹具 |
+| 最终包隔离 | 36/36 | 包括阻断网络、父 DOM、Node/preload，洪泛与死循环期间宿主可响应 |
+| Opus 归档裁剪续验 | 5/5 | 真实 Windows 文件系统，保留非归档文件及外部哨兵；未重写更广的路径键迁移，POSIX 未验收 |
+
+真实生成的成功样本具有明确的续轮来源：Step 5 经源码 Desktop core 的真实 `create_file` 写入完整 HTML，约 **512.83 秒**；该源码轮最终带有中断标记，不能将引擎 success 标志当目标完成。之后在同一会话由打包程序真实续轮注册，修复强制检索后的该轮仅调用 `render_view`，约 **59.65 秒**。当时及最终 UI 构建均通过 **11/11** 业务/浏览器检查；最终 UI 复查没有新增模型请求。文件未由测试脚本编写或修补。两组本金与复利计算、年份及两项利率变化、三种位置保持同一文档、实时主题与私有状态恢复均实际操作验证。GPT OSS 20B 在最终包新发起的真实轮约 **55.60 秒**，经发现工具打开官方 MCP App，再点击宿主审批刷新时间，**2/2** 通过。
+
+本地测量与上述生成时间分开：固定 7472 字节夹具，20 次可信 `view_ready` 发布时间到组件交互完成，P50 **186.338 ms**、P95 **244.925 ms**、最大 **411.419 ms**；1000 行数据的 60 次输入到两帧后，P50 **35.5 ms**、P95 **43.5 ms**、最大 **59.7 ms**。早期一组最大 **2556.658 ms** 的尾延迟保留；其解析完成到帧初始化间隔约 2504.5 ms，原因未确定，不能用成功重测抹去该尖峰。
+
+三次早期 P4 失败分别记录：中文 stdout 编码错误、把含按钮/内边距的摘要总高误当三行正文上限，以及真实的历史懒加载布局跳动。前两项修正验证器；第三项修正产品占位高度及组件上报高度的保留，并增加“最新历史视图仍可见”的原生断言。最终 100 视图会话首次可见区挂载 2 个 iframe，长摘要正文为 57.56 px / 19.2 px 行高，展开不重载文档。
+
+人工查看[真实模型页面](verification/2026-10-17-riu-prompt-generated.png)和[画中画](verification/2026-10-17-riu-prompt-generated-pip.png)：工作面板的结果层级与控件可读；画中画仍依靠内部滚动，参数控件在纵向排列的结果卡片下方，摘要仍夹带 HTML `output` 术语。功能通过不代表完整视觉验收，跨模板布局、文案与密度继续列为开放项。另附[真实宿主审批截图](verification/2026-10-17-riu-prompt-mcp-approval.png)与[长摘要回归截图](verification/2026-10-17-riu-prompt-summary.png)。
+
+两个 Windows 交付载体均从最终目录包重建。便携包第一次解压时 **G 盘剩余空间为 0，退出码 2**，原失败报告保留；自动审批拒绝了组合式递归清理，随后仅删除本轮重复的单个 carrier 文件，并用同盘硬链接提供测试入口，未手动递归删除解压目录。启动器在缺少完成标记时按其原有流程重新解压，恢复验收 **3/3** 通过，三种展示位置保留同一文档，实际 Desktop build 为 `a802526c1487ccb8`。**17.15 秒**包含此次重新解压、core 启动与恢复视图，不作为冷盘或本地渲染指标。恢复后 G 盘约剩 **273 MB**；完整 NSIS 安装/卸载仍未进行。
+
+新增可复用验证器 `scripts/verification/riu_prompt_real.py`，支持新会话、记录来源的真实续轮和无新增模型请求的已存产物复查；隔离输出目录必须放在仓库内。例：
+
+```powershell
+& ./ReverieCli-py/venv/Scripts/python.exe scripts/verification/riu_prompt_real.py --exe ReverieCli-ui/release/win-unpacked/ReverieUI.exe --sdk-root .runtime/riu-p3-sdk --source nvidia --model stepfun-ai/step-5-preview --cases identity generated --output .runtime/riu-prompt-next-real
+```
+
+这会使用当前已配置来源的真实服务，结果可能再次暴露原生思考复述、服务拒绝或沙箱 API 误用；验证器保留失败与原始事件，不承诺其他模型复现本样本质量。
+
+<a id="riu-p4-delivery-2026-10-17"></a>
+
+### 2026-10-17 — RIU P4 展示体验、性能与 Windows 交付验收
+
+P4 代码与 Windows 本地功能验收已完成；**整体发布门仍未通过**：Python 全量有 1 项 Writer 提示词断言失败，真实外部模型到 MCP App 的链路未验证，完整安装/卸载及非 Windows 平台仍未验收。未改版本，未提交、未推送。当前基线为 `0bcbddadb55c24742dff35ff0b6045c0ea938034` 加既有 dirty tree；保留其他 Python/NVIDIA/RIU 工作，没有修改 Writer 提示词或其测试来追绿。[本轮结构化证据](verification/2026-10-17-riu-p4.json)记录每项命令、退出码、日志 SHA-256、实际计数、产物与限制；各次失败保留在 `.runtime/riu-p4/`，不与最终通过数累计。
+
+复用 ConversationDisplay 的位置控件和 Workbench 的交互视图页签，只协商标准 `inline/fullscreen/pip`，`card/carousel` 是内容布局。按项目/会话/视图/revision 共用运行实例，固定 portal target 通过 Chromium `Element.moveBefore` 在连接中的容器间移动；位置与 live→历史交接不重建 iframe，保留 JS、表单和滚动。主题、语言、尺寸、CSS variables 动态更新，减少动效通过系统 CSS 与有名字空间的 Reverie 扩展提供。键盘、焦点返回、错误重试、1080×700 输入区及 Workbench 原页签恢复均有打包证据。Desktop 设置保存最多 200 条展示/展开偏好，浏览器存储仅作缓存；组件私有状态仍需主动保存，离屏销毁后不能恢复未保存的 JS 临时状态。
+
+离屏历史仅挂载可见、聚焦、工具执行或 pinned 实例，关闭/卸载立即拒绝旧桥消息及迟到结果，释放执行租约、资源 token、监听器、观察器、计时器与动画。跨进程 iframe Escape 使用固定宿主键盘转发，只能返回 inline，不改第三方 HTML、不开 Node/preload，不触及原 executor/security_policy/permission_review/审批/会话锁。浏览器缓存清空后的展开恢复、live→历史交接、100 个离屏视图、聚焦后离屏再失焦与迟到资源释放均有定向测试。
+
+最终目录包、NSIS 载荷与便携载荷的 UI 构建为 **`6198938667318762`**（UTC `2026-10-17T07:21:18.245Z`），Windows x64 / Electron **41.2.1** / UI 与核心 **2.5.0** / 核心接口 **1.0**。[包内一致性记录](verification/2026-10-17-riu-p4-artifacts.json)：**9 个冻结 Python 模块与当前源码代码对象一致，71 个编译 UI 文件与 ASAR 逐字节一致**。内置核心含提交后 `view_ready.committed_at`，不拿模型开始时间或写盘前 manifest 时间冒充渲染起点。
+
+| 回归与交付检查 | 本轮实际结果 |
+| --- | --- |
+| Python 全量 | `PYTHONPATH=G:/Reverie/Reverie-Cli/ReverieCli-py`，项目 venv 的 `python -m pytest -q -c ReverieCli-py/pytest.ini ReverieCli-py/tests`：**2020 通过、2 跳过、1 失败，共 2023 项**，556.79 秒，退出码 1。失败：`test_reverie_prompt_upgrade.py::test_shared_coding_guardrails_are_injected_into_all_modes`（Writer，165 行）。当前提示词与“所有模式都含 Coding Guardrails”的测试预期冲突，涉及已有其他改动，未修改；不能声称全量绿 |
+| Desktop 全量 | `npm test`：**379 通过、1 跳过，共 380 项**；51 文件通过/1 文件跳过，58.60 秒，退出码 0。RATS 实机集成未提供专用配对配置，继续跳过 |
+| 定向检查 | Python RIU/MCP **91 通过、1 跳过**，13.39 秒；最终 Desktop 四个受影响文件 **35 通过**。不与全量相加；Windows 符号链接权限相关项跳过，不能借单测替代原生路径验证 |
+| 类型与构建 | `npm run typecheck`：1038 translations/82 templates、两个 tsconfig 通过；`npm run build` 通过。`npm run dist:win` 在本轮完整生成过内核/NSIS/便携包；后续 UI 修复重建并实际测试最终目录包，最终再用 `npx electron-builder --win nsis --x64 --prepackaged release/win-unpacked` 与 `node scripts/build-portable.mjs` 从该包生成分发物，未重用旧安装器 |
+| 文档与差异 | `python scripts/verification/check_docs.py`：**31 份文档、669 个本地链接、0 错误**；另报 85 个本地产物引用，不混算为链接门禁。`git diff --check` 通过 |
+| P4 实际包 | [28/28](verification/2026-10-17-riu-p4-runtime.json)：同一实例三种位置、非法模式错误、iframe 与宿主键盘、亮暗主题、即时语言、减少动效、窄窗、空/1000 行/错误数据、刷新与实际进程重启、revision、缺文件重试、100 历史、撤销 token、关闭后正常聊天、私有边界及内置 CLI 摘要降级 |
+| P2 / P3 实际包重跑 | [P2 24/24](verification/2026-10-17-riu-p4-p2.json)；[P3 26/26](verification/2026-10-17-riu-p4-p3.json)。原版 `@modelcontextprotocol/server-basic-vanillajs@2.0.3` 未修改，stdio / 核心协议 2025-06-18；app-only、隐藏结果 `_meta`、错误资源文本回退、审批允许/拒绝、消息建议与 teardown 均重跑 |
+| 隔离 | [36/36](verification/2026-10-17-riu-p4-isolation.json)，`evaluation.passed=true`；洪泛中宿主 ping 0 ms，死循环中/销毁/销毁后本次各 1 ms。它们是单次探针，不是普遍性能承诺 |
+| Windows 分发物 | `ReverieCli-ui/release/Reverie-Setup-2.5.0-x64.exe` 与 `dist/Reverie-Portable-2.5.0-x64.exe` 已生成。NSIS 安装选项页已读取，解出载荷与全新目录便携实际切换各 **3/3**；三套载荷 EXE/核心/ASAR 哈希一致。便携本次冷启动含解包、核心和恢复共 **25.41 秒**，原先约 225 秒端点超时的失败保留；这些启动耗时不算作渲染。结果/命令/哈希见结构化证据；完整安装/卸载未通过验收，保护检查发现已有 Reverie 开始菜单快捷方式，未覆盖它 |
+
+按规格 5.1 的八组逐项核对，下面的“通过”仅覆盖实际运行的子集，不推导未测平台/扩展：
+
+| 验收组 | 本次证据与边界 |
+| --- | --- |
+| 产物正确性 | 完整 Python 中的 views/render_view/bridge/e2e 与 MCP 资源负例，Desktop resolve/host tests，加打包缺文件→摘要→重试恢复。超限、JSON/编码/缺文件、穿越/UNC/哈希/跨会话等受测项通过；Windows symlink 权限跳过仍保留 |
+| 事件与兼容 | pipeline、view-events、live-stream、core-protocol 与完整 Desktop 回归；伪造正文、重复/过期/取消、未知 schema 摘要降级受测项通过。没有借当前包宣称所有历史核心/Desktop 二进制组合均实机验证 |
+| 用户流程 | P4 28 项、数据筛选/参数滑块、card/carousel 布局、新 revision、刷新/真实重启、缺文件恢复、关闭后继续聊天；原始 P1 SVG 图表/文本表格与复利模拟器另在最终包补跑 **5/5**，键盘滑块本地重算并跨三种位置保留。实际内置 `reverie.exe --prompt ... --report-file ...` 返回摘要，无 HTML |
+| 安全隔离 | 36 项实际 Electron 探针：Node/preload/父 DOM/任意文件、导航/外链/下载/网络/相机、伪造身份、洪泛和同步死循环，执行权限不随位置变化扩大 |
+| 交互授权 | P2 24 项和 P3 26 项：限制与 schema 拒绝、正确执行 worker 审批、忙碌、Stop、重复 ID、崩溃 unknown 不重放；timeout/断连/旧连接边界另由完整单测覆盖。未伪称已等待每一种审批的 330 秒超时实机过程 |
+| 会话与隐私 | P2 重启/fork/rewind/delete、副作用计数与运行 journal；P3 私有 `_meta`/app-only 描述不入模型；P4 动态运行时私有标记不入全部请求，普通后续追问不附 HTML，完整模板不入请求。初始化/显式新版本时 FastContext 确实检索到原工作区 HTML 源码片段，属于真实 token 成本，不声称 HTML 零 token 或禁止用户显式读源文件 |
+| MCP 互操作 | 原版官方组件与负例重跑：initialize/initialized、按序 tool-input/tool-result、回调、metadata/alias、app-only、未知方法错误、缺资源/错误 MIME/URI/网络 CSP/超大 HTML 文本回退。仅固定离线 stdio profile；HTTP/SSE UI、真实 2025-11-25 服务、OAuth、完整 window.openai/Plugin Extensions 未验证 |
+| 可访问性与性能 | Tab/Enter/Escape 与焦点返回、系统减少动效、中文长标题/摘要、空/1000 行、亮暗对比度、1080×700、100 历史按需挂载及下表实测。额外用 Windows 原生输入实际切换 Workbench→pip→Escape，观察焦点环回到放大按钮。原生 IME、屏幕阅读器与全面 WCAG 认证未验证 |
+
+性能主机为 Windows `10.0.26300`、AMD Ryzen 5 5600X（6 核/12 线程）、约 23.89 GiB RAM，Electron 41.2.1。fixture 的实际 HTML 字节数、hash 与原始样本见 runtime JSON，数据上限 1000 行；采样时没有并行构建/全量测试。采用 nearest-rank 分位数：
+
+| 量测边界 | 样本 | P50 / P95 或原始耗时 |
+| --- | --- | --- |
+| 原子提交后 `view_ready.committed_at` → fixture 完成初始化/本地首轮 render 并进入 requestAnimationFrame（可交互标记） | 20 | **144.730 / 182.238 ms**，最大 183.869 ms；≤1 s 目标通过。HTML/模型生成与原子写盘分离记录，不算进此区间 |
+| 1000 行本地 input dispatch → 两次 requestAnimationFrame | 60 | **24.6 / 28.1 ms**，最大 43.3 ms；≤100 ms 目标通过。不含 CDP 往返或模型等待，也不等于物理屏幕 photon 延迟 |
+| 100 个视图/200 条消息历史切换 → 首个可交互视图 | 1 | **269.38 ms**；早期分页两次 **144.59、150.94 ms**；观测挂载数 **[2, 0, 0]**，最终 100 个视图行，没有全挂载。含核心 I/O，不调用模型；样本不足以称 P95 |
+
+安装器 **441,330,470 字节**（SHA-256 `41dbe54391f03403d330a2f8bff4acd265758f98eabb35532c7f09ef1ed7b5a3`），便携包 **502,083,249 字节**（SHA-256 `8acff6b966e89d72a2aa336d8df1271fa258ca51bb358526141f81cea47e16f5`）。包内核对、载荷实际运行与截图见[结构化记录](verification/2026-10-17-riu-p4.json)及 [fullscreen](verification/2026-10-17-riu-p4-fullscreen.png)、[pip](verification/2026-10-17-riu-p4-pip.png)、[窄窗](verification/2026-10-17-riu-p4-narrow.png)、[历史](verification/2026-10-17-riu-p4-history.png)。安装器窗口的可访问性树确认停留安装选项页；原生截图受其他前台全屏窗口影响而不可用，没有按该截图发送坐标输入，也未点击安装。
+
+主题 fixture 文字/背景对比度亮/暗分别 **14.71:1 / 16.31:1**。这是给定样例的测量，第三方组件仍需正确使用 host styles；不能由它推导任意外部 UI 都有合格对比度。
+
+真实外部流程使用隔离配置与合成“读取当前时间”提示，复制已配置模型的必要凭据，仅发往其原端点，不修改用户当前配置，也不把凭据写入公开证据。实际尝试：OpenCode `nemotron-3.5-lightning-free` **403**（服务拒绝该客户端）；SenseNova `sensenova-6.7-flash-lite` **404 model is not found**；ModelScope `ZhipuAI/GLM-5` **400 no provider supported**；Mistral `devstral-latest` **429 rate limit**；Z.AI `GLM-4.6V-Flash` **429 overload/rate limit**。全部保持 **unverified**，本地 loopback/官方本地 stdio 的通过不能替代它。真实模型→生成 HTML 的实时流程也未验证。
+
+验收过程中查出的实际产品问题已修复：位置移动重载 iframe、live→历史重复运行实例、语言更新重建 iframe、跨进程 Escape 无效、Workbench 窄窗遮挡/原页签未恢复、浏览器缓存丢失展示偏好，以及完整偏好广播用旧 inspectorOpen 覆盖新键盘操作。早期脚本失败也保留：并行 GUI 争用单实例、过早操作未选会话、关闭 iframe 后仍用 iframe 定位“展开”、将源码里的静态标记误作私有运行时数据。P2 旧夹具把 RPC ID 当跨重启操作 ID；本轮改用已有 `reverie/call-tool` 的显式 `callId` 后验证 unknown 不重放，标准 MCP 请求继续按实例命名空间隔离。没有改执行器、审批、核心安全边界来迁就测试。
+
+复现命令在仓库根运行，Desktop build/test 在其子目录运行，所有 `--output` 使用新的仓库内目录，GUI 测试必须顺序执行：
+
+```powershell
+$env:PYTHONPATH='G:/Reverie/Reverie-Cli/ReverieCli-py'
+& ./ReverieCli-py/venv/Scripts/python.exe -m pytest -q -c ReverieCli-py/pytest.ini ReverieCli-py/tests
+python scripts/verification/riu_p4_electron.py --exe ReverieCli-ui/release/win-unpacked/ReverieUI.exe --output .runtime/riu-p4/new-p4-run --samples 20
+python scripts/verification/riu_p2_electron.py --exe ReverieCli-ui/release/win-unpacked/ReverieUI.exe --output .runtime/riu-p4/new-p2-run
+python scripts/verification/riu_p3_electron.py --exe ReverieCli-ui/release/win-unpacked/ReverieUI.exe --sdk-root .runtime/riu-p3-sdk --output .runtime/riu-p4/new-p3-run
+python scripts/verification/riu_p3_artifacts.py --module tools.render_view --module agent.system_prompt --output .runtime/riu-p4/new-artifacts.json
+python scripts/verification/check_docs.py
+# ReverieCli-ui: npm test; npm run typecheck; npm run build; npm run dist:win
+# Final carrier rebuild: npx electron-builder --win nsis --x64 --prepackaged release/win-unpacked
+# Then: node scripts/build-portable.mjs
+```
+
+后续按顺序处理：由提示词改动所属工作确认 Writer guardrails 的正确契约并恢复全量绿；提供可用的已授权模型后重跑真实流程；在干净 Windows 用户/VM 完整安装、运行、卸载并检查 PATH/快捷方式；补原生 IME/屏幕阅读器与 Linux/macOS。MCP 断连后只保留快照，原连接回收后的回调拒绝且不自动重连/重放；联网 CSP、partial/tool-cancelled、全部内容模态与完整宿主扩展仍属单独验收范围。
+
+<a id="riu-p3-interop-2026-10-16"></a>
+
+### 2026-10-16 — Intelligent UI P3 MCP Apps 固定范围互操作
+
+实施前重新读取规格引用的官方 [UI](https://developers.openai.com/plugins/build/chatgpt-ui)、[quickstart](https://developers.openai.com/plugins/build/app-quickstart)、[reference](https://developers.openai.com/plugins/reference) 全文，对照 ext-apps `2.0.3` / UI 协议 `2026-01-26`。测试的 manifest 与 lockfile 固定在 [fixture 目录](../scripts/verification/fixtures/mcp-apps/README.md)，实际安装的 MCP 包版本、integrity 和原始官方文件 SHA-256 均记录在 [结构化证据](verification/2026-10-16-riu-p3.json)。SDK 是契约与验证依赖；宿主直接实现声明范围内的标准 JSON-RPC，不修改组件或注入专有适配器。核心 transport 请求 `2025-06-18`，接受 `2025-06-18` / `2025-11-25` 并固定协商值；真实官方 stdio 服务本次协商的是 `2025-06-18`。
+
+`mcp.py` 目录保留工具 UI metadata/visibility；资源层检查单个自包含 `ui://` HTML、标准 MIME、请求的 CSP/permissions 与宿主实际空授权，以服务器配置摘要、连接 nonce、URI、内容 hash 和策略构成缓存身份。结果格式化与动态工具只把公开 `content` / `structuredContent` 交给模型；私有结果 `_meta` 放在可服务目录之外，经宿主给组件。app-only 工具不进模型 schema、catalog/search/list，模型猜名执行也被拒绝。标准资源指针优先，`openai/outputTemplate` 仅为资源别名。
+
+当前 profile 为 `offline-server-tools-v1`。支持标准 initialize/initialized、就绪后的 tool-input/tool-result、原服务器原连接的 `tools/call`、文本 `ui/message` 建议、text/JSON model-context、有限 inline 高度及标准销毁握手。标准组件无需 capability/sessionId/`riu/*` 字段；宿主绑定 source Window、实例租约、会话和 revision。回调继续通过原 coordinator、worker、executor、security_policy、permission_review、审批归属及会话锁；Writer 模式拒绝 MCP 回调，当前 app visibility/模式与最初 allowlist 取交集。组件自报 user-gesture 不启动模型，宿主按钮才发送正常追问。完整[支持 / 拒绝 / 未验证矩阵](INTELLIGENT_UI_SPEC.md#p3-固定兼容-profileoffline-server-tools-v1)保留每项边界。
+
+最终验证为 Windows x64 / Electron `41.2.1` / UI 与核心 `2.5.0`，目录包构建 ID **`726514e3746dd726`**（UTC `2026-10-17T01:09:56.566Z`，纽约当地仍为 10 月 16 日）。`npm run pack` 重建 PyInstaller ui-onedir 内核，最后的 MCP 透明画布修复再运行 `npm run build` 与 `npx electron-builder --dir`。实际产物为 `ReverieCli-ui/release/win-unpacked/ReverieUI.exe`、内置 `reverie.exe` 和 `resources/app.asar`；[包内核对记录](verification/2026-10-16-riu-p3-artifacts.json)包含三者字节数与 SHA-256，验收时 7 个关键冻结 Python 模块与当前源码编译对象相同，69 个 UI 编译文件与 ASAR 内容逐字节一致。不能用源码检查或旧安装器替代此包的结果。
+
+验收后的严格复核发现编译目录 `reverie-build.json` 于 UTC `01:16:51.706` 重新生成（ID `5c37394f6117ae10`）；因此后一次全文件比较为 false。单独核实 EXE/内核/ASAR 的 SHA-256 均未变化，7 个冻结模块与其余 68 个编译文件仍一致；差异只有构建标识的 id/builtAt。原始 69/69 记录对应验收时刻，后次差异另存于结构化证据 `post_acceptance_recheck`，未覆盖生成文件来消除差异。实际跑过互操作与隔离探针的包仍为 `726514e3746dd726`。
+
+| 检查 | 本次实际结果 |
+| --- | --- |
+| Python 全量 | `python -m pytest tests -q -o faulthandler_timeout=120`：**2020 通过、2 跳过**，743.50 秒，退出码 0；慢测试打印过诊断线程栈，未中止测试；最终结果来自完整结束的运行 |
+| Desktop 全量 | `npm test`：**370 通过、1 跳过**，51 文件通过 / 1 文件跳过，101.37 秒 |
+| 定向回归 | Python MCP/回调 guard **59 通过**；最后的 lifecycle/画布定向测试 **14 通过**，不与全量数字相加 |
+| 类型与构建 | `npm run typecheck`（1032 translations / 82 templates、两个 tsconfig）、renderer/Electron 构建、内核构建与目录打包通过 |
+| 文档与差异 | 默认文档检查 31 份 / 655 个本地链接、fixture README 2 个本地链接均无错误；`git diff --check` 通过 |
+| 原版标准示例与负例 | 最终包真实 GUI + loopback 模型 + 官方 stdio 服务，**26/26**，见[互操作原始报告](verification/2026-10-16-riu-p3-interop.json) |
+| 打包隔离探针 | **36/36 检查条目通过**，包含 34 项必选门禁，`evaluation.passed=true`；见[隔离原始报告](verification/2026-10-16-riu-p3-isolation.json)。洪泛、死循环期间及销毁后的宿主 ping、销毁本次采样各 1 ms，不作普遍性能承诺 |
+
+官方 `@modelcontextprotocol/server-basic-vanillajs@2.0.3` 的组件源码与发布 HTML 均未修改；实际存储的 HTML 与安装包逐字节相同，217,951 字节，SHA-256 `bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53`。真实 GUI 完成握手、按序输入/结果通知、工具回调审批允许与拒绝、消息建议和销毁 ack；[原样示例截图](verification/2026-10-16-riu-p3-official.png)。标准透明组件由宿主背景承载，本次实际文字对比度 16.40:1；未据此宣称全面可访问性认证。
+
+独立失败/恶意 fixtures 验证 app-only 写操作经审批只执行一次，重复 ID 不重放；model-only 工具从 UI 调用在审批前被拒，未知方法给明确 JSON-RPC 错误。私有 `_meta` 只在组件可见，在全部 loopback 模型请求中均不存在；app-only 描述同样不存在。model-context 作为带来源的不可信 user 数据进入下一轮且不自动发起请求。缺资源、错误 MIME、URI 不符、请求网络 CSP、超大 HTML 五种 UI 失败，模型与用户仍取得服务器原文本结果；别名资源也实际显示。[边界截图](verification/2026-10-16-riu-p3-boundaries.png)与原始请求、审批日志、副作用和截图保存在 `.runtime/riu-p3/packaged-final-sequential/`，复现脚本为 `scripts/verification/riu_p3_electron.py`。
+
+较早失败不计入通过：验证脚本曾误用 UI IPC hello，后来改为直连打包内核 SDK 而未增加 UI action；实际查出并修复了 MCP 历史未恢复视图、标准 MIME 被存储层拒绝，以及透明暗色组件落在白色 iframe 背景的缺陷；折叠活动导致的文本观测错误改为同时检查工具结果和用户可见文本。GUI 与探针并发会竞争 Electron 单实例互斥，最终验收分别顺序运行。旧包和旧源码的通过数未移作当前验收。
+
+限制保持明确：空闲工作内核目前 30 秒后可被回收，旧 MCP 连接、重启或断连后的回调拒绝，须重新调用工具取得新绑定，不自动重连或重放。收起/组件主动销毁等待 ack 最多 500 ms，强制卸载/终止进程只能尽力通知，执行权限立即撤销。HTTP/SSE UI、实际核心协议 `2025-11-25` 服务、外部真实模型/服务、OAuth、Linux/macOS、安装器/便携版验收未验证；动态 hostContext、partial/tool-cancelled、展示模式与全部内容模态仍未实现。没有声明完整 `window.openai` 或 Plugin Extensions 兼容。本次未提交、未推送，保留其他已有工作树改动。
+
+<a id="riu-p2-interactions-2026-10-15"></a>
+
+### 2026-10-15 — Intelligent UI P2 交互控制、审批与状态恢复
+
+在既有未提交的 P0/P1/P2 草稿上补齐 P2；未提交、未推送。交互方法与形状固定对照 ext-apps v1.2.0 / 协议 2026-01-26，仅承载本地离线生成视图。主进程把实例租约绑定到 project/session/view/revision，受限 iframe 通道验证 source、能力、握手、请求 ID、大小/速率/并发和超时。切换、卸载和重载撤销实例；迟到响应丢弃，重复请求不再次执行。第三方 MCP 回调因 P3 的 server/generation/app visibility 绑定尚未实现而拒绝，不声明 serverTools 或完整 MCP Apps 兼容。
+
+工具回调复用普通 runPrompt 的 coordinator、worker pool、checkout/session 锁、RunJournal、ToolExecutor、security_policy、permission_review 和审批 worker 归属；删除草稿中 admin bridge 的独立回调通道。组件自报的 user-gesture 不作为授权证据，工具在原有 gate 中逐次等待宿主确认。ui/message 仅在宿主显示建议，用户点击“发送追问”才调用正常 runPrompt。私有 JSON 状态按内容 revision 保存并使用 baseRevision 冲突检查；状态、摘要、写前收据位于 HTML 可服务目录之外。模型只临时取得带 view/revision 来源、合计不超过 8 KiB 的不可信 user 摘要，不把其提升为 system 或持久历史。
+
+写操作先持久化 unknown 收据再执行；成功、拒绝和 Stop 都消耗操作 ID。真实崩溃测试在 command_exec 已写入一行副作用之后强制终止整棵验证应用进程树，重新启动读取收据和私有筛选状态；再次点击同一操作收到 unknown 错误，没有第二行副作用。fork 复制可见版本与私有状态且重新绑定会话，不复制操作收据；rewind 隐藏后续引用，删除 fork 保留原会话。真实审批日志中的 run_id/session_id 与执行 worker 的持久运行记录/PID 对应。
+
+最终验证包构建 ID 为 `6841218dffec623d`，包内 main/controller/build metadata 与编译输出逐字节核对；完整交互复现脚本为 `scripts/verification/riu_p2_electron.py`。当前验证结果：Python 全量 `python -m pytest tests -q` **1941 通过、2 跳过**（643.73 秒）；RIU focused **69 通过、1 跳过**；Desktop `npm test` **363 通过、1 跳过**（51 文件）。类型检查、i18n（1032 translations / 82 templates）、renderer/Electron 构建、PyInstaller ui-onedir 内核与独立目录打包通过。最后的权限/回调复核为 **81 通过**，最终交互 focused 为 **32 通过**。实际 packaged Electron 41.2.1 的 loopback fixture **24/24**，打包隔离探针 **34/34**（同步循环/洪泛中宿主 ping、销毁及销毁后 ping 本次各 1 ms）。这是一台 Windows 主机的样本，不作跨平台或普遍性能承诺。
+
+初次生成时 FastContext 对工作区 HTML 源文件的检索片段确实进入过模型输入，此成本保留在 loopback 请求证据中，不宣称生成 HTML 零 token。后续追问实际只补充选中摘要，没有重新附带模板标记；私有状态标记在所有模型请求中均未出现。此处验证的是给定 fixture 的后续请求边界，不宣称任意用户查询都不会显式读取工作区 HTML。
+
+原始模型请求、运行/审批 journal、截图、配置、crash 前后的副作用及全部尝试保存在仓库 `.runtime/riu-p2/`。较早的失败尝试未计入通过；包括修复前四项重放/陈旧状态回归、误删初始化字段后恢复、构建/打包重叠得到不完整 PIL 的验证包，以及脚本的过期 frame、异步等待和恢复收据显示检查。最终结果与文件哈希集中于 [P2 结构化证据](verification/2026-10-15-riu-p2.json)，隔离原始结果见 [打包探针](verification/2026-10-15-riu-p2-isolation.json)。
+
+未完成项继续保持未完成：外部真实模型/服务、第三方不改代码 MCP 示例、完整 UI metadata/_meta 分流与 Apps 生命周期（P3）、动态主题/尺寸/展示模式和广泛可访问性/性能（P4）、Linux/macOS、安装器/便携发布流程。此次只生成验证包，未执行发布。
+
+<a id="riu-p1-pipeline-2026-10-11"></a>
+
+### 2026-10-11 — Intelligent UI P1 render_view 流水线与视图时间线
+
+在已验证的 P0 可信宿主之上实现 `docs/INTELLIGENT_UI_SPEC.md` 的 P1：注册 `artifact_path` 的 `render_view` 工具、受限产物存储（`ViewStore`）、manifest schema、`view_ready` / `view_error` 事件、能力探测，以及视图时间线的 revision / fork / rewind / delete。先写能失败的 focused 测试，再实现最小宿主与受限通道；全过程不关闭 webSecurity、不放宽宿主 script-src、不把视图 HTML 注入主 DOM。
+
+身份由内核绑定：会话 / 轮次 / 工具调用 id 从内核上下文读取，绝不取自模型参数；视图在产物落盘并提交到 `ViewStore` 之后才发出 `view_ready`（先持久化后显示）。模型文本里伪造的 handle 形字符串不会凭空生成视图行——渲染层只认由真实 `render_view` 工具结果铸出的行，再经 `ViewStore` 解引用。解析后的渲染层引用是白名单：只有注册器给出的不透明 `reverie-view:` url 与 policyId，绝不含文件系统路径。
+
+证据按两条真实链路取得，不沿用历史数字：Python e2e 在两个强制 fixture（`parameter_simulator.html`、`data_chart.html`）上以真实 `RenderViewTool`、`ViewStore` 与桥接分发打通 工具→存储→宿主解引用→重启/fork/rewind/delete→TUI 降级；渲染层 pipeline 测试重建 行→行记录→解析引用。关键属性：工具结果与历史恢复后的模型请求都不含 HTML 字节或路径——fixture 的 `<script>` 标记在结果、事件、解析行、解析引用与恢复后的转录中均不出现。**不宣称 HTML 生成零 token**；此处只验证 HTML 不被重新加入模型请求。
+
+测试与回归（当前测量，非历史累计，均在对应工作目录运行）：RIU focused Python **41 通过 / 1 跳过**（`tests/test_riu_views.py`、`test_riu_render_view.py`、`test_riu_bridge_views.py`、`test_riu_views_e2e.py`）；渲染层 pipeline **6 通过**（`src/view-pipeline.test.ts`）。桌面全量 `npm test` **342 通过 / 1 跳过**（48 文件）；`npm run typecheck`（i18n + 渲染层与 Electron 两个 tsconfig）通过。Python 全量 **1912 通过 / 2 跳过**；非游戏完成度门禁 `test_modules_do_not_silently_swallow_broad_exceptions` 通过——两处 RIU except（`render_view._emit`、agent 每轮 provenance 铸造）改走 `report_suppressed_exception` 后不再静默，记录到 logger `reverie.recovery`。另有 1 项非本任务失败 `test_rats_runtime.py::test_unreachable_supported_provider_fast_fails_and_remains_hidden`（全量 CPU 负载下 provider 快速失败预算 <1.0s 被 1.108s 超出），隔离重跑 2.29s 通过，判为与 RIU 无关的环境时序抖动，不追绿。
+
+构建与打包：`npm run build`（tsc + vite + build-info）通过，构建 ID `03c991ccd69a9a3c`。`npm run dist:win`（PyInstaller 内核 + `electron-builder --win nsis --x64` + 便携版）产出 `release/win-unpacked/ReverieUI.exe`（223,114,752 字节）、内置 `reverie.exe`（14,116,343 字节）、NSIS 安装包 `Reverie-Setup-2.5.0-x64.exe`（441,172,175 字节，sha256 `99259a8b781fe331b17fb8362c73059a8bbba9bafe844d9b274d284920c1a8ff`）与便携版 `dist/Reverie-Portable-2.5.0-x64.exe`（501,867,890 字节，sha256 `beb9a93670237a7edcf99b7350c06555e742254fe1a1da5e4db79ebda57d2986`）。P1 代码已编入该打包程序；在真实包上重跑 P0 隔离探针 `--riu-isolation-probe` 得 **34/34 通过**（`evaluation.passed=true`，容器 sandboxed-iframe，失败 0），确认接入 P1 后视图宿主仍隔离且可响应。结构化结果见 [P1 流水线证据](verification/2026-10-11-riu-p1-pipeline.json)。
+
+边界与范围：仅 Windows x64 实测，Linux/macOS **未验证**；**未验证**在运行中的打包 GUI 会话里由真实模型驱动的实时视图生成（真实模型写 HTML、用户看到渲染面板）——工具→存储→宿主→重启/fork/rewind/delete→TUI 链由上述 Python e2e 与渲染层重建证明，但未无头跑通一次实机模型会话；网络、原生 IME 与屏幕阅读器路径**未验证**。本次未提交、未推送，预先存在的未提交改动均保留。
+
+<a id="riu-p0-isolation-2026-10-11"></a>
+
+### 2026-10-11 — Intelligent UI P0 可信宿主隔离验证
+
+按 `docs/INTELLIGENT_UI_SPEC.md` 的 P0 实施并验证生成式 UI 的可信宿主，暂不实现其余 RIU。承载方式为自定义特权协议 `reverie-view:`（standard+secure，不支持 fetch、不开 CORS、不绕过 CSP）配合 `allow-scripts` 的 sandbox iframe；该沙箱产生不透明来源（`window.origin` 序列化为 "null"），Chromium 站点隔离把视图帧放入独立进程。先写能失败的 focused 测试，再实现最小宿主与受限通道；全过程不关闭 webSecurity、不放宽宿主 script-src、不把视图 HTML 注入主 DOM。
+
+容器选择依据实测：sandbox iframe 已满足 P0 的全部隔离与性能门禁，故本阶段不改用独立 WebContents。视图帧的权限请求一律拒绝，`reverie-view:` 的下载一律取消，帧内导航只允许绑定入口的首次提交。
+
+平台与构建：Windows x64、Electron 41.2.1，构建 ID `5f3644816919bb5a`。探针在真实打包程序 `release/win-unpacked/ReverieUI.exe` 上以 `--riu-isolation-probe` 运行，加载仓库内离线 HTML fixture（benign/hostile/flood/loop），由视图帧内与可信主进程分别判定。结构化结果见 [隔离探针证据](verification/2026-10-11-riu-p0-isolation.json)。
+
+隔离探针 **34/34 通过**（门禁集合，`evaluation.passed=true`）。覆盖：Node/preload/父 DOM/顶层窗口均不可达；不透明来源与 DOM 存储、cookie 被拒；路径穿越（原始 `..` 经 WHATWG 归一化后 404、百分号编码 `%2e%2e%2f` 被处理器拒为 400）、外来 token、脚本 MIME 不可映射、未绑定目录、下载、远程子资源、window.open、表单提交、fetch、WebSocket 均被阻断；视图帧权限请求授予数为 0；伪造桥来源、缺能力、过期实例、不支持方法、超大消息均被拒；洪泛被限速（accepted=64，rateLimited≈2938）。宿主剪贴板仍可用。
+
+P0 核心主张在实机得到证明：在无限同步循环与消息洪泛下，宿主对主进程 ping 的最坏响应为 7ms（循环）与 3ms（洪泛，预算均 1500ms），循环期间聊天输入框仍可用；视图可被销毁、其进程确认退出，拆除耗时 32ms、拆除后 ping 2ms（预算 3000/1500ms）。
+
+诚实说明：首轮探针为 30/34，4 项失败经核查均为断言把正确的安全行为判错，而非真实缺陷——不透明来源下 `document.cookie` 读取抛 SecurityError 即等于被拒；`session.fetch` 对原始 `..` 归一化得 404、对编码 `..` 得 400，两者都未泄露文件；WebSocket 构造函数不同步抛错但连接从不建立；`document.origin` 是已废弃别名、此处为 undefined，`window.origin==="null"` 才是不透明来源的权威信号。据此把断言改为验证真实属性后，重新在打包程序上运行得 34/34，未复制任何历史通过数。
+
+桌面回归 **299 通过、1 跳过**；`npm run typecheck`（i18n、渲染层与 Electron 两个 tsconfig）通过；`npm run build` 与 `electron-builder --dir` 重新打包并签名通过，随后重建签名版 NSIS 安装包。未改动任何 Python 源码，故本轮未重跑 Python 全量（不沿用历史数字作为本次结果）。
+
+边界与范围：仅 Windows 实测，Linux/macOS **未验证**；仅实现并验证 P0 可信宿主，`render_view`、持久产物、时间线、回调、私有状态等 P1+ 均未实现。探针与受限通道为验证路径，受 `--riu-isolation-probe` 开关控制，不进入普通应用流程。隔离产物保存在仓库内 `docs/verification/`。本次未提交、未推送。
 
 <a id="desktop-memory-2026-10-10"></a>
 
@@ -444,7 +702,7 @@ API 返回 usage 时发布带工作区/会话身份的 `context.usage` 事件，
 
 ### 结论与范围
 
-当前代码已有较完整的本地编码工作流，但不能把 S01–S21 的代码接入或单轮打包测试解释为全部功能完成。本次登记 **23 项缺口 / 限制 / 证据问题**，其中 G22 的文档整理在本次完成；其余状态在 [功能矩阵](FEATURE_STATUS.md)，后续工作与验收条件只维护于 [ROADMAP](ROADMAP.md)。
+当前代码已有较完整的本地编码工作流，但不能把 S01–S21 的代码接入或单轮打包测试解释为全部功能完成。本次登记 **24 项缺口 / 限制 / 证据问题**，其中 G22 的文档整理在本次完成；其余状态在 [功能矩阵](FEATURE_STATUS.md)，后续工作与验收条件只维护于 [ROADMAP](ROADMAP.md)。
 
 审查对象是 `G:\Reverie\Reverie-Cli` 的**本地工作区**，起始 HEAD 为 `127c39769217d87dd7647a3c6b296e2629d8f9ff`，版本 2.5.0，已有大量未提交实现。本次没有把 HEAD、远端发布和工作区混成一个版本，没有修改用户凭据 / 会话 / 配置，没有 commit、push 或远端发布。
 

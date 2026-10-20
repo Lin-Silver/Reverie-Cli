@@ -1,8 +1,18 @@
 import { useState } from "react";
-import { Brain, Eye, MessageSquare } from "lucide-react";
+import { Brain, Eye, Maximize2, MessageSquare, Minimize2, PictureInPicture2 } from "lucide-react";
 import { FloatingMenu } from "./FloatingMenu";
 import { useI18n } from "./i18n";
 import type { UiPreferences } from "./preferences";
+import type { ViewDisplayMode } from "./ViewPresentation";
+
+/** Card and carousel are content layouts; only these three values cross the bridge. */
+export function ViewDisplayControls({ mode, change }: { mode: ViewDisplayMode; change: (mode: ViewDisplayMode) => void }) {
+  const { t } = useI18n();
+  return <span className="view-display-controls" role="group" aria-label={t("视图展示位置")}>
+    {([ ["inline", "返回对话内", Minimize2, "对话内"], ["fullscreen", "在工作面板中放大", Maximize2, "工作面板"], ["pip", "画中画", PictureInPicture2, "画中画"] ] as const).map(([value, label, Icon, currentLabel]) =>
+      <button key={value} type="button" className="ghost-button" data-view-mode={value} aria-label={t(label)} title={t(label)} aria-pressed={mode === value} onClick={() => change(value)}><Icon size={14} aria-hidden="true" />{mode === value && <span aria-hidden="true">{t(currentLabel)}</span>}</button>)}
+  </span>;
+}
 
 type Props = { preferences: UiPreferences; update: (patch: Partial<UiPreferences>) => void };
 const presets = [

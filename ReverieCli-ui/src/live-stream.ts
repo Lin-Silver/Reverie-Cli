@@ -1,4 +1,4 @@
-import type { LiveTurn, TurnSegment } from "./types";
+import type { LiveTurn, TurnSegment, ViewSegment } from "./types";
 
 export const LIVE_STREAM_RENDER_INTERVAL_MS = 40;
 export const LIVE_STREAM_EVENT_LIMIT = 200;
@@ -7,7 +7,11 @@ export interface LiveTurnBatch {
   assistantText: string;
   reasoningText: string;
   events: Array<Record<string, unknown>>;
-  ordered?: Array<{ kind: "assistant" | "reasoning"; text: string } | { kind: "activity"; event: Record<string, unknown> }>;
+  ordered?: Array<
+    | { kind: "assistant" | "reasoning"; text: string }
+    | { kind: "activity"; event: Record<string, unknown> }
+    | { kind: "view"; view: ViewSegment }
+  >;
 }
 
 export function emptyLiveTurnBatch(): LiveTurnBatch {
@@ -76,6 +80,29 @@ function mergeTurnSegments(turn: LiveTurn, batch: LiveTurnBatch): TurnSegment[] 
   ];
   for (const update of updates) {
     const last = segments.at(-1);
+    if (update.kind === "view") {
+      // A view is identified across its revisions by (session, view id); a new
+      // revision (or an error) replaces the existing segment in place so the
+      // timeline never shows two cards for the same view. A replayed lower
+      // revision is stale and must not downgrade what is already shown. An error
+      // with no view id (registration failed before a view id was minted) never
+      // matches an existing card and is appended as its own failure row.
+      const incoming = update.view;
+      let placed = false;
+      if (incoming.viewId) {
+        for (let index = segments.length - 1; index >= 0; index -= 1) {
+          const segment = segments[index];
+          if (segment.kind !== "view") continue;
+          if (segment.view.sessionId !== incoming.sessionId || segment.view.viewId !== incoming.viewId) continue;
+          const stale = incoming.status === "ready" && incoming.revision < segment.view.revision;
+          if (!stale) segments[index] = { kind: "view", view: incoming };
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) segments.push({ kind: "view", view: incoming });
+      continue;
+    }
     if (update.kind !== "activity") {
       if (!update.text) continue;
       if (last?.kind === update.kind) segments[segments.length - 1] = { kind: update.kind, text: last.text + update.text };

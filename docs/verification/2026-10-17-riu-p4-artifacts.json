@@ -1,0 +1,375 @@
+{
+  "passed": true,
+  "frozen_modules": [
+    {
+      "module": "reverie.mcp",
+      "matches_current_source": true,
+      "source_sha256": "b80555fe59d30cf0fd5720053df082321f11a12d5dcb67d85a6a1e71803b0062"
+    },
+    {
+      "module": "reverie.mcp_apps",
+      "matches_current_source": true,
+      "source_sha256": "744396e430dc73cefd8302f9b6c9948cb85115dd3ada361510c5dff5fb86403e"
+    },
+    {
+      "module": "reverie.views",
+      "matches_current_source": true,
+      "source_sha256": "a874342672c75073d5ad65a9a1c96e294a6419b6da6a534e650b35e719f63c20"
+    },
+    {
+      "module": "reverie.view_execution",
+      "matches_current_source": true,
+      "source_sha256": "21a964e9886844583e36a0e6a011ef9ad33090eb617dfc4049ccc5f0361febe6"
+    },
+    {
+      "module": "reverie.tools.mcp_dynamic",
+      "matches_current_source": true,
+      "source_sha256": "4840fc7f413403147973c8cdf6c5606704c94bea9234efc776734e82fc9bae2b"
+    },
+    {
+      "module": "reverie.agent.tool_executor",
+      "matches_current_source": true,
+      "source_sha256": "a989fca41fd11059dd8cc2d3a20a7563a7d658c78b6b1ec0f1ae8514f49441ec"
+    },
+    {
+      "module": "reverie.sdk_bridge",
+      "matches_current_source": true,
+      "source_sha256": "5d00a27665bb4958c8d706ad45327ab70592339c0edf682ca69fd39524e4a1a6"
+    },
+    {
+      "module": "reverie.tools.render_view",
+      "matches_current_source": true,
+      "source_sha256": "da6b78db07479f7cec9fa3db5dbd75c2cf32184c37a514b2e99ef01b260efaa0"
+    },
+    {
+      "module": "reverie.agent.system_prompt",
+      "matches_current_source": true,
+      "source_sha256": "783777a6a4ed1e1a4b9aa8d1e066ecadb50d1113de893c83e9ddd99742277642"
+    }
+  ],
+  "ui": {
+    "files": [
+      {
+        "file": "dist/assets/index-B0EPdzjx.js",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/index-B0EPdzjx.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/index-DZW9WMEJ.css",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/pdf.worker.min-Dswkl-cV.mjs",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/PdfPreview-CdTGnofo.js",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/PdfPreview-CdTGnofo.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/riu-probe-BpXUtagd.js",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/riu-probe-BpXUtagd.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/view-bridge-Bk2F8R7B.js",
+        "matches": true
+      },
+      {
+        "file": "dist/assets/view-bridge-Bk2F8R7B.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist/backgrounds/aurora-archive.webp",
+        "matches": true
+      },
+      {
+        "file": "dist/backgrounds/ember-manuscript.webp",
+        "matches": true
+      },
+      {
+        "file": "dist/backgrounds/moss-library.webp",
+        "matches": true
+      },
+      {
+        "file": "dist/index.html",
+        "matches": true
+      },
+      {
+        "file": "dist/reverie-mark.png",
+        "matches": true
+      },
+      {
+        "file": "dist/riu-probe.html",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/appearance.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/appearance.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/attachments.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/attachments.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/core-actions.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/core-actions.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/core-timeouts.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/core-timeouts.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/execution-coordinator.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/execution-coordinator.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/git-workspace.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/git-workspace.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/isolated-workspaces.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/isolated-workspaces.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/kernel-resolver.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/kernel-resolver.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/launch-options.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/launch-options.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/main.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/main.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/preferences.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/preferences.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/preload.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/preload.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/reverie-build.json",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/riu-probe-preload.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/riu-probe-preload.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/runtime-paths.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/runtime-paths.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/session-workspace.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/session-workspace.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-display-preferences.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-display-preferences.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-fixtures.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-fixtures.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-host.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-host.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-interactions.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-interactions.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-isolation-probe.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-isolation-probe.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-isolation-runner.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-isolation-runner.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-resolve.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-resolve.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-session.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/view-session.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/window-tray.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/window-tray.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/workbench.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/workbench.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/worker-pool.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/worker-pool.js.map",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/workspace-lifecycle.js",
+        "matches": true
+      },
+      {
+        "file": "dist-electron/workspace-lifecycle.js.map",
+        "matches": true
+      }
+    ],
+    "build": {
+      "version": "2.5.0",
+      "id": "6198938667318762",
+      "builtAt": "2026-10-17T07:21:18.245Z",
+      "platform": "win32",
+      "arch": "x64"
+    },
+    "trusted": {
+      "schema": "reverie.trusted-kernels.v1",
+      "generated_at": "2026-10-17T06:44:09.862Z",
+      "kernels": [
+        {
+          "sha256": "8be26dcd886a93ce2537b585436e3d7a6ffe07c7af453f7bb766d66a802b4cda",
+          "platform": "win32",
+          "arch": "x64",
+          "version": "2.5.0",
+          "bridge_protocol": "sdk-bridge.v1"
+        }
+      ]
+    }
+  },
+  "artifacts": [
+    {
+      "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+      "bytes": 223114752,
+      "sha256": "3f0f290bba6817ba69ad6a9282e4c52214f59d406ea8fb8fbfbdf8ef67067b45"
+    },
+    {
+      "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+      "bytes": 14138620,
+      "sha256": "0fce0bfa03ddae7fc8e2a8455ab48d17b7e4301416f61acca6fed8690f1149e7"
+    },
+    {
+      "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\resources\\app.asar",
+      "bytes": 81391948,
+      "sha256": "5058450ba0e9be5e5539caffbf223608f9ee88d10ad2804503d937c37e9036c3"
+    }
+  ]
+}

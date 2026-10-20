@@ -1,3 +1,4 @@
+import { normalizeViewDisplayPreferences, type ViewDisplayPreference } from "./view-display-preferences";
 export type UiLanguage = "zh-CN" | "en-US";
 export type StartupModePreference = "gui" | "tui";
 export type AccentPreference = "violet" | "blue" | "teal" | "rose" | "amber";
@@ -30,6 +31,7 @@ export interface StoredUiPreferences {
   inspectorWidth: number;
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
+  viewPresentations: Record<string, ViewDisplayPreference>;
 }
 
 /**
@@ -71,6 +73,7 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   inspectorWidth: 620,
   recentProjects: [],
   archivedSessions: {},
+  viewPresentations: {},
 };
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
@@ -134,6 +137,7 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     inspectorWidth: paneWidth(source.inspectorWidth, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH, DEFAULT_UI_PREFERENCES.inspectorWidth),
     recentProjects: stringList(source.recentProjects).slice(0, 12),
     archivedSessions: archivedSessions(source.archivedSessions),
+    viewPresentations: normalizeViewDisplayPreferences(source.viewPresentations),
   };
 }
 
@@ -147,5 +151,6 @@ export function mergeUiPreferences(current: unknown, patch: unknown): StoredUiPr
     ...update,
     archivedSessions: update.archivedSessions ?? base.archivedSessions,
     recentProjects: update.recentProjects ?? base.recentProjects,
+    viewPresentations: { ...base.viewPresentations, ...normalizeViewDisplayPreferences(update.viewPresentations) },
   });
 }

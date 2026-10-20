@@ -15,6 +15,7 @@ from .config import (
     MODEL_SOURCE_DISPLAY_NAMES,
     SUPPORTED_ACTIVE_MODEL_SOURCES,
     SUPPORTED_TTI_SOURCES,
+    derive_model_display_name,
     model_source_display_name,
     normalize_active_model_source,
     normalize_model_provider,
@@ -77,8 +78,6 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
         {"key": "api_key", "label": "API key", "kind": "secret"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
-        {"key": "temperature", "label": "Temperature", "kind": "float", "min": 0, "max": 2},
-        {"key": "top_p", "label": "Top P", "kind": "float", "min": 0, "max": 1},
         {"key": "reasoning_budget", "label": "Reasoning budget", "kind": "int", "min": -1, "max": 32768},
     ],
 }
@@ -163,7 +162,9 @@ def _standard_catalog(config: Config) -> List[Dict[str, Any]]:
             {
                 "id": str(index),
                 "model": model.model,
-                "display_name": model.model_display_name or model.model,
+                "display_name": derive_model_display_name(
+                    model.model, model.model_display_name
+                ),
                 "description": f"Custom {normalize_model_provider(model.provider)} model",
                 "transport": normalize_model_provider(model.provider),
                 "context_length": model.max_context_tokens,
@@ -530,6 +531,12 @@ def apply_model_selection(
         return _apply_custom_provider_selection(config, selected, reasoning)
 
     provider_config = dict(getattr(config, normalized_source, {}) or {})
+    if (
+        normalized_source == "nvidia"
+        and selected.get("default_max_tokens")
+        and provider_config.get("selected_model_id") != selected["id"]
+    ):
+        provider_config["max_tokens"] = int(selected["default_max_tokens"])
     provider_config["selected_model_id"] = str(selected.get("id") or "")
     provider_config["selected_model_display_name"] = str(selected.get("display_name") or selected.get("id") or "")
     if selected.get("context_length"):

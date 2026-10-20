@@ -73,6 +73,19 @@ export const CORE_RESPONSE_CONTRACT = {
   rollbackCheckpoint: { type: "rollback.result", required: ["result", "recovery"] },
   workspaceMentions: { type: "workspace.mentions", required: ["items", "context_engine"] },
   deleteProjectData: { type: "project.deleted", required: ["project_root", "deleted_sessions"] },
+  // RIU P1 view channel. getView's envelope is rebuilt in main.ts from the
+  // kernel's authoritative response (the model-safe `view` only; the `resolved`
+  // path block is consumed by the host registrar and never forwarded), so the
+  // renderer-facing contract requires just `view`. setViewState rides the tail.
+  getView: { type: "view.resolved", required: ["view"] },
+  setViewState: { type: "view.state", required: ["revision"] },
+  // RIU P2 gated interaction. callViewTool funnels through the kernel's single
+  // gated ToolExecutor; the envelope always carries the bound viewId/callId and a
+  // terminal status (success | error | busy | cancelled). updateViewModelContext
+  // stores the untrusted, size-capped model-context summary.
+  callViewTool: { type: "view.tool_result", required: ["viewId", "callId", "status"] },
+  updateViewModelContext: { type: "view.model_context", required: ["status"] },
+  releaseView: { type: "view.released", required: [] },
 } as const;
 
 export type CoreActionName = keyof typeof CORE_RESPONSE_CONTRACT;

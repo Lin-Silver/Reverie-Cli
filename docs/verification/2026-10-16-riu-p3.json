@@ -1,0 +1,446 @@
+{
+  "date": "2026-10-16",
+  "timezone": "America/New_York",
+  "scope": "Windows production packaged Electron + unchanged official stdio MCP example + local negative fixtures; loopback model",
+  "profile": "offline-server-tools-v1",
+  "working_tree": {
+    "head_at_report": "0bcbddadb55c24742dff35ff0b6045c0ea938034",
+    "contains_uncommitted_preexisting_work": true,
+    "committed": false,
+    "pushed": false,
+    "note": "This evidence describes the dirty working tree and verified directory package, not HEAD or a published release."
+  },
+  "versions": {
+    "ext_apps": "2.0.3",
+    "ui_protocol": "2026-01-26",
+    "mcp_core": "2025-06-18",
+    "mcp_core_requested": "2025-06-18",
+    "mcp_core_accepted": [
+      "2025-06-18",
+      "2025-11-25"
+    ],
+    "mcp_core_actually_negotiated": "2025-06-18",
+    "actual_transport": "stdio",
+    "desktop": "2.5.0",
+    "kernel": "2.5.0",
+    "electron": "41.2.1",
+    "python_build": "3.10.11",
+    "pyinstaller": "6.21.0",
+    "host_implementation": "Direct standard JSON-RPC host; SDK is pinned reference and verification dependency, not injected into the component."
+  },
+  "sources": {
+    "reread_in_full_before_implementation": [
+      "https://developers.openai.com/plugins/build/chatgpt-ui",
+      "https://developers.openai.com/plugins/build/app-quickstart",
+      "https://developers.openai.com/plugins/reference"
+    ],
+    "fixed_contract": "https://github.com/modelcontextprotocol/ext-apps/blob/v2.0.3/src/spec.types.ts",
+    "release": "https://github.com/modelcontextprotocol/ext-apps/releases/tag/v2.0.3",
+    "official_example": "https://github.com/modelcontextprotocol/ext-apps/tree/v2.0.3/examples/basic-server-vanillajs",
+    "local_doc_snapshots": [
+      {
+        "path": ".runtime/riu-p3-sources/openai-ui.md",
+        "bytes": 26454,
+        "sha256": "85db9012f91af7037cbf7b077d4ccb9b319c787ce76cdbefa4d7d9c0c1de847b"
+      },
+      {
+        "path": ".runtime/riu-p3-sources/openai-quickstart.md",
+        "bytes": 18397,
+        "sha256": "d4b699d181cd7218dd1f603b9c6584cb513db406757e0b2c59b3247a4eb01c9a"
+      },
+      {
+        "path": ".runtime/riu-p3-sources/openai-reference.md",
+        "bytes": 35725,
+        "sha256": "61c045a53b7813ab8f7fc6cc4c0607548d61be6c3847351d97406eaa1201becd"
+      }
+    ],
+    "lockfile": {
+      "path": "scripts/verification/fixtures/mcp-apps/package-lock.json",
+      "bytes": 42229,
+      "sha256": "1c8bac36c024dfceea7d9da70356cbe37ca1c4aa61d7ec751ec84ef54cced02e"
+    },
+    "installed_mcp_packages": [
+      {
+        "path": "node_modules/@modelcontextprotocol/client",
+        "version": "2.3.1",
+        "integrity": "sha512-mIGZXpHsjnZ6lD+gD/WCMpR5k8yVQQ8nNFH1N0Srf7AvnwTUMYD6pvTY8ng2+He5FfV7YMZLmrjL7cLa/cc3dQ=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/core",
+        "version": "2.3.1",
+        "integrity": "sha512-laVmIhPGpWi7rG9q+0UigblRN0Hws/Yjlb6qLFtVqryXVLkc4h+yN8z731POD2LnAGQlFe7/tXhUm7Bi0YB91g=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/express",
+        "version": "2.0.0",
+        "integrity": "sha512-Snlr8j9FR9LcVvEJPF7qJ7d5zTL4Bes2dk7RcacN9eSZ7OLohwxqhEvWu1+UxELyScgLbLLOdeVEGdwKI1iwVQ=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/ext-apps",
+        "version": "2.0.3",
+        "integrity": "sha512-Tn+4+cyhO4f4cQSDxNyLiIfEE+qlTTuIbWBJB8JTinEXOhDYgCT4wDTQplxD9MBYZH5pCYGC59GaxiwIT4bu8w=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/node",
+        "version": "2.0.0",
+        "integrity": "sha512-Y4hAC2XdGDUdDOCbLDOCA4+aL3NUldjsOWlDL/YwpAxrPhRm1xHd7lZ+mLacvZ9t3PaH28wgNoaLQGrIk1P2pg=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/server",
+        "version": "2.0.0",
+        "integrity": "sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/server-basic-vanillajs",
+        "version": "2.0.3",
+        "integrity": "sha512-SGqoYRPkZ83b9VTJGdGzDHqL7+OCzTcEunkA2h7lJr5xpWxqMO43OIBkYFgYLfptxLMbB6K6cVX7dISFXv5xDA=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/server-basic-vanillajs/node_modules/@modelcontextprotocol/client",
+        "version": "2.0.0",
+        "integrity": "sha512-8f1OghQ2rjzIOfqgUCP+8GiUWqRs89njoWLNqAe8kWmDePv3s1fZXseej+QXemssEuuOvLLmLO/kqM3IQHtISw=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/server-basic-vanillajs/node_modules/@modelcontextprotocol/core",
+        "version": "2.0.0",
+        "integrity": "sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA=="
+      },
+      {
+        "path": "node_modules/@modelcontextprotocol/server/node_modules/@modelcontextprotocol/core",
+        "version": "2.0.0",
+        "integrity": "sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA=="
+      }
+    ],
+    "official_distribution": [
+      {
+        "path": ".runtime/riu-p3-sdk/node_modules/@modelcontextprotocol/server-basic-vanillajs/dist/index.js",
+        "bytes": 1938021,
+        "sha256": "47e70774f0e4ce69472862db1e5452b4c3004fab77257eff27ef6258011a8b24"
+      },
+      {
+        "path": ".runtime/riu-p3-sdk/node_modules/@modelcontextprotocol/server-basic-vanillajs/dist/server.js",
+        "bytes": 1015659,
+        "sha256": "323ac2e929eae16fd75e8929e4c76fc05cc23135e930c5785782e90c8c519e56"
+      },
+      {
+        "path": ".runtime/riu-p3-sdk/node_modules/@modelcontextprotocol/server-basic-vanillajs/dist/mcp-app.html",
+        "bytes": 217951,
+        "sha256": "bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53"
+      }
+    ],
+    "example_changes": "None. Official published distribution was installed and executed as shipped; stored HTML compared byte-for-byte."
+  },
+  "protocol_matrix": {
+    "supported": [
+      "Catalog preserves _meta.ui resourceUri/visibility/outputSchema; model schemas/search/list/guessed execution exclude app-only tools.",
+      "openai/outputTemplate resource pointer alias only; standard resourceUri takes precedence.",
+      "Exact ui:// identity, one self-contained text/html;profile=mcp-app resource <=2 MiB; server/config/connection/content/policy cache identity.",
+      "Public content and structuredContent, private result _meta hydration outside served directory; <=200 KiB initial private snapshot.",
+      "ui/initialize 2026-01-26 and ui/notifications/initialized; source-window and host lease identity without proprietary component fields.",
+      "After initialized: ui/notifications/tool-input then tool-result exactly once; raw CallToolResult preserved for component.",
+      "tools/call through ordinary coordinator/worker/executor/security_policy/permission_review/approval/session lock; original server and live connection, current mode and app visibility, initial allowlist <=32.",
+      "Server isError remains a tool result; host refusals are JSON-RPC errors; durable receipts and instance-namespaced IDs prevent write replay.",
+      "User-text ui/message stages a proposal; only explicit host button sends a normal model turn.",
+      "Text/JSON ui/update-model-context <=8 KiB, last update, temporary untrusted user data with provenance; never system or persisted history.",
+      "Initial theme/locale/inline hostContext; bounded size-changed height 120-800 px.",
+      "ui/notifications/request-teardown and host ui/resource-teardown with <=500 ms ack wait; execution revoked immediately.",
+      "UI failures retain useful original tool text in both model and user paths; metadata-only results get generic public text, never a raw dump."
+    ],
+    "rejected": [
+      "Unknown UI protocol versions, malformed/out-of-order messages, duplicates, old source/lease/revision/session, oversize/rate/concurrency overflow.",
+      "App-only calls from model, model-only calls from app, cross-server/changed generation/stale connection; Writer-mode MCP callbacks.",
+      "Nonempty requested CSP origins/frames/base origins, browser permissions or legacy widgetCSP; wrong MIME/URI/missing/oversize resources degrade to text.",
+      "Node/preload/parent DOM/network/window.open/download/navigation/permission access; never trust frame user-gesture assertions.",
+      "ui/open-link, UI tools/list/resources proxy/sampling and unknown methods are not advertised and return explicit request errors.",
+      "Private reverie/* methods are refused on the standard MCP App channel; no riu/* replacement protocol."
+    ],
+    "unverified_or_outside_profile": [
+      "Real HTTP/SSE UI interoperability and a real server negotiating MCP core 2025-11-25 (accepted code path alone is not interoperability proof).",
+      "Real external model/provider/service, OAuth, Linux/macOS, installer/portable release acceptance.",
+      "Full window.openai or Plugin Extensions compatibility; only the outputTemplate pointer alias is supported.",
+      "Dynamic hostContext/theme updates, partial tool input/tool-cancelled notifications, fullscreen/pip/display-mode changes and all multimodal content.",
+      "Forced unmount/process termination cannot guarantee a teardown ack; notification is best effort, security revocation is immediate.",
+      "Long-lived connections across idle worker eviction (currently 30 seconds), restart or disconnect: callback is rejected; fresh tool invocation is required, no implicit reconnect/replay.",
+      "Broad screen-reader/IME/accessibility/cross-platform/performance certification."
+    ]
+  },
+  "verification": {
+    "python_full": {
+      "command": "python -m pytest tests -q -o faulthandler_timeout=120",
+      "cwd": "ReverieCli-py",
+      "passed": 2020,
+      "skipped": 2,
+      "seconds": 743.5,
+      "exit_code": 0,
+      "log": ".runtime/riu-p3-python-latest.log",
+      "note": "The diagnostic faulthandler timeout printed thread stacks for a slow test; it is not a test termination or a passed substitute."
+    },
+    "desktop_full": {
+      "command": "npm test",
+      "cwd": "ReverieCli-ui",
+      "passed": 370,
+      "skipped": 1,
+      "files_passed": 51,
+      "files_skipped": 1,
+      "seconds": 101.37,
+      "log": ".runtime/riu-p3-desktop-final-source.log"
+    },
+    "python_guard_focus": {
+      "passed": 59,
+      "command": "python -m pytest tests/test_mcp_apps.py tests/test_mcp_catalog_media.py tests/test_mcp_background_discovery.py tests/test_riu_call_view_tool.py -q"
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "passed": true,
+      "translations": 1032,
+      "templates": 82,
+      "typescript_configs": 2
+    },
+    "packaged_interop": {
+      "passed": 26,
+      "total": 26,
+      "report": "docs/verification/2026-10-16-riu-p3-interop.json",
+      "script": "scripts/verification/riu_p3_electron.py",
+      "raw_directory": ".runtime/riu-p3/packaged-final-sequential",
+      "checks": [
+        {
+          "name": "packaged-hello-profile",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "official-sdk-initialize-and-notifications",
+          "passed": true,
+          "detail": [
+            null,
+            "ui/notifications/tool-input",
+            "ui/notifications/tool-result"
+          ]
+        },
+        {
+          "name": "official-transparent-canvas-text-readable",
+          "passed": true,
+          "detail": {
+            "background": "rgb(21, 22, 28)",
+            "foreground": "rgb(243, 244, 246)",
+            "contrast": 16.401654042195634
+          }
+        },
+        {
+          "name": "official-unchanged-component-tool-callback",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "official-callback-denial",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "official-message-proposal-no-automatic-model-turn",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "official-html-byte-identical",
+          "passed": true,
+          "detail": "bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53"
+        },
+        {
+          "name": "official-graceful-teardown-ack",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "private-meta-delivered-only-to-component",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "hostile-parent-preload-node-network-blocked",
+          "passed": true,
+          "detail": {
+            "node": "undefined",
+            "preload": "undefined",
+            "openai": "undefined",
+            "parent": "blocked",
+            "fetch": "blocked"
+          }
+        },
+        {
+          "name": "app-only-through-normal-approval-executor",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "duplicate-does-not-replay-write",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "model-only-rejected-from-app",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "unsupported-standard-method-explicit-error",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "model-context-does-not-trigger-model",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "model-context-untrusted-user-data",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "no-private-meta-or-app-only-descriptor-in-model",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "app-requested-teardown",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "missing-text-fallback",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "bad-mime-text-fallback",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "wrong-uri-text-fallback",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "network-text-fallback",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "oversize-text-fallback",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "output-template-resource-alias",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "official-distribution-unmodified",
+          "passed": true,
+          "detail": null
+        },
+        {
+          "name": "model-privacy-after-all-negative-fixtures",
+          "passed": true,
+          "detail": null
+        }
+      ]
+    },
+    "packaged_isolation": {
+      "passed": 36,
+      "total": 36,
+      "report": "docs/verification/2026-10-16-riu-p3-isolation.json",
+      "metrics": {
+        "hostPingDuringFloodMs": 1,
+        "hostPingDuringLoopMs": 1,
+        "viewTeardownMs": 1,
+        "hostPingAfterTeardownMs": 1
+      },
+      "note": "36 check entries passed, including the mandatory 34-check gate. Timing is a single local sample, not a general latency promise."
+    },
+    "artifacts": {
+      "passed": true,
+      "build": {
+        "version": "2.5.0",
+        "id": "726514e3746dd726",
+        "builtAt": "2026-10-17T01:09:56.566Z",
+        "platform": "win32",
+        "arch": "x64"
+      },
+      "frozen_source_modules_matched": 7,
+      "compiled_ui_files_matched": 69,
+      "files": [
+        {
+          "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\ReverieUI.exe",
+          "bytes": 223114752,
+          "sha256": "e946822f728b3ba8d9d69a24a53c0b25697138c43576ae22ca493b8f858f274d"
+        },
+        {
+          "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\reverie.exe",
+          "bytes": 14133523,
+          "sha256": "bcd10bd71e65bff980473a7a2b14330f996ef89737fc3a377e5cf27878ee353a"
+        },
+        {
+          "path": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\release\\win-unpacked\\resources\\app.asar",
+          "bytes": 81331517,
+          "sha256": "1f2cf4d9e110e531d9d6795c3e27987201e61cc79224d83c45b2fe484cf58a8f"
+        }
+      ],
+      "report": "docs/verification/2026-10-16-riu-p3-artifacts.json",
+      "script": "scripts/verification/riu_p3_artifacts.py"
+    },
+    "build_commands": [
+      "npm run pack",
+      "npm run build",
+      "npx electron-builder --dir"
+    ],
+    "build_notes": "Kernel was rebuilt before packaging. Final MCP-only transparent canvas fix rebuilt UI and directory package against the current kernel. No installer/portable release produced for this P3 acceptance.",
+    "post_acceptance_recheck": {
+      "raw_report": ".runtime/riu-p3/artifact-rechecked.json",
+      "strict_comparison_passed": false,
+      "artifact_hashes_unchanged": true,
+      "frozen_source_modules_matched": 7,
+      "compiled_ui_files_matched": 68,
+      "total_compared_ui_files": 69,
+      "mismatches": ["dist-electron/reverie-build.json"],
+      "package_build_id": "726514e3746dd726",
+      "later_generated_build_id": "5c37394f6117ae10",
+      "later_generated_build_at": "2026-10-17T01:16:51.706Z",
+      "note": "After acceptance, the compiled directory build metadata was regenerated (id/builtAt changed). All package hashes, frozen modules and other compiled files remain unchanged. The initial 69/69 proof is retained at its acceptance time; the strict later comparison is recorded as false. The tested package remains build 726514e3746dd726. No generated metadata was overwritten to manufacture a match."
+    },
+    "build_logs": [
+      ".runtime/riu-p3-build-final.log",
+      ".runtime/riu-p3-package-visual.log"
+    ],
+    "screenshots": [
+      "2026-10-16-riu-p3-official.png",
+      "2026-10-16-riu-p3-boundaries.png"
+    ],
+    "docs_check": {
+      "state": "passed",
+      "command": "python scripts/verification/check_docs.py --json .runtime/riu-p3/docs-final.json",
+      "documents": 31,
+      "local_links": 655,
+      "errors": 0,
+      "fixture_readme": { "documents": 1, "local_links": 2, "errors": 0 }
+    },
+    "git_diff_check": {
+      "state": "passed",
+      "command": "git diff --check",
+      "exit_code": 0,
+      "note": "Only existing LF-to-CRLF conversion warnings; no whitespace errors."
+    }
+  },
+  "failed_attempts_not_counted_as_passes": [
+    "Attempted hello through UI IPC; test corrected to use direct packaged kernel SDK hello, without adding a new UI action.",
+    "MCP history reference was not restored to a view; session-utils repaired with regression.",
+    "ViewStore initially refused standard MIME; exact MCP MIME/source-kind support added with host tests.",
+    "Collapsed activity text was a faulty fallback observation; loopback user-visible echo now checks preserved server business text.",
+    "GUI interoperability and isolation probe competed for Electron single-instance mutex; final acceptance ran them sequentially.",
+    "Stock transparent dark-theme component exposed white iframe canvas contrast defect; host canvas fixed only for MCP, original HTML unchanged, final contrast measured 16.40:1.",
+    "Earlier full Python run 2009 passed/2 skipped predates final mode guard; superseded by the full current-source result above."
+  ]
+}

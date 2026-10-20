@@ -64,6 +64,9 @@ PROJECT_STORAGE_LAYOUT: Dict[str, List[str]] = {
         "specs",
         "steering",
     ],
+    "views": [
+        "views",
+    ],
 }
 
 
@@ -196,6 +199,7 @@ class ProjectStorageResolver:
                 "feedback": "Observe-Extract-Propose-Evaluate-Apply learning proposals and feedback history.",
                 "tools": "Tool state, generated media state, and subagent run state.",
                 "runtime": "Logs, harness reports, security audits, lifecycle data, browser state, specs, and steering files.",
+                "views": "Model-generated interactive view artifacts, manifests, and private display state (Intelligent UI).",
             },
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }

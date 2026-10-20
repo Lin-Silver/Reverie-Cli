@@ -1,4 +1,5 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, shell, Tray } from "electron";
+import { ViewInstances } from "./view-interactions";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, protocol, shell, Tray } from "electron";
 import { assertCoreAction, assertCoreResponse, normalizeCorePayload } from "./core-actions";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { appendFile, copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -37,6 +38,10 @@ import {
   normalizeUiPreferences,
   type StoredUiPreferences,
 } from "./preferences";
+import { VIEW_SCHEME, ViewHost } from "./view-host";
+import { attachViewDownloadGuard, attachViewFrameGuards, attachViewProtocol, createViewGuardLog } from "./view-session";
+import { prepareViewResolution } from "./view-resolve";
+import { runIsolationProbe } from "./view-isolation-runner";
 
 type JsonRecord = Record<string, unknown>;
 type DesktopSettings = {
@@ -49,6 +54,24 @@ type DesktopSettings = {
 const desktopStartedAt = Date.now();
 const uiRoot = path.resolve(__dirname, "..");
 const launchOptions = parseDesktopLaunchOptions(process.argv);
+
+// Generative views are served from their own scheme so they never share the application's
+// origin. It is a standard, secure scheme that obeys CSP and cannot fetch or run a service
+// worker; privileges must be declared before the app becomes ready.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: VIEW_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: false,
+      corsEnabled: false,
+      bypassCSP: false,
+      allowServiceWorkers: false,
+      stream: false,
+    },
+  },
+]);
 const ownsDesktopInstance = launchOptions.tui || app.requestSingleInstanceLock();
 if (!ownsDesktopInstance) app.quit();
 const outerExecutableDirectory = process.env.PORTABLE_EXECUTABLE_DIR
@@ -66,6 +89,7 @@ const runtimePaths = {
   temp: path.join(runtimeRoot, "temp"),
   crashDumps: path.join(runtimeRoot, "crash-dumps"),
   backgrounds: path.join(runtimeRoot, "backgrounds"),
+  views: path.join(runtimeRoot, "views"),
   settings: path.join(runtimeRoot, "desktop-settings.json"),
 };
 
@@ -96,6 +120,8 @@ function internalKernelPath(): string {
 }
 
 let activeKernelPath = internalKernelPath();
+const viewHost = new ViewHost({ root: runtimePaths.views });
+const viewGuardLog = createViewGuardLog();
 const knownWorkspaceRoots = new Set<string>();
 
 async function selectKernelPath(preferExternal = true): Promise<string> {
@@ -275,7 +301,7 @@ class CoreBridge {
     return this.projectRoot;
   }
 
-  hasActivePrompt(): boolean { return [...this.pending.values()].some(item => ["runPrompt", "resumePrompt"].includes(item.action)); }
+  hasActivePrompt(): boolean { return [...this.pending.values()].some(item => ["runPrompt", "resumePrompt", "callViewTool"].includes(item.action)); }
   getPid(): number | undefined { return this.child?.pid; }
 
   setCoreAppRoot(coreAppRoot: string): void {
@@ -433,10 +459,11 @@ let quitDialogOpen = false;
 let bridge: CoreBridge | null = null;
 const terminals = new TerminalManager(message => mainWindow?.webContents.send("core:event", message));
 const journal = new RunJournal();
-const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string }>();
+const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string }>();
 const workerPool = new WorkerPool<CoreBridge>(4, worker => worker.stop("Idle kernel released."));
 const approvalOwners = new Map<string, string>();
 const stopBeforeStart = new Set<string>();
+const viewInstances = new ViewInstances();
 const coordinator = new ExecutionCoordinator(entries => mainWindow?.webContents.send("core:event", { type: "executors.changed", entries, maximum: 4 }));
 const notificationFile = path.join(runtimeRoot, "notifications.json");
 let notifications: LocalNotification[] = [];
@@ -505,6 +532,7 @@ async function requestAppQuit(): Promise<void> {
 
 async function activateWorkspace(projectRoot: string): Promise<string> {
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
+  viewInstances.clear();
   const resolved = await activateWorkspaceInPlace(bridge, projectRoot, async (nextProjectRoot) => {
     knownWorkspaceRoots.add(path.resolve(nextProjectRoot).toLowerCase());
     await mutateDesktopSettings((settings) => ({
@@ -579,6 +607,17 @@ async function createWindow(): Promise<void> {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  // Generative-view boundaries that cannot affect the shell: the view scheme answers 404
+  // until a view is registered, the download guard only fires for `reverie-view:` items,
+  // and the navigation guard only judges sub-frames, of which the shell has none.
+  attachViewProtocol(mainWindow.webContents.session, viewHost);
+  attachViewDownloadGuard(mainWindow.webContents.session, viewGuardLog);
+  attachViewFrameGuards(mainWindow.webContents, viewHost, viewGuardLog);
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    if (input.type === "keyDown" && input.key === "Escape" && mainWindow?.webContents.focusedFrame?.url.startsWith("reverie-view:")) {
+      mainWindow.webContents.send("core:event", { type: "view.escape" });
+    }
+  });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const current = mainWindow?.webContents.getURL() ?? "";
     if (url !== current) {
@@ -586,6 +625,7 @@ async function createWindow(): Promise<void> {
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     }
   });
+  mainWindow.webContents.on("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) viewInstances.clear(); });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   windowTray?.destroy();
   windowTray = createWindowTray(
@@ -606,6 +646,7 @@ async function createWindow(): Promise<void> {
 
 ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: unknown) => {
   if (!bridge) throw new Error("Reverie core bridge is not initialized.");
+  if (!mainWindow || _event.sender !== mainWindow.webContents || _event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Only the trusted top frame may use core IPC.");
   const action = assertCoreAction(rawAction);
   const payload = normalizeCorePayload(rawPayload);
   if (action === "getContextUsage" && payload.sessionId) {
@@ -616,9 +657,25 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
       return assertCoreResponse(action, await executor.worker.request(action, { ...payload, liveRead: true }));
     }
   }
-  if (["runPrompt", "resumePrompt"].includes(action)) {
+  if (action === "releaseView") {
+    const id = String(payload.interactionId || "");
+    const released = viewInstances.revoke(id);
+    if (released) viewHost.release(released.viewId);
+    for (const [leaseId, executor] of executors) if (executor.interactionId === id) {
+      stopBeforeStart.add(leaseId);
+      if (executor.worker.hasActivePrompt()) void executor.worker.request("stopPrompt", { sessionId: executor.sessionId }).catch(() => {});
+    }
+    return { type: "view.released" };
+  }
+  if (["setViewState", "updateViewModelContext", "callViewTool"].includes(action)) {
+    const ref = viewInstances.require(payload);
+    if (!samePath(ref.projectRoot, bridge.getProjectRoot())) throw new Error("View workspace is no longer selected.");
+    payload.projectRoot = ref.projectRoot;
+  }
+  if (["runPrompt", "resumePrompt", "callViewTool"].includes(action)) {
     const admin = bridge; const root = attachmentRoot(String(payload.projectRoot || admin.getProjectRoot())); const sessionId = String(payload.sessionId || "");
-    const models = payload.source && payload.model
+    const viewCall = action === "callViewTool";
+    const models = viewCall ? {} : payload.source && payload.model
       ? { active_model: { id: payload.model }, active_source: payload.source }
       : (await admin.request("getModelSources")).models as JsonRecord;
     const selectedModel=models.active_model as JsonRecord | null;
@@ -628,7 +685,7 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
     let leaseId = ""; let worker: CoreBridge | null = null; let reusable = false;
     const workerKey = JSON.stringify([root, admin.getCoreAppRoot(), activeKernelPath]);
     try {
-      const lease = await coordinator.acquire(root, sessionId, payload.runType === "review"); leaseId = lease.id;
+      const lease = await coordinator.acquire(root, sessionId, payload.runType === "review", !viewCall); leaseId = lease.id;
       payload.goalContext = payload.runType === "review" ? "" : goalInstructions(await loadGoal(root, sessionId));
       await journal.update(record.id, { goalContext: String(payload.goalContext) });
       const acquired = await workerPool.acquire(workerKey, () => new CoreBridge(root, admin.getCoreAppRoot(), activeKernelPath, () => {}));
@@ -640,7 +697,8 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
         if (event.type === "run.control") void journal.update(record.id, { state: String(event.state) });
         mainWindow?.webContents.send("core:event", { ...message, event });
       });
-      executors.set(lease.id, { worker, root, sessionId, runId: record.id });
+      executors.set(lease.id, { worker, root, sessionId, runId: record.id, interactionId: viewCall ? String(payload.interactionId) : undefined });
+      if (viewCall) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "running", project_root: root, session_id: sessionId, run_id: record.id } });
       const preparation = await Promise.allSettled([
         acquired.reused ? Promise.resolve() : worker.request("initialize", { projectRoot: root, deferPayloads: true }),
         workingSnapshot(root, `refs/reverie/runs/${record.id}/before`).then(() => journal.update(record.id,{beforeRef:`refs/reverie/runs/${record.id}/before`})).catch(error => { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }),
@@ -648,7 +706,9 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
       for (const result of preparation) if (result.status === "rejected") throw result.reason;
       coordinator.pid(lease.id, worker.getPid() || 0); await journal.update(record.id, { state: "running", pid: worker.getPid() });
       if (stopBeforeStart.has(lease.id)) throw new Error("Run stopped before tools started.");
-      const response = await worker.request(action, payload); const result = response.result as JsonRecord;
+      if (viewCall) viewInstances.require(payload);
+      const response = await worker.request(action, payload);
+      const result = viewCall ? { success: response.status === "success", output_text: response.output, error: response.error } : response.result as JsonRecord;
       reusable = true;
       const cancelled = !result.success && stopBeforeStart.has(lease.id);
       if (!cancelled) {
@@ -656,9 +716,10 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
       }
       await journal.finish(record.id, result, result.success ? "completed" : cancelled ? "cancelled" : "failed");
       if (!cancelled) await publishNotification(root, sessionId, record.id, result.success ? "completed" : "failed", result.success ? "Reverie 已完成 / Completed" : "Reverie 运行失败 / Failed", String(result.error || result.output_text || "").slice(0,220));
+      if (viewCall) viewInstances.require(payload);
       return assertCoreResponse(action, response);
     } catch (error) { await journal.finish(record.id, {error:String(error)}, String(error).includes("Queued run cancelled") || (leaseId && stopBeforeStart.has(leaseId)) ? "cancelled" : "interrupted"); await publishNotification(root, sessionId, record.id, "recovery", "Reverie 需要核对 / Needs review", String(error)); throw error; }
-    finally { if (worker) { worker.setEventHandler(() => {}); await workerPool.release(workerKey, worker, reusable); } if (leaseId) { executors.delete(leaseId); stopBeforeStart.delete(leaseId); coordinator.release(leaseId); for (const [id, owner] of approvalOwners) if (owner === leaseId) approvalOwners.delete(id); } }
+    finally { if (viewCall && leaseId) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "finished", project_root: root, session_id: sessionId, run_id: record.id } }); if (worker) { worker.setEventHandler(() => {}); await workerPool.release(workerKey, worker, reusable); } if (leaseId) { executors.delete(leaseId); stopBeforeStart.delete(leaseId); coordinator.release(leaseId); for (const [id, owner] of approvalOwners) if (owner === leaseId) approvalOwners.delete(id); } }
   }
   if (["stopPrompt", "steerPrompt", "pausePrompt", "continuePrompt"].includes(action)) {
     const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot())); const sessionId = String(payload.sessionId || "");
@@ -670,15 +731,44 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
     return assertCoreResponse(action, await executor.worker.request(action,payload));
   }
   if (action === "resolveApproval") {
-    const owner = approvalOwners.get(String(payload.approvalId)); const executor = owner ? executors.get(owner) : undefined;
+    const owner = approvalOwners.get(String(payload.approvalId));
+    const executor = owner ? executors.get(owner) : undefined;
     if (!executor || stopBeforeStart.has(owner!)) throw new Error("Approval expired or its run stopped.");
     if (payload.sessionId && payload.sessionId !== executor.sessionId || payload.projectRoot && !samePath(String(payload.projectRoot),executor.root)) throw new Error("Approval belongs to a different run.");
     approvalOwners.delete(String(payload.approvalId)); return assertCoreResponse(action, await executor.worker.request(action,payload));
   }
-  if (["deleteSession", "rewindSession", "rollbackCheckpoint", "deleteProjectData"].includes(action)) {
+  if (action === "getView") {
+    // The kernel's response carries the model-safe `view` AND an authoritative
+    // `resolved` path block. prepareViewResolution hands the paths to the host
+    // registrar ONLY and builds a path-free reference for the renderer. The
+    // registrar widens containment to the kernel ViewStore's own views dir
+    // (trusted, never model-supplied) and binds an opaque `reverie-view:` url.
+    // A forged view id never reaches here: the kernel's getView raises first.
+    const generation = viewInstances.generation;
+    const response = await bridge.request(action, payload);
+    if (generation !== viewInstances.generation) throw new Error("View resolution expired during session switch.");
+    const reference = await prepareViewResolution(response, async (source) => {
+      await viewHost.allowRoot(source.viewsRoot);
+      const binding = await viewHost.register({
+        viewId: source.viewId,
+        revision: source.revision,
+        sessionId: source.sessionId,
+        directory: source.directory,
+        entry: source.entry,
+        mimeType: source.mimeType,
+      });
+      return { url: binding.url, policyId: binding.policyId };
+    });
+    if (generation !== viewInstances.generation) throw new Error("View resolution expired during session switch.");
+    const interactionId = viewInstances.register({ ...reference, projectRoot: bridge.getProjectRoot() });
+    return assertCoreResponse(action, { type: "view.resolved", view: { ...reference, interactionId } });
+  }
+  if (["deleteSession", "deleteSessions", "forkSession", "rewindSession", "rollbackCheckpoint", "deleteProjectData"].includes(action)) {
     const root=String(payload.projectRoot || bridge.getProjectRoot()); const sessionId=String(payload.sessionId || "");
     if (coordinator.list().some(item=>samePath(item.projectRoot,root) && (!sessionId || item.sessionId===sessionId)) || terminals.active(root).some(item=>!sessionId || item.sessionId===sessionId)) throw new Error("Stop the affected session runs and terminals before removing or restoring records.");
   }
+  if (action === "getSession" && viewInstances.selectSession(String(payload.sessionId || ""))) viewHost.releaseAll();
+  if (["initialize", "loadSession", "createSession", "deleteSession", "deleteSessions", "forkSession", "rewindSession", "deleteProjectData"].includes(action)) { viewInstances.clear(); viewHost.releaseAll(); }
   const response = await bridge.request(action, payload);
   if (action === "initialize") {
     void log(`Desktop initialized in ${Date.now() - desktopStartedAt} ms`);
@@ -687,6 +777,7 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
 });
 
 ipcMain.handle("core:cancel", async (_event, owner?: {projectRoot:string;sessionId:string}) => {
+  if (!mainWindow || _event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Only the trusted top frame may cancel runs.");
   if (!bridge) return;
   const active = [...executors.values()].filter(item => samePath(item.root, owner?.projectRoot || bridge!.getProjectRoot()) && (!owner || item.sessionId === owner.sessionId));
   if (active.length > 1) throw new Error("Select a specific session run for forced termination.");
@@ -960,6 +1051,12 @@ ipcMain.handle("desktop:set-ui-preferences", async (_event, patch: JsonRecord) =
     ui: mergeUiPreferences(settings.ui, safePatch),
   }));
   const ui = normalizeUiPreferences(updated.ui);
+  // Pane controls already reconcile their own optimistic, sequenced requests.
+  // A full snapshot here can roll back a newer pane request while saving a view.
+  const passive: JsonRecord = {};
+  if (Object.hasOwn(safePatch, "language")) passive.language = ui.language;
+  if (Object.hasOwn(safePatch, "viewPresentations")) passive.viewPresentations = ui.viewPresentations;
+  if (Object.keys(passive).length) mainWindow?.webContents.send("core:event", { type: "desktop.preferences", preferences: passive });
   return uiPreferencesPayload(ui);
 });
 
@@ -1122,6 +1219,20 @@ app.whenReady().then(async () => {
   // the notification reads as "electron.app.…" instead of Reverie. Harmless on
   // macOS/Linux, which ignore the id.
   app.setAppUserModelId("Reverie");
+  if (launchOptions.isolationProbe) {
+    // Verification entry point: a dedicated window and session partition, never the user's.
+    const code = await runIsolationProbe({
+      uiRoot,
+      runtimeRoot,
+      reportPath: launchOptions.isolationProbeReport,
+    }).catch(error => {
+      log(`Isolation probe failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      process.stdout.write(`isolation probe crashed: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 2;
+    });
+    app.exit(code);
+    return;
+  }
   const settings = await readDesktopSettings();
   const startupMode = resolveDesktopStartupMode(
     launchOptions,

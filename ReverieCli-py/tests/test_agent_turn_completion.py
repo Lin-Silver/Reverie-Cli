@@ -135,6 +135,52 @@ def test_reasoning_only_turn_is_retried_instead_of_ending_the_run(monkeypatch, t
     assert agent.messages[-1]["content"].strip() == "Edge is open on youtube.com."
 
 
+def test_reasoning_only_retries_remain_in_history_without_empty_api_messages(monkeypatch, tmp_path) -> None:
+    first = "The system prompt says to use tools. This is the raw failed attempt."
+    second = "Still considering the same inputs."
+    turns = [
+        [_chunk(_delta(reasoning=first), "length")],
+        [_chunk(_delta(reasoning=second), "stop")],
+        [_chunk(_delta(content="Done. //END//"), "stop")],
+    ]
+    captured = []
+    _install_scripted_openai(monkeypatch, turns, captured)
+    agent = _agent(tmp_path)
+    agent.messages = [{"role": "user", "content": "Create the requested view."}]
+    list(agent._process_streaming_openai_sdk(session_id="t"))
+
+    assert [message.get("reasoning_content") for message in agent.messages if message.get("reasoning_content")] == [first, second]
+    assert all(message.get("content") or message.get("tool_calls") for call in captured for message in call["messages"] if message.get("role") == "assistant")
+    # Request projection must not mutate the persisted, user-visible transcript.
+    assert len([message for message in agent.messages if message.get("content") is None]) == 2
+
+
+@pytest.mark.parametrize("partial_tool", (False, True))
+def test_failed_stream_preserves_raw_reasoning_without_replaying_partial_tools(monkeypatch, tmp_path, partial_tool):
+    raw = "  The system prompt repeats here. These are the actual interrupted bytes."
+
+    class BrokenStream:
+        def __iter__(self):
+            yield _chunk(_delta(reasoning=raw), None)
+            if partial_tool:
+                yield _chunk(_delta(tool_calls=[_tool_call_delta("unfinished", "create_file", '{"path":')]), None)
+            raise RuntimeError("upstream fatal error")
+
+    captured = []
+    _install_scripted_openai(monkeypatch, [BrokenStream()], captured)
+    agent = _agent(tmp_path)
+    agent.provider = "openai-chat"
+    agent._check_and_compress_context = lambda **kwargs: None
+    persisted = []
+    agent._persist_history_to_session = lambda: persisted.append(list(agent.messages))
+    chunks = list(agent.process_message("Create the view", session_id="failed"))
+    traces = [message for message in agent.messages if message.get("reasoning_content")]
+    assert [message["reasoning_content"] for message in traces] == [raw]
+    assert not any(message.get("tool_calls") for message in agent.messages)
+    assert persisted and persisted[-1][-1]["reasoning_content"] == raw
+    assert "upstream fatal error" in _visible_text(chunks)
+
+
 def test_exhausted_recovery_budget_still_records_a_closing_assistant_message(monkeypatch, tmp_path) -> None:
     turns = [[_chunk(_delta(reasoning="thinking in circles"), "stop")]]
     captured: list = []
@@ -319,7 +365,7 @@ def test_resume_uses_existing_user_turn_and_records_uncertain_tool_result(tmp_pa
     assert "result is unknown" in requests[0][-1]["content"]
 
 
-def test_reasoning_prompt_echo_is_dropped_from_the_thinking_stream(monkeypatch, tmp_path) -> None:
+def test_reasoning_prompt_echo_is_preserved_in_stream_and_history(monkeypatch, tmp_path) -> None:
     prompt = "控制我的电脑，帮我打开我电脑上的Edge浏览器，并输入Youtube的网址"
     turns = [
         [
@@ -338,13 +384,12 @@ def test_reasoning_prompt_echo_is_dropped_from_the_thinking_stream(monkeypatch, 
         for chunk in chunks[chunks.index(THINKING_START_MARKER) + 1 : chunks.index(THINKING_END_MARKER)]
     )
 
-    assert thinking == "We need to control the computer."
-    assert prompt not in thinking
+    assert thinking == f"{prompt}\n\nWe need to control the computer."
     stored = [message for message in agent.messages if message["role"] == "assistant"]
-    assert stored[-1]["reasoning_content"] == "We need to control the computer."
+    assert stored[-1]["reasoning_content"] == thinking
 
 
-def test_reasoning_echo_split_across_chunks_is_still_dropped(monkeypatch, tmp_path) -> None:
+def test_reasoning_echo_split_across_chunks_is_preserved(monkeypatch, tmp_path) -> None:
     prompt = "Open Edge and type the YouTube URL"
     turns = [
         [
@@ -365,7 +410,7 @@ def test_reasoning_echo_split_across_chunks_is_still_dropped(monkeypatch, tmp_pa
         for chunk in chunks[chunks.index(THINKING_START_MARKER) + 1 : chunks.index(THINKING_END_MARKER)]
     )
 
-    assert thinking == "First, list the running apps."
+    assert thinking == f"{prompt}\n\nFirst, list the running apps."
 
 
 def test_reasoning_that_merely_mentions_the_prompt_is_preserved(monkeypatch, tmp_path) -> None:
@@ -391,12 +436,29 @@ def test_reasoning_that_merely_mentions_the_prompt_is_preserved(monkeypatch, tmp
     assert thinking == reasoning
 
 
-def test_short_prompts_are_never_treated_as_a_reasoning_echo(tmp_path) -> None:
+def test_repeated_prompt_is_emitted_immediately_without_prefix_buffering(tmp_path) -> None:
     agent = _agent(tmp_path)
     agent.messages = [{"role": "user", "content": "hi"}]
 
-    assert agent._reasoning_echo_guard() == ""
-    assert agent._strip_reasoning_prompt_echo("hi there") == "hi there"
+    state = agent._new_turn_state()
+    assert state.add_reasoning("hi") == [THINKING_START_MARKER, "hi"]
+    assert state.collected_thinking == "hi"
+
+
+def test_non_streaming_sdk_preserves_repeated_native_reasoning(monkeypatch, tmp_path):
+    prompt = "请计算并保留真实的模型输出。"
+    reasoning = f"  {prompt}\n\n先检查输入。"
+    response = SimpleNamespace(choices=[SimpleNamespace(
+        message=SimpleNamespace(content="结果为 7。", reasoning_content=reasoning, tool_calls=[]),
+        finish_reason="stop",
+    )])
+    agent = _agent(tmp_path)
+    agent.messages = [{"role": "user", "content": prompt}]
+    monkeypatch.setattr(agent, "_ensure_client", lambda: SimpleNamespace(chat=SimpleNamespace(
+        completions=SimpleNamespace(create=lambda **kwargs: response),
+    )))
+    assert agent._process_non_streaming_openai_sdk(session_id="test") == "结果为 7。"
+    assert agent.messages[-1]["reasoning_content"] == reasoning
 
 
 def test_required_skills_are_loaded_in_full_on_each_turn_and_goal_stays_out_of_history(monkeypatch, tmp_path):

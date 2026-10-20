@@ -1,0 +1,537 @@
+{
+  "version": 1,
+  "date": "2026-10-15",
+  "topic": "RIU P2 generated-view interactions, approval ownership and durable no-replay recovery",
+  "platform": "win32",
+  "electron": "41.2.1",
+  "build": {
+    "version": "2.5.0",
+    "id": "6841218dffec623d",
+    "builtAt": "2026-10-15T14:48:02.376Z",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "gitHead": "0bcbddadb55c24742dff35ff0b6045c0ea938034",
+  "committed": false,
+  "pushed": false,
+  "baseline": "Existing dirty P0/P1/P2 worktree preserved; P2 completed for offline generated views.",
+  "protocolProfile": {
+    "reference": "https://github.com/modelcontextprotocol/ext-apps/blob/v1.2.0/src/spec.types.ts",
+    "protocolVersion": "2026-01-26",
+    "mcp_apps": false,
+    "serverTools": false,
+    "methods": [
+      "ui/initialize",
+      "ui/notifications/initialized",
+      "tools/call",
+      "ui/message",
+      "ui/update-model-context",
+      "reverie/view-state"
+    ],
+    "legacyPrivateAlias": "reverie/call-tool",
+    "mcpCallbacks": "Rejected until P3 server/generation/app visibility binding exists."
+  },
+  "regressions": {
+    "pythonFull": {
+      "passed": 1941,
+      "skipped": 2,
+      "seconds": 643.73
+    },
+    "pythonRiu": {
+      "passed": 69,
+      "skipped": 1
+    },
+    "permissionsAfterCleanup": {
+      "passed": 81
+    },
+    "desktopFull": {
+      "passed": 363,
+      "skipped": 1,
+      "files": 51,
+      "seconds": 69.38
+    },
+    "desktopFocusedAfterBusyFollowupChange": {
+      "passed": 32,
+      "files": 5
+    },
+    "typecheck": {
+      "passed": true,
+      "translations": 1032,
+      "templates": 82
+    }
+  },
+  "boundaries": {
+    "executor": "Ordinary ExecutionCoordinator/WorkerPool lease, checkout/session lock, ToolExecutor.execute, security_policy, permission_review, approvalOwners and RunJournal. No direct MCPRuntime.call_tool path.",
+    "provenance": "Frame claims cannot authorize turns. Host approval gates component tools; a host button starts ordinary runPrompt. Busy proposals are retained.",
+    "state": "Content-revision-bound private JSON plus optimistic baseRevision, stored outside served HTML.",
+    "modelContext": "Aggregate 8 KiB transient untrusted user data with view/revision; absent from persisted history.",
+    "noReplay": "Write-ahead unknown receipts. Completed/denied/stopped ids are consumed; altered arguments conflict; crash receipts are queried without execution."
+  },
+  "loopback": {
+    "passed": true,
+    "checks": [
+      {
+        "name": "composer-observed",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "startup-message-only-proposes",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "automatic-message-does-not-call-model",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "allowed-tool-result",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "approved-write-exists",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "duplicate-rejected",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "denied-no-side-effect",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "schema-error-no-approval",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "stop-during-approval",
+        "passed": true,
+        "detail": {
+          "jsonrpc": "2.0",
+          "id": "stopped-once",
+          "error": {
+            "code": -32000,
+            "message": "Stopped. Check the authoritative tool state before starting a new operation."
+          }
+        }
+      },
+      {
+        "name": "private-state-saved",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "host-followup-reaches-model-with-summary",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "private-state-always-excluded-from-model",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "registered-html-not-reinjected-on-followup",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "model-run-blocks-view-callback",
+        "passed": true,
+        "detail": {
+          "jsonrpc": "2.0",
+          "id": "busy-once",
+          "error": {
+            "code": -32000,
+            "message": "Error invoking remote method 'core:request': Error: This conversation already has a running or queued task."
+          }
+        }
+      },
+      {
+        "name": "busy-followup-retains-proposal",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "slow-tool-side-effect-before-crash",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "restart-restores-private-state",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "restart-shows-unknown-write",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "unknown-write-never-replayed",
+        "passed": true,
+        "detail": {
+          "jsonrpc": "2.0",
+          "id": "slow-once",
+          "error": {
+            "code": -32000,
+            "message": "Execution outcome is unknown. Check the authoritative tool state; this request will not be replayed."
+          }
+        }
+      },
+      {
+        "name": "fork-copies-private-state-without-call-replay",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "old-instance-cross-session-rejected",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "rewind-hides-later-view",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "delete-fork-preserves-original",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "approvals-owned-by-execution-worker",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "approvalOwners": [
+      {
+        "event": {
+          "at": "2026-10-15T14:51:23.766Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "session_id": "20261015_105114_654501",
+          "run_id": "2fb9ca30-c271-4196-bc8f-04d5a984e645",
+          "view_id": "v34208d73c065aaff",
+          "view_title": "RIU P2 fixture",
+          "call_id": "\"write-once\"",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "6004ecf6d77b45d4ab2566a0d212fbba",
+          "tool": "create_file",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "medium",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "path": "approved.txt",
+            "content": "APPROVED_ONCE",
+            "overwrite": true
+          },
+          "command": "",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "paths": [
+            "approved.txt"
+          ],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "2fb9ca30-c271-4196-bc8f-04d5a984e645",
+          "sessionId": "20261015_105114_654501",
+          "pid": 43068
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-15T14:51:29.721Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "session_id": "20261015_105114_654501",
+          "run_id": "8c83b880-6378-41ec-a94b-142bc3ac8172",
+          "view_id": "v34208d73c065aaff",
+          "view_title": "RIU P2 fixture",
+          "call_id": "\"stopped-once\"",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "9e10dd39a3094556a8e2cc4a08728560",
+          "tool": "create_file",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "medium",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "path": "stopped.txt",
+            "content": "STOPPED"
+          },
+          "command": "",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "paths": [
+            "stopped.txt"
+          ],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "8c83b880-6378-41ec-a94b-142bc3ac8172",
+          "sessionId": "20261015_105114_654501",
+          "pid": 43068
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-15T14:51:42.230Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "session_id": "20261015_105114_654501",
+          "run_id": "96a372e8-e352-4fbb-adb8-c83b17ca2546",
+          "view_id": "v34208d73c065aaff",
+          "view_title": "RIU P2 fixture",
+          "call_id": "\"slow-once\"",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "5291b355e90f4f0bbb0c7d8c14e8e1ad",
+          "tool": "command_exec",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "high",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "command": "python slow_write.py",
+            "timeout": 90
+          },
+          "command": "python slow_write.py",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "paths": [],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "96a372e8-e352-4fbb-adb8-c83b17ca2546",
+          "sessionId": "20261015_105114_654501",
+          "pid": 43068
+        }
+      },
+      {
+        "event": {
+          "at": "2026-10-15T14:51:27.674Z",
+          "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "session_id": "20261015_105114_654501",
+          "run_id": "ed67560b-125f-46a5-8751-fea928bb0552",
+          "view_id": "v34208d73c065aaff",
+          "view_title": "RIU P2 fixture",
+          "call_id": "\"denied-once\"",
+          "source": "component",
+          "type": "approval.request",
+          "approval_id": "d4f212059648408eb1e847e8ad5165b3",
+          "tool": "create_file",
+          "message": "Component request needs host approval; the component cannot attest a user gesture.",
+          "risk": "medium",
+          "permission_mode": "default",
+          "concerns": [],
+          "review_source": "policy",
+          "read_only": false,
+          "arguments": {
+            "path": "denied.txt",
+            "content": "DENIED"
+          },
+          "command": "",
+          "cwd": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p2\\demo-10-final\\workspace",
+          "paths": [
+            "denied.txt"
+          ],
+          "network": "unknown / tool declaration",
+          "boundary": "Software capability checks; no OS sandbox. Child processes retain the current user's OS permissions.",
+          "scopes": [
+            "once"
+          ]
+        },
+        "owner": {
+          "id": "ed67560b-125f-46a5-8751-fea928bb0552",
+          "sessionId": "20261015_105114_654501",
+          "pid": 43068
+        }
+      }
+    ],
+    "generationInputBoundary": "Initial workspace retrieval may contain the source HTML before registration. It remains real model input; no zero-token claim. The follow-up must not re-add it.",
+    "report": ".runtime/riu-p2/demo-10-final/report.json",
+    "modelRequests": ".runtime/riu-p2/demo-10-final/model-requests.json",
+    "runJournals": ".runtime/riu-p2/demo-10-final/workspace/.reverie/desktop/runs"
+  },
+  "isolation": {
+    "passed": true,
+    "gateChecks": 34,
+    "rawChecks": 36,
+    "metrics": {
+      "hostPingDuringFloodMs": 1,
+      "hostPingDuringLoopMs": 1,
+      "viewTeardownMs": 1,
+      "hostPingAfterTeardownMs": 1
+    },
+    "report": "docs/verification/2026-10-15-riu-p2-isolation.json"
+  },
+  "binaryMatchesCompiledOutput": [
+    "dist-electron/main.js",
+    "dist-electron/view-interactions.js",
+    "dist-electron/reverie-build.json",
+    "dist/index.html"
+  ],
+  "artifacts": [
+    {
+      "path": ".runtime/riu-p2/final-package/win-unpacked/ReverieUI.exe",
+      "bytes": 223114752,
+      "sha256": "d6f7b63680ce0dd4ff2908d7346c3112123ad1df2dc2c15b586c10393d2a0119"
+    },
+    {
+      "path": ".runtime/riu-p2/final-package/win-unpacked/reverie.exe",
+      "bytes": 14125911,
+      "sha256": "e6a17a034d1e3e179a7f76be52888ada613ae893c9a543064c4e684d4ba36aa4"
+    },
+    {
+      "path": ".runtime/riu-p2/final-package/win-unpacked/resources/app.asar",
+      "bytes": 81319269,
+      "sha256": "4c631326dfd229bbb601847b19af2587006955a62abc986f2f814765ddedb286"
+    },
+    {
+      "path": ".runtime/riu-p2/final-package/win-unpacked/reverie-runtime/PIL/_imaging.cp310-win_amd64.pyd",
+      "bytes": 2587648,
+      "sha256": "a6150bd6d42c8179bb0bef700765b1dba247b89e115808f70727eb5a04fc344f"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "docs/verification/2026-10-15-riu-p2-approval.png",
+      "bytes": 113560,
+      "sha256": "f39fe04344a5823a78fdc1a4d50b4b4dba9ef19950183c006f1dc273f6f380bc"
+    },
+    {
+      "path": "docs/verification/2026-10-15-riu-p2-result.png",
+      "bytes": 89360,
+      "sha256": "2e3cb5315cc317d8ba80fddf00017beb82d47aee78e924f0cead060fff87b221"
+    },
+    {
+      "path": "docs/verification/2026-10-15-riu-p2-recovery.png",
+      "bytes": 90815,
+      "sha256": "72fa6a2305ba97c9e240dfff3fa31efc19c46a0f2c8ca3a4676a2c4557f256fa"
+    },
+    {
+      "path": "docs/verification/2026-10-15-riu-p2-stop.png",
+      "bytes": 103388,
+      "sha256": "83614c6d81ebaf4b94b95b78bc11b29923c4f7b0bc0eba80c27ebed5feb87422"
+    }
+  ],
+  "sourceSnapshot": [
+    {
+      "path": "ReverieCli-py/reverie/view_execution.py",
+      "bytes": 6149,
+      "sha256": "04079bff8554004c88f3badb4e3d7ea8a3c3ad851beb778de7ab5c1e0b433893"
+    },
+    {
+      "path": "ReverieCli-py/reverie/views.py",
+      "bytes": 30803,
+      "sha256": "3f147b87e56fe3859570d28611ea9611a96c49c27a77aed6b5f863ed780956a8"
+    },
+    {
+      "path": "ReverieCli-py/reverie/sdk_bridge.py",
+      "bytes": 90579,
+      "sha256": "9157fe14dd8e849dd88dc392612cc3c8a02db2ca951924709da9da36cbbd64d5"
+    },
+    {
+      "path": "ReverieCli-py/reverie/agent/tool_executor.py",
+      "bytes": 65003,
+      "sha256": "c09cfdd9749677d005286f69c34974fb5660f8cc609da0d025ab7dfc1cd18fe5"
+    },
+    {
+      "path": "ReverieCli-py/reverie/agent/agent.py",
+      "bytes": 354832,
+      "sha256": "b0273992588490432a3167a74e7ffc67636338a88911672a23537974b45564e7"
+    },
+    {
+      "path": "ReverieCli-ui/electron/main.ts",
+      "bytes": 65268,
+      "sha256": "b214eb5b63e1c238470b867ddf8acdc1a0ed47634acbc73f6815fcf0b63c5a8e"
+    },
+    {
+      "path": "ReverieCli-ui/electron/view-interactions.ts",
+      "bytes": 1533,
+      "sha256": "d594b8084ba537c8244ddb35cdfdcff67cab96442f6d6147e7d81cd2b716edea"
+    },
+    {
+      "path": "ReverieCli-ui/electron/execution-coordinator.ts",
+      "bytes": 4616,
+      "sha256": "55eb34bc9654162d652b837244da45dd729bbfb4538ee54e8f58b74ea8e9ea10"
+    },
+    {
+      "path": "ReverieCli-ui/src/InteractiveView.tsx",
+      "bytes": 12943,
+      "sha256": "f7875540de72727663865bc4a1b9466dd9cb19c7b7448073868406b047331fb5"
+    },
+    {
+      "path": "ReverieCli-ui/src/view-interaction.ts",
+      "bytes": 5298,
+      "sha256": "e89e87a643ce2ea9237978011aade6009b2c4775a1b322cc262b746e8bb51689"
+    },
+    {
+      "path": "ReverieCli-ui/src/view-bridge.ts",
+      "bytes": 7474,
+      "sha256": "04335373ecf78d9dbed9104c23f519d89fb4f1f348a887574d0630c3131d6b5a"
+    },
+    {
+      "path": "scripts/verification/riu_p2_electron.py",
+      "bytes": 17390,
+      "sha256": "5f8d1f8352e75447f5d1684a28e7ccad865a466354ec32d3a5173a97c4eed9d0"
+    }
+  ],
+  "logs": {
+    "pythonFull": ".runtime/riu-p2/python-full-final.log",
+    "pythonRiu": ".runtime/riu-p2/python-focused-final.log",
+    "permissions": ".runtime/riu-p2/permission-final.log",
+    "desktopFull": ".runtime/riu-p2/desktop-full-current.log",
+    "desktopFocused": ".runtime/riu-p2/desktop-focused-delivery.log",
+    "typecheck": ".runtime/riu-p2/typecheck-delivery.log",
+    "kernelBuild": ".runtime/riu-p2/kernel-build-delivery.log",
+    "build": ".runtime/riu-p2/build-delivery-final.log",
+    "package": ".runtime/riu-p2/package-final-verified.log"
+  },
+  "earlierAttempts": {
+    "location": ".runtime/riu-p2/demo-01 through demo-09-final",
+    "acceptedAsPassed": false,
+    "note": "Failures retained: incomplete intermediate package, stale-frame/async harness assumptions, initial source-retrieval assertion, and seeded-vs-kernel session identity mismatch. Final fresh-profile demo-10-final passed all checks."
+  },
+  "notVerified": [
+    "External real model/service",
+    "Unchanged third-party MCP Apps example",
+    "P3 UI metadata/result _meta lifecycle",
+    "Dynamic hostContext/display modes/accessibility/performance beyond this fixture",
+    "Linux/macOS",
+    "NSIS/portable installer acceptance",
+    "Arbitrary queries intentionally reading workspace source HTML"
+  ],
+  "documentation": {
+    "documents": 30,
+    "localLinks": 628,
+    "errors": 0,
+    "log": ".runtime/riu-p2/docs-check.log",
+    "diffCheckPassed": true
+  }
+}

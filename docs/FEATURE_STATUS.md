@@ -1,8 +1,10 @@
 # 功能状态与已知缺口
 
-状态汇总更新：**2026-10-10，版本 2.5.0**。逐项功能审查基线为 2026-10-05–06，后续检查按日期注明范围。本文描述当前实现；开发优先级和闭环条件统一维护在 [ROADMAP](ROADMAP.md)。[审查报告](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05)保留修复前复现，[首轮修复报告](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05)、[请求 / 个人资料修复报告](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05)与[工作面板修复报告](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06)记录后续改动和验证。G24–G27 来自 [MCP 客户端边界附录](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-addendum-2026-10-05)，G28–G32 来自 [跨平台身份与语言覆盖附录](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05)。
+状态汇总更新：**2026-10-20，版本 2.5.0**。逐项功能审查基线为 2026-10-05–06，后续检查按日期注明范围。本文描述当前实现；开发优先级和闭环条件统一维护在 [ROADMAP](ROADMAP.md)。[审查报告](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05)保留修复前复现，[首轮修复报告](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05)、[请求 / 个人资料修复报告](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05)与[工作面板修复报告](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06)记录后续改动和验证。G24–G27 来自 [MCP 客户端边界附录](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-addendum-2026-10-05)，G28–G32 来自 [跨平台身份与语言覆盖附录](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05)。
 
 ## 如何读状态
+
+2026-10-20 暂停交接：用户因关机要求将当前源码保存到 GitHub 并交由 Cloud 续修。[交接提示词](CLOUD_CODEX_RIU_HANDOFF.md)和[结构化记录](verification/2026-10-20-riu-continuation.json)说明最新状态。自动选择交互视图的指导、Desktop 按需初始化检索、空 Harness 快速返回、失败命令重跑成功后的门禁修复及思考区 Markdown 空白排版已改源码，**尚未重建最终包**。最新 Desktop 383/1、类型检查通过；Python 全量 2098/2/1，Windows 粘贴输入测试单独重跑通过但根因未闭环。此前 `2cfd719ac18e73a4` 的通过不能覆盖这些后续修改。云端按用户最新要求优先验证合法 OpenCode 匿名免费来源，并修复实际发现的 source 客户端问题；模型生成与视觉质量门继续保留。
 
 2026-10-09–10 提交前复核：完成当前工作树的 Python / Desktop 回归、依赖检查、Windows CLI 构建、本地 HTTP 工具流程及打包 GUI 设置持久化检查；修正了旧发布断言和 Skills 文件在 Git 换行转换后的哈希不一致。具体通过、失败后重测、跳过和打包范围见 [本次验证记录](VERIFICATION_HISTORY.md#publish-validation-2026-10-09)。版本号未变，Intelligent UI 仍为待开发提案，外部服务与跨平台缺口没有因本次提交而关闭。
 
@@ -58,7 +60,9 @@
 
 ## 缺口登记
 
-**G33 — Intelligent UI / MCP Apps 宿主：P1，提案、未实现。** 缺产物注册、隔离渲染、时间线视图、受控回调、私有状态与标准 Apps 生命周期；已有的资源读取和结构化 MCP 结果不等于 UI 宿主。验收和下一步提示词在 [技术规格](INTELLIGENT_UI_SPEC.md)，实施顺序在 [Roadmap](ROADMAP.md#intelligent-ui)。G24 仍保留不属于 UI 的 MCP 功能边界。
+**G33 — Intelligent UI / MCP Apps：P0–P4 宿主已实现；真实模型生成质量仍按模型和样本限定。** 标准 `inline/fullscreen/pip` 复用同一 iframe，支持动态主题/语言/尺寸、键盘与焦点、窄窗、私有状态、分页历史与资源回收；长摘要可展开，展示按钮增大。后续确认 Writer 失败涉及实际提示词/工具不一致，已修正模式、MCP/插件注入、Atlas 账本、原始模型 ID、媒体前置条件、空 harness 和 Desktop 自动批准等路径。生成视图说明提供可用的宿主集成示例；工具对明显的不支持 API 给出静态提示。原始失败和当前源码/包/真实模型结果见 [提示词与生成质量续验](VERIFICATION_HISTORY.md#riu-prompt-quality-2026-10-17)；早期性能与交付范围保留在 [P4 记录](VERIFICATION_HISTORY.md#riu-p4-delivery-2026-10-17)。关键词检查或 `render_view` 注册成功不等于模型质量通过，不宣称 OpenAI 功能/效果对等。P3 仍为 ext-apps 2.0.3/UI 2026-01-26 离线 profile，原执行/审批/会话锁继续生效；Linux/macOS、原生 IME/屏幕阅读器、HTTP/SSE UI、完整 window.openai 与 Plugin Extensions 未验证或另属范围，G24/G26 保留。
+
+2026-10-18–20 续修：按完整生产请求去重工具参数说明，保留全部原生 schema、用户固定 Skill、安全约束和可运行示例；忽略默认规则注释，修正显式视图工具范围被否定文件指令误触发检索。移除原生思考的内容过滤及 CLI 猜测删段，保存失败/中断的原始文本。画中画增加高度、短摘要可展开，内容仍须自行组织结果与关键控件。最终 Windows Desktop **2.5.0 / 2cfd719ac18e73a4** 通过 P2/P3/P4 与隔离回归；便携启动器修复深路径漏件，真实新解压 1084 个文件全部匹配。安装/卸载、其他平台及跨模板生成质量仍有独立门禁，见[本轮续验](VERIFICATION_HISTORY.md#riu-quality-2026-10-20)。提示词缩短或宿主通过不代表模型生成稳定。
 
 P1 优先影响执行正确性或核心闭环；P2 影响规模、体验或验证完整度。“源码确认”与“实机 / 隔离复现”分开，未经复现的风险不写成已发生的数据错误。
 
@@ -79,7 +83,7 @@ P1 优先影响执行正确性或核心闭环；P2 影响规模、体验或验�
 | G13 | P2 | 原生中文 IME 与屏幕阅读器验收不足 | 命令面板键盘选择与组合输入保护已补齐；原生候选窗 / 屏幕阅读器仍缺实机验收 |
 | G14 | P2 | OS 通知点击、禁用和并行审批通知缺证据 | 缺少验收；应用内记录和历史 Windows shown 证据不能覆盖这些组合 |
 | G15 | P2 | 认证插件 / MCP / RATS 的真实授权生命周期缺当前证据 | 外部 Engine RATS 集成单独运行 11 项通过；其他真实认证插件 / MCP 生命周期仍缺验收，静态注册不是授权成功 |
-| G16 | P2 | 检索性能与质量基准覆盖不足 | 缺少验收；历史 SWE-bench 23 项 / 冻结 7 项不是完整 300 项或跨语言结论 |
+| G16 | P2 | 检索性能与质量基准覆盖不足 | 缺少验收；历史 SWE-bench 24 项 / 冻结 7 项不是完整 300 项或跨语言结论 |
 | G17 | P2 | 同版本改包和启动路径识别 | 已加入构建 ID、时间与实际启动路径；本轮便携版首次启动被自动审批拦截，未验证首次解压；已编译 GUI 验证见修复报告 |
 | G18 | P2 | 当前 Linux / macOS GUI、长运行与原生设备验证不足 | 缺少验收；CI 配置存在，本次在 Windows 核对，未重验其他平台 |
 | G19 | P1 | 内置 Engine 原生窗口 / 输入呈现 | 已实现并有真实 Windows 帧、按键 / 鼠标、缩放与关闭验证；其他平台未验收 |

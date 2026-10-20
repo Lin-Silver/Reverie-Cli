@@ -99,8 +99,48 @@ def test_memory_requests_do_not_force_repository_retrieval(tmp_path, prompt):
     "修复 memory_manager 工具代码并添加项目测试。",
     "Update memory_manager.py and its tests in this repository.",
     "修改 reverie/memory/store.py 的版本逻辑。",
+    "Fix src/main.py.",
+    "Explain src/model.ts.",
 ])
 def test_memory_implementation_edits_still_force_repository_retrieval(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": prompt}]
+    tools = [{"type": "function", "function": {"name": "codebase-retrieval"}}]
+    assert agent._native_tool_choice(tools) == {"type": "function", "function": {"name": "codebase-retrieval"}}
+
+
+@pytest.mark.parametrize("prompt", [
+    "Use render_view to display artifacts/comparison.html. Do not run commands or read other files.",
+    "调用 render_view 注册 artifacts/savings-comparator.html。不要重新创建或读取其他文件。",
+    "Create artifacts/comparison.html with create_file, then render_view. Only use those two tools.",
+])
+def test_artifact_paths_do_not_force_repository_retrieval(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": prompt}]
+    tools = [{"type": "function", "function": {"name": name}} for name in ("codebase-retrieval", "create_file", "render_view")]
+    assert agent._native_tool_choice(tools) is None
+
+
+@pytest.mark.parametrize("prompt", [
+    "做月度图表，倍率修改后总量同步更新。仅使用 create_file 和 render_view，不读取已有文件，不调用其他工具。",
+    "增加最高价格筛选并更新同一视图。继续只使用 create_file 和 render_view，不读取其他文件或调用其他工具。",
+    "Update this interactive chart. Only use create_file and render_view. Do not inspect existing files.",
+])
+def test_explicit_view_tool_scope_is_not_overridden_by_negative_file_instructions(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": prompt}]
+    tools = [{"type": "function", "function": {"name": name}} for name in ("codebase-retrieval", "create_file", "render_view")]
+    assert agent._native_tool_choice(tools) is None
+
+
+@pytest.mark.parametrize("prompt", [
+    "修复 reverie/tools/render_view.py 的代码并添加回归测试。",
+    "Analyze src/app.ts, then create a diagram with create_file and render_view.",
+])
+def test_real_repository_changes_with_view_tool_names_still_require_retrieval(tmp_path, prompt):
     agent = make_agent(tmp_path)
     agent.mode = "reverie"
     agent.messages = [{"role": "user", "content": prompt}]

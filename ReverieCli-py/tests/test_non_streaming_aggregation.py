@@ -81,7 +81,6 @@ def test_buffered_output_preserves_reasoning_in_saved_history(buffered_agent, mo
     agent._promote_writer_direct_prose_commit = lambda state: None
     agent._writer_retry_instruction_for_invalid_commit_tool_call = lambda calls: None
     agent._writer_retry_instruction_for_short_direct_prose = lambda content: None
-    agent._reasoning_echo_guard = lambda: ""
 
     def generate():
         state = agent._new_turn_state()

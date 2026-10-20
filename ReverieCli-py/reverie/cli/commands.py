@@ -7360,7 +7360,10 @@ class CommandHandler:
                     pass
             item_description = str(item.get("description", "") or "").strip()
             if item_description:
-                description_parts.append(item_description)
+                if provider_label == "NVIDIA":
+                    description_parts.insert(0, item_description)
+                else:
+                    description_parts.append(item_description)
             description = " | ".join(description_parts)
             models_data.append(
                 {
@@ -7448,7 +7451,11 @@ class CommandHandler:
             if full_context_tokens > 0:
                 provider_cfg["max_context_tokens"] = full_context_tokens
                 try:
-                    provider_cfg["max_tokens"] = int(selected_model.get("max_output_tokens") or full_context_tokens)
+                    provider_cfg["max_tokens"] = int(
+                        selected_model.get("default_max_tokens")
+                        or selected_model.get("max_output_tokens")
+                        or full_context_tokens
+                    )
                 except (TypeError, ValueError):
                     provider_cfg["max_tokens"] = full_context_tokens
         if post_select_config is not None:

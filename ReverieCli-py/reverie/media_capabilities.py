@@ -226,10 +226,20 @@ def render_runtime_media_capabilities_digest(capabilities: Optional[Dict[str, An
 
     def line(label: str, item: Dict[str, Any]) -> str:
         enabled = "enabled" if item.get("enabled") else "disabled"
+        source = item.get("active_source", "")
+        details = item.get("sources", {}).get(source, {})
+        if not item.get("enabled"):
+            access = "disabled"
+        elif source == "local" and not details.get("local_models_exist"):
+            access = "missing-local-model"
+        elif source != "local" and not details.get("api_key_available"):
+            access = "missing-credential"
+        else:
+            access = "unverified"
         default_model = str(item.get("default_model", "") or "(none)").strip()
         return (
-            f"- {label}: {enabled}; source={item.get('active_source', '')}; "
-            f"default={default_model}; configured={item.get('configured_count', 0)}; "
+            f"- {label}: setting={enabled}; source={source}; "
+            f"default={default_model}; models={item.get('configured_count', 0)}; access={access}; "
             f"tool=`{item.get('tool', '')}`"
         )
 
@@ -238,6 +248,7 @@ def render_runtime_media_capabilities_digest(capabilities: Optional[Dict[str, An
             "## Runtime Media Capabilities",
             line("image", image),
             line("video", video),
+            "- Enabled settings and model catalogs do not establish service availability; access=unverified still requires a successful runtime request.",
             "- Details: call `media_generation_capabilities` before selecting non-default models or provider-specific parameters.",
         ]
     )

@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "topic": "Intelligent UI P1 — render_view pipeline, durable artifacts, timeline, restart/fork/rewind/delete, TUI fallback",
+  "date": "2026-10-11",
+  "platform": "win32",
+  "arch": "x64",
+  "electron": "41.2.1",
+  "appVersion": "2.5.0",
+  "buildId": "03c991ccd69a9a3c",
+  "committed": false,
+  "implementationOrder": "Failing-first: focused tests written to fail, then the minimal host and restricted channel implemented.",
+  "focusedTests": {
+    "pythonRiu": {
+      "cwd": "ReverieCli-py",
+      "files": ["tests/test_riu_views.py", "tests/test_riu_render_view.py", "tests/test_riu_bridge_views.py", "tests/test_riu_views_e2e.py"],
+      "passed": 41,
+      "skipped": 1
+    },
+    "rendererPipeline": { "file": "ReverieCli-ui/src/view-pipeline.test.ts", "passed": 6 }
+  },
+  "regressions": {
+    "renderer": { "command": "npm test", "testFiles": 48, "passed": 342, "skipped": 1, "durationSeconds": 59.27, "exit": 0 },
+    "typecheck": { "command": "npm run typecheck", "i18n": "1023 translations, 82 templates", "exit": 0 },
+    "python": {
+      "cwd": "ReverieCli-py",
+      "command": "python -m pytest tests -q",
+      "passed": 1912,
+      "skipped": 2,
+      "durationSeconds": 465.55,
+      "broadExceptionGuard": "tests/test_non_game_completion.py::test_modules_do_not_silently_swallow_broad_exceptions passed after routing the two RIU except-sites (render_view._emit, agent per-turn provenance minting) through report_suppressed_exception, which logs to logger reverie.recovery; the handlers are no longer silent.",
+      "nonBlockingFailure": {
+        "test": "tests/test_rats_runtime.py::test_unreachable_supported_provider_fast_fails_and_remains_hidden",
+        "reason": "Timing-sensitive provider fast-fail budget (<1.0s) exceeded under full-suite CPU load (measured 1.108s). Unrelated to RIU; touches no file changed in this task.",
+        "isolatedRerun": "passed in 2.29s"
+      }
+    }
+  },
+  "build": { "command": "npm run build", "steps": ["tsc -p tsconfig.electron.json", "vite build", "build-info"], "exit": 0 },
+  "package": {
+    "command": "npm run dist:win (build:kernel PyInstaller + electron-builder --win nsis --x64 + build-portable)",
+    "artifacts": [
+      { "path": "ReverieCli-ui/release/win-unpacked/ReverieUI.exe", "bytes": 223114752 },
+      { "path": "ReverieCli-ui/release/win-unpacked/reverie.exe", "bytes": 14116343, "role": "bundled standalone kernel" },
+      { "path": "ReverieCli-ui/release/Reverie-Setup-2.5.0-x64.exe", "bytes": 441172175, "sha256": "99259a8b781fe331b17fb8362c73059a8bbba9bafe844d9b274d284920c1a8ff", "role": "NSIS installer" },
+      { "path": "dist/Reverie-Portable-2.5.0-x64.exe", "bytes": 501867890, "sha256": "beb9a93670237a7edcf99b7350c06555e742254fe1a1da5e4db79ebda57d2986", "role": "portable" }
+    ]
+  },
+  "packagedViewHostProbe": {
+    "note": "P1 code is compiled into this packaged binary; re-running the P0 isolation probe on the real package confirms the view host stays isolated and responsive with P1 wired in.",
+    "command": "release/win-unpacked/ReverieUI.exe --riu-isolation-probe --riu-probe-report .runtime/riu-p1-packaged-probe.json",
+    "packaged": true,
+    "container": "sandboxed-iframe",
+    "gateChecks": "34/34",
+    "evaluationPassed": true,
+    "failing": 0,
+    "metricsMs": { "hostPingDuringLoop": 1, "hostPingDuringFlood": 0, "hostPingAfterTeardown": 1, "viewTeardown": 1 },
+    "reportPath": ".runtime/riu-p1-packaged-probe.json"
+  },
+  "verifiedProperties": [
+    "render_view persists the artifact in the restricted ViewStore before any view_ready is emitted (persist-before-display).",
+    "Identity (session/turn/tool-call) is read from the kernel context, never from model arguments.",
+    "The tool result and restored-history model requests carry no HTML bytes or filesystem path: fixture <script> markers are absent from the result, the event, parsed rows, the resolved reference and the restored transcript.",
+    "A forged handle-shaped string in model prose does not fabricate a view row; only a real render_view tool result mints one.",
+    "The revision / fork / rewind / delete lifecycle resolves through a fresh store+bridge over the same on-disk root (simulated restart).",
+    "The resolved view reference is an allow-list: opaque reverie-view: url + policyId from the registrar, never a filesystem path."
+  ],
+  "notVerified": [
+    "Linux and macOS (Windows x64 only).",
+    "Live model-driven view generation inside a running packaged GUI session (a real model writing HTML and the user seeing the rendered panel). The tool->storage->host-dereference->restart/fork/rewind/delete->TUI chain is proven by the Python e2e on the two mandated fixtures with the real RenderViewTool, ViewStore and bridge dispatch, and the renderer line->row->resolved-ref rebuild by the pipeline test; a live packaged model session was not exercised headlessly.",
+    "Network, native IME and screen-reader paths.",
+    "Zero-token HTML is NOT claimed; only the absence of HTML re-addition to model requests is verified."
+  ],
+  "fixtures": ["ReverieCli-py/tests/fixtures/riu_p1/parameter_simulator.html", "ReverieCli-py/tests/fixtures/riu_p1/data_chart.html"]
+}

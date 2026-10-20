@@ -27,6 +27,11 @@ from .roles import (
 )
 
 SESSION_INDEX_FILENAME = 'session_index.json'
+
+# How many pre-compaction full transcripts to keep per session. Older copies are
+# deleted when the list is trimmed; they exist to recover from a bad compaction,
+# not as an indefinite history.
+FULL_TRANSCRIPT_ARCHIVE_LIMIT = 20
 GENERATED_SESSION_NAME_PREFIXES = ('Session ', 'Prompt Run ', 'New Conversation')
 
 
@@ -154,6 +159,14 @@ class SessionManager:
         # Session file id -> mtime already inspected for a name upgrade, so a
         # session whose first prompt yields no title is not re-read forever.
         self._name_upgrade_scanned: Dict[str, int] = {}
+        # Session id -> digest of the last payload written to disk. Several call
+        # sites persist the same transcript within one turn; matching digest
+        # turns the repeat saves into a no-op instead of a rewrite plus a full
+        # search-index rebuild.
+        self._session_digests: Dict[str, str] = {}
+        # Resolved paths of full-transcript archives this process already removed,
+        # so a stale metadata copy cannot trigger a repeated unlink attempt.
+        self._deleted_transcript_archives: set = set()
         # Last `current_session_id` written to session_state.json, so repeated
         # saves of the same session skip a redundant fsync'd write.
         self._persisted_state_session_id: Optional[str] = None
@@ -209,6 +222,25 @@ class SessionManager:
         merged.update(self._scope_metadata())
         return merged
 
+    @staticmethod
+    def _payload_digest(payload: Dict) -> str:
+        """Stable digest of a session payload for redundant-write detection.
+
+        `updated_at` is excluded: it is stamped by the save path itself, so
+        including it would make every save look different and defeat the
+        comparison it exists for. Sorted keys keep the digest independent of
+        dict insertion order; the canonical separators keep it independent of
+        formatting.
+        """
+        comparable = {key: value for key, value in payload.items() if key != 'updated_at'}
+        try:
+            encoded = json.dumps(comparable, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        except (TypeError, ValueError):
+            # Non-JSON-serializable metadata means we cannot prove equality, so
+            # always write rather than risk dropping a real change.
+            return ""
+        return hashlib.sha1(encoded.encode("utf-8")).hexdigest()
+
     def _belongs_to_workspace(self, data: Dict) -> bool:
         metadata = data.get('metadata') or {}
 
@@ -245,7 +277,15 @@ class SessionManager:
                 time.sleep(delay)
                 delay *= 2
 
-    def _write_json_atomic(self, target_path: Path, payload: Dict) -> None:
+    def _write_json_atomic(self, target_path: Path, payload: Dict, *, compact: bool = False) -> None:
+        """Write `payload` to `target_path` atomically.
+
+        `compact` drops the two-space indentation. Transcripts dominate the
+        workspace's session bytes and a single message can carry a whole file
+        body, where an indent run per line is pure overhead: nothing reads them
+        by eye. Small state and index files stay indented so they remain
+        diffable and inspectable.
+        """
         target_path = Path(target_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -260,7 +300,10 @@ class SessionManager:
                 delete=False,
             ) as f:
                 temp_path = Path(f.name)
-                json.dump(payload, f, indent=2, ensure_ascii=False)
+                if compact:
+                    json.dump(payload, f, separators=(",", ":"), ensure_ascii=False)
+                else:
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
 
@@ -494,7 +537,10 @@ class SessionManager:
             if not title or title == str(data.get('name') or ''):
                 continue
             data['name'] = title
-            self._write_json_atomic(session_path, data)
+            self._write_json_atomic(session_path, data, compact=True)
+            # Written outside `_write_session`, so the cached digest no longer
+            # describes the file on disk.
+            self._session_digests.pop(session_id, None)
             entry['name'] = title
             self._stamp_session_file_mtime(session_id, entry)
             self._name_upgrade_scanned[session_id] = int(
@@ -535,7 +581,16 @@ class SessionManager:
         session.metadata = self._merge_scope_metadata(session.metadata)
         session_path = self.sessions_dir / f"{session.id}.json"
         payload = session.to_dict()
-        self._write_json_atomic(session_path, payload)
+        digest = self._payload_digest(payload)
+        if digest and digest == self._session_digests.get(session.id):
+            # Same transcript as the last durable write: skip the fsync'd rewrite
+            # and the search-index rebuild it would trigger. The index is a
+            # projection of this payload, so an unchanged payload cannot change
+            # either one.
+            self._session_digests[session.id] = digest
+            return payload
+        self._write_json_atomic(session_path, payload, compact=True)
+        self._session_digests[session.id] = digest
         written_mtime = self._stamp_session_file_mtime(session.id)
         if self._current_session is not None and self._current_session.id == session.id:
             self._current_session_mtime = written_mtime if self._current_session is session else 0
@@ -585,7 +640,7 @@ class SessionManager:
         }
 
         try:
-            self._write_json_atomic(target_path, payload)
+            self._write_json_atomic(target_path, payload, compact=True)
         except Exception:
             return ""
 
@@ -598,8 +653,41 @@ class SessionManager:
                 'message_count': len(current_messages),
             }
         )
-        session.metadata['full_transcript_archives'] = archives[-20:]
+        kept = archives[-FULL_TRANSCRIPT_ARCHIVE_LIMIT:]
+        # The list is capped, but the files behind the dropped entries used to
+        # stay on disk forever: every compaction of a long session leaked a full
+        # transcript copy. Delete only paths we recorded ourselves and only
+        # inside our own archive directory, so a stray metadata value can never
+        # make this remove something else.
+        for entry in archives[: -FULL_TRANSCRIPT_ARCHIVE_LIMIT]:
+            self._delete_transcript_archive(entry)
+        session.metadata['full_transcript_archives'] = kept
         return str(target_path)
+
+    def _delete_transcript_archive(self, entry: Any) -> None:
+        """Best-effort removal of one superseded full-transcript archive."""
+        raw_path = entry.get('path') if isinstance(entry, dict) else entry
+        if not raw_path:
+            return
+        try:
+            candidate = Path(str(raw_path))
+            if not candidate.is_absolute():
+                candidate = self.base_dir / candidate
+            resolved = candidate.resolve()
+            if resolved.parent != self.transcripts_dir.resolve():
+                return
+            if not resolved.name.startswith('full_transcript_'):
+                return
+        except (OSError, ValueError):
+            return
+        # A path recorded twice (for example after a failed trim) is removed once.
+        if str(resolved) in self._deleted_transcript_archives:
+            return
+        try:
+            resolved.unlink(missing_ok=True)
+            self._deleted_transcript_archives.add(str(resolved))
+        except OSError:
+            report_suppressed_exception("remove superseded full transcript archive")
 
     def _refresh_memory_index_for_session(
         self,

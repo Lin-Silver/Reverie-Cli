@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
+REPOSITORY_MODES = frozenset({"reverie", "reverie-atlas", "reverie-gamer"})
+
+
 MODE_METADATA: Dict[str, Dict[str, object]] = {
     "reverie": {
         "display_name": "Reverie",

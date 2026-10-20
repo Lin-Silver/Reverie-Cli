@@ -30,7 +30,7 @@ class RulesManager:
     def _load_rules_text_file(self, path: Path) -> List[str]:
         """Read newline-delimited rules from a text file."""
         with open(path, 'r', encoding='utf-8') as handle:
-            return [line.strip() for line in handle if line.strip()]
+            return [line.strip() for line in handle if line.strip() and not line.lstrip().startswith('#')]
 
     def _load_rules_json_file(self, path: Path) -> List[str]:
         """Read the legacy JSON rule list format."""

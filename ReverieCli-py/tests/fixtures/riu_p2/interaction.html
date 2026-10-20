@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>RIU P2 interaction fixture</title>
+<style>body{font:14px system-ui;margin:18px;background:#15171c;color:#e4e9f2}button,input{font:inherit;margin:5px;padding:7px}pre{white-space:pre-wrap}label{display:block}</style>
+<h3>RIU P2 · loopback fixture</h3>
+<p id="ready">Connecting…</p>
+<label>Private filter <input id="filter" value="initial"></label>
+<button id="save">Save private state</button><button id="context">Update selection summary</button>
+<button id="write">Write approved file</button><button id="deny">Write denied file</button>
+<button id="stop">Write stopped file</button><button id="slow">Run slow write</button>
+<button id="busy">Try while busy</button><button id="duplicate">Repeat write id</button>
+<button id="followup">Suggest follow-up</button><button id="bad">Invalid schema</button>
+<pre id="result" aria-live="polite"></pre>
+<pre id="receipts"></pre>
+<script>
+// RIU_P2_HTML_ONLY: this script must never be copied into a model request.
+let capability, stateRevision = 0;
+const results = {};
+function send(id, method, params) { parent.postMessage({jsonrpc:"2.0",id,method,params,capability},"*"); }
+// Persisted operation ids are explicit; standard JSON-RPC ids are instance-local.
+function tool(id, name, args) { send(id, "reverie/call-tool", {toolName:name,arguments:args,callId:id}); }
+const write = () => tool("write-once", "create_file", {path:"approved.txt",content:"APPROVED_ONCE",overwrite:true});
+addEventListener("message", e => {
+  if (e.source !== parent || !e.data) return;
+  const m = e.data;
+  if (m.id === "init" && m.result) {
+    capability = m.result.capability;
+    parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized",capability},"*");
+    stateRevision = m.result.reverieViewState?.revision || 0;
+    document.querySelector("#filter").value = m.result.reverieViewState?.state?.filter || "initial";
+    document.querySelector("#ready").textContent = "Ready · private revision " + stateRevision;
+    document.querySelector("#result").textContent = JSON.stringify(m.result.reverieToolCalls);
+    document.querySelector("#receipts").textContent = JSON.stringify(m.result.reverieToolCalls);
+    // A startup message even claiming user-gesture must only become a host proposal.
+    send("auto-message", "ui/message", {role:"user",content:[{type:"text",text:"RIU_P2_FOLLOWUP"}],source:"user-gesture"});
+    return;
+  }
+  results[m.id] = m;
+  if (m.id === "state" && m.result) stateRevision = m.result.revision;
+  document.querySelector("#result").textContent = JSON.stringify(m);
+});
+document.querySelector("#write").onclick = write;
+document.querySelector("#duplicate").onclick = write;
+document.querySelector("#deny").onclick = () => tool("denied-once", "create_file", {path:"denied.txt",content:"DENIED"});
+document.querySelector("#stop").onclick = () => tool("stopped-once", "create_file", {path:"stopped.txt",content:"STOPPED"});
+document.querySelector("#slow").onclick = () => tool("slow-once", "command_exec", {command:"python slow_write.py",timeout:90});
+document.querySelector("#busy").onclick = () => tool("busy-once", "create_file", {path:"busy.txt",content:"BUSY"});
+document.querySelector("#bad").onclick = () => tool("invalid-once", "create_file", {path:17,content:"BAD"});
+document.querySelector("#save").onclick = () => send("state", "reverie/view-state", {baseRevision:stateRevision,state:{filter:document.querySelector("#filter").value,private:"PRIVATE_UI_SENTINEL"}});
+document.querySelector("#context").onclick = () => send("context", "ui/update-model-context", {content:[{type:"text",text:"Selected row 3"}]});
+document.querySelector("#followup").onclick = () => send("followup", "ui/message", {role:"user",content:[{type:"text",text:"RIU_P2_FOLLOWUP"}]});
+send("init", "ui/initialize", {protocolVersion:"2026-01-26",appInfo:{name:"riu-p2-fixture",version:"1"},appCapabilities:{}});
+</script></html>

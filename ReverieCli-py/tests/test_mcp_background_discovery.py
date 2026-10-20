@@ -253,7 +253,7 @@ def test_first_paint_rules_skip_expensive_harness_enrichment(monkeypatch, tmp_pa
 
     rules = ReverieInterface._build_additional_rules_with_tti(
         interface,
-        SimpleNamespace(mode="writer"),
+        SimpleNamespace(mode="reverie"),
         include_harness_guidance=False,
     )
     assert "## Skills" in rules

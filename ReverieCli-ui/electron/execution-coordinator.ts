@@ -32,7 +32,7 @@ export class ExecutionCoordinator {
     }
     this.publish();
   }
-  async acquire(projectRoot:string,sessionId:string,readOnly=false):Promise<ExecutionEntry>{
+  async acquire(projectRoot:string,sessionId:string,readOnly=false,queue=true):Promise<ExecutionEntry>{
     const root=await realpath(projectRoot);let checkout=pathKey(root);let gitCheckout=false;
     try{const result=await runGit("git",["-C",root,"rev-parse","--show-toplevel"],{windowsHide:true,timeout:10000,maxBuffer:1024*1024});checkout=pathKey(await realpath(result.stdout.trim()));gitCheckout=true;}catch{/* Non-Git projects coordinate overlapping directories. */}
     this.roots.set(pathKey(projectRoot),checkout);this.roots.set(pathKey(root),checkout);
@@ -40,7 +40,7 @@ export class ExecutionCoordinator {
     for(const key of [pathKey(projectRoot),pathKey(root)]){if(gitCheckout)this.gitRoots.add(key);else this.gitRoots.delete(key);}
     if(this.list().some(item=>pathKey(item.projectRoot)===pathKey(root) && item.sessionId===sessionId))throw new Error("This conversation already has a running or queued task.");
     const entry:ExecutionEntry={id:randomUUID(),projectRoot:root,checkout,gitCheckout,sessionId,state:"queued",readOnly,reason:"",createdAt:new Date().toISOString()};this.entries.set(entry.id,entry);
-    const granted=new Promise<void>((resolve,reject)=>this.waiting.set(entry.id,{resolve,reject}));this.drain();await granted;return {...entry};
+    const granted=new Promise<void>((resolve,reject)=>this.waiting.set(entry.id,{resolve,reject}));this.drain();if(!queue && entry.state==="queued"){this.waiting.delete(entry.id);this.entries.delete(entry.id);this.drain();throw new Error("View tool busy: another run owns this checkout.");}await granted;return {...entry};
   }
   pid(id:string,pid:number){const item=this.entries.get(id);if(item){item.pid=pid;this.publish();}}
   find(root:string,sessionId:string){const key=this.owners.get(pathKey(root)) || pathKey(root);return this.list().find(item=>pathKey(item.projectRoot)===key && item.sessionId===sessionId);}

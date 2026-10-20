@@ -296,6 +296,9 @@ class ModeSwitchTool(BaseTool):
         skills_manager = self.context.get("skills_manager")
         if skills_manager is not None:
             skills_manager.set_active_mode(normalized_mode)
+        mcp_runtime = self.context.get("mcp_runtime")
+        if mcp_runtime is not None:
+            mcp_runtime.set_active_mode(normalized_mode)
 
         if config_manager:
             config = config_manager.load()
@@ -308,6 +311,10 @@ class ModeSwitchTool(BaseTool):
             metadata["mode"] = normalized_mode
             session.metadata = metadata
             session_manager.save_session(session)
+
+        refresh_guidance = self.context.get("refresh_agent_prompt_guidance")
+        if callable(refresh_guidance):
+            refresh_guidance()
 
         reason_text = f" Reason: {reason.strip()}" if str(reason or "").strip() else ""
         visible_tools = self._visible_tool_names_for_mode(normalized_mode)

@@ -152,13 +152,11 @@ def test_reverie_default_tool_surface_keeps_core_modeling_without_runtime_tools(
     assert "notify_user" in tool_names
 
 
-def test_shared_coding_guardrails_are_injected_into_all_modes() -> None:
+def test_shared_coding_guardrails_are_injected_into_repository_modes() -> None:
     for mode in (
         "reverie",
         "reverie-atlas",
         "reverie-gamer",
-        "writer",
-        "computer-controller",
     ):
         prompt = build_system_prompt(model_name="Test Model", mode=mode)
 

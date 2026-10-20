@@ -1,4 +1,5 @@
 import { normalizeUiLanguage, type UiLanguage } from "./i18n";
+import { normalizeViewDisplayPreferences, type ViewDisplayPreference } from "../electron/view-display-preferences";
 import {
   INSPECTOR_DEFAULT_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
@@ -39,6 +40,7 @@ export interface UiPreferences {
   inspectorWidth: number;
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
+  viewPresentations: Record<string, ViewDisplayPreference>;
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
@@ -70,6 +72,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
   recentProjects: [],
   archivedSessions: {},
+  viewPresentations: {},
 };
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
@@ -125,6 +128,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     archivedSessions: Object.fromEntries(
       Object.entries(rawArchives).map(([project, sessions]) => [project, stringList(sessions)]),
     ),
+    viewPresentations: normalizeViewDisplayPreferences(source.viewPresentations),
   };
 }
 

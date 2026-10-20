@@ -17,5 +17,5 @@ def build_openai_options(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "temperature": 1.0,
         "top_p": 0.95,
         "max_tokens": max_output_tokens(cfg, default=8_192, maximum=MAX_OUTPUT_TOKENS),
-        "extra_body": {"reasoning_effort": effort},
+        "extra_body": {"reasoning_effort": effort, "top_k": 64},
     }

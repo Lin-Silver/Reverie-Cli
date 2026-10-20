@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compound growth simulator</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #fff; color: #1a1a28; }
+  main { padding: 16px; max-width: 520px; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  .row { display: grid; grid-template-columns: 120px 1fr 72px; gap: 10px; align-items: center; margin: 8px 0; }
+  output { font-variant-numeric: tabular-nums; }
+  .result { margin-top: 14px; padding: 12px; border: 1px solid #d6d6e2; border-radius: 8px; background: #f7f7fb; }
+  .result b { font-size: 20px; color: #2f6df6; }
+  .bars { display: flex; gap: 3px; align-items: flex-end; height: 72px; margin-top: 10px; }
+  .bars span { flex: 1; background: linear-gradient(#8ab4ff, #2f6df6); border-radius: 2px 2px 0 0; min-height: 2px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Compound growth simulator</h1>
+  <p>Offline parameter simulator — every control recomputes the projection locally, with no host round-trip.</p>
+  <div class="row"><label for="p">Principal</label><input id="p" type="range" min="100" max="100000" step="100" value="10000"><output id="po"></output></div>
+  <div class="row"><label for="r">Rate % / yr</label><input id="r" type="range" min="0" max="20" step="0.1" value="7"><output id="ro"></output></div>
+  <div class="row"><label for="y">Years</label><input id="y" type="range" min="1" max="40" step="1" value="20"><output id="yo"></output></div>
+  <div class="result">Projected balance: <b id="total">—</b><div class="bars" id="bars" aria-hidden="true"></div></div>
+</main>
+<script>
+  (function () {
+    var p = document.getElementById("p"), r = document.getElementById("r"), y = document.getElementById("y");
+    var po = document.getElementById("po"), ro = document.getElementById("ro"), yo = document.getElementById("yo");
+    var total = document.getElementById("total"), bars = document.getElementById("bars");
+    var money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    function render() {
+      var principal = Number(p.value), rate = Number(r.value) / 100, years = Number(y.value);
+      po.textContent = money.format(principal); ro.textContent = r.value + "%"; yo.textContent = years + "y";
+      var series = [], value = principal;
+      for (var i = 0; i < years; i += 1) { value *= (1 + rate); series.push(value); }
+      total.textContent = money.format(value);
+      var peak = Math.max.apply(null, series.concat([principal])) || 1;
+      bars.innerHTML = "";
+      series.forEach(function (point) {
+        var bar = document.createElement("span");
+        bar.style.height = Math.max(2, Math.round((point / peak) * 72)) + "px";
+        bars.appendChild(bar);
+      });
+    }
+    [p, r, y].forEach(function (control) { control.addEventListener("input", render); });
+    render();
+  })();
+</script>
+</body>
+</html>

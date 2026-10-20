@@ -1,0 +1,281 @@
+{
+  "date": "2026-10-20",
+  "state": "Paused by user for shutdown and Cloud handoff; source snapshot, not release acceptance",
+  "baseline_parent": "0bcbddadb55c24742dff35ff0b6045c0ea938034",
+  "source_baseline": "The commit containing docs/CLOUD_CODEX_RIU_HANDOFF.md includes the previously dirty/untracked RIU source",
+  "version": "2.5.0",
+  "latest_source_checks": {
+    "focused": {
+      "passed": 85
+    },
+    "desktop": {
+      "passed": 383,
+      "skipped": 1,
+      "seconds": 86.33
+    },
+    "typecheck": {
+      "passed": true
+    },
+    "python_full": {
+      "passed": 2098,
+      "skipped": 2,
+      "failed": 1,
+      "seconds": 449.56,
+      "failure": "tests/test_input_handler.py::test_windows_prompt_editor_paste_preserves_single_newline; IndexError: pop from an empty deque"
+    },
+    "python_failure_isolated_rerun": {
+      "passed": 1,
+      "seconds": 0.18,
+      "interpretation": "Root cause unresolved; does not replace the original full-suite failure"
+    }
+  },
+  "latest_changes_packaged": false,
+  "last_previous_packaged_build": {
+    "version": "2.5.0",
+    "id": "2cfd719ac18e73a4",
+    "scope": "Predates latest automatic-view guidance, Harness/lazy-context changes and reasoning CSS fix",
+    "p2": "24/24",
+    "p3": "26/26",
+    "p4": "31/31",
+    "isolation": "36/36",
+    "portable_recovery": "3/3",
+    "portable_payload_hashes": "1084/1084"
+  },
+  "native_reasoning_layout": {
+    "same_text": true,
+    "before_height_px": 2318.421875,
+    "after_height_px": 1078.671875,
+    "ordered_items": 21,
+    "scope": "Retained real native output in old production package; temporary CSS only"
+  },
+  "sensenova_before": {
+    "source": "sensenova",
+    "model": "sensenova-6.8-flash-lite",
+    "packaged_build": "2cfd719ac18e73a4",
+    "task": "natural calculator",
+    "turn_ms": 147557.2965,
+    "first_native_ms": 24777.3,
+    "first_tool_ms": 72890.3,
+    "view_ready_ms": 134649,
+    "request_metrics": [
+      {
+        "body_bytes": 125555,
+        "system_characters": 56137,
+        "schema_characters": 65683,
+        "tools": 27,
+        "status": 200,
+        "headers_ms": 21868.02770000031,
+        "first_reasoning_ms": 21907.453499999974,
+        "first_content_ms": 44870.32360000012,
+        "first_tool_fragment_ms": 46046.11820000036,
+        "complete_ms": 69923.45650000061,
+        "finish_reasons": [
+          "length"
+        ],
+        "schemas_sha256": "d00b3ad8ceb4433ed5093ffcc1e906d3e327759f58bad941adf4bc2c957d162f",
+        "usage": {
+          "prompt_tokens": 34995,
+          "completion_tokens": 6144,
+          "total_tokens": 41139,
+          "completion_tokens_details": {
+            "reasoning_tokens": 2892
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          }
+        }
+      },
+      {
+        "body_bytes": 126593,
+        "system_characters": 56280,
+        "schema_characters": 65683,
+        "tools": 27,
+        "status": 200,
+        "headers_ms": 16626.921400000356,
+        "first_reasoning_ms": 16627.40070000018,
+        "first_content_ms": 16640.451299999768,
+        "first_tool_fragment_ms": 16640.473999999813,
+        "complete_ms": 50450.79270000042,
+        "finish_reasons": [
+          "tool_calls"
+        ],
+        "schemas_sha256": "d00b3ad8ceb4433ed5093ffcc1e906d3e327759f58bad941adf4bc2c957d162f",
+        "usage": {
+          "prompt_tokens": 35112,
+          "completion_tokens": 4790,
+          "total_tokens": 39902,
+          "completion_tokens_details": {
+            "reasoning_tokens": 9
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          }
+        }
+      },
+      {
+        "body_bytes": 145640,
+        "system_characters": 58674,
+        "schema_characters": 65683,
+        "tools": 27,
+        "status": 200,
+        "headers_ms": 5658.137800000077,
+        "first_reasoning_ms": 5658.65550000035,
+        "first_content_ms": 5658.819799999947,
+        "first_tool_fragment_ms": 5658.910400000423,
+        "complete_ms": 8067.615300000398,
+        "finish_reasons": [
+          "tool_calls"
+        ],
+        "schemas_sha256": "d00b3ad8ceb4433ed5093ffcc1e906d3e327759f58bad941adf4bc2c957d162f",
+        "usage": {
+          "prompt_tokens": 40820,
+          "completion_tokens": 124,
+          "total_tokens": 40944,
+          "completion_tokens_details": {
+            "reasoning_tokens": 6
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 32768,
+            "audio_tokens": 0
+          }
+        }
+      },
+      {
+        "body_bytes": 147911,
+        "system_characters": 59092,
+        "schema_characters": 65683,
+        "tools": 27,
+        "status": 200,
+        "headers_ms": 5968.649100000221,
+        "first_reasoning_ms": 5969.412200000079,
+        "first_content_ms": 7475.042600000052,
+        "complete_ms": 10944.997700000386,
+        "finish_reasons": [
+          "stop"
+        ],
+        "schemas_sha256": "d00b3ad8ceb4433ed5093ffcc1e906d3e327759f58bad941adf4bc2c957d162f",
+        "usage": {
+          "prompt_tokens": 41233,
+          "completion_tokens": 637,
+          "total_tokens": 41870,
+          "completion_tokens_details": {
+            "reasoning_tokens": 162
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 32768,
+            "audio_tokens": 0
+          }
+        }
+      }
+    ],
+    "system_chars_first": 56137,
+    "native_schema_chars": 65683,
+    "native_tools": 27,
+    "request_bytes": [
+      125555,
+      126593,
+      145640,
+      147911
+    ],
+    "reviewed_outcome": "registered_unvalidated",
+    "original_report_outcome": "repaired_success",
+    "semantic_assertions": 0,
+    "caveat": "Old generation-only classifier incorrectly treated registration as quality success; original evidence retained, verifier fixed. Existing 6144-token setting truncated first request; normal feedback recovery, not test-authored HTML."
+  },
+  "discarded_timing_scope": {
+    "directory": "before-sensenova",
+    "reason": "Wrong SenseNova recorder field caused real calls to bypass recorder; raw generation exists but complete API timing unavailable"
+  },
+  "nvidia_matrix": {
+    "planned_including_text": 36,
+    "completed_before_user_source_switch": 10,
+    "finished": false,
+    "reason": "Stopped between samples on user steering; retain model/business failures, verifier failures and upstream 503s"
+  },
+  "cloud_source_instruction": {
+    "priority": "OpenCode legitimate anonymous/free gateway, e.g. a currently available Space Bunny model",
+    "candidate_raw_id_from_2026_10_20_official_docs": "space-bunny-free",
+    "live_availability_verified_by_this_handoff": false,
+    "required": "Refresh official docs and live catalog, verify actual protocol and anonymity; repair source client errors, preserve failures and respect service denials/rate limits; no client impersonation"
+  },
+  "natural_task_fixture": {
+    "path": "scripts/verification/fixtures/riu-natural-tasks.json",
+    "version": "2026-10-20.2",
+    "sha256": "9d7b849e06d31a679c04cef835c7c82b44176668cdab476babf6fd8c557078b8"
+  },
+  "unverified": [
+    "Latest standalone CLI/Desktop rebuild and frozen/trust checks",
+    "Latest production GUI regressions",
+    "Complete two-model x five-task x three-fresh-session quality matrix and text controls",
+    "Cross-template manual visual/interaction quality",
+    "Latest portable/installer rebuild and real extraction/recovery",
+    "Windows installer lifecycle in clean VM",
+    "Linux/macOS native acceptance",
+    "HTTP/SSE UI, OAuth and full window.openai/Plugin Extensions"
+  ],
+  "local_only_raw_evidence": [
+    ".runtime/riu-prompt-update-20261017-093759",
+    ".runtime/riu-quality-20261018-060708",
+    ".runtime/riu-experience-20261020-100708",
+    ".runtime/riu-p3-sdk"
+  ],
+  "evidence": [
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/python-full.json",
+      "sha256": "f71491c718f66b74b198aa0ab79456406e54eb64f3cffd84c31da9476dadfd1d",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/desktop-full.json",
+      "sha256": "5aed6a13b97a6c94c543a95c5e67bbc61458f209d48fb6c6cf3f2da2d166f8c1",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/typecheck.json",
+      "sha256": "eaf39a987b6e06a08e12236abc6d905980dffbe8dad69b49938f1516271ba6bb",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/focused-green.json",
+      "sha256": "999d89b9cdca226e2ec61e02e2d32a61d6b7299f3c44179e21913ebb1b8306bd",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/input-paste-rerun.json",
+      "sha256": "038075a421f9e8b817441bdd7c688c1743d61749e96ab17f908f99732e9996ed",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/reasoning-spacing-red.json",
+      "sha256": "1a0876889b4ac98843381885444bfec93b46d85c85042274c88d33a0a669176e",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/harness-lazy-red.json",
+      "sha256": "c99eeb3e11902ed82a0799cfaa70119ab8c3c6f766db575906f9d0152a19abb4",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/harness-command-red.json",
+      "sha256": "a1fc14f31191385eb64f0d88b50476f897f2b6f90ec67d92c90d07b21bde9141",
+      "scope": "Original local verification log; historical failures retained"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/reasoning-before.png",
+      "sha256": "6bf6eecf65512103b63787e209bc0d1b4728e4e80b850557006fba2634cc454a",
+      "scope": "Old-package native-reasoning replay with temporary CSS; no new model request or new-build acceptance"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/reasoning-after.png",
+      "sha256": "1f11f792853d10f7eb0b37fd0f7a87a93ba595b949a7e385f64b8c319bb159a9",
+      "scope": "Old-package native-reasoning replay with temporary CSS; no new model request or new-build acceptance"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-continuation/reasoning-spacing-browser.json",
+      "sha256": "97174bfaa8950c86bdd6e44b6baebe92dbcbbd779c97fe1ceecb482013172f8f",
+      "scope": "Old-package native-reasoning replay with temporary CSS; no new model request or new-build acceptance"
+    }
+  ]
+}

@@ -1,0 +1,306 @@
+{
+  "version": 1,
+  "packaged": true,
+  "platform": "win32",
+  "electron": "41.2.1",
+  "container": "sandboxed-iframe",
+  "startedAt": "2026-10-17T01:12:01.997Z",
+  "metrics": {
+    "hostPingDuringFloodMs": 1,
+    "hostPingDuringLoopMs": 1,
+    "viewTeardownMs": 1,
+    "hostPingAfterTeardownMs": 1
+  },
+  "checks": [
+    {
+      "id": "node-integration-disabled",
+      "passed": true,
+      "detail": "nodeGlobalsAbsent=true leaked=\"\" origin=file://"
+    },
+    {
+      "id": "context-isolation-enabled",
+      "passed": true,
+      "detail": "bridge=true keys=\"failed,onCommand,reply\" nodeGlobalsAbsent=true"
+    },
+    {
+      "id": "view-entry-loaded",
+      "passed": true,
+      "detail": "reason=state handshaken=true"
+    },
+    {
+      "id": "restricted-channel-round-trip",
+      "passed": true,
+      "detail": "echoed=initialized"
+    },
+    {
+      "id": "view-out-of-process",
+      "passed": true,
+      "detail": "host=4 view=5 osPid=23092"
+    },
+    {
+      "id": "traversal-request-blocked",
+      "passed": true,
+      "detail": "raw=404 encoded=400 via session.fetch"
+    },
+    {
+      "id": "foreign-token-blocked",
+      "passed": true,
+      "detail": "status=404"
+    },
+    {
+      "id": "script-mime-unmappable",
+      "passed": true,
+      "detail": "status=415"
+    },
+    {
+      "id": "unbound-directory-blocked",
+      "passed": true,
+      "detail": "status=404"
+    },
+    {
+      "id": "download-blocked",
+      "passed": true,
+      "detail": "attempted=1 cancelled=1"
+    },
+    {
+      "id": "host-clipboard-allowed",
+      "passed": true,
+      "detail": "result=riu-probe-clipboard"
+    },
+    {
+      "id": "node-api-absent",
+      "passed": true,
+      "detail": "evaluated"
+    },
+    {
+      "id": "preload-bridge-absent",
+      "passed": true,
+      "detail": "evaluated"
+    },
+    {
+      "id": "parent-dom-blocked",
+      "passed": true,
+      "detail": "evaluated"
+    },
+    {
+      "id": "top-window-access-blocked",
+      "passed": true,
+      "detail": "evaluated"
+    },
+    {
+      "id": "opaque-origin-enforced",
+      "passed": true,
+      "detail": "window=null document=undefined protocol=reverie-view:"
+    },
+    {
+      "id": "storage-apis-blocked",
+      "passed": true,
+      "detail": "evaluated"
+    },
+    {
+      "id": "network-fetch-blocked",
+      "passed": true,
+      "detail": "TypeError"
+    },
+    {
+      "id": "websocket-blocked",
+      "passed": true,
+      "detail": "error without open"
+    },
+    {
+      "id": "remote-subresource-blocked",
+      "passed": true,
+      "detail": "blocked"
+    },
+    {
+      "id": "window-open-blocked",
+      "passed": true,
+      "detail": "evaluated"
+    },
+    {
+      "id": "form-submission-blocked",
+      "passed": true,
+      "detail": "href unchanged"
+    },
+    {
+      "id": "frame-navigation-blocked",
+      "passed": true,
+      "detail": "blocked=1 allowed=1 targets=reverie-view://9b3878b394a890d3c1e8502835f5ad8d/payload.txt"
+    },
+    {
+      "id": "permission-requests-denied",
+      "passed": true,
+      "detail": "viewRequests=2 granted=0 seen=notifications,background-sync"
+    },
+    {
+      "id": "flood-rate-limited",
+      "passed": true,
+      "detail": "rateLimited=2939 accepted=3"
+    },
+    {
+      "id": "host-responsive-after-flood",
+      "passed": true,
+      "detail": "answered=3/3 worst=1ms"
+    },
+    {
+      "id": "forged-bridge-source-rejected",
+      "passed": true,
+      "detail": "window.postMessage with a valid capability"
+    },
+    {
+      "id": "missing-capability-rejected",
+      "passed": true,
+      "detail": "no capability"
+    },
+    {
+      "id": "stale-instance-rejected",
+      "passed": true,
+      "detail": "revision 99"
+    },
+    {
+      "id": "unsupported-method-rejected",
+      "passed": true,
+      "detail": "files/delete"
+    },
+    {
+      "id": "oversize-message-rejected",
+      "passed": true,
+      "detail": "262145 bytes"
+    },
+    {
+      "id": "host-responsive-during-loop",
+      "passed": true,
+      "detail": "answered=6/6 worst=1ms"
+    },
+    {
+      "id": "chat-input-usable-during-loop",
+      "passed": true,
+      "detail": "value=\"ok-while-looping\""
+    },
+    {
+      "id": "view-destroyed-after-loop",
+      "passed": true,
+      "detail": "closed=true frameGone=true in 1ms"
+    },
+    {
+      "id": "view-process-exited",
+      "passed": true,
+      "detail": "osPid=13164 exited=true"
+    },
+    {
+      "id": "host-responsive-after-teardown",
+      "passed": true,
+      "detail": "answered=3/3 worst=1ms"
+    }
+  ],
+  "notes": [
+    "POST on a bound entry answered 405 via session.fetch",
+    "blocked network requests during the hostile phase: none observed",
+    "loop fixture mount: handshake"
+  ],
+  "guards": {
+    "permissions": [
+      {
+        "permission": "media",
+        "granted": false,
+        "isMainFrame": true,
+        "origin": "",
+        "kind": "check"
+      },
+      {
+        "permission": "media",
+        "granted": false,
+        "isMainFrame": true,
+        "origin": "",
+        "kind": "check"
+      },
+      {
+        "permission": "web-app-installation",
+        "granted": false,
+        "isMainFrame": true,
+        "origin": "",
+        "kind": "check"
+      },
+      {
+        "permission": "geolocation",
+        "granted": false,
+        "isMainFrame": true,
+        "origin": "",
+        "kind": "check"
+      },
+      {
+        "permission": "clipboard-sanitized-write",
+        "granted": true,
+        "isMainFrame": true,
+        "origin": "file:///G:/Reverie/Reverie-Cli/ReverieCli-ui/release/win-unpacked/resources/app.asar/dist/riu-probe.html",
+        "kind": "request"
+      },
+      {
+        "permission": "clipboard-read",
+        "granted": true,
+        "isMainFrame": true,
+        "origin": "file:///G:/Reverie/Reverie-Cli/ReverieCli-ui/release/win-unpacked/resources/app.asar/dist/riu-probe.html",
+        "kind": "request"
+      },
+      {
+        "permission": "notifications",
+        "granted": false,
+        "isMainFrame": false,
+        "origin": "reverie-view://9b3878b394a890d3c1e8502835f5ad8d/index.html",
+        "kind": "request"
+      },
+      {
+        "permission": "background-sync",
+        "granted": false,
+        "isMainFrame": false,
+        "origin": "",
+        "kind": "check"
+      }
+    ],
+    "navigations": [
+      {
+        "url": "reverie-view://054e419829899ed8748b171319e08a35/index.html",
+        "frameUrl": "",
+        "verdict": "allow"
+      },
+      {
+        "url": "reverie-view://9b3878b394a890d3c1e8502835f5ad8d/index.html",
+        "frameUrl": "",
+        "verdict": "allow"
+      },
+      {
+        "url": "reverie-view://9b3878b394a890d3c1e8502835f5ad8d/payload.txt",
+        "frameUrl": "reverie-view://9b3878b394a890d3c1e8502835f5ad8d/index.html",
+        "verdict": "block"
+      },
+      {
+        "url": "reverie-view://ac32eb977d3897b8e047d7a3f81ce5a1/index.html",
+        "frameUrl": "",
+        "verdict": "allow"
+      },
+      {
+        "url": "reverie-view://25e995482ea9f1009b5195d5ee3de215/index.html",
+        "frameUrl": "",
+        "verdict": "allow"
+      },
+      {
+        "url": "reverie-view://b9a38df8391c5b950d16ccba157839d9/index.html",
+        "frameUrl": "",
+        "verdict": "allow"
+      }
+    ],
+    "downloads": [
+      {
+        "url": "reverie-view://054e419829899ed8748b171319e08a35/payload.txt",
+        "cancelled": true
+      }
+    ],
+    "windowOpens": [],
+    "blockedRequests": []
+  },
+  "evaluation": {
+    "passed": true,
+    "failures": [],
+    "missing": []
+  }
+}

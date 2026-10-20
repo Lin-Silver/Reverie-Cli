@@ -11,6 +11,7 @@ import type {
   PromptResult,
   ProviderProbe,
   RecoveryState,
+  ResolvedViewRef,
   SessionListState,
   SessionState,
   SettingsState,
@@ -138,6 +139,25 @@ interface CoreRequestMap {
   rollbackCheckpoint: { payload: { checkpointId: string; confirmed: true }; response: Envelope<"rollback.result", { result: Record<string, unknown>; recovery: RecoveryState }> };
   workspaceMentions: { payload: { query: string; limit: number }; response: Envelope<"workspace.mentions", { query: string; items: WorkspaceMention[]; elapsed_ms: number; context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
   deleteProjectData: { payload: { projectRoot: string; confirmed: true }; response: Envelope<"project.deleted", { project_root: string; project_data_dir: string; deleted_sessions: number; deleted: string[] }> };
+  /** RIU P1 view dereference. The renderer receives only the model-safe, path-free
+   *  reference: main.ts resolves the kernel's authoritative paths through the host
+   *  registrar (see electron/view-resolve.ts) and strips them before this crosses IPC. */
+  getView: { payload: { viewId: string; sessionId?: string; revision?: number }; response: Envelope<"view.resolved", { view: ResolvedViewRef }> };
+  setViewState: { payload: { viewId: string; sessionId: string; revision: number; interactionId: string; state: Record<string, unknown>; baseRevision: number }; response: Envelope<"view.state", { revision: number }> };
+  /** RIU P2 gated tool callback. The renderer never names the tool executor: callViewTool
+   *  routes through the kernel's single gated ToolExecutor (cancel -> read-only review ->
+   *  security_policy -> approval gate). viewId is the controller's kernel-bound ref, never
+   *  frame-supplied; `source` is clamped provenance; a duplicate callId answers `duplicate`
+   *  without re-running the write. */
+  callViewTool: {
+    payload: { viewId: string; sessionId: string; revision: number; interactionId: string; toolName: string; arguments?: Record<string, unknown>; callId: string; source?: string };
+    response: Envelope<"view.tool_result", { viewId: string; callId: string; status: string; duplicate?: boolean; output?: string; error?: string; reason?: string; data?: Record<string, unknown>; source?: string }>;
+  };
+  /** RIU P2 untrusted model-context summary. Stored capped (MAX_VIEW_SUMMARY_BYTES) and tagged
+   *  untrusted-user-data, kept separate from the private setViewState display state and never
+   *  escalated to a system role. */
+  updateViewModelContext: { payload: { viewId: string; sessionId: string; revision: number; interactionId: string; summary: string }; response: Envelope<"view.model_context", { status: string }> };
+  releaseView: { payload: { interactionId: string }; response: Envelope<"view.released", Record<string, never>> };
 }
 
 export type CoreAction = keyof CoreRequestMap;

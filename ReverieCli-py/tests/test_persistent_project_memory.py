@@ -133,7 +133,8 @@ def test_context_engine_memory_query_and_system_prompt_use_active_memory(tmp_pat
     manifest = get_tool_descriptions_for_mode("reverie")
     assert "### `memory_manager`" in manifest
     assert "model-authored content" in manifest
-    assert "scope: session, project, workflow, or procedural" in manifest
+    scope = MemoryManagerTool.parameters["properties"]["scope"]["description"]
+    assert all(value in scope for value in ("session", "project", "workflow", "procedural"))
     assert "stop after a successful memory_manager remember result" in manifest
     assert "repository retrieval is unnecessary" in manifest
     assert "need no repository retrieval" in MemoryManagerTool.description

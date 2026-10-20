@@ -60,7 +60,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | Kimi K3, DeepSeek V4 Pro/Flash, Muse Glimmer 30B, Nemotron 3.5 Lightning, Nemotron 3 Super/Ultra, MiniMax M3, Step-3.7-Flash, GPT-OSS-120B, Laguna XS 2.1 |
+| **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | DeepSeek V4.1 Flash, GLM 5.3 Flash, Step 5 Preview, Nemotron 3.5 Super VL/Lightning, Muse Glimmer 30B, Nemotron 3 Super/Ultra, GPT-OSS-20B, Laguna XS 2.1 |
 | **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Qwen3.8-27B (default), GLM-5.3/Flash, DeepSeek V4.1 Flash, DeepSeek V4 Pro 0813, Step 3.7 Flash |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
 | **SenseNova**      | SenseTime SenseNova API with live model discovery and OpenAI-compatible transport                              | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.2, and SenseNova 6.8 Flash Lite                                                                                            |
@@ -211,7 +211,7 @@ Reverie-Cli/
 │   │   │   └── tool_executor.py← Tool execution
 │   │   ├── cli/
 │   │   │   └── interface.py   ← Terminal UI (Rich-based)
-│   │   ├── nvidia.py          ← NVIDIA provider integration (11 models)
+│   │   ├── nvidia.py          ← NVIDIA provider integration (10 models)
 │   │   ├── codex.py           ← Codex/ChatGPT provider integration
 │   │   ├── modelscope.py      ← ModelScope OpenAI Chat provider and capability catalog
 │   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider

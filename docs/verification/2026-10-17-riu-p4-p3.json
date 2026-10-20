@@ -1,0 +1,175 @@
+{
+  "scope": "Windows production packaged Electron + unchanged official stdio MCP example + local negative fixtures; loopback model",
+  "versions": {
+    "ext_apps": "2.0.3",
+    "ui_protocol": "2026-01-26",
+    "mcp_core": "2025-06-18"
+  },
+  "output": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p3-final",
+  "official_html_sha256": "bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53",
+  "checks": [
+    {
+      "name": "packaged-hello-profile",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "official-sdk-initialize-and-notifications",
+      "passed": true,
+      "detail": [
+        null,
+        "ui/notifications/tool-input",
+        "ui/notifications/tool-result",
+        "ui/notifications/host-context-changed",
+        "ui/notifications/host-context-changed"
+      ]
+    },
+    {
+      "name": "official-transparent-canvas-text-readable",
+      "passed": true,
+      "detail": {
+        "background": "rgb(21, 22, 28)",
+        "foreground": "rgb(243, 243, 247)",
+        "contrast": 16.30906414343467
+      }
+    },
+    {
+      "name": "official-unchanged-component-tool-callback",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "official-callback-denial",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "official-message-proposal-no-automatic-model-turn",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "official-html-byte-identical",
+      "passed": true,
+      "detail": "bd332aada2a5aff326101e9069840bf62fb6b9eaad413496e655b09d735a5e53"
+    },
+    {
+      "name": "official-graceful-teardown-ack",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "private-meta-delivered-only-to-component",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "hostile-parent-preload-node-network-blocked",
+      "passed": true,
+      "detail": {
+        "node": "undefined",
+        "preload": "undefined",
+        "openai": "undefined",
+        "parent": "blocked",
+        "fetch": "blocked"
+      }
+    },
+    {
+      "name": "app-only-through-normal-approval-executor",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "duplicate-does-not-replay-write",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "model-only-rejected-from-app",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "unsupported-standard-method-explicit-error",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "model-context-does-not-trigger-model",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "model-context-untrusted-user-data",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "no-private-meta-or-app-only-descriptor-in-model",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "app-requested-teardown",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "missing-text-fallback",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "bad-mime-text-fallback",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "wrong-uri-text-fallback",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "network-text-fallback",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "oversize-text-fallback",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "output-template-resource-alias",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "official-distribution-unmodified",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "model-privacy-after-all-negative-fixtures",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "kernel_hello": {
+    "id": "p3-hello",
+    "type": "ready",
+    "protocol_version": 1,
+    "project_root": "G:\\Reverie\\Reverie-Cli\\.runtime\\riu-p4\\p3-final\\workspace",
+    "capabilities": {
+      "views": {
+        "schema_version": 1,
+        "inline": true,
+        "mcp_apps": true,
+        "mcp_apps_protocol": "2026-01-26",
+        "mcp_apps_sdk": "2.0.3",
+        "profile": "offline-server-tools-v1"
+      }
+    }
+  },
+  "passed": true
+}

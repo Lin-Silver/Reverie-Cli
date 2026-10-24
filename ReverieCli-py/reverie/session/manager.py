@@ -146,6 +146,7 @@ class SessionManager:
         self._ensure_dirs()
         self._current_session: Optional[Session] = None
         self._current_session_mtime = 0
+        self._current_session_size = 0
         self._session_index: Dict[str, Dict[str, Any]] = self._load_session_index()
         self._session_index_dirty = False
         # Session file id -> mtime already reflected in `self._session_index`.
@@ -594,6 +595,14 @@ class SessionManager:
         written_mtime = self._stamp_session_file_mtime(session.id)
         if self._current_session is not None and self._current_session.id == session.id:
             self._current_session_mtime = written_mtime if self._current_session is session else 0
+            try:
+                self._current_session_size = (
+                    (self.sessions_dir / f"{session.id}.json").stat().st_size
+                    if self._current_session is session
+                    else 0
+                )
+            except OSError:
+                self._current_session_size = 0
         self._session_index[session.id] = self._session_index_entry(session)
         # Deferred: the transcript itself is already durable above, and the index
         # entry is reconstructible from it. Flushed by the observable operations.
@@ -831,10 +840,17 @@ class SessionManager:
             # the active transcript object. Its revision must stay independent.
             known_mtime = self._current_session_mtime
             try:
-                on_disk_mtime = session_path.stat().st_mtime_ns
+                on_disk_stat = session_path.stat()
+                on_disk_mtime = on_disk_stat.st_mtime_ns
+                on_disk_size = on_disk_stat.st_size
             except OSError:
                 on_disk_mtime = 0
-            if known_mtime and on_disk_mtime == known_mtime:
+                on_disk_size = 0
+            if (
+                known_mtime
+                and on_disk_mtime == known_mtime
+                and on_disk_size == self._current_session_size
+            ):
                 self._save_state(session_id)
                 return current
 
@@ -858,6 +874,10 @@ class SessionManager:
 
             self._current_session = session
             self._current_session_mtime = self._scanned_session_files.get(session_id, 0)
+            try:
+                self._current_session_size = session_path.stat().st_size
+            except OSError:
+                self._current_session_size = 0
             self._save_state(session.id)
             if self._session_index.get(session.id) != refreshed_index_entry:
                 self._session_index[session.id] = refreshed_index_entry
@@ -887,6 +907,8 @@ class SessionManager:
 
             if self._current_session and self._current_session.id == session_id:
                 self._current_session = None
+                self._current_session_mtime = 0
+                self._current_session_size = 0
                 self._save_state(None)
 
             return True
@@ -952,6 +974,7 @@ class SessionManager:
         session.metadata = self._merge_scope_metadata(session.metadata)
         self._current_session = session
         self._current_session_mtime = 0
+        self._current_session_size = 0
         self._save_state(session.id)
 
     def update_messages(self, messages: List[Dict]) -> None:

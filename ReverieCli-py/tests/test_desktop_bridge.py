@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -2093,9 +2094,13 @@ def test_reloading_the_active_session_skips_a_redundant_parse(tmp_path: Path) ->
         # An outside write invalidates the fingerprint, so the transcript is
         # re-read rather than served stale.
         session_path = manager.sessions_dir / f"{session.id}.json"
+        original_stat = session_path.stat()
         changed = session.to_dict()
         changed["messages"].append({"role": "assistant", "content": "External worker reply"})
         session_path.write_text(json.dumps(changed), encoding="utf-8")
+        # Some filesystems can retain the same timestamp for rapid writes;
+        # file size is part of the active-session fingerprint too.
+        os.utime(session_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
         manager.list_sessions()
         reloaded = manager.load_session(session.id)
     finally:

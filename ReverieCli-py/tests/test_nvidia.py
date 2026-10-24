@@ -72,6 +72,7 @@ def test_nvidia_runtime_model_data_uses_sdk_base_url_for_muse_glimmer():
 def test_nvidia_catalog_context_lengths_match_model_cards():
     expected_context_lengths = {
         "meta/muse-glimmer-30b": 131072,
+        "minimaxai/minimax-m3.1-flash": 262144,
         "nvidia/nemotron-3.5-lightning-30b-a3b": 1048576,
         "nvidia/nemotron-3-super-120b-a12b": 1000000,
         "nvidia/nemotron-3-ultra-550b-a55b": 1000000,
@@ -133,6 +134,7 @@ def test_nvidia_catalog_excludes_removed_legacy_models():
     assert "moonshotai/kimi-k2.5" not in catalog_by_id
     assert "moonshotai/kimi-k2-thinking" not in catalog_by_id
     assert "z-ai/glm-5.2" not in catalog_by_id
+    assert "z-ai/glm-5.3" not in catalog_by_id
 
 
 @pytest.mark.parametrize(

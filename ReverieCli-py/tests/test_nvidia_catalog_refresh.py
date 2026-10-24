@@ -25,6 +25,7 @@ RETIRED_MODELS = (
     "minimaxai/minimax-m3",
     "stepfun-ai/step-3.7-flash",
     "openai/gpt-oss-120b",
+    "z-ai/glm-5.3",
 )
 
 
@@ -39,6 +40,7 @@ def test_retired_hosted_models_fall_back_to_available_default(model_id):
 
 def test_new_hosted_models_are_shared_with_desktop_catalog():
     expected = {
+        "minimaxai/minimax-m3.1-flash": (262144, ["image", "video"]),
         "nvidia/nemotron-3.5-super-vl-120b-a12b": (262144, ["image", "video"]),
         "stepfun-ai/step-5-preview": (1048576, ["image"]),
         "deepseek-ai/deepseek-v4.1-flash": (1048576, ["image"]),
@@ -51,6 +53,7 @@ def test_new_hosted_models_are_shared_with_desktop_catalog():
     desktop_ids = {model["id"] for model in desktop["models"]}
     assert desktop_ids == {model["id"] for model in get_nvidia_model_catalog()}
     assert not desktop_ids.intersection(RETIRED_MODELS)
+    assert "z-ai/glm-5.3" not in desktop_ids
     for model in desktop["models"]:
         if model["id"] in {"deepseek-ai/deepseek-v4.1-flash", "z-ai/glm-5.3-flash"}:
             assert "可能尚未针对该模型进行多并发调用优化" in model["description"]
@@ -61,6 +64,21 @@ def test_new_hosted_models_are_shared_with_desktop_catalog():
         assert config.nvidia["selected_model_id"] == model_id
         assert config.nvidia["max_context_tokens"] == context_length
         assert get_nvidia_model_metadata(model_id)["vision_modalities"] == modalities
+
+
+def test_minimax_m31_has_its_own_reasoning_and_output_profile():
+    model_id = "minimaxai/minimax-m3.1-flash"
+    config = {"selected_model_id": model_id, "reasoning_effort": "xhigh", "max_tokens": 1000000}
+    options = build_nvidia_openai_options(config)
+
+    assert options == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": 65536,
+        "extra_body": {"chat_template_kwargs": {"reasoning_effort": "xhigh"}},
+    }
+    assert nvidia_model_requires_preserved_reasoning_history(model_id)
+    assert build_nvidia_openai_options({"selected_model_id": model_id})["max_tokens"] == 65536
 
 
 @pytest.mark.parametrize("effort", ["none", "low", "high"])
@@ -91,6 +109,7 @@ def test_deepseek_41_uses_provider_example_budget_without_legacy_template_kwargs
 
 @pytest.mark.parametrize("model_id,budget", [
     ("deepseek-ai/deepseek-v4.1-flash", 262144),
+    ("minimaxai/minimax-m3.1-flash", 65536),
     ("stepfun-ai/step-5-preview", 4096),
 ])
 def test_cli_and_desktop_selection_apply_model_default_budget(tmp_path, monkeypatch, model_id, budget):
@@ -110,6 +129,7 @@ def test_cli_and_desktop_selection_apply_model_default_budget(tmp_path, monkeypa
     handler = CommandHandler(
         Console(force_terminal=False), {"config_manager": manager, "project_root": project_root},
     )
+    monkeypatch.setattr(handler, "_configure_nvidia_thinking_for_model", lambda cfg, model: cfg)
     assert handler._cmd_nvidia_model(model_id) is True
     assert manager.load().nvidia["max_tokens"] == budget
 

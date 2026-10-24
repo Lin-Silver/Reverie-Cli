@@ -10,6 +10,7 @@ from . import (
     glm_53_flash,
     gpt_oss_20b,
     laguna_xs_21,
+    minimax_m3_1_flash,
     muse_glimmer,
     nemotron_3_super,
     nemotron_3_ultra,
@@ -24,6 +25,7 @@ ProfileBuilder = Callable[[Dict[str, Any]], Dict[str, Any]]
 _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
     "deepseek-ai/deepseek-v4.1-flash": deepseek_v41_flash.build_openai_options,
     "z-ai/glm-5.3-flash": glm_53_flash.build_openai_options,
+    "minimaxai/minimax-m3.1-flash": minimax_m3_1_flash.build_openai_options,
     "meta/muse-glimmer-30b": muse_glimmer.build_openai_options,
     "nvidia/nemotron-3.5-lightning-30b-a3b": nemotron_35_lightning.build_openai_options,
     "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,

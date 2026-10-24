@@ -119,6 +119,13 @@ NVIDIA_REASONING_LOW_MEDIUM_HIGH_OPTIONS = (
     _thinking_option("medium", "Medium", "Balanced reasoning depth."),
     _thinking_option("high", "High", "Detailed step-by-step reasoning."),
 )
+NVIDIA_MINIMAX_M31_REASONING_OPTIONS = (
+    _thinking_option("low", "Low", "Use a shorter reasoning trace."),
+    _thinking_option("medium", "Medium", "Use a balanced reasoning depth."),
+    _thinking_option("high", "High", "Use a detailed reasoning trace."),
+    _thinking_option("xhigh", "XHigh", "Use an extra-high reasoning allocation."),
+    _thinking_option("max", "Max", "Use the model's maximum reasoning effort."),
+)
 NVIDIA_REASONING_ALL_OPTIONS = (
     _thinking_option("none", "Non-think", "Disable reasoning tokens."),
     _thinking_option("minimal", "Minimal", "Use the smallest reasoning allocation."),
@@ -264,6 +271,21 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         context_length=131_072,
         max_output_tokens=16_384,
         default_max_tokens=16_384,
+    ),
+    _openai_model(
+        "minimaxai/minimax-m3.1-flash",
+        "MiniMax M3.1 Flash",
+        "Multimodal OpenAI SDK transport with model-specific sampling, reasoning effort, and preserved reasoning history.",
+        vision=True,
+        thinking=True,
+        thinking_control="effort",
+        thinking_options=list(NVIDIA_MINIMAX_M31_REASONING_OPTIONS),
+        default_thinking_choice="high",
+        vision_modalities=["image", "video"],
+        context_length=262_144,
+        max_output_tokens=65_536,
+        default_max_tokens=65_536,
+        preserve_reasoning_history=True,
     ),
     _openai_model(
         "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -469,8 +491,8 @@ def normalize_nvidia_thinking_choice(model_id: Any, value: Any, default: Optiona
         "none": "none" if "none" in option_ids else fallback,
         "max": "max",
         "maximum": "max",
-        "extra high": "max",
-        "xhigh": "max",
+        "extra high": "xhigh" if "xhigh" in option_ids else "max",
+        "xhigh": "xhigh" if "xhigh" in option_ids else "max",
         "high": "high",
         "medium": "medium",
         "med": "medium",

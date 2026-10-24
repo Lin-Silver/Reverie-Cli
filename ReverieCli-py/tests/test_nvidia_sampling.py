@@ -19,6 +19,7 @@ from reverie.nvidia import (
 
 SAMPLING = {
     "meta/muse-glimmer-30b": (1.0, 0.95, {"top_k": 64}),
+    "minimaxai/minimax-m3.1-flash": (1.0, 0.95, {"chat_template_kwargs": {"reasoning_effort": "high"}}),
     "nvidia/nemotron-3.5-lightning-30b-a3b": (1.0, 0.95, {}),
     "nvidia/nemotron-3-super-120b-a12b": (1.0, 0.95, {}),
     "nvidia/nemotron-3-ultra-550b-a55b": (1.0, 0.95, {}),
@@ -115,7 +116,7 @@ def test_step_raw_request_sends_disabled_top_k_and_preserves_explicit_request_ov
     assert apply_nvidia_request_defaults({**payload, "max_tokens": 73}, config)["max_tokens"] == 73
 
 
-@pytest.mark.parametrize("model_id", ["meta/muse-glimmer-30b", "poolside/laguna-xs-2.1", "z-ai/glm-5.3-flash", SUPER_VL])
+@pytest.mark.parametrize("model_id", ["meta/muse-glimmer-30b", "minimaxai/minimax-m3.1-flash", "poolside/laguna-xs-2.1", "z-ai/glm-5.3-flash", SUPER_VL])
 @pytest.mark.parametrize("stream", [False, True])
 def test_agent_serializes_recommended_sampling_through_actual_sdk(monkeypatch, tmp_path, model_id, stream):
     config = Config.from_dict({"active_model_source": "nvidia", "nvidia": {"selected_model_id": model_id, "api_key": "test"}})

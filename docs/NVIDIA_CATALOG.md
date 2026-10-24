@@ -1,12 +1,13 @@
 # NVIDIA offline catalog
 
-Refreshed on 2026-10-16. This is a curated catalog for general assistance, coding, and tool use. The CLI and desktop obtain the same bundled list from `reverie/nvidia.py`; opening it does not require an inventory request.
+Refreshed on 2026-10-23. This is a curated catalog for general assistance, coding, and tool use. The CLI and desktop obtain the same bundled list from `reverie/nvidia.py`; opening it does not require an inventory request.
 
 ## Current models
 
 | Hosted model ID | Context tokens | Thinking controls | Default output budget |
 | --- | ---: | --- | ---: |
 | `meta/muse-glimmer-30b` | 131,072 | none / minimal / low / medium / high / max | 16,384 |
+| `minimaxai/minimax-m3.1-flash` | 262,144 | low / medium / high / xhigh / max | 65,536 |
 | `nvidia/nemotron-3.5-lightning-30b-a3b` | 1,048,576 | on / off | 16,384 |
 | `nvidia/nemotron-3-super-120b-a12b` | 1,000,000 | none / low / high | Full remaining context |
 | `nvidia/nemotron-3-ultra-550b-a55b` | 1,000,000 | Fixed reasoning | 16,384 |
@@ -21,11 +22,12 @@ Generation budgets include reasoning where the provider counts it. Reverie reser
 
 ## Model-specific sampling
 
-Sampling was checked against the publishers' Hugging Face model cards and generation configurations on 2026-10-16, rather than copying the Build playground's example slider values. These are author-recommended defaults for general/agentic use, not a claim that a single preset is optimal for every task. Only the NVIDIA source uses these profiles.
+Sampling was checked against publishers' Hugging Face model cards, generation configurations, and NVIDIA API references on 2026-10-23, rather than copying Build playground slider values where a model-specific recommendation is documented. These are author-recommended defaults for general/agentic use, not a claim that a single preset is optimal for every task. Only the NVIDIA source uses these profiles.
 
 | Hosted model | Temperature | Top-p | Additional sampling | Official source |
 | --- | ---: | ---: | --- | --- |
 | Muse Glimmer 30B | 1.0 | 0.95 | `top_k=64` | [Meta best practices](https://huggingface.co/meta-models/Muse-Glimmer-30B#best-practices) |
+| MiniMax M3.1 Flash | 1.0 | 0.95 | `chat_template_kwargs.reasoning_effort` | [NVIDIA inference reference](https://docs.api.nvidia.com/nim/reference/minimaxai-minimax-m3-1-flash-infer) |
 | Nemotron 3.5 Lightning | 1.0 | 0.95 | Provider defaults | [NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) |
 | Nemotron 3 Super | 1.0 | 0.95 | Provider defaults | [NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16) |
 | Nemotron 3 Ultra | 1.0 | 0.95 | Provider defaults | [NVIDIA generation config](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16/blob/main/generation_config.json) |
@@ -48,15 +50,16 @@ The [sampling verification record](verification/2026-10-16-nvidia-sampling.json)
 
 ## Hosted request profiles
 
-The five additions use dedicated profiles:
+Models with dedicated request profiles:
 
+- [MiniMax M3.1 Flash](https://build.nvidia.com/minimaxai/minimax-m3.1-flash): text, image, and video input; SDK transport; temperature 1.0 and top-p 0.95. Its reasoning level is sent through `chat_template_kwargs.reasoning_effort`, and prior assistant reasoning is preserved for tool follow-ups. NVIDIA's hosted catalog advertises 262K context and the inference reference caps output at 65,536 tokens; the model card describes up to 1M depending on serving configuration.
 - [Nemotron 3.5 Super VL](https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b): text, image, and video input; SDK transport; native `reasoning_effort`. The hosted Build page advertises 262K context, while the architecture card describes up to 1M depending on deployment. The bundled value uses the hosted page's smaller window. Its [inference reference](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3_5-super-vl-120b-a12b-infer) caps generated output at 131,072 tokens.
 - [DeepSeek V4.1 Flash](https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash): text and image input; SDK transport; temperature 1.0 and top-p 0.95. The default budget follows the official 262,144-token example, as requested. The hosted example and inference schema do not expose the old V4 `thinking` / string `reasoning_effort` template configuration, so those fields are omitted.
 - [GLM 5.3 Flash](https://docs.api.nvidia.com/nim/reference/z-ai-glm-5-3-flash): text and image input; SDK transport; native `reasoning_effort`, with `chat_template_kwargs.clear_thinking=true`. Sampling follows the publisher's generation config: temperature 1.0 and top-p 0.95.
 - [Step 5 Preview](https://docs.api.nvidia.com/nim/reference/stepfun-ai-step-5-preview-infer): text and image input; request transport; publisher-recommended temperature 1.0, top-p 0.95, and disabled top-k; fixed reasoning. Assistant `reasoning_content` is retained when continuing a tool conversation. Video and audio are not advertised as supported inputs.
 - [GPT-OSS-20B](https://docs.api.nvidia.com/nim/reference/openai-gpt-oss-20b-infer): text input; SDK transport; temperature 1.0 and top-p 1.0. Output is capped at the documented hosted limit of 4,096 tokens, rather than using the context window as an output budget.
 
-GLM 5.3's non-Flash endpoint is already marked for deprecation on the official catalog, so it is not added to this curated refresh. Kimi K2.6 still appears in `/v1/models`, but an authenticated inference request returned HTTP 404; inventory presence alone does not establish availability.
+GLM-5.3's non-Flash endpoint is marked for deprecation on NVIDIA's model catalog, so `z-ai/glm-5.3` is excluded from the built-in list. GLM-5.3 Flash is a separate endpoint and remains listed while NVIDIA continues to mark it available. Kimi K2.6 still appears in `/v1/models`, but an authenticated inference request returned HTTP 404; inventory presence alone does not establish availability.
 
 DeepSeek V4.1 Flash and GLM 5.3 Flash remain selectable, as requested, with this note in both the CLI and desktop model descriptions: “NVIDIA 可能尚未针对该模型进行多并发调用优化；本次验证多次超时。” The concurrency explanation is a possibility, not a confirmed diagnosis. The observed result is repeated request timeouts.
 

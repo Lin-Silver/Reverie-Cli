@@ -22,7 +22,7 @@ _EXPLICIT_SKILL_RE = re.compile(r"(?<![A-Za-z0-9_.-])\$([A-Za-z0-9][A-Za-z0-9._-
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{1,}")
 _SKILL_SCAN_SKIP_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv"}
 _SKILL_METADATA_RELATIVE_PATH = Path("agents") / "openai.yaml"
-_DEFAULT_SKILL_METADATA_CHAR_BUDGET = 8_000
+_DEFAULT_SKILL_METADATA_CHAR_BUDGET = 8_192
 _MAX_PINNED_SKILLS = 4
 _SKILL_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "into", "your", "when", "use", "using",
@@ -43,6 +43,11 @@ def _same_path(left: Path, right: Path) -> bool:
     return os.path.normcase(str(left.resolve(strict=False))) == os.path.normcase(
         str(right.resolve(strict=False))
     )
+
+
+def _path_identity(path: Path) -> str:
+    """Return a normalized identity for fast de-duplication of existing paths."""
+    return os.path.normcase(str(path.resolve(strict=False)))
 
 
 def _stable_json_signature(payload: Any) -> str:
@@ -344,15 +349,16 @@ class SkillsManager:
         roots = self._build_root_candidates()
         records: list[SkillRecord] = []
         errors: list[SkillError] = []
-        seen_skill_paths: list[Path] = []
+        seen_skill_paths: set[str] = set()
 
         for root in roots:
             if not root.path.is_dir():
                 continue
             for skill_md in self._iter_skill_files(root.path):
-                if any(_same_path(skill_md, seen) for seen in seen_skill_paths):
+                path_identity = _path_identity(skill_md)
+                if path_identity in seen_skill_paths:
                     continue
-                seen_skill_paths.append(skill_md)
+                seen_skill_paths.add(path_identity)
                 record, error = self._load_skill(skill_md, root)
                 if record is not None and self._skill_visible_in_active_mode(record):
                     records.append(record)
@@ -502,7 +508,7 @@ class SkillsManager:
     def _iter_skill_files(self, root_path: Path) -> list[Path]:
         """Return candidate SKILL.md files from one root, recursively."""
         skill_files: list[Path] = []
-        seen: list[Path] = []
+        seen: set[str] = set()
 
         for dirpath, dirnames, filenames in os.walk(root_path):
             dirnames[:] = [name for name in dirnames if name not in _SKILL_SCAN_SKIP_DIRS]
@@ -511,9 +517,10 @@ class SkillsManager:
             candidate = Path(dirpath) / "SKILL.md"
             if not candidate.is_file():
                 continue
-            if any(_same_path(candidate, discovered) for discovered in seen):
+            path_identity = _path_identity(candidate)
+            if path_identity in seen:
                 continue
-            seen.append(candidate)
+            seen.add(path_identity)
             skill_files.append(candidate)
             # A discovered Skill directory is a package boundary. Its nested
             # references must not become separate Skills during discovery.

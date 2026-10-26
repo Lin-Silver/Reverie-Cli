@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from reverie.skills_manager import SkillsManager
+from reverie.skills_manager import SkillRoot, SkillsManager
 from reverie.tools.registry import get_tool_classes_for_mode
 from reverie.tools.skill_lookup import SkillLookupTool
 
@@ -150,3 +150,52 @@ def test_skill_resources_are_chunked_and_confined_to_package(tmp_path, monkeypat
                             resource_path="../../skills_manager.py").success
     assert not tool.execute(operation="read_resource", skill_name="reverse-skill",
                             resource_path=str(manager.get_record("reverse-skill").path_to_skill_md)).success
+
+
+def test_skill_discovery_uses_bounded_path_identity_checks(tmp_path, monkeypatch):
+    root_path = tmp_path / "skills"
+    for index in range(40):
+        skill = root_path / f"skill-{index:02d}"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: skill-{index:02d}\ndescription: Test skill.\n---\n\nInstructions.\n",
+            encoding="utf-8",
+        )
+
+    manager = SkillsManager(tmp_path / "workspace", tmp_path / "app")
+    monkeypatch.setattr(
+        manager,
+        "_build_root_candidates",
+        lambda: (SkillRoot("workspace", "skills", root_path, 0),),
+    )
+    samefile_calls = 0
+    original_samefile = Path.samefile
+
+    def count_samefile(path: Path, other: Path) -> bool:
+        nonlocal samefile_calls
+        samefile_calls += 1
+        return original_samefile(path, other)
+
+    monkeypatch.setattr(Path, "samefile", count_samefile)
+    snapshot = manager.scan()
+
+    assert snapshot.skill_count == 40
+    assert samefile_calls < 40
+
+
+def test_skill_discovery_deduplicates_overlapping_roots(tmp_path, monkeypatch):
+    skill_dir = tmp_path / "skills" / "sample"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: sample\ndescription: Sample skill.\n---\n\nInstructions.\n",
+        encoding="utf-8",
+    )
+    outer_root = SkillRoot("workspace", "outer", skill_dir.parent, 0)
+    inner_root = SkillRoot("app", "inner", skill_dir, 1)
+    manager = SkillsManager(tmp_path / "workspace", tmp_path / "app")
+    monkeypatch.setattr(manager, "_build_root_candidates", lambda: (outer_root, inner_root))
+
+    snapshot = manager.scan()
+
+    assert [record.name for record in snapshot.records] == ["sample"]
+    assert snapshot.records[0].root == outer_root

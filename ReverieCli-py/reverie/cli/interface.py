@@ -1356,29 +1356,18 @@ class ReverieInterface:
         summaries: List[str] = []
         errors: List[str] = []
 
-        def scan_skills() -> str:
-            return self.skills_manager.scan().summary_label()
-
         def scan_plugins() -> str:
             return self.runtime_plugin_manager.scan().summary_label()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="reverie-startup") as executor:
-            futures = {
-                executor.submit(scan_skills): "skills",
-                executor.submit(scan_plugins): "plugins",
-            }
-            for future in concurrent.futures.as_completed(futures):
-                label = futures[future]
-                try:
-                    summaries.append(f"{label}: {future.result()}")
-                except Exception as exc:
-                    errors.append(f"{label}: {exc}")
+        try:
+            summaries.append(f"plugins: {scan_plugins()}")
+        except Exception as exc:
+            errors.append(f"plugins: {exc}")
 
-        if not errors:
-            try:
-                summaries.append(f"plugin skills: {self.skills_manager.scan().summary_label()}")
-            except Exception as exc:
-                errors.append(f"plugin skills: {exc}")
+        try:
+            summaries.append(f"plugin skills: {self.skills_manager.scan().summary_label()}")
+        except Exception as exc:
+            errors.append(f"plugin skills: {exc}")
 
         self._startup_discovery_ready = True
         if errors:

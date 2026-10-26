@@ -260,8 +260,31 @@ def test_first_paint_rules_skip_expensive_harness_enrichment(monkeypatch, tmp_pa
     assert "## Plugins" in rules
 
 
-def test_startup_discovery_warms_skills_for_active_mode() -> None:
-    scanned_modes: list[str] = []
+def test_startup_discovery_scans_plugins_before_skills_once(monkeypatch) -> None:
+    scan_order: list[str] = []
+
+    class ImmediateFuture:
+        def __init__(self, value) -> None:
+            self.value = value
+
+        def result(self):
+            return self.value
+
+    class ImmediateExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def submit(self, callback):
+            return ImmediateFuture(callback())
+
+    monkeypatch.setattr(interface_module.concurrent.futures, "ThreadPoolExecutor", ImmediateExecutor)
+    monkeypatch.setattr(interface_module.concurrent.futures, "as_completed", lambda futures: futures)
 
     class Skills:
         active_mode = "reverie"
@@ -270,17 +293,22 @@ def test_startup_discovery_warms_skills_for_active_mode() -> None:
             self.active_mode = mode
 
         def scan(self):
-            scanned_modes.append(self.active_mode)
+            assert scan_order == ["plugins"]
+            scan_order.append("skills")
             return SimpleNamespace(summary_label=lambda: "1 skill")
+
+    def scan_plugins():
+        scan_order.append("plugins")
+        return SimpleNamespace(summary_label=lambda: "1 plugin")
 
     interface = SimpleNamespace(
         _startup_discovery_ready=False,
         skills_manager=Skills(),
-        runtime_plugin_manager=SimpleNamespace(scan=lambda: SimpleNamespace(summary_label=lambda: "1 plugin")),
+        runtime_plugin_manager=SimpleNamespace(scan=scan_plugins),
         _load_active_runtime_config=lambda: SimpleNamespace(mode="reverie"),
         _show_activity_event=lambda *args, **kwargs: None,
     )
 
     ReverieInterface._warm_startup_discovery(interface, config=SimpleNamespace(mode="writer"))
-    assert scanned_modes
-    assert set(scanned_modes) == {"writer"}
+    assert scan_order == ["plugins", "skills"]
+    assert interface.skills_manager.active_mode == "writer"

@@ -10,7 +10,7 @@ from reverie.cli.input_handler import InputHandler
 from reverie.cli.theme import DECO, THEME
 from reverie.session.manager import SessionManager
 from reverie.sdk_bridge import ReverieSdkBridge
-from reverie.skills_manager import SkillsManager
+from reverie.skills_manager import SkillRoot, SkillsManager
 from reverie.tools.skill_lookup import SkillLookupTool
 
 
@@ -32,6 +32,9 @@ def _manager(tmp_path: Path, *skills: tuple[str, str]) -> SkillsManager:
     for name, description in skills:
         _write_skill(skills_root, name, description)
     manager = SkillsManager(project_root=project_root, app_root=app_root)
+    manager._build_root_candidates = lambda: (
+        SkillRoot("workspace", ".agents/skills", skills_root, 0),
+    )
     manager.scan()
     return manager
 

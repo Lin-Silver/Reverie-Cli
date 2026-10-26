@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/elayadesign/ai-design-skills",
+  "revision": "a2735a3eaf092eaaffb6dc17df25de33ef3bd048",
+  "imported": "2026-10-26",
+  "license": "MIT",
+  "license_file": "ELAYA_LICENSE",
+  "adaptation": "Unmodified upstream skill files and license. Reverie discovers and loads them through skill_lookup.",
+  "files": {
+    "design-to-motion/SKILL.md": "87f62a4fe2396190dfd096d758ee2bf2b294c68650d695f3c8334283f85a57b7",
+    "landing-page-design/SKILL.md": "9bb434133ef964b31d2bf18973e12e8d0ed5e346b09897adc00fafb3fcc3aabf",
+    "ELAYA_LICENSE": "720ed124a9c2010417a60d15ff77313b165526f447d51033af3b5daa0f47ffdd"
+  }
+}

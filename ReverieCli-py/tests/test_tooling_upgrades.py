@@ -1329,9 +1329,9 @@ def test_local_build_scripts_bundle_embedded_chromium() -> None:
 
 
 def test_desktop_build_scripts_survive_unavailable_user_proxy() -> None:
-    repo_root = Path(__file__).resolve().parents[2] / "ReverieCli-ui"
+    repo_root = Path(__file__).resolve().parents[2]
     build_bat = (repo_root / "build.bat").read_text(encoding="utf-8", errors="replace")
-    build_sh = (repo_root / "build.sh").read_text(encoding="utf-8")
+    build_sh = (repo_root / "ReverieCli-ui" / "build.sh").read_text(encoding="utf-8")
 
     assert "npm ci --userconfig=NUL" in build_bat
     assert "npm ci --userconfig=/dev/null" in build_sh

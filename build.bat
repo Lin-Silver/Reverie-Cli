@@ -10,8 +10,8 @@ shift
 goto parse_args
 :args_done
 
-for %%I in ("%~dp0.") do set "UI_ROOT=%%~fI"
-for %%I in ("%UI_ROOT%\..") do set "REPO_ROOT=%%~fI"
+for %%I in ("%~dp0.") do set "REPO_ROOT=%%~fI"
+set "UI_ROOT=%REPO_ROOT%\ReverieCli-ui"
 
 where node >nul 2>&1 || (echo [ERROR] Node.js is required. & exit /b 1)
 where npm >nul 2>&1 || (echo [ERROR] npm is required. & exit /b 1)

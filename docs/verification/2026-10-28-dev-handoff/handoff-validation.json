@@ -63,7 +63,7 @@
   "publication_status": "prepared; remote confirmation is required after push",
   "documentation_check": {
     "documents": 48,
-    "local_links": 971,
+    "local_links": 972,
     "errors": [],
     "local_artifact_references": 126
   },
@@ -92,5 +92,19 @@
   "evidence_byte_identity": {
     "files_verified": 79,
     "passed": true
+  },
+  "first_remote_clone": {
+    "commit": "d81b1f1d2452728793771a6e34f809ae0b01fc54",
+    "content_manifest_verified": 275,
+    "evidence_copies_verified": 79,
+    "documentation_errors": 2,
+    "cause": "Two existing linked v6 .log files were excluded by the repository-wide *.log rule.",
+    "correction": "Force-track both original logs without modifying their contents.",
+    "preserved_report": "docs/verification/2026-10-28-dev-handoff/first-remote-clone-check.json",
+    "final_remote_recheck": "Must be performed after this corrective commit; its result is reported in delivery."
+  },
+  "force_tracked_log_credential_scan": {
+    "files": 2,
+    "known_token_pattern_hits": 0
   }
 }

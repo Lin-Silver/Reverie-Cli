@@ -3,14 +3,14 @@
   "repository": "Lin-Silver/Reverie-Cli",
   "branch": "dev",
   "base_commit": "350c5baaed1b41f399ca09e01b912a4f81eaa80e",
-  "status": "pre-commit content manifest; actual commit and push are confirmed separately",
+  "status": "pre-commit content manifest; actual final commit and push are confirmed separately",
   "excluded_self": "docs/verification/2026-10-28-dev-handoff/publication-manifest.json",
-  "changed_paths_including_manifest": 276,
+  "changed_paths_including_manifest": 279,
   "files": [
     {
       "path": ".gitattributes",
-      "bytes": 226,
-      "sha256": "e39258740dd7ff683ef25fc2926e8016df569f1f3ab32508f251782e2997ee54"
+      "bytes": 296,
+      "sha256": "7ec115ab4d39a7bf6c09c843f1f63908ddc07529b871a6bd8849840999bfe017"
     },
     {
       "path": ".github/workflows/verify-riu-packages.yml",
@@ -848,6 +848,16 @@
       "sha256": "674dbbad1a0a7edd21b79b8a51adb1904aa94eb171603300efafe0f39668a9f5"
     },
     {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v6-desktop.log",
+      "bytes": 2043,
+      "sha256": "f3c62745aedc6ebffdae60ba70ee433e3dcf43dc395afc7220bbf852feea742f"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v6-llama-server.log",
+      "bytes": 1925,
+      "sha256": "3013e923f067bf67bb3b97b6c15ab4bbb8050cee3ce6a55896399ee8de2771a0"
+    },
+    {
       "path": "docs/verification/2026-10-27-static-rich-routing/v7-report.json",
       "bytes": 1289,
       "sha256": "7a9ae4f2009e968b660e4ba7a8e980a99020d71cc7773ad69f78cb32cb3a124d"
@@ -864,8 +874,8 @@
     },
     {
       "path": "docs/verification/2026-10-28-dev-handoff/README.md",
-      "bytes": 1905,
-      "sha256": "c987716c437f190c4e5c3ca1d4cf1b340c48fb5a50eb69cb49a8d9dc40519786"
+      "bytes": 2214,
+      "sha256": "6810f4d83fc27d7c4090ffbdb8eff570f45da31d121800c0622e61c285511f6f"
     },
     {
       "path": "docs/verification/2026-10-28-dev-handoff/check-launcher-shell-syntax.txt",
@@ -1288,19 +1298,24 @@
       "sha256": "e2861dbf17c9cb74d57668ceaa0ec8111c014cd26d10d2d0dffdf37188dac690"
     },
     {
+      "path": "docs/verification/2026-10-28-dev-handoff/first-remote-clone-check.json",
+      "bytes": 29029,
+      "sha256": "c8f1ccf8f018dab0300dff66d2f0666c18d34b9bdd832163c6b0dd922f72845b"
+    },
+    {
       "path": "docs/verification/2026-10-28-dev-handoff/goal-before-handoff.json",
       "bytes": 126401,
       "sha256": "842eef614a1a5797b5f848465bb6390ccf824f2c907b8d14814857a2ae605932"
     },
     {
       "path": "docs/verification/2026-10-28-dev-handoff/goal.json",
-      "bytes": 129356,
-      "sha256": "39a65a7f05d4f4dbce50395e6b28a6e2500bf745c5f2b2620a79a07986b39589"
+      "bytes": 129423,
+      "sha256": "573f7d449b601df4e171a11b401e46b654af71225e1e15112f8270ffc725173c"
     },
     {
       "path": "docs/verification/2026-10-28-dev-handoff/handoff-validation.json",
-      "bytes": 3098,
-      "sha256": "7c95628948ed772c546aa5fd4e6e556ffe955d8a2f7003d64d038a23674e246c"
+      "bytes": 3785,
+      "sha256": "4d2603ffbaf3c4076698e7f99d95bf396d1f8a84a9131d3068e889968f4d5bd5"
     },
     {
       "path": "scripts/verification/desktop_process.py",

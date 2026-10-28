@@ -2139,7 +2139,7 @@
       "typecheck": "passed",
       "package_launcher": "3/3 passed",
       "shell_syntax": "passed",
-      "docs_links": "971 checked / 0 errors",
+      "docs_links": "972 checked / 0 errors; first clone exposed two ignored logs, both now explicitly tracked",
       "python_full_suite": "not rerun; pytest unavailable; historical results kept separate"
     }
   }

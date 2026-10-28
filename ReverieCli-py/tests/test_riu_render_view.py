@@ -185,6 +185,49 @@ def test_storage_examples_outside_executable_scripts_do_not_warn(tmp_path, body)
     assert not result.data.get("authoring_warnings")
 
 
+def test_controls_without_host_integration_get_advice_without_html_rewriting(tmp_path):
+    agent, store, workspace = _FakeAgent(), _store(tmp_path), _workspace(tmp_path)
+    agent.runtime_surface = 'desktop'
+    html = '<label>Value<input value="2"></label><script>const PRIVATE_HTML_SENTINEL=2;</script>'
+    _artifact(workspace, body=html)
+    result = _tool(agent=agent, store=store, workspace=workspace).execute(artifact_path='chart.html', title='t', summary='s')
+    assert result.success
+    assert any('initialization' in w for w in result.data['authoring_warnings'])
+    assert any('reverie/view-state' in w for w in result.data['authoring_warnings'])
+    assert 'PRIVATE_HTML_SENTINEL' not in result.output
+    entry, _ = store.resolve_entry('sess-1', result.data['view']['view_id'], 1)
+    assert entry.read_text() == html
+
+
+def test_host_api_markers_are_advisory_and_do_not_claim_runtime_validation(tmp_path):
+    agent, store, workspace = _FakeAgent(), _store(tmp_path), _workspace(tmp_path)
+    agent.runtime_surface = 'desktop'
+    _artifact(workspace, body='<input><script>/* ui/initialize reverie/view-state capability */</script>')
+    result = _tool(agent=agent, store=store, workspace=workspace).execute(artifact_path='chart.html', title='t', summary='s')
+    assert result.success
+    assert not result.data.get('authoring_warnings')
+
+
+@pytest.mark.parametrize('script', [
+    '/* ui/initialize reverie/view-state */',
+    "parent.postMessage({method:'ui/initialize',capability:''},'*'); /* reverie/view-state */",
+])
+def test_host_capability_advice_preserves_registered_model_bytes(tmp_path, script):
+    agent = _FakeAgent()
+    agent.runtime_surface = 'desktop'
+    workspace, store = _workspace(tmp_path), _store(tmp_path)
+    html = '<input><script>' + script + '</script>'
+    _artifact(workspace, body=html)
+    result = _tool(agent=agent, store=store, workspace=workspace).execute(
+        artifact_path='chart.html', title='t', summary='s')
+    assert result.success
+    assert any('capability' in warning for warning in result.data.get('authoring_warnings', []))
+    view = result.data['view']
+    path, _ = store.resolve_entry('sess-1', view['view_id'], view['revision'])
+    assert path.read_text() == html
+    assert 'runtime verified' not in result.output
+
+
 def test_identity_is_kernel_bound_not_model_arguments(tmp_path):
     agent = _FakeAgent(session_id="sess-1")
     store = _store(tmp_path)

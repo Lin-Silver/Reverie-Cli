@@ -158,7 +158,7 @@ export interface RenderViewResult {
 // here; the authoritative title/summary/url still come from getView.
 const RENDER_VIEW_HANDLE = /view_id=([^,)\s]+),\s*revision=(\d+)/;
 const RENDER_VIEW_TITLE = /Interactive view ready:\s*"([^"]*)"/;
-const RENDER_VIEW_SUMMARY = /Summary:\s*([\s\S]+)/;
+const RENDER_VIEW_SUMMARY = /Summary:\s*([\s\S]+?)(?=\r?\nAuthoring warnings:|$)/;
 
 /** Lift the opaque handle out of a stored render_view tool-result text, or return
  *  null for a failure line, arbitrary prose, or a non-string. Pure; reads no HTML

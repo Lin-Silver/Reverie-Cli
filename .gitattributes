@@ -1,0 +1,4 @@
+
+# Keep copied RIU evidence logs byte-identical, including their original whitespace.
+docs/verification/2026-10-28-dev-handoff/evidence/**/*.log.txt -whitespace
+docs/verification/2026-10-28-dev-handoff/check-*.txt -whitespace

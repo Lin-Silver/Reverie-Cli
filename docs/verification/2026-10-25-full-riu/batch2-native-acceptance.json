@@ -1,0 +1,48 @@
+{
+  "scope": "Shared batch2 deterministic acceptance; zero real model quality samples; single primary P4 run.",
+  "passed": true,
+  "stages": [
+    {
+      "name": "artifacts",
+      "exit_code": 0,
+      "seconds": 1.0007941600051709
+    },
+    {
+      "name": "p2",
+      "exit_code": 0,
+      "seconds": 16.357033200998558
+    },
+    {
+      "name": "p3",
+      "exit_code": 0,
+      "seconds": 21.306071637998684
+    },
+    {
+      "name": "isolation",
+      "exit_code": 0,
+      "seconds": 5.33760401699692
+    },
+    {
+      "name": "rich-native",
+      "exit_code": 0,
+      "seconds": 4.665934712000308
+    },
+    {
+      "name": "same-real-profile-geometry",
+      "exit_code": 0,
+      "seconds": 34.289954376989044
+    },
+    {
+      "name": "p4",
+      "exit_code": 0,
+      "seconds": 114.37712151400046
+    }
+  ],
+  "build": {
+    "version": "2.5.0",
+    "id": "85ab811e5ef12ec9",
+    "builtAt": "2026-10-25T06:35:47.921Z",
+    "platform": "linux",
+    "arch": "x64"
+  }
+}

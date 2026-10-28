@@ -1,0 +1,1 @@
+bwrap: Can't find source path /tmp/riu-deb-bwrap-install-upgrade-20261027/root/usr/share/icons/hicolor: No such file or directory

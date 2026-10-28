@@ -207,7 +207,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed !important; }
 .message-label { padding-top: 3px; font-size: var(--font-small); font-weight: 650; color: var(--muted); text-align: right; }
 .message.assistant .message-label { color: var(--accent); }
 .message-body { min-width: 0; font-size: var(--font-ui); line-height: 1.72; color: #dcdee3; }
-.user-text { white-space: pre-wrap; color: var(--text); line-height: 1.65; }
+.user-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); line-height: 1.65; }
 .markdown { min-width: 0; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }

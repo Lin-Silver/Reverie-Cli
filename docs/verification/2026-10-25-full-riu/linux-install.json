@@ -1,0 +1,125 @@
+{
+  "scope": "Install, upgrade and remove real debs in an explicitly disposable container.",
+  "upgrade_kind": "same-version distinct native-build upgrade",
+  "model_quality_samples": 0,
+  "stages": [
+    {
+      "name": "install-baseline",
+      "exit_code": 0,
+      "seconds": 9.284013725991827
+    },
+    {
+      "name": "baseline-native",
+      "exit_code": 0,
+      "seconds": 6.716071682996699
+    },
+    {
+      "name": "upgrade-current",
+      "exit_code": 0,
+      "seconds": 10.726976413992816
+    },
+    {
+      "name": "current-native",
+      "exit_code": 0,
+      "seconds": 3.4806674910068978
+    },
+    {
+      "name": "current-rich",
+      "exit_code": 0,
+      "seconds": 4.951570303994231
+    },
+    {
+      "name": "uninstall",
+      "exit_code": 0,
+      "seconds": 0.19375083800696302
+    }
+  ],
+  "checks": [
+    {
+      "name": "baseline-package-identity",
+      "passed": true,
+      "detail": "Package: reverie\nVersion: 2.5.0\nArchitecture: amd64\n"
+    },
+    {
+      "name": "current-package-identity",
+      "passed": true,
+      "detail": "Package: reverie\nVersion: 2.5.0\nArchitecture: amd64\n"
+    },
+    {
+      "name": "distinct-native-builds",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-installed-hash-ReverieUI",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-installed-hash-reverie",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-installed-hash-resources/app.asar",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-restores-real-native-view",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-installed-hash-ReverieUI",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-installed-hash-reverie",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-installed-hash-resources/app.asar",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "upgraded-native-state-preservation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "installed-rich-markdown-renderer",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "dpkg-uninstall",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "program-and-launchers-removed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "uninstall-preserves-user-profile",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "passed": true,
+  "debs": {
+    "baseline": {
+      "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/installers-baseline-8fae-fixed-v2/Reverie-2.5.0-linux-x64.deb",
+      "sha256": "48183fded3e3e0f80e2416e5e9c3a39dac3cfc8838064b44ff65fdbb3ce42a8a"
+    },
+    "current": {
+      "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/installers-format-v2-fixed/Reverie-2.5.0-linux-x64.deb",
+      "sha256": "0a86da33087de14e5afd073a6f0b658a68198e61a8f737e0a0757e22a8da55af"
+    }
+  }
+}

@@ -84,6 +84,67 @@ def test_openai_call_retries_once_without_cache_hint_on_400() -> None:
     assert "prompt_cache_key" not in calls[1]
 
 
+def test_agent_remembers_http_cache_rejection_without_changing_tools(tmp_path, monkeypatch):
+    import requests
+    from reverie.agent import agent as module
+
+    agent = ReverieAgent(
+        base_url="https://example.test/v1/chat/completions", api_key="", model="gpt-5.6",
+        project_root=tmp_path, provider="request",
+    )
+    calls = []
+
+    def post(url, **kwargs):
+        payload = kwargs['json']
+        calls.append(payload)
+        response = requests.Response()
+        response.status_code = 400 if 'cache_prompt' in payload else 200
+        response._content = b'{"message":"feature extra arguments: cache_prompt is not currently supported"}'
+        return response
+
+    monkeypatch.setattr(module, 'provider_post', post)
+    for question in ['first', 'follow-up']:
+        payload = agent._prepare_request_payload(_openai_payload(question))
+        agent._make_direct_request(payload, stream=False)
+    assert len(calls) == 3
+    assert 'cache_prompt' in calls[0]
+    assert all('cache_prompt' not in call and 'prompt_cache_key' not in call for call in calls[1:])
+    assert all(call['tools'] == _openai_payload('')['tools'] for call in calls)
+    assert calls[-1]['messages'][-1]['content'] == 'follow-up'
+
+    for change in ['model', 'base_url', 'api_key', 'custom_headers', 'provider']:
+        old = getattr(agent, change)
+        setattr(agent, change, {'X-Test': 'changed'} if change == 'custom_headers' else str(old) + '-changed')
+        payload = {**_openai_payload('other scope'), 'model': agent.model}
+        assert 'cache_prompt' in agent._prepare_request_payload(payload), change
+        setattr(agent, change, old)
+
+
+def test_agent_remembers_sdk_cache_rejection_for_later_tool_steps(tmp_path):
+    agent = ReverieAgent(
+        base_url='https://example.test/v1', api_key='test', model='gpt-5.6',
+        project_root=tmp_path, provider='openai-chat',
+    )
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        if 'prompt_cache_key' in kwargs:
+            error = RuntimeError('unsupported prompt_cache_key')
+            error.status_code = 400
+            raise error
+        return 'ok'
+
+    agent._ensure_client = lambda: SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    for question in ['first', 'follow-up']:
+        assert agent._create_openai_chat_completion(**_openai_payload(question)) == 'ok'
+    assert len(calls) == 3
+    assert 'prompt_cache_key' in calls[0]
+    assert all('prompt_cache_key' not in call for call in calls[1:])
+    assert all(call['tools'] == _openai_payload('')['tools'] for call in calls)
+
+
 def test_non_cache_error_is_not_retried() -> None:
     calls = []
 

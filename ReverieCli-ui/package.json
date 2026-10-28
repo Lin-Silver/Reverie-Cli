@@ -24,7 +24,7 @@
     "test": "vitest run",
     "pack": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --dir",
     "dist:win": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --win nsis --x64 && node scripts/build-portable.mjs",
-    "dist:linux": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --linux AppImage deb --x64",
+    "dist:linux": "npm run build:kernel && npm run build && node scripts/package-validation.mjs --output release --targets AppImage,deb",
     "dist:mac": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --mac dmg"
   },
   "dependencies": {

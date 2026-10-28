@@ -1,0 +1,3465 @@
+{
+  "scope": "Native renderer calibration with authored fixtures; zero model-quality samples.",
+  "model_quality_samples": 0,
+  "checks": [
+    {
+      "name": "long-user-source-text-preserved",
+      "passed": true
+    },
+    {
+      "name": "rich-no-unfinished-or-raw-format",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "rich-contained-layout",
+      "passed": true,
+      "detail": {
+        "width": 862,
+        "scrollWidth": 862
+      }
+    },
+    {
+      "name": "rich-chat-contained-layout",
+      "passed": true,
+      "detail": {
+        "width": 1164,
+        "scrollWidth": 1164
+      }
+    },
+    {
+      "name": "rich-metric-values-and-labels",
+      "passed": true,
+      "detail": [
+        [
+          "计划中",
+          "7"
+        ],
+        [
+          "开发中",
+          "5"
+        ],
+        [
+          "已有成果",
+          "4"
+        ],
+        [
+          "半归档",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "rich-all-supplied-table-rows",
+      "passed": true,
+      "detail": [
+        {
+          "rows": [
+            [
+              "项目01",
+              "0",
+              "否"
+            ],
+            [
+              "项目02",
+              "1",
+              "是"
+            ]
+          ],
+          "headers": [
+            "项目",
+            "数量",
+            "完成"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rich-supplied-source-links",
+      "passed": true,
+      "detail": [
+        "https://example.com/"
+      ]
+    },
+    {
+      "name": "rich-ordinary-markdown-links",
+      "passed": true,
+      "detail": 1
+    },
+    {
+      "name": "rich-markdown-heading",
+      "passed": true,
+      "detail": [
+        "渲染校准"
+      ]
+    },
+    {
+      "name": "rich-markdown-emphasis",
+      "passed": true,
+      "detail": [
+        "零值与布尔值"
+      ]
+    },
+    {
+      "name": "rich-markdown-list",
+      "passed": true,
+      "detail": 2
+    },
+    {
+      "name": "rich-ordinary-code-preserved",
+      "passed": true,
+      "detail": [
+        "print(0)\n"
+      ]
+    },
+    {
+      "name": "reject-incorrect-gfm-table-data",
+      "passed": true
+    },
+    {
+      "name": "actual-text-contrast-dark",
+      "passed": true,
+      "detail": [
+        {
+          "text": "渲染校准",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "零值与布尔值",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "保留普通正文",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "保留普通链接",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目主页",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目主页",
+          "foreground": [
+            131,
+            183,
+            255
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 8.766399267625749,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "数量",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "完成",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 16.335541283470082,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目01",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 11.753131615091242,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "0",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 11.753131615091242,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "否",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 11.753131615091242,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目02",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 11.753131615091242,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "1",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 11.753131615091242,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "是",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            20.121568627450984,
+            22,
+            28
+          ],
+          "ratio": 11.753131615091242,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "print(0)\n",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            26,
+            27,
+            34
+          ],
+          "ratio": 11.155174796552993,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "计划中",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 9.298536466914333,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "7",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 12.92392796283273,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "开发中",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 9.298536466914333,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "5",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 12.92392796283273,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "已有成果",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 9.298536466914333,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "4",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 12.92392796283273,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "半归档",
+          "foreground": [
+            205,
+            208,
+            220
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 9.298536466914333,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "1",
+          "foreground": [
+            243,
+            243,
+            247
+          ],
+          "background": [
+            41,
+            42,
+            48
+          ],
+          "ratio": 12.92392796283273,
+          "minimum": 3,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "whole-chat-contained-dark-1280",
+      "passed": true,
+      "detail": {
+        "width": 1012,
+        "scrollWidth": 1012
+      }
+    },
+    {
+      "name": "contained-dark-1280",
+      "passed": true,
+      "detail": {
+        "width": 862,
+        "scrollWidth": 862
+      }
+    },
+    {
+      "name": "whole-chat-contained-dark-460",
+      "passed": true,
+      "detail": {
+        "width": 460,
+        "scrollWidth": 460
+      }
+    },
+    {
+      "name": "contained-dark-460",
+      "passed": true,
+      "detail": {
+        "width": 384,
+        "scrollWidth": 384
+      }
+    },
+    {
+      "name": "actual-text-contrast-light",
+      "passed": true,
+      "detail": [
+        {
+          "text": "渲染校准",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "零值与布尔值",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "保留普通正文",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "保留普通链接",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目主页",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目主页",
+          "foreground": [
+            29,
+            92,
+            159
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 6.4803994043603685,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "数量",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "完成",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 14.712859554795893,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目01",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 8.264919634117128,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "0",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 8.264919634117128,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "否",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 8.264919634117128,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "项目02",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 8.264919634117128,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "1",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 8.264919634117128,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "是",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            249,
+            249,
+            252
+          ],
+          "ratio": 8.264919634117128,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "print(0)\n",
+          "foreground": [
+            98,
+            71,
+            185
+          ],
+          "background": [
+            244,
+            245,
+            248
+          ],
+          "ratio": 6.1717069892418905,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "计划中",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 6.972933869133897,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "7",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 12.412921267613216,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "开发中",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 6.972933869133897,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "5",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 12.412921267613216,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "已有成果",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 6.972933869133897,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "4",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 12.412921267613216,
+          "minimum": 3,
+          "passed": true
+        },
+        {
+          "text": "半归档",
+          "foreground": [
+            70,
+            75,
+            91
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 6.972933869133897,
+          "minimum": 4.5,
+          "passed": true
+        },
+        {
+          "text": "1",
+          "foreground": [
+            34,
+            36,
+            45
+          ],
+          "background": [
+            230,
+            230,
+            233
+          ],
+          "ratio": 12.412921267613216,
+          "minimum": 3,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "whole-chat-contained-light-1280",
+      "passed": true,
+      "detail": {
+        "width": 1012,
+        "scrollWidth": 1012
+      }
+    },
+    {
+      "name": "contained-light-1280",
+      "passed": true,
+      "detail": {
+        "width": 862,
+        "scrollWidth": 862
+      }
+    },
+    {
+      "name": "whole-chat-contained-light-460",
+      "passed": true,
+      "detail": {
+        "width": 460,
+        "scrollWidth": 460
+      }
+    },
+    {
+      "name": "contained-light-460",
+      "passed": true,
+      "detail": {
+        "width": 384,
+        "scrollWidth": 384
+      }
+    },
+    {
+      "name": "literal-metric-numbers-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-one-line-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-responsive-columns-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-horizontal-accessible-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-spacing-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-table-data-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-table-number-one-line-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-card-text-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-image-renders-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-badge-renders-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-source-pill-renders-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-official-link-renders-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-card-responsive-contained-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "unsupported-fields-retain-source-dark-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-numbers-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-one-line-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-responsive-columns-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-horizontal-accessible-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-spacing-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-table-data-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-table-number-one-line-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-card-text-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-image-renders-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-badge-renders-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-source-pill-renders-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-official-link-renders-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-card-responsive-contained-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "unsupported-fields-retain-source-dark-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-numbers-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-one-line-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-responsive-columns-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-horizontal-accessible-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-spacing-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-table-data-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-table-number-one-line-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-card-text-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-image-renders-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-badge-renders-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-source-pill-renders-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-official-link-renders-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-card-responsive-contained-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "unsupported-fields-retain-source-light-1280",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 862,
+          "scrollWidth": 862,
+          "imageWidth": 336
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-numbers-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-one-line-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-responsive-columns-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-metric-horizontal-accessible-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-metric-spacing-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-table-data-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "long-table-number-one-line-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-card-text-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-image-renders-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-badge-renders-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-source-pill-renders-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-official-link-renders-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "recommendation-card-responsive-contained-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "unsupported-fields-retain-source-light-460",
+      "passed": true,
+      "detail": {
+        "metrics": [
+          "9007199254740993",
+          "1.2300"
+        ],
+        "metricValueLines": 1,
+        "metricColumns": 2,
+        "metricHorizontalAccess": true,
+        "label": "Record  ID\n编号",
+        "cells": [
+          "9007199254740993",
+          "0.1234567890123456789",
+          "ID  01\n第二行",
+          "否",
+          "—"
+        ],
+        "numericCellLines": 1,
+        "title": "Card  01\n第二行",
+        "description": "首段  双空格\n次段",
+        "image": {
+          "alt": "项目看板截图",
+          "complete": true,
+          "width": 320,
+          "objectFit": "contain",
+          "aspectRatio": "4 / 3"
+        },
+        "badge": "综合首选",
+        "badgeTone": "answer-badge answer-badge-success",
+        "sourceLabel": "社区来源",
+        "sourceHref": "https://example.com/source",
+        "officialLink": "官方网站",
+        "officialHref": "https://example.com/",
+        "cardDimensions": {
+          "width": 384,
+          "scrollWidth": 384,
+          "imageWidth": 148
+        },
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n",
+        "tableCount": 1
+      }
+    },
+    {
+      "name": "literal-data-after-reload",
+      "passed": true,
+      "detail": {
+        "number": "9007199254740993",
+        "original": "{\"type\":\"table\",\"columns\":[\"项目\"],\"rows\":[[\"保留的项目\"]],\"note\":\"尚有两项未完成\"}\n"
+      }
+    },
+    {
+      "name": "no-browser-errors",
+      "passed": true
+    }
+  ],
+  "captures": [
+    "dark-1280.png",
+    "dark-460.png",
+    "light-1280.png",
+    "light-460.png",
+    "literal-dark-1280.png",
+    "literal-chat-dark-1280.png",
+    "literal-dark-460.png",
+    "literal-chat-dark-460.png",
+    "literal-light-1280.png",
+    "literal-chat-light-1280.png",
+    "literal-light-460.png",
+    "literal-chat-light-460.png"
+  ],
+  "fixture_sha256": "d8ee91070f689387e7f27ceff135b0fbd2c43a6600435ec6bac55759063f41c5",
+  "literal_fixture_sha256": "c22632773ec761ea7d5857c9fe1d72f8a60af8ee4dbc9e9001502347494fc95e",
+  "browser_errors": [],
+  "build": {
+    "version": "2.5.0",
+    "id": "1a5c7b1a69284aaa",
+    "builtAt": "2026-10-26T14:14:25.979Z",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "passed": true
+}

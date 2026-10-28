@@ -2,9 +2,15 @@
 
 本指南按 2026-10-06 的本地 2.5.0 代码核对。当前完成度和边界见 [功能状态](FEATURE_STATUS.md)，终端命令另见 [CLI 参考](CLI_COMMANDS.md)。
 
-2026-10-20 续修源码已加入自动交互视图选择指导和思考 Markdown 空白排版修复，但尚未重新打包；现有同版本安装包不会自动包含这些改动。Cloud 接手范围、测试失败和旧包证据见 [交接记录](CLOUD_CODEX_RIU_HANDOFF.md)。
+2026-10-24 验收的 Linux 目录包构建为 `25dc25402c61887e`，已完成源码核对和原生消费者检查，补充真实控件接线、错误与主题颜色、Canvas 重绘指导，并修正空传输及原生操作验证。具体性能条件和边界见[本包记录](verification/2026-10-21-riu-completion/generic-batch-native9.md)。Windows 安装包未在本轮重建，相同版本号不会自动包含这些改动。真实模型质量仍在实测，原轮次失败与旧包证据均保留。
 
 ## 启动与更新
+
+2026-10-20 Cloud 已重新构建 Linux 原生 CLI/目录包 `f83a5d6f50971c66`，不代表 Windows 安装包更新。匿名 Chat 无需假密钥；上游要求认证或拒绝其他客户端时仍会失败。Retry-After 冷却等待可用 Stop 取消，不自动购买额度。范围见 [Cloud 续验](VERIFICATION_HISTORY.md#riu-cloud-runtime-2026-10-20)。
+
+2026-10-21 核对的[MiniCPM 官方免费 Space API](verification/2026-10-20-riu-cloud/free-api-search.md)是 Gradio 接口，未提供标准 Chat 的 tools 参数；该免费入口不能直接填写为当前 OpenAI Chat 来源地址。MiniCPM-V 4.6 的旧免费 Key 公告与当前要求认证的 API 文档分别记录。
+
+OVHcloud 匿名标准 Chat 可通过“添加标准模型”配置，API 密钥留空；基址、模型 ID 与实际免费额度见[免费来源配置](verification/2026-10-21-riu-completion/free-model-sources.md)。模型是否能正确完成交互回答仍由具体实测决定。
 
 Windows 构建提供 `Reverie-Portable-2.5.0-x64.exe`、`Reverie-Setup-2.5.0-x64.exe` 和终端核心 `reverie.exe`。下载 / 发布入口在 [项目 README](../README.md)。便携版首次启动需要解压运行时；包内桌面核心与外部单文件核心是不同启动路径。
 
@@ -86,6 +92,8 @@ Git 目录项应作为项目打开，不能当文件读取。撤销、删除、�
 流式请求会复用内核和连接池；桌面初始化后会在空闲时预备一个请求内核，不发送模型请求。首次内核初始化与 Git 快照并行；文件内容和父提交相同的连续快照复用已有 Git 对象，各轮仍保留独立恢复引用。服务商返回响应头、首个流事件和正文的时间仍由实际线路决定，详见 [工作面板与请求验证](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06)。
 
 ## MCP 交互视图
+
+要求调整假设、筛选排序、选择方案或试填本地表单时，模型应直接在对话里提供可用控件，并附简短文字说明；单个算式和普通问答仍使用文本。可以继续用自然语言修改刚才那一份回答。实际完成程度取决于模型生成质量，保存文件或看到标题并不证明交互正确。
 
 RIU 视图标题栏提供三种展示位置，和对话内容显示偏好共用 `ConversationDisplay` 控件：
 

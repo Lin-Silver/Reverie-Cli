@@ -1,0 +1,157 @@
+{
+  "scope": "Closed final allowed cohort. Automatic outcomes remain immutable and are not full product acceptance.",
+  "snapshot_at_utc": "2026-10-26T09:07:33.834660+00:00",
+  "build": "85ab811e5ef12ec9",
+  "version": "2.5.0",
+  "closed_slots": 60,
+  "completed_evaluations": 59,
+  "interrupted_model_conversations": 1,
+  "empty_prestart_execution": 1,
+  "observer_assisted_ids": [
+    "model-2-comparison-1"
+  ],
+  "automatic_qualified": 31,
+  "known_manual_invalidations": [
+    "model-1-chart-1",
+    "model-2-rich-mixed-1",
+    "model-2-table-2",
+    "model-2-table-3"
+  ],
+  "qualified_after_observed_manual_invalidations": 27,
+  "exhaustive_manual_validation_of_all_automatic_successes": false,
+  "outcomes": {
+    "first_pass": 16,
+    "repaired_success": 15,
+    "semantic_failure": 19,
+    "infrastructure_interruption": 1,
+    "service_transport_error": 3,
+    "model_violation": 2,
+    "validator_or_product_error": 4
+  },
+  "by_task": [
+    {
+      "task": "rich-overview",
+      "slots": 6,
+      "automatic_qualified": 6,
+      "outcomes": {
+        "first_pass": 6
+      }
+    },
+    {
+      "task": "rich-recommendations",
+      "slots": 6,
+      "automatic_qualified": 6,
+      "outcomes": {
+        "repaired_success": 3,
+        "first_pass": 3
+      }
+    },
+    {
+      "task": "rich-long-table",
+      "slots": 6,
+      "automatic_qualified": 2,
+      "outcomes": {
+        "semantic_failure": 3,
+        "repaired_success": 2,
+        "validator_or_product_error": 1
+      }
+    },
+    {
+      "task": "rich-mixed",
+      "slots": 6,
+      "automatic_qualified": 6,
+      "outcomes": {
+        "first_pass": 2,
+        "repaired_success": 4
+      }
+    },
+    {
+      "task": "calculator",
+      "slots": 6,
+      "automatic_qualified": 1,
+      "outcomes": {
+        "semantic_failure": 4,
+        "repaired_success": 1,
+        "model_violation": 1
+      }
+    },
+    {
+      "task": "table",
+      "slots": 6,
+      "automatic_qualified": 3,
+      "outcomes": {
+        "repaired_success": 3,
+        "semantic_failure": 2,
+        "validator_or_product_error": 1
+      }
+    },
+    {
+      "task": "chart",
+      "slots": 6,
+      "automatic_qualified": 2,
+      "outcomes": {
+        "repaired_success": 2,
+        "infrastructure_interruption": 1,
+        "model_violation": 1,
+        "semantic_failure": 2
+      }
+    },
+    {
+      "task": "form",
+      "slots": 6,
+      "automatic_qualified": 0,
+      "outcomes": {
+        "service_transport_error": 3,
+        "semantic_failure": 2,
+        "validator_or_product_error": 1
+      }
+    },
+    {
+      "task": "comparison",
+      "slots": 6,
+      "automatic_qualified": 0,
+      "outcomes": {
+        "semantic_failure": 5,
+        "validator_or_product_error": 1
+      }
+    },
+    {
+      "task": "text",
+      "slots": 6,
+      "automatic_qualified": 5,
+      "outcomes": {
+        "first_pass": 5,
+        "semantic_failure": 1
+      }
+    }
+  ],
+  "automatic_model_acceptance": false,
+  "full_acceptance": false,
+  "verifier_overlay_applied": true,
+  "canonical_verifier_regressions_passed": 209,
+  "provenance_audit": "batch2-final-provenance-audit.json",
+  "manual_fixed18": "batch2-fixed18-manual.json",
+  "remaining_visual_review_inventory": ".runtime/riu-completion-20261021/formal2-live-visual-review.json",
+  "limitations": [
+    "One interrupted started model execution; one observer-assisted evaluation.",
+    "Original31 automatic qualifications contain4 confirmed manual failures;27 after these invalidations is not27 fully validated successes.",
+    "All24 rich-answer cases/389 captures inspected;19 final captured answers without unresolved P2,5 with unresolved defects.",
+    "Remaining671 PNG captures from16 later interactive executions are retained and not claimed personally inspected.",
+    "Windows x64/macOS arm64/x64 actual-system installation is unavailable.",
+    "Model-generated content/interactive reliability remains below acceptance; no third cohort."
+  ],
+  "closure_time_snapshot_at_utc": "2026-10-25T23:34:01.543530+00:00",
+  "manual_addenda": [
+    "batch2-rich24-visual-review.json",
+    "batch2-later-table-readability.json",
+    "batch2-later-interactive-capture-review.json",
+    "batch2-observer-readability-chart-revision.json",
+    "batch2-final-capture-review.json"
+  ],
+  "archive_time_remaining_visual_review_inventory": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-remaining-visual-review.json",
+  "remaining_generated_cases": 0,
+  "remaining_generated_pngs": 0,
+  "latest_observer_revision": "batch2-observer-readability-chart-revision.json",
+  "generated_case_capture_journals": 54,
+  "postclosure_addendum_index": "batch2-postclosure-addendum-index.json"
+}

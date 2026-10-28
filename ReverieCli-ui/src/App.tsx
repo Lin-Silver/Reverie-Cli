@@ -86,13 +86,12 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
-import { Workbench, parseFileLink } from "./Workbench";
+import { AnswerMarkdown as Markdown } from "./AnswerMarkdown";
+import { Workbench } from "./Workbench";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { ConversationDisplay, DisplayPresets } from "./ConversationDisplay";
 import { ComposerSuggestions } from "./ComposerSuggestions";
 import { composerToken, slashOptions, type CompletionOption } from "./composer-completion";
-import remarkGfm from "remark-gfm";
 import { FileChanges } from "./FileChanges";
 import { InteractiveView } from "./InteractiveView";
 import { ViewPresentationProvider } from "./ViewPresentation";
@@ -382,34 +381,6 @@ function IconButton({
   );
 }
 
-const Markdown = memo(function Markdown({ children }: { children: string }) {
-  return (
-    <div className="markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ href, children: linkChildren }) => (
-            <a
-              href={href}
-              onClick={(event) => {
-                event.preventDefault();
-                if (href) { const file = parseFileLink(href); if (file) window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: file })); else void window.reverie.openExternal(href); }
-              }}
-            >
-              {linkChildren}
-            </a>
-          ),
-          code: ({ className, children: codeChildren }) => (
-            <code className={className}>{codeChildren}</code>
-          ),
-        }}
-      >
-        {children}
-      </ReactMarkdown>
-    </div>
-  );
-});
-
 const StreamingMarkdown = memo(function StreamingMarkdown({ children, running }: { children: string; running: boolean }) {
   const latestText = useRef(children);
   const [sampledText, setSampledText] = useState(children);
@@ -420,7 +391,7 @@ const StreamingMarkdown = memo(function StreamingMarkdown({ children, running }:
     return () => window.clearInterval(timer);
   }, [running]);
   const deferredText = useDeferredValue(sampledText);
-  return <Markdown>{running ? deferredText : children}</Markdown>;
+  return <Markdown streaming={running}>{running ? deferredText : children}</Markdown>;
 });
 
 function BrandMark({ compact = false }: { compact?: boolean }) {

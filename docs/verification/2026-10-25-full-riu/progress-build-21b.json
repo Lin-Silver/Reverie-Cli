@@ -1,0 +1,132 @@
+{
+  "snapshot_at_utc": "2026-10-25T05:02:41.066724+00:00",
+  "status": "in_progress",
+  "build": "21b0ccbb9bf73090",
+  "version": "2.5.0",
+  "python": {
+    "passed": 2321,
+    "skipped": 24
+  },
+  "desktop": {
+    "passed": 407,
+    "skipped": 1,
+    "scope": "Last full renderer regression before final CSS link-color change; latest CSS checked in actual native dark/light rendering."
+  },
+  "development": {
+    "cases": 8,
+    "qualified": 7,
+    "first_pass": 5,
+    "repaired_success": 2,
+    "semantic_failure": 1,
+    "formal_samples": 0
+  },
+  "formal": {
+    "planned_cases": 60,
+    "completed_at_snapshot": 6,
+    "qualified_at_snapshot": 5,
+    "samples": [
+      {
+        "id": "model-1-rich-overview-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "35032711b9f765b41666bae85a28555f3441ef957fa0721ef2f29eb5827fd9d0"
+      },
+      {
+        "id": "model-2-rich-overview-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "b5e3111bc0d65f7594e1edfa522cfaee7ca55dba2736e1c92f868dfdcf560960"
+      },
+      {
+        "id": "model-1-rich-recommendations-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "346583efeccf12b2176946e03cb7ea68925dd5941e36685b491d0f7724791067"
+      },
+      {
+        "id": "model-2-rich-recommendations-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "bd66fa217289a679d364aecdf755b956a8556a0b560017b0708af642bd883eae"
+      },
+      {
+        "id": "model-1-rich-long-table-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "33578dee13566d56824ac4e3cf6f08707890b39aaeddd89cf702fa163d83c6d2"
+      },
+      {
+        "id": "model-2-rich-long-table-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "6687d961defc5ed0be740a43898bef6ddca325104ddbe83e101e7e9e378b477b"
+      }
+    ],
+    "fixed_manual_reviews": 18,
+    "manual_reviews_complete": 0,
+    "complete": false
+  },
+  "packages": [
+    {
+      "path": ".runtime/riu-completion-20261021/installers-format-v2-fixed/Reverie-2.5.0-linux-x64.AppImage",
+      "bytes": 398948029,
+      "sha256": "925d5b2d02e902db656887c21e597efa81d3fc50ac3712936920f613015c6986"
+    },
+    {
+      "path": ".runtime/riu-completion-20261021/installers-format-v2-fixed/Reverie-2.5.0-linux-x64.deb",
+      "bytes": 356436024,
+      "sha256": "0a86da33087de14e5afd073a6f0b658a68198e61a8f737e0a0757e22a8da55af"
+    }
+  ],
+  "evidence": {
+    "native-acceptance.json": {
+      "sha256": "dc8d3bb21aa2c2390684193b117aa8689663aec191a7fab191dc65cf8bca3f55"
+    },
+    "linux-install.json": {
+      "sha256": "5cf1d92f04b04f12f6fbc8752a5f54d7c173730a5eb90c362a621de2a36bfa04"
+    },
+    "linux-launchers.json": {
+      "sha256": "755c8ae8db440cb22375cc1bae42b7665901bc05dd60a3ea2156d52b4784a2d1"
+    },
+    "appimage-rich.json": {
+      "sha256": "e45050d2689ef58cf48b4485f95b654d667244e91f908d8c6263973ba798ce07"
+    }
+  },
+  "platforms": {
+    "linux-x64": "deb install/upgrade/uninstall15 passed; launcher supplement6 passed; AppImage extract-and-run native renderer18 passed",
+    "windows-x64": "Not built or run in corresponding OS; manual workflow prepared, not executed",
+    "macos-arm64": "Not built or run in corresponding OS; manual workflow prepared, not executed",
+    "macos-x64": "Not built or run in corresponding OS; manual workflow prepared, not executed"
+  },
+  "limitations": [
+    "Whole RIU incomplete; no release, commit, push, signing or notarization.",
+    "Model identifier-spacing failure preserved; images below are examples, not a whole-cohort pass.",
+    "AppImage FUSE-mounted launch was not tested; actual extract-and-run was tested."
+  ],
+  "example_images": [
+    {
+      "file": "overview-dark-narrow.png",
+      "source": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-overview-1-execution-1/rich-overview-1/generation-dark-460.png",
+      "sha256": "c5d3804d82359a235b575c7ca7354fb350a7f28c8dfc3f95fcecb5d837454dbc",
+      "edited": false
+    },
+    {
+      "file": "recommendations-dark-narrow.png",
+      "source": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-recommendations-1-execution-1/rich-recommendations-1/generation-dark-460.png",
+      "sha256": "10e24d550dbe30d10c414457d29441567f86a74c31fc6b09e02ebf4036bcc442",
+      "edited": false
+    }
+  ]
+}

@@ -172,14 +172,17 @@ def test_non_dict_messages_cost_nothing_and_do_not_raise() -> None:
     assert WorkspaceStatsManager.count_messages_tokens([None, "x"]) == 2
 
 
-def test_tokenizer_disclosure_matches_whether_tiktoken_is_installed() -> None:
+def test_tokenizer_disclosure_matches_whether_tiktoken_encoding_is_available() -> None:
     """/status labels its own precision, so the label must track the real counter."""
     tokenizer = WorkspaceStatsManager.describe_tokenizer()
 
     assert tokenizer["label"]
     assert tokenizer["detail"]
     try:
-        import tiktoken  # noqa: F401
+        import tiktoken
+        # Importing the package does not prove its separately downloaded BPE
+        # data can be loaded (offline/proxy-restricted first launches).
+        tiktoken.get_encoding("cl100k_base")
     except Exception:
         assert tokenizer["exact"] is False
         assert tokenizer["name"] == "heuristic"

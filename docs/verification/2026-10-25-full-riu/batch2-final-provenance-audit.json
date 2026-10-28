@@ -1,0 +1,36 @@
+{
+  "scope": "Follow-up read-only provenance audit after compatibility corrections. Original failed audits and frozen reports unchanged.",
+  "at_utc": "2026-10-25T23:25:59.140883+00:00",
+  "original_failed_audit": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-formal2-final-readonly-audits.json",
+  "request_audit": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-formal2-complete-request-audit-v2.json",
+  "request_audit_sha256": "8e88749c10a0e51b06e654c1c949533af1cd48cd2dee0f2fa7f2c9dfb090b26f",
+  "schema_audit": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-formal2-complete-schema-audit-v2.json",
+  "schema_audit_sha256": "c14093b031e94994a243b2afbdb7e86604419ea0faa6269b445515d5bb44a9c9",
+  "request_integrity_passed": true,
+  "production_tools_and_native_defaults_passed": true,
+  "exact_schema_equality_passed": true,
+  "request_count": 848,
+  "request_statuses": {
+    "400": 86,
+    "200": 630,
+    "429": 124,
+    "None": 1,
+    "500": 7
+  },
+  "retained_incomplete_streams": 1,
+  "closed_slots": 60,
+  "completed_quality_executions": 59,
+  "observer_assisted_ids": [
+    "model-2-comparison-1"
+  ],
+  "prestart_empty_execution_count": 1,
+  "source_overlay_only": [
+    "ReverieCli-py/tests/test_riu_quality_verifier.py",
+    "scripts/verification/riu_quality_benchmark.py"
+  ],
+  "other_product_source_changes": [],
+  "native_artifact_changes": [],
+  "whole_response_completeness_passed": false,
+  "quality_acceptance": false,
+  "quality_scores_changed": false
+}

@@ -275,6 +275,30 @@ def test_opencode_reverse_proxy_url_survives_config_normalization() -> None:
     assert cfg["api_url"] == "https://proxy.example.com/zen/v1?key=abc123"
 
 
+def test_opencode_inference_catalog_uses_aggregate_route_only_on_official_host(monkeypatch) -> None:
+    from reverie import opencode as opencode_module
+
+    captured = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"id": "deepseek-v4.1-flash-free"}]}
+
+    monkeypatch.setattr(opencode_module.requests, "get", lambda url, **kwargs: captured.append(url) or Response())
+    for api_url in ["https://opencode.ai/inference/openai/v1?trace=fixture",
+                    "https://proxy.example.com/inference/openai/v1?trace=fixture",
+                    "https://opencode.ai/zen/v1"]:
+        fetch_opencode_model_catalog({"api_url": api_url}, force_refresh=True)
+    assert captured == ["https://opencode.ai/inference/v1/models?trace=fixture",
+                        "https://proxy.example.com/inference/openai/v1/models?trace=fixture",
+                        "https://opencode.ai/zen/v1/models"]
+    assert resolve_opencode_request_url("https://opencode.ai/inference/openai/v1", "") == \
+        "https://opencode.ai/inference/openai/v1/chat/completions"
+
+
 def test_opencode_catalog_uses_explicit_proxy(monkeypatch) -> None:
     from reverie import opencode as opencode_module
 

@@ -1,0 +1,164 @@
+{
+  "scope": "User-prioritized reusable rich answer UI in Reverie Desktop; not complete general model quality or the paused prior formal matrix.",
+  "completed_at_utc": "2026-10-25T00:11:22.880146+00:00",
+  "passed": true,
+  "build": {
+    "version": "2.5.0",
+    "id": "c9df6ba5417e0851",
+    "builtAt": "2026-10-25T00:06:41.860Z",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "native_executable": "ReverieCli-ui/release/linux-unpacked/ReverieUI",
+  "features": [
+    "metric cards",
+    "status tables",
+    "image-and-text recommendations",
+    "source pills and native external links",
+    "theme and narrow-container layouts",
+    "streamed blocks and focus stability",
+    "saved-answer reload"
+  ],
+  "tests": {
+    "desktop": {
+      "passed": 407,
+      "skipped": 1
+    },
+    "python": {
+      "passed": 2314,
+      "skipped": 24,
+      "warnings": 14,
+      "display": "DISPLAY=:94",
+      "first_missing_display_failure_retained": true
+    },
+    "prompt_contracts_passed": 56,
+    "typecheck_passed": true,
+    "initial_native_rendering_and_actual_model_checks": 31,
+    "latest_native_display_and_contrast_checks": 5,
+    "native_p2": 24,
+    "native_p3": 26,
+    "isolation": 36,
+    "compiled_product_modules": 14,
+    "compiled_ui_files": 71,
+    "standalone_modules": 10
+  },
+  "actual_model": {
+    "id": "Qwen3.5-397B-A17B",
+    "turns": 1,
+    "http_requests": 4,
+    "http_statuses": [
+      400,
+      200,
+      429,
+      200
+    ],
+    "all27_exact_schemas_and_defaults_preserved": true,
+    "model_build": "2413a187f93a2112",
+    "latest_renderer_build": "c9df6ba5417e0851",
+    "same_generated_answer_on_latest_ui": true,
+    "new_model_generation_after_ui_only_fix": false,
+    "remote_images_loaded": true,
+    "general_model_quality_acceptance": false
+  },
+  "contrast": {
+    "dark": {
+      "tested": 26,
+      "minimum_ratio": 7.045970533286183,
+      "all_passed": true
+    },
+    "light": {
+      "tested": 26,
+      "minimum_ratio": 5.406952447204219,
+      "all_passed": true
+    }
+  },
+  "source_manifest": {
+    "path": ".runtime/riu-completion-20261021/rich-answer-v2-source-after.json",
+    "sha256": "837231eb0b36a482df60e7c2b11b9e9f0799cd94a2cfef7afac10ed0f17bf39f"
+  },
+  "current_source_files": 576,
+  "all_source_and_native_artifact_hashes_match": true,
+  "reports": {
+    "native_generated_answer": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-native/report.json",
+      "sha256": "ab1d61ccf04eef5340991c4498f951a5c45cbcf1ee2a222b06ebcb8a9bfd7c01"
+    },
+    "latest_native_display": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-actual-themes-v2/report.json",
+      "sha256": "6c318d58cbfe7b76a4794be9294060585c8f68694b2beba9dc8a68975f51f663"
+    },
+    "exact_production_schemas": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-native-exact-schema.json",
+      "sha256": "aca58cefc0af6c31a6f81406fa4f713cb0e963d7e0f368adb0badcab4710feaf"
+    },
+    "artifacts": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-artifacts-v2.json",
+      "sha256": "8f8688cdf6ddb2dded846a26b3ae70b9fa390ee110408f8e2e70545cede784b1"
+    },
+    "standalone": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-standalone.json",
+      "sha256": "99922f024b273e1e4eb5e9ea80a1fd492e8b56040b858dc67c32015d5acd73af"
+    },
+    "python": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-python-full-display.txt",
+      "sha256": "6aff90b2e9e4a971b43450aeaa078e781bc0cc31cfb8808a79e3e22fadd063cc"
+    },
+    "python_first_display_failure": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-python-full.txt",
+      "sha256": "1ed01c61ea54b1d88ff51fc903434df1c6233b87adf9c90934ebf9293a5f8a04"
+    },
+    "desktop": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-ui-full-v2.txt",
+      "sha256": "09118bf358b1e862186e653c72d787f7cf26ca60a864201c37ed3fb96e8960f0"
+    },
+    "typecheck": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-typecheck-v2.txt",
+      "sha256": "bdc0e1fc77ba144a26d4a5c0fc4ca14f6dd8f6e7bca63a23ac52e809152224cc"
+    },
+    "prompt_contracts": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-prompt-contracts.txt",
+      "sha256": "e2a43602749bb8fabc3e63dd8eaa5f953a5be2b83beff36685c1f1003715ae04"
+    },
+    "stream_node_failure_before_fix": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-stream-node-before-fix.txt",
+      "sha256": "41579f7ab01b2bedcf37a21bc2ffd5de453336b2974d2ea1b474da2a9221d3c5"
+    },
+    "original_model_renderer_retained": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-native-v1-renderer.zip",
+      "sha256": "01acc4775944a7f457171b6270ab7f226092308957dd37c5fa395bb989e4497d"
+    },
+    "previous_native9_backup": {
+      "path": ".runtime/riu-completion-20261021/native9-before-rich-answer-package-backup.json",
+      "sha256": "011a94987ce8cd8e1c8b57db20f1e02c430eeb9b9cb6038ed9a950c985643478"
+    },
+    "final_p2": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-p2-v2/report.json",
+      "sha256": "3598ea1561f0e26b3703e151916e2c1e2a4b079994d012d1f1edd35198329745"
+    },
+    "final_p3": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-p3-v2/report.json",
+      "sha256": "8988fed247fe831a4d3bb7530066dcd0aa69180b81a790ad7040cdcab70b506d"
+    },
+    "final_isolation": {
+      "path": ".runtime/riu-completion-20261021/rich-answer-isolation-v2.json",
+      "sha256": "4442d0c91aaf862929764137eb874b1976c9353117af1c3e4ce4dd90bec4ad46"
+    }
+  },
+  "historical_formal": {
+    "paused_by_user": true,
+    "completed": 15,
+    "generation": 13,
+    "text": 2,
+    "unexecuted": 21,
+    "manual_first10_executed": false,
+    "all15_original_report_hashes_unchanged": true,
+    "whole_formal_quality_accepted": false
+  },
+  "performance": "No new P4 or stable/causal/model-speedup claim for this UI change.",
+  "platform_context": {
+    "requested_tokens": 200000,
+    "assistant_can_change_platform_window": false,
+    "project_context_settings_modified": false
+  },
+  "not_published": true
+}

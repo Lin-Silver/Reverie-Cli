@@ -1,0 +1,13 @@
+{
+  "scope": "production packaged Electron + loopback model; no external provider",
+  "output": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v11-linux-20261027/p2-appimage",
+  "checks": [
+    {
+      "name": "composer-observed",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "passed": false,
+  "error": "TimeoutError('Page.wait_for_selector: Timeout 120000ms exceeded.\\nCall log:\\n  - waiting for locator(\".live-message\") to be detached\\n    242 × locator resolved to visible <article class=\"message assistant live-message\">…</article>\\n')"
+}

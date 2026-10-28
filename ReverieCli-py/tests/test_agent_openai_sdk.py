@@ -155,6 +155,75 @@ def test_explicit_memory_request_keeps_memory_tools_available(tmp_path):
     }
 
 
+def test_desktop_self_contained_static_rich_answer_uses_direct_response_route(tmp_path):
+    agent = ReverieAgent(
+        base_url="https://example.test/v1",
+        api_key="x",
+        model="test-model",
+        project_root=tmp_path,
+        provider="openai-sdk",
+        config=_standard_config(),
+        runtime_surface="desktop",
+    )
+    supplied_data = (
+            "请用中文展示下面的合成测试资料，保留所有值和行：\n"
+            "统计：计划中7、开发中5、已有成果4、半归档1。\n"
+            "项目总览表：Reverie CLI｜开发中｜桌面回答 UI 格式测试；"
+            "本地模型冒烟｜计划中｜一次性 LFM 输出校准。\n"
+            "推荐卡片：测试项目；徽标测试数据；来源 https://example.com/source。"
+    )
+    agent.messages = [
+        {"role": "user", "content": "Earlier unrelated request with historical context."},
+        {"role": "assistant", "content": "Historical response that must not enter this turn."},
+        {"role": "user", "content": supplied_data},
+    ]
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": [
+        _tool_schema("create_file"),
+        _tool_schema("render_view"),
+        _tool_schema("read_file"),
+    ]
+    agent._memory_context_package_message = lambda: (_ for _ in ()).throw(
+        AssertionError("self-contained static answers do not need memory retrieval")
+    )
+
+    assert agent.get_visible_tool_schemas() == []
+    prompt = agent._request_system_prompt()
+    assert prompt.endswith("Use the user's provided data verbatim; omit optional fields that were not supplied.")
+    assert "Do not call tools" in prompt
+    assert "Output native UI blocks, not Markdown tables." in prompt
+    assert "one metric item for every pair in the same order" in prompt
+    assert "Never use section headings, table row counts or card counts as metric labels or values." in prompt
+    assert '```reverie-ui\n{"type":"metrics"' in prompt
+    assert '"type":"table"' in prompt
+    assert '"type":"cards"' in prompt
+    assert agent.system_prompt not in prompt
+    request_messages = agent._build_messages()
+    assert [message["role"] for message in request_messages] == ["system", "user"]
+    assert request_messages[1]["content"] == supplied_data
+
+
+def test_static_rich_tool_suppression_keeps_tools_for_research_or_interaction(tmp_path):
+    prompts = (
+        "请根据仓库检索当前项目状态，再以表格展示。",
+        "请把下面这些数据展示成可筛选、可排序的交互表格。",
+        "请把下面这些统计卡片保存到项目文件。",
+    )
+    for prompt in prompts:
+        agent = ReverieAgent(
+            base_url="https://example.test/v1",
+            api_key="x",
+            model="test-model",
+            project_root=tmp_path,
+            provider="openai-sdk",
+            config=_standard_config(),
+            runtime_surface="desktop",
+        )
+        agent.messages = [{"role": "user", "content": prompt}]
+        agent.tool_executor.get_tool_schemas = lambda mode="reverie": [_tool_schema("read_file")]
+
+        assert [schema["function"]["name"] for schema in agent.get_visible_tool_schemas()] == ["read_file"]
+
+
 def _seed_writer_project(
     tmp_path: Path,
     novel_id: str,

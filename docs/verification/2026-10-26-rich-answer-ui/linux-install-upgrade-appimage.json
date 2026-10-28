@@ -1,0 +1,214 @@
+{
+  "scope": "Install, upgrade and remove real debs in an explicitly disposable container.",
+  "upgrade_kind": "same-version distinct native-build upgrade",
+  "model_quality_samples": 0,
+  "stages": [
+    {
+      "name": "install-baseline",
+      "exit_code": 0,
+      "seconds": 8.696175286000653
+    },
+    {
+      "name": "baseline-sandbox-owner",
+      "exit_code": 0,
+      "seconds": 0.0022081370043451898
+    },
+    {
+      "name": "baseline-sandbox-mode",
+      "exit_code": 0,
+      "seconds": 0.0014100049957050942
+    },
+    {
+      "name": "baseline-native",
+      "exit_code": 0,
+      "seconds": 34.07826777500304
+    },
+    {
+      "name": "upgrade-current-unpack",
+      "exit_code": 0,
+      "seconds": 8.823345178003365
+    },
+    {
+      "name": "current-sandbox-permission-reset",
+      "exit_code": 0,
+      "seconds": 0.002346772998862434
+    },
+    {
+      "name": "upgrade-current-configure",
+      "exit_code": 0,
+      "seconds": 0.031816673996218015
+    },
+    {
+      "name": "current-native",
+      "exit_code": 0,
+      "seconds": 3.6605093329999363
+    },
+    {
+      "name": "current-rich",
+      "exit_code": 0,
+      "seconds": 6.895935392996762
+    },
+    {
+      "name": "appimage-temp-directory",
+      "exit_code": 0,
+      "seconds": 0.00404893600352807
+    },
+    {
+      "name": "appimage-temp-owner",
+      "exit_code": 0,
+      "seconds": 0.003743016000953503
+    },
+    {
+      "name": "appimage-temp-mode",
+      "exit_code": 0,
+      "seconds": 0.0014162119987304322
+    },
+    {
+      "name": "current-appimage-rich",
+      "exit_code": 0,
+      "seconds": 42.39705336000043
+    },
+    {
+      "name": "uninstall",
+      "exit_code": 0,
+      "seconds": 0.16478665800241288
+    }
+  ],
+  "checks": [
+    {
+      "name": "baseline-package-identity",
+      "passed": true,
+      "detail": "Package: reverie\nVersion: 2.5.0\nArchitecture: amd64\n"
+    },
+    {
+      "name": "current-package-identity",
+      "passed": true,
+      "detail": "Package: reverie\nVersion: 2.5.0\nArchitecture: amd64\n"
+    },
+    {
+      "name": "distinct-native-builds",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-payload-readable-by-desktop-user",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-sandbox-ready-for-native-comparison",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-installed-hash-ReverieUI",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-installed-hash-reverie",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-installed-hash-resources/app.asar",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "baseline-restores-real-native-view",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-payload-readable-by-desktop-user",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-sandbox-owner-and-setuid",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-installed-hash-ReverieUI",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-installed-hash-reverie",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "current-installed-hash-resources/app.asar",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "upgraded-native-state-preservation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "installed-rich-markdown-renderer",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "final-appimage-rich-renderer",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "final-appimage-build-id",
+      "passed": true,
+      "detail": {
+        "version": "2.5.0",
+        "id": "1a5c7b1a69284aaa",
+        "builtAt": "2026-10-26T14:14:25.979Z",
+        "platform": "linux",
+        "arch": "x64"
+      }
+    },
+    {
+      "name": "appimage-extraction-scratch-cleaned",
+      "passed": true,
+      "detail": {
+        "removed_test_directories": [
+          "appimage_extracted_1f5a889cb0848777ad6a9da5c7e22008"
+        ]
+      }
+    },
+    {
+      "name": "dpkg-uninstall",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "program-and-launchers-removed",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "uninstall-preserves-user-profile",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "passed": true,
+  "debs": {
+    "baseline": {
+      "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/installers-batch2/Reverie-2.5.0-linux-x64.deb",
+      "sha256": "55ca9039d9fa91eba3da5103370945ea8299d13ad46533874b37c84685370295"
+    },
+    "current": {
+      "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/rich-fidelity-20261026/installers-final-ui/Reverie-2.5.0-linux-x64.deb",
+      "sha256": "21629b9236fd4b1b75a9180973ab5729cd5cd795f526576ff1ca9339fd060df3"
+    }
+  },
+  "appimage": {
+    "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/rich-fidelity-20261026/installers-final-ui/Reverie-2.5.0-linux-x64.AppImage",
+    "sha256": "bdd5e10cb068a1fda48ecb0df9a62539a5b4ff81c6cdbdf1cc7cf2e93864dd32"
+  }
+}

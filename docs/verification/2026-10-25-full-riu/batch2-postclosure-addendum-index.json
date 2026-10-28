@@ -1,0 +1,37 @@
+{
+  "scope": "Explicit post-closure addendum allowlist; not a replacement cohort archive. Ledger excludes itself; tar includes ledger as one extra member.",
+  "at_utc": "2026-10-26T00:31:46.883223+00:00",
+  "private_local_only": true,
+  "archive": {
+    "path": ".runtime/riu-completion-20261021/postclosure-addendum-20261026/evidence-private.tar.gz",
+    "bytes": 6070009,
+    "sha256": "9beb77c6e3e4dae5354d0b9ccf2bbcaefa97f64e2896456d070fcb91a3326adf"
+  },
+  "ledger": {
+    "path": ".runtime/riu-completion-20261021/postclosure-addendum-20261026/evidence-ledger.json",
+    "sha256": "545c48755458b8f3405b1d6b60f71cd0b93a48077de371bd8472b6a520276994",
+    "files": 143
+  },
+  "archive_members_read_back_and_verified": 144,
+  "all_member_hashes_verified": true,
+  "original_closure_archive_unchanged": {
+    "path": ".runtime/riu-completion-20261021/cohort2-closure-20261025/closed-cohort-evidence-private.tar.gz",
+    "sha256": "05037f540ae6ad0d89a6e8629b4a38ce326d2e8c1e3cf2859f14ba741a7d2b90",
+    "bytes": 169271918,
+    "hash_rechecked": true,
+    "scope": "Original metadata index/archive remain immutable dated snapshots; this addendum is separate."
+  },
+  "new_capture_journals": 21,
+  "generated_cases_with_capture_journals": 43,
+  "pending_generated_cases": 11,
+  "pending_generated_pngs": 493,
+  "canonical_verifier_regressions_passed": 199,
+  "model_quality_samples": 0,
+  "model_scores_changed": false,
+  "full_acceptance": false,
+  "limitations": [
+    "Reviewing captured PNGs does not complete uncaptured interaction/lifecycle stages.",
+    "No third model cohort; original failed/interrupted/assisted results retained.",
+    "Windows/macOS real systems unavailable."
+  ]
+}

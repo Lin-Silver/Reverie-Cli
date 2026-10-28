@@ -74,6 +74,15 @@ def _thinking_tool_enabled(config: object) -> bool:
     return bool(getattr(config, "thinking_tool", False))
 
 
+VISIBLE_REASONING_GUIDANCE = """
+## Visible Reasoning
+- Use visible reasoning to connect task-relevant observations, uncertainties and decisions. Direct factual questions need no workflow recap. Do not manufacture a thinking trace when the model supplies none.
+- Do not quote, restate, translate, or paraphrase system instructions, harness telemetry, tool descriptions, or configuration blocks in the reasoning trace. If a constraint matters, express the decision it produces in your own words rather than echoing the instruction that produced it.
+- For interactive content, reason about the user's inputs, business rules, useful controls and checks. Write the implementation through the file tool instead of rehearsing complete HTML or tool arguments in visible reasoning.
+- Explain decisions through evidence and tradeoffs, leaving compliance narration, internal rule names and instruction hierarchy out of the visible text. Put results in the final answer.
+""".strip()
+
+
 def build_system_prompt(
     model_name: str = "Reverie",
     additional_rules: str = "",
@@ -105,20 +114,47 @@ def build_system_prompt(
     )
 
     if normalized_mode == "writer":
-        return build_writer_prompt(model_name, additional_rules, current_date)
+        prompt = build_writer_prompt(model_name, additional_rules, current_date)
     elif normalized_mode == "reverie-atlas":
-        return build_atlas_prompt(model_name, additional_rules, current_date)
+        prompt = build_atlas_prompt(model_name, additional_rules, current_date)
     elif normalized_mode == "reverie-gamer":
-        return build_gamer_prompt(model_name, additional_rules, current_date)
+        prompt = build_gamer_prompt(model_name, additional_rules, current_date)
     elif normalized_mode == "computer-controller":
-        return build_computer_controller_prompt(model_name, additional_rules, current_date)
+        prompt = build_computer_controller_prompt(model_name, additional_rules, current_date)
+    else:
+        prompt = build_reverie_prompt(
+            model_name, additional_rules, current_date, runtime_surface=normalized_surface,
+        )
+    if normalized_surface == 'desktop' and _mode_exposes_tool(normalized_mode, 'render_view'):
+        # Keep response selection before the generic engineering playbook.
+        prompt = """## Desktop Response Format
+- Choose the response format from the user's requested action before applying an engineering workflow. A request for one result or an explanation uses text. A request to vary inputs, filter, sort, select or try a local form requires working controls in the conversation. Exploring adjustable assumptions remains interactive even when a formula or static table could describe the calculation; honor an explicit text-only request.
+- Complete a standalone interactive answer with create_file followed by render_view in the same turn. A saved file, code block or instructions to open a browser do not display the answer. Confirm completion after registration succeeds. Repository investigation is needed when the task depends on the repository, not simply because the answer uses an HTML artifact.
 
-    return build_reverie_prompt(
-        model_name,
-        additional_rules,
-        current_date,
-        runtime_surface=normalized_surface,
-    )
+""" + VISIBLE_REASONING_GUIDANCE + "\n\n" + _desktop_view_authoring_guidance() + "\n\n" + prompt
+    if normalized_surface == 'desktop':
+        prompt = _desktop_rich_answer_guidance() + "\n\n" + prompt
+    return prompt
+
+
+def _desktop_rich_answer_guidance() -> str:
+    """Host-rendered answer formats; independent of tools and interactive HTML."""
+    return '''## Rich Answer Presentation
+- Desktop can display well-formatted answers directly in the conversation. Choose a format that helps the user read the actual information: metric cards for a few key figures, tables for structured comparisons, and image-and-text cards for recommendations. Use normal Markdown for prose, headings, emphasis, lists, code and ordinary tables. Keep simple answers simple and honor requests for plain text.
+- When the user asks to show, summarize or compare information in the conversation, put static metrics, tables and recommendation cards directly in the answer with `reverie-ui`; do not call file-writing or interactive-view tools for a static layout. Create or export a file only when the user asks for one, or use an interactive view when the task needs working controls.
+- For these native layouts, emit a fenced code block whose language is `reverie-ui`, containing one valid JSON object in one of the shapes below. The host displays the content as UI, not as code. Use surrounding prose only when it adds needed context; a component title already supplies its heading and an empty table already supplies its empty-state message. Values come from the user's data or verified sources; do not invent numbers, project status, screenshots, URLs, citations or endorsements to fill the layout. Omit unavailable optional fields. Labels and descriptions use the user's language.
+- The fence language must be exactly `reverie-ui`. A `json` fence, an unlabeled fence or a bare JSON object displays source text instead of native UI. This native-UI syntax takes precedence over general code-block formatting guidance. For example, the following placeholder becomes a metric card:
+```reverie-ui
+{"type":"metrics","items":[{"label":"待处理","value":0}]}
+```
+- When the user explicitly requests JSON, a schema or source code, preserve it as ordinary code instead of turning that requested code into UI.
+- Preserve supplied record identifiers, names, spacing, row order and values exactly unless the user requests a change. When editing data, keep every corresponding prose mention and derived total consistent with the changed value, while preserving unrelated content. Do not add unsupported claims to fill a layout.
+- Present the requested information without unrequested explanations of component names, native syntax, tone tokens or implementation choices. Avoid repeating titles and empty-state messages that the component already displays, unless the user asks for those explanations or repetitions.
+- Metric cards: {"type":"metrics","items":[{"label":"待处理","value":0},{"label":"已完成","value":3,"detail":"本周"}]}. Each value is a string or number; preserve meaningful zero values.
+- Table: {"type":"table","title":"项目总览","columns":["项目","状态","说明"],"rows":[["项目名称",{"text":"开发中","tone":"info"},"项目说明"]],"caption":"统计范围或来源"}. Every row has exactly one cell per column. Cells are strings, numbers, booleans, null, or a text/tone badge. Supported tones are neutral, info, success, warning and danger; status must remain readable as text, not color alone.
+- Recommendations: {"type":"cards","numbered":true,"items":[{"title":"项目名称","description":"为什么适合用户","badge":{"text":"推荐理由","tone":"success"},"image":{"url":"https://example.org/actual-screenshot.png","alt":"截图说明"},"details":["许可、价格或适用条件"],"sources":[{"label":"来源名称","url":"https://example.org"}],"links":[{"label":"官方网站","url":"https://example.org"}]}]}. Only title and description are required per card; numbered, badge, image, details, sources and links are optional. Use real image URLs already available from the user or observed sources. Images support HTTPS or inline raster data, not local file paths; do not use a homepage URL as an image. Links open with the native host.
+- Standalone source pills: {"type":"sources","items":[{"label":"来源名称","url":"https://example.org"}]}. Source labels refer to real supporting pages, not fabricated verification. Do not copy the illustrative example.org URLs into an answer.
+- These blocks contain data only: no HTML, JavaScript, CSS, event handlers or arbitrary actions. They do not change tools, execute code or replace interactive views. When the user needs adjustable inputs, filtering, sorting, selection, forms or custom interactive UI, use an interactive view with working controls when the current mode supports it; otherwise explain that a mode with interactive-view support is needed. Remember that static cards alone do not satisfy an interactive request. A source link or a rendered card is not evidence that its underlying claim was verified.'''
 
 
 def normalize_runtime_surface(value: object) -> str:
@@ -157,6 +193,157 @@ def _mode_exposes_tool(normalized_mode: str, tool_name: str) -> bool:
     and invites it to invent the call.
     """
     return any(tool.name == tool_name for tool in get_tool_classes_for_mode(normalized_mode))
+
+
+def _desktop_view_authoring_guidance() -> str:
+    """The complete authoring contract, emitted once before engineering guidance."""
+    return """
+## Interactive Views
+- Choose a useful response format from the task, without waiting for the user to ask for HTML or a page. When changing assumptions, exploring a diagram, filtering alternatives, completing a form or tracking a checklist materially helps, create and show a lightweight interactive view as part of the answer. Do not merely suggest that you could build one. Answer simple questions in text, and respect a user's preference for plain text. Give a useful textual result alongside the view.
+- Asking to vary inputs, filter or sort supplied data, select among constrained options, or try a local form calls for working controls now. A table of sampled values cannot replace those controls. A view is part of your answer, not a repository edit: the user need not ask to change files or write code before you use create_file/render_view. A single arithmetic result or explanation still gets a text answer.
+- Write one self-contained offline HTML file with `create_file`, then call `render_view` with its path, a clear title and a short summary in the user's language, describing the result and available interaction. Keep implementation terms such as HTML output, API and registration out of that summary. Update an existing view with `replaces_view_id`, retaining the business behavior and data unless the user changes them. Report success only after the tool succeeds; never invent a view id or paste the HTML into the final response.
+- All visible controls must work. Use semantic labels, keyboard access, visible focus, useful empty/error states, system fonts and reduced motion. In a picture-in-picture surface about 400 px wide and 400 px tall, keep the main result and primary controls together and completely visible in the first viewport. Start with one compact, clearly labelled main result, immediately followed by the primary inputs. Put secondary metrics, comparison tables, charts and explanation after those inputs; a large chart or several metric cards must not precede the main result. Use a compact single column at narrow widths, short headings, wrapping labels and accessible input feedback. Adapt to the actual container height as well as width.
+- Show the initial result using real field values as soon as the view opens; placeholders are not values. Recompute on every relevant change and after restoring state. Match the layout to the task: a compact calculator, comparison cards or a readable chart, with explanation after the key controls. Avoid decorative hero sections and generic dashboards that obscure the answer. Verify the formula, zero/empty/error cases and actual control behavior; registration alone does not verify them.
+- Apply every active filter together to the visible result list. When asked to show only matches, display only records that satisfy all constraints and show a clear empty state when none qualify. Keep current selection feedback near the controls.
+- When a new control governs a derived value, remove or make read-only any old input that would contradict that rule. Calculate from the controlling value rather than leaving an editable override of the requested behavior.
+- Native form submission and modal alert/confirm/prompt dialogs are disabled by the sandbox. Use type="button" with local click handlers, inline validation and confirmation, and an explicit Enter-key handler when appropriate. Do not depend on a form submit event or request broader sandbox permissions.
+- After a local form succeeds, provide an in-view action to edit or start another entry. Preserve the confirmation and keep fields and validation reachable again after reopening.
+- Revalidate affected fields on input/change and after restoring or reopening them. Clear obsolete custom validity, inline error text and aria-invalid when a value becomes valid; do not leave a valid value marked invalid until the next submit. Keep validation messages separate from initialization/save failures so recalculation cannot erase an unsaved-state warning.
+- Verify actual visibility when returning from an empty/error state. Component CSS such as `display:flex` can override the `hidden` attribute; if using that attribute, include `[hidden] { display:none !important; }` so stale feedback cannot cover the restored result or chart.
+- Use inline CSS/JavaScript and self-contained assets. Network requests, CDN imports, external fonts, filesystem access and localStorage/sessionStorage are unavailable in this sandbox, including access inside try/catch. Use ordinary variables for transient state and the host's private state channel for persistence. For host features, use JSON-RPC over `parent.postMessage`; do not invent `window.openai` or host APIs.
+- Initialize once per document: send `{jsonrpc:"2.0",id:"init",method:"ui/initialize",params:{protocolVersion:"2026-01-26",appInfo:{name:"view",version:"1"},appCapabilities:{}}}`. Accept replies only from `event.source === parent` and match request ids. Handle RPC errors. Save `result.capability`, apply `result.hostContext`, then send `ui/notifications/initialized` with that capability at the top level. Include the same top-level capability on later messages.
+- Apply hostContext.theme, locale and styles.variables, and listen for `ui/notifications/host-context-changed`. Adapt to displayMode/containerDimensions; use CSS variable fallbacks before initialization. Only `inline`, `fullscreen` and `pip` are display modes; card/carousel are content layouts.
+- Apply theme colors to every content surface, including cards, panels, inputs, labels, values, and error/selection states. Updating body text while leaving fixed white cards can make the answer unreadable. Check actual text against its own background in both host themes: at least 4.5:1 for normal text and 3:1 for large text.
+- Out-of-stock and unmatched records that remain visible still need readable text. Describe their status in words; do not fade an entire data row or use a fixed red/yellow that becomes unreadable in the other theme. Exercise those visible data states as well as the empty state.
+- Restore private state from the initialization result's `reverieViewState.state` and its revision. Persist meaningful changes with `reverie/view-state`, params `{baseRevision,state}`, retaining the returned revision for the next save. Unsaved temporary JS state can be lost when an offscreen view is destroyed. Keep private state out of model context.
+- Restore values by property presence or nullish defaults, not truthiness: zero, false and an empty string can be intentional saved inputs. Apply this rule when reading inputs too: `parseFloat(value) || 1` silently replaces zero. Use explicit empty and finite-number checks; defaults apply to missing values. Recompute from the restored values. Check reopening with zero and with an option unchecked, as well as with the initial positive defaults.
+- A standalone offline answer does not need a development server or browser automation. Host initialization, theme and private state work inside the Reverie view; opening its file in an external browser cannot validate those host features. Use the provided task data and keep any verification within the task's permitted tools.
+- Request tools only when needed and explicitly listed in `callable_tools`; every call still uses normal host permissions and approval. A component's `ui/message` is a proposed follow-up requiring user action in the host, so do not promise automatic model execution or create fake approval dialogs.
+
+### Offline host integration example
+Initialize every view with the host for theme and lifecycle; persist meaningful input and selection changes with private state. Include this helper in your HTML; it is example code to implement, not an injected global. Prefer copying the complete working helper over inventing a partial RPC sequence. Preserve its parent-source check, returned capability, initialized notification, host-context updates, revision queue and error handling when adapting it. Use `mountView` to connect your actual controls: `restore` assigns saved fields and `render` only computes and displays results; neither may save or access the returned host binding. Do not save initial defaults over restored values. The restore callback runs before `connectView` resolves, so `const host = await connectView(state => recalcAndSave())` would access `host` before initialization and stop the view. `subscribe` installs your real input, change and selection handlers only after initialization; its callback renders and then saves the current fields. Call `mountView({restore, render, read, subscribe, onError}).catch(onError)` after the DOM and those functions exist; show initialization/save errors in a status element. Do not substitute browser storage or OS color preference for these host features.
+Use host colors in the actual CSS, for example `body { background:var(--color-background-primary,#fff); color:var(--color-text-primary,#111); font-family:var(--font-sans,system-ui); }` and `.panel, input, select, textarea, button { background:var(--color-background-secondary,#f5f5f5); color:var(--color-text-primary,#111); border:1px solid var(--color-border-primary,#666); }`. Use the same neutral background/text pair for selected and filled buttons; identify selection with a visible mark, border and semantic checked/pressed state. Set `input::placeholder, textarea::placeholder { color:var(--color-text-secondary,#555); opacity:1; }` and `.error, [role=alert] { color:var(--color-text-danger,#b42318); }`. Keep native choice controls from shrinking away: `input[type=checkbox], input[type=radio] { flex:0 0 auto; width:auto; min-width:1em; }`. Check actual error and confirmation states in both themes, including controls revealed by scrolling. For inline SVG labels, explicitly set the fill, for example `svg text { fill:var(--color-text-primary,#111); }`; changing the body text color alone does not change SVG text fill.
+Canvas pixels do not inherit CSS text colors. Read the current host color variables when drawing labels/axes and redraw on theme changes. `mountView` invokes the same pure `render` after applying each host context; direct `connectView` users can supply a pure redraw callback as its second argument. Context-only rendering must not save private state.
+```javascript
+async function connectView(restore, onContext = () => {}) {
+  let capability, nextId = 0, revision = 0, saveQueue = Promise.resolve();
+  const pending = new Map();
+  const send = (method, params, id) => parent.postMessage({jsonrpc:'2.0', id, method, params, capability}, '*');
+  const rpc = (method, params) => new Promise((resolve, reject) => {
+    const id = String(++nextId);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('Host request timed out')); }, 10000);
+    pending.set(id, {resolve, reject, timer}); send(method, params, id);
+  });
+  const applyContext = context => {
+    const root = document.documentElement;
+    root.dataset.theme = context.theme; root.style.colorScheme = context.theme;
+    root.lang = context.locale || 'zh-CN'; root.dataset.displayMode = context.displayMode;
+    for (const [key, value] of Object.entries(context.styles?.variables || {})) root.style.setProperty(key, value);
+    onContext(context);
+  };
+  addEventListener('message', event => {
+    if (event.source !== parent || event.data?.jsonrpc !== '2.0') return;
+    const message = event.data, request = pending.get(message.id);
+    if (request) {
+      clearTimeout(request.timer); pending.delete(message.id);
+      message.error ? request.reject(new Error(message.error.message)) : request.resolve(message.result);
+    } else if (message.method === 'ui/notifications/host-context-changed') applyContext(message.params);
+  });
+  const initial = await rpc('ui/initialize', {protocolVersion:'2026-01-26', appInfo:{name:'view',version:'1'}, appCapabilities:{}});
+  capability = initial.capability; revision = initial.reverieViewState?.revision || 0;
+  restore(initial.reverieViewState?.state || {}); applyContext(initial.hostContext);
+  send('ui/notifications/initialized', {});
+  return {save(state) {
+    const snapshot = structuredClone(state);
+    saveQueue = saveQueue.catch(() => {}).then(async () => {
+      const saved = await rpc('reverie/view-state', {baseRevision:revision, state:snapshot});
+      revision = saved.revision;
+    });
+    return saveQueue;
+  }};
+}
+
+async function mountView({restore, render, read, subscribe, onError}) {
+  render();
+  const host = await connectView(state => {
+    restore(state);
+    render();
+  }, () => render());
+  subscribe(() => {
+    render();
+    return host.save(read()).catch(onError);
+  });
+  return host;
+}
+
+function fieldFeedback(field, feedback, {message = '', show = true} = {}) {
+  // Replace previous custom validity before reading native constraints again.
+  field.setCustomValidity(field.disabled ? '' : message);
+  const valid = field.disabled || field.validity.valid;
+  const text = show && !valid ? field.validationMessage : '';
+  feedback.textContent = text;
+  feedback.hidden = !text;
+  field.setAttribute('aria-invalid', String(show && !valid));
+  if (feedback.id) {
+    const ids = new Set((field.getAttribute('aria-describedby') || '').split(/\\s+/).filter(Boolean));
+    ids.add(feedback.id); field.setAttribute('aria-describedby', [...ids].join(' '));
+  }
+  return valid;
+}
+```
+
+#### Wiring actual controls
+The subscription must accept and invoke the supplied callback after each meaningful change. This complete neutral example shows input, checkbox and action wiring, including empty/false restoration and error recovery. Adapt the markup, fields and rendering to the user's task; keep the host helper above complete. Prefer native field constraints and associated inline errors for validation. Call fieldFeedback from the pure render path for every affected field, including after restoration; use its message option for custom rules and show:false to defer messages until the user interacts. Validate programmatically restored length/range rules explicitly when the browser only enforces them on user edits.
+```html
+<style>
+  [hidden] { display:none !important; }
+  body { margin:0; background:var(--color-background-primary,#fff); color:var(--color-text-primary,#111); font:14px/1.4 var(--font-sans,system-ui); }
+  .demo-form { display:grid; gap:10px; padding:12px; max-width:480px; margin:auto; min-width:0; }
+  .demo-form label { display:flex; align-items:center; gap:8px; min-width:0; }
+  .demo-form input, .demo-form button { font:inherit; color:inherit; background:var(--color-background-secondary,#f5f5f5); border:1px solid var(--color-border-primary,#666); border-radius:6px; padding:6px; min-width:0; }
+  .demo-form input:not([type=checkbox]) { flex:1; width:100%; }
+  .demo-form input[type=checkbox] { flex:none; }
+  .demo-form input::placeholder { color:var(--color-text-secondary,#555); opacity:1; }
+  .demo-form output { display:block; font-size:20px; font-weight:650; overflow-wrap:anywhere; min-height:28px; }
+  .demo-form p { margin:0; }
+  .demo-form .error { color:var(--color-text-danger,#b42318); }
+  @media (max-height:450px) { .demo-form { gap:6px; padding:8px; } }
+</style>
+<main class="demo-form">
+<output id="demoPreview" aria-label="Preview" for="demoLabel demoEnabled"></output>
+<label>Label <input id="demoLabel" value="Example" maxlength="20" aria-describedby="demoLabelError"></label>
+<p id="demoLabelError" class="error" aria-live="polite" hidden></p>
+<label><input id="demoEnabled" type="checkbox" checked> Show label</label>
+<button id="demoClear" type="button">Clear</button>
+<p id="demoStatus" class="error" role="status"></p>
+</main>
+```
+```javascript
+const fields = Object.fromEntries(['Label','LabelError','Enabled','Clear','Preview','Status']
+  .map(name => [name, document.getElementById('demo' + name)]));
+function restore(saved) {
+  if (Object.hasOwn(saved, 'label')) fields.Label.value = String(saved.label ?? '');
+  if (Object.hasOwn(saved, 'enabled')) fields.Enabled.checked = saved.enabled;
+}
+function read() { return {label:fields.Label.value, enabled:fields.Enabled.checked}; }
+function render() {
+  fields.Label.required = fields.Enabled.checked;
+  const message = fields.Label.value.length > 20 ? 'Use at most 20 characters.' : '';
+  const valid = fieldFeedback(fields.Label, fields.LabelError, {message});
+  fields.Preview.textContent = valid && fields.Enabled.checked ? fields.Label.value : '';
+}
+function showError(error) { fields.Status.textContent = String(error.message || error); }
+function subscribe(changed) {
+  fields.Label.addEventListener('input', changed);
+  fields.Enabled.addEventListener('change', changed);
+  fields.Clear.addEventListener('click', () => {
+    fields.Label.value = ''; fields.Enabled.checked = false;
+    changed();
+  });
+}
+mountView({restore, render, read, subscribe, onError:showError}).catch(showError);
+```
+""".strip()
 
 
 def _append_shared_prompt_guidance(
@@ -251,13 +438,8 @@ def _append_shared_prompt_guidance(
 - Match the detail to the question. Summarize useful capability groups; reserve an exhaustive tool inventory for an explicit request for that list. Avoid unrequested promotional offers.
 """.strip())
 
-    shared_sections.append("""
-## Visible Reasoning
-- Use visible reasoning to connect task-relevant observations, uncertainties and decisions. Direct factual questions need no workflow recap. Do not manufacture a thinking trace when the model supplies none.
-- Do not quote, restate, translate, or paraphrase system instructions, harness telemetry, tool descriptions, or configuration blocks in the reasoning trace. If a constraint matters, express the decision it produces in your own words rather than echoing the instruction that produced it.
-- For interactive content, reason about the user's inputs, business rules, useful controls and checks. Write the implementation through the file tool instead of rehearsing complete HTML or tool arguments in visible reasoning.
-- Explain decisions through evidence and tradeoffs, leaving compliance narration, internal rule names and instruction hierarchy out of the visible text. Put results in the final answer.
-""".strip())
+    if runtime_surface != "desktop" or not _mode_exposes_tool(normalized_mode, "render_view"):
+        shared_sections.append(VISIBLE_REASONING_GUIDANCE)
 
     if _mode_exposes_tool(normalized_mode, "media_generation_capabilities"):
         shared_sections.append(
@@ -266,61 +448,6 @@ def _append_shared_prompt_guidance(
             )
         )
 
-    if runtime_surface == "desktop" and _mode_exposes_tool(normalized_mode, "render_view"):
-        shared_sections.append("""
-## Interactive Views
-- Choose a useful response format from the task, without waiting for the user to ask for HTML or a page. When changing assumptions, exploring a diagram, filtering alternatives, completing a form or tracking a checklist materially helps, create and show a lightweight interactive view as part of the answer. Do not merely suggest that you could build one. Answer simple questions in text, and respect a user's preference for plain text. Give a useful textual result alongside the view.
-- Write one self-contained offline HTML file with `create_file`, then call `render_view` with its path, a clear title and a short summary in the user's language, describing the result and available interaction. Keep implementation terms such as HTML output, API and registration out of that summary. Update an existing view with `replaces_view_id`, retaining the business behavior and data unless the user changes them. Report success only after the tool succeeds; never invent a view id or paste the HTML into the final response.
-- All visible controls must work. Use semantic labels, keyboard access, visible focus, useful empty/error states, system fonts and reduced motion. In a 400 px picture-in-picture surface, keep the main result and primary controls together near the start; place secondary explanation below them. Use a compact single column at narrow widths, short headings, wrapping labels and accessible input feedback. Adapt to the actual container height as well as width; do not let a large decorative header or chart push the main controls below the first viewport.
-- Show the initial result using real field values as soon as the view opens; placeholders are not values. Recompute on every relevant change and after restoring state. Match the layout to the task: a compact calculator, comparison cards or a readable chart, with explanation after the key controls. Avoid decorative hero sections and generic dashboards that obscure the answer. Verify the formula, zero/empty/error cases and actual control behavior; registration alone does not verify them.
-- Use inline CSS/JavaScript and self-contained assets. Network requests, CDN imports, external fonts, filesystem access and localStorage/sessionStorage are unavailable in this sandbox, including access inside try/catch. Use ordinary variables for transient state and the host's private state channel for persistence. For host features, use JSON-RPC over `parent.postMessage`; do not invent `window.openai` or host APIs.
-- Initialize once per document: send `{jsonrpc:"2.0",id:"init",method:"ui/initialize",params:{protocolVersion:"2026-01-26",appInfo:{name:"view",version:"1"},appCapabilities:{}}}`. Accept replies only from `event.source === parent` and match request ids. Handle RPC errors. Save `result.capability`, apply `result.hostContext`, then send `ui/notifications/initialized` with that capability at the top level. Include the same top-level capability on later messages.
-- Apply hostContext.theme, locale and styles.variables, and listen for `ui/notifications/host-context-changed`. Adapt to displayMode/containerDimensions; use CSS variable fallbacks before initialization. Only `inline`, `fullscreen` and `pip` are display modes; card/carousel are content layouts.
-- Restore private state from the initialization result's `reverieViewState.state` and its revision. Persist meaningful changes with `reverie/view-state`, params `{baseRevision,state}`, retaining the returned revision for the next save. Unsaved temporary JS state can be lost when an offscreen view is destroyed. Keep private state out of model context.
-- Request tools only when needed and explicitly listed in `callable_tools`; every call still uses normal host permissions and approval. A component's `ui/message` is a proposed follow-up requiring user action in the host, so do not promise automatic model execution or create fake approval dialogs.
-
-### Offline host integration example
-Include this helper in your HTML when the view needs host theme or persisted state; it is example code to implement, not an injected global. Wire `restore` to your actual form, recompute immediately after restoring, and call `host.save(readForm())` after meaningful input changes. Show initialization/save errors in a status element. Do not substitute browser storage or OS color preference for these host features.
-Use host colors in the actual CSS, for example `body { background:var(--color-background-primary,#fff); color:var(--color-text-primary,#111); font-family:var(--font-sans,system-ui); }`.
-```javascript
-async function connectView(restore) {
-  let capability, nextId = 0, revision = 0, saveQueue = Promise.resolve();
-  const pending = new Map();
-  const send = (method, params, id) => parent.postMessage({jsonrpc:'2.0', id, method, params, capability}, '*');
-  const rpc = (method, params) => new Promise((resolve, reject) => {
-    const id = String(++nextId);
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('Host request timed out')); }, 10000);
-    pending.set(id, {resolve, reject, timer}); send(method, params, id);
-  });
-  const applyContext = context => {
-    const root = document.documentElement;
-    root.dataset.theme = context.theme; root.style.colorScheme = context.theme;
-    root.lang = context.locale || 'zh-CN'; root.dataset.displayMode = context.displayMode;
-    for (const [key, value] of Object.entries(context.styles?.variables || {})) root.style.setProperty(key, value);
-  };
-  addEventListener('message', event => {
-    if (event.source !== parent || event.data?.jsonrpc !== '2.0') return;
-    const message = event.data, request = pending.get(message.id);
-    if (request) {
-      clearTimeout(request.timer); pending.delete(message.id);
-      message.error ? request.reject(new Error(message.error.message)) : request.resolve(message.result);
-    } else if (message.method === 'ui/notifications/host-context-changed') applyContext(message.params);
-  });
-  const initial = await rpc('ui/initialize', {protocolVersion:'2026-01-26', appInfo:{name:'view',version:'1'}, appCapabilities:{}});
-  capability = initial.capability; revision = initial.reverieViewState?.revision || 0;
-  restore(initial.reverieViewState?.state || {}); applyContext(initial.hostContext);
-  send('ui/notifications/initialized', {});
-  return {save(state) {
-    const snapshot = structuredClone(state);
-    saveQueue = saveQueue.catch(() => {}).then(async () => {
-      const saved = await rpc('reverie/view-state', {baseRevision:revision, state:snapshot});
-      revision = saved.revision;
-    });
-    return saveQueue;
-  }};
-}
-```
-""".strip())
 
     if _thinking_tool_enabled(config):
         shared_sections.append(THINKING_TOOL_GUIDANCE)

@@ -1,0 +1,47 @@
+[6890:1027/130716.359626:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+[6890:1027/130717.607362:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130717.607435:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+[6890:1027/130717.607453:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+
+DevTools listening on ws://127.0.0.1:54221/devtools/browser/689d37b8-4942-4f34-a531-a371752a4212
+[6890:1027/130717.644471:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130717.645233:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130717.648993:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130717.781765:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130717.884023:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6936:1027/130718.079861:ERROR:net/socket/ssl_client_socket_impl.cc:924] handshake failed; returned -1, SSL error code 1, net_error -202
+[6958:1027/130718.142229:ERROR:gpu/ipc/client/command_buffer_proxy_impl.cc:285] ContextResult::kTransientFailure: Failed to send GpuControl.CreateCommandBuffer.
+[6920:1027/130746.136084:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.302 ms
+[6920:1027/130753.235957:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.027 ms
+[6920:1027/130757.135739:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.113 ms
+[6920:1027/130758.349987:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.179 ms
+[6920:1027/130800.335775:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.006 ms
+[6920:1027/130800.436777:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.17 ms
+[6920:1027/130801.135556:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.154 ms
+[6920:1027/130802.235584:ERROR:components/viz/service/display/display.cc:298] Frame latency is negative: -0.105 ms
+[6890:1027/130918.110574:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.110719:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.110846:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.110929:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.254944:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.255032:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.255198:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.255362:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.607423:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.607483:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.607787:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.607912:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.754929:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.755036:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130918.755352:ERROR:dbus/bus.cc:405] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[6890:1027/130918.755374:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[6890:1027/130948.834754:ERROR:content/browser/network_service_instance_impl.cc:608] Network service crashed or was terminated, restarting service.
+[6890:1027/130948.860951:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote
+[6890:1027/130948.862735:ERROR:content/common/zygote/zygote_communication_linux.cc:291] Failed to send GetTerminationStatus message to zygote
+[6890:1027/130948.876061:ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+[6890:1027/130948.880378:ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+[6890:1027/130948.882759:ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+[6890:1027/130948.883324:ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+[6890:1027/130948.883677:ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+[6890:1027/130948.884022:ERROR:content/browser/gpu/gpu_process_host.cc:990] GPU process launch failed: error_code=1002
+[6890:1027/130948.884052:FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.

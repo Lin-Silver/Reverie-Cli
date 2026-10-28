@@ -1,0 +1,80 @@
+  • electron-builder  version=26.15.3 os=6.18.55
+  • loaded configuration  file=package.json ("build" field)
+  • building        target=deb arch=x64 file=/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-launcherfix-20261027/mounted-output-retry2/Reverie-2.5.0-linux-x64.deb
+ExecError: /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/fpm process failed 1
+Exit code:
+1
+Output:
+Exit code: 1. Command failed: /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/fpm -s dir --force -t deb -d libgtk-3-0 -d libnotify4 -d libnss3 -d libxss1 -d libxtst6 -d xdg-utils -d libatspi2.0-0 -d libuuid1 -d libsecret-1-0 --deb-recommends libappindicator3-1 --deb-compression xz --architecture amd64 --after-install /tmp/t-RlgVp4/0-after-install.sh --after-remove /tmp/t-RlgVp4/1-after-remove.sh --description Reverie context-engine coding assistant
+ Reverie desktop — a native GUI host for the Reverie CLI core --version 2.5.0 --package /workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-launcherfix-20261027/mounted-output-retry2/Reverie-2.5.0-linux-x64.deb --name reverie --maintainer Lin-Silver <linsilver54@gmail.com> --vendor Lin-Silver <linsilver54@gmail.com> --url https://github.com/Lin-Silver/Reverie-Cli --category devel --deb-priority optional --license MIT /workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-launcherfix-20261027/mounted-prepackaged/=/opt/Reverie /workspace/Reverie-Cli/ReverieCli-py/reverie.png=/usr/share/icons/hicolor/512x512/apps/ReverieUI.png /tmp/t-RlgVp4/3-ReverieUI.desktop=/usr/share/applications/Reverie.desktop
+/tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'File#initialize': Permission denied @ rb_sysopen - /dev/null (Errno::EACCES)
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'IO.open'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'Gem::Resolver#output'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/modules/ui.rb:41:in 'Gem::Molinillo::UI#after_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:232:in 'Gem::Molinillo::Resolver::Resolution#end_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:187:in 'Gem::Molinillo::Resolver::Resolution#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolver.rb:43:in 'Gem::Molinillo::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:186:in 'Gem::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:413:in 'Gem::RequestSet#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:425:in 'Gem::RequestSet#resolve_current'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:234:in 'Gem.finish_resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:291:in 'block in Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Thread::Mutex#synchronize'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/gems/bin/fpm:25:in '<main>'
+/tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'File#initialize': Permission denied @ rb_sysopen - /dev/null (Errno::EACCES)
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'IO.open'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'Gem::Resolver#output'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/modules/ui.rb:33:in 'Gem::Molinillo::UI#before_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:213:in 'Gem::Molinillo::Resolver::Resolution#start_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:168:in 'Gem::Molinillo::Resolver::Resolution#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolver.rb:43:in 'Gem::Molinillo::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:186:in 'Gem::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:413:in 'Gem::RequestSet#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:425:in 'Gem::RequestSet#resolve_current'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:234:in 'Gem.finish_resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:291:in 'block in Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Thread::Mutex#synchronize'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/gems/bin/fpm:25:in '<main>'
+
+/tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'File#initialize': Permission denied @ rb_sysopen - /dev/null (Errno::EACCES)
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'IO.open'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'Gem::Resolver#output'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/modules/ui.rb:41:in 'Gem::Molinillo::UI#after_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:232:in 'Gem::Molinillo::Resolver::Resolution#end_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:187:in 'Gem::Molinillo::Resolver::Resolution#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolver.rb:43:in 'Gem::Molinillo::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:186:in 'Gem::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:413:in 'Gem::RequestSet#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:425:in 'Gem::RequestSet#resolve_current'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:234:in 'Gem.finish_resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:291:in 'block in Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Thread::Mutex#synchronize'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/gems/bin/fpm:25:in '<main>'
+/tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'File#initialize': Permission denied @ rb_sysopen - /dev/null (Errno::EACCES)
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'IO.open'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:173:in 'Gem::Resolver#output'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/modules/ui.rb:33:in 'Gem::Molinillo::UI#before_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:213:in 'Gem::Molinillo::Resolver::Resolution#start_resolution'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolution.rb:168:in 'Gem::Molinillo::Resolver::Resolution#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/vendor/molinillo/lib/molinillo/resolver.rb:43:in 'Gem::Molinillo::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/resolver.rb:186:in 'Gem::Resolver#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:413:in 'Gem::RequestSet#resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems/request_set.rb:425:in 'Gem::RequestSet#resolve_current'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:234:in 'Gem.finish_resolve'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:291:in 'block in Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Thread::Mutex#synchronize'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/lib/ruby/3.4.0/rubygems.rb:289:in 'Gem.activate_bin_path'
+	from /tmp/riu-electron-builder-cache-copy-20261027/fpm@2.1.4/fpm-1.17.0-ruby-3.4.3-linux-amd64-1nk0v/ruby-3.4.3-portable/gems/bin/fpm:25:in '<main>'
+
+    at /workspace/Reverie-Cli/ReverieCli-ui/node_modules/builder-util/src/util.ts:192:18
+    at ChildProcess.exithandler (node:child_process:424:5)
+    at ChildProcess.emit (node:events:509:28)
+    at maybeClose (node:internal/child_process:1141:16)
+    at Process.ChildProcess._handle.onexit (node:internal/child_process:306:5) {
+  exitCode: 1,
+  alreadyLogged: false,
+  code: '1'
+}

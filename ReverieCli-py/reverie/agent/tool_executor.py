@@ -21,7 +21,7 @@ from ..config import get_project_data_dir, get_workspace_checkpoint_dir
 from ..diagnostics import report_suppressed_exception
 from ..modes import normalize_mode
 from ..thinking_tool import THINK_TOOL_NAME
-from ..tools.base import BaseTool, ToolResult
+from ..tools.base import BaseTool, ToolResult, INVALID_TOOL_ARGUMENTS
 from ..tools.mcp_dynamic import MCPDynamicTool
 from ..tools.rats_catalog import RatsCatalogTool
 from ..tools.rats_dynamic import RatsDynamicTool
@@ -1130,6 +1130,8 @@ class ToolExecutor:
         Returns:
             ToolResult with success status and output
         """
+        if INVALID_TOOL_ARGUMENTS in arguments:
+            return ToolResult.fail("Incomplete tool arguments; nothing was executed. Resend the complete JSON object.")
         self._sync_dynamic_tools()
         tool = self.get_tool(tool_name)
 

@@ -1,0 +1,60 @@
+
+> reverie@2.5.0 test
+> vitest run --maxWorkers=2
+
+
+ RUN  v4.1.1 /workspace/Reverie-Cli/ReverieCli-ui
+
+Switched to a new branch 'other'
+Switched to branch 'main'
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+To /workspace/Reverie-Cli/ReverieCli-ui/.runtime/test-temp/reverie-git-remote-700JDh
+ * [new branch]      main -> main
+To /workspace/Reverie-Cli/ReverieCli-ui/.runtime/test-temp/reverie-git-remote-700JDh
+ * [new branch]      remote-only -> remote-only
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+
+ Test Files  53 passed | 1 skipped (54)
+      Tests  425 passed | 1 skipped (426)
+   Start at  10:00:22
+   Duration  48.15s (transform 2.84s, setup 0ms, import 7.64s, tests 55.27s, environment 12.18s)
+

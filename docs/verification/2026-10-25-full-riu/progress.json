@@ -1,0 +1,907 @@
+{
+  "snapshot_at_utc": "2026-10-26T09:07:33.834660+00:00",
+  "status": "in_progress_with_validation_blockers",
+  "build": "c059be45303a7a67",
+  "version": "2.5.0",
+  "python": {
+    "passed": 2390,
+    "skipped": 24,
+    "warnings": 59,
+    "seconds": 391.626,
+    "canonical_verifier_passed": 209,
+    "prompt_contracts_passed": 57,
+    "native_calibration_passed": 71
+  },
+  "desktop": {
+    "passed": 407,
+    "skipped": 1
+  },
+  "development": {
+    "cases": 8,
+    "qualified": 7,
+    "first_pass": 5,
+    "repaired_success": 2,
+    "semantic_failure": 1,
+    "formal_samples": 0
+  },
+  "formal": {
+    "path": "/workspace/Reverie-Cli/.runtime/riu-full-formal60-20261025-round2",
+    "planned_cases": 60,
+    "fixed_manual_reviews": 18,
+    "status": "closed_with_interruption",
+    "formal_cohort": 2,
+    "max_formal_cohorts": 2,
+    "closed_slots": 60,
+    "completed": 59,
+    "interrupted_count": 1,
+    "interrupted_ids": [
+      "model-2-chart-1"
+    ],
+    "qualified": 31,
+    "outcomes": {
+      "first_pass": 16,
+      "repaired_success": 15,
+      "semantic_failure": 19,
+      "service_transport_error": 3,
+      "model_violation": 2,
+      "validator_or_product_error": 4
+    },
+    "closed_slot_outcomes": {
+      "first_pass": 16,
+      "repaired_success": 15,
+      "semantic_failure": 19,
+      "infrastructure_interruption": 1,
+      "service_transport_error": 3,
+      "model_violation": 2,
+      "validator_or_product_error": 4
+    },
+    "active": [],
+    "manual_reviews_complete": 17,
+    "build": "85ab811e5ef12ec9",
+    "automatic_model_acceptance": false,
+    "full_acceptance": false,
+    "acceptance_limitation": "One started execution interrupted. Retain slot without replacement;60 slot closure is not60 complete model-quality executions.",
+    "manual_reviews_passed": 7,
+    "manual_review_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-operator-review.json",
+    "observer_assisted_ids": [
+      "model-2-comparison-1"
+    ],
+    "observer_assistance_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-comparison2-viewport-assistance/diagnosis.json",
+    "observer_assisted_completed": 1,
+    "unassisted_completed": 58,
+    "observer_assistance_scope": "Observer execution required viewport assistance. Original automatic result must retain this caveat; no clean fully automatic execution is claimed.",
+    "manual_reviews_failed": 9,
+    "manual_reviews_incomplete": 1,
+    "manual_profiles_accounted": 18,
+    "manual_unavailable_profiles": [
+      {
+        "id": "model-2-chart-1",
+        "reason": "Model modification execution killed; no completed final session or substitute artifact.",
+        "diagnosis": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-interruption-20261025/diagnosis.json"
+      }
+    ],
+    "manual_processing_complete": true,
+    "manual_full_review_complete": false,
+    "execution_health": {
+      "scope": "Read-only process health; flags lost execution without retrying, scoring, or stopping models.",
+      "observed_at_utc": "2026-10-25T17:29:43.322580+00:00",
+      "driver": {
+        "pid": 367919,
+        "state": "Z",
+        "owned": false,
+        "live": false
+      },
+      "active_children": [],
+      "whole_round_closed": true,
+      "needs_attention": false,
+      "stalled_local_reviews": [],
+      "attention_reason": null
+    },
+    "qualified_scope": "Automatic verifier only. Scored completions exclude interrupted slots; manual invalidations remain separate from immutable original reports.",
+    "observed_manual_invalidations": [
+      "model-1-chart-1",
+      "model-2-rich-mixed-1",
+      "model-2-table-2",
+      "model-2-table-3"
+    ],
+    "qualified_after_observed_manual_reviews": 27,
+    "samples": [
+      {
+        "id": "model-1-rich-overview-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "97b5a3613d64baad6886a403841e3e01cd0f27beadb5cc55bc90b73ed975e32e",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-overview-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "cfb09668c96d6517b3a15fc50f6e3c4ec86ae056494390dc855ecaab12114cb3",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-recommendations-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 2,
+        "report_sha256": "1b4d35b15e6e5a9ab9324bed9f44177c132b75e27f8fe0ac3930d320ebd27f8b",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-recommendations-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "617ca783d13302fb436354f7b647d15d57092a9a599f77f22add3c877da275dd",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-long-table-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "5b1bce8eab931e8a826f8ed6e7b0446eba4334bc8103ccd0d37d00bfdf4c3201",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-long-table-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "6074024fdd14478eb6ca619fd1cf4d91c8a82c7c82a972319774fbd8c34d201d",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-mixed-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "2c72a8c33b447d61e82039e63795ab1254189cc6055c8cb544812bd51336b3d0",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-mixed-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "9936670114c7be09966832ccb33f49eb61f982860ed3d0d8953fdb17bc827194",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-calculator-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "3841698d4c9a4a78db09aad41fabd041d166beaddb468dbdf2d6b4b3413ca6e0",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-calculator-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "5a0e6e8eb591a92526c4d321cf1ed5386ae07f145e53a28859c1467c705312e6",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-table-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 2,
+        "report_sha256": "36faf14cea6c20b4d32713951a4c527a135b04875adb98df50b3dec1709bae87",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-table-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "0e689d9c79cc4d055d0d24456731b6935f06b7c0e2f472b318ba8bfb9318de96",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-chart-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "16ca3f9292282b0296a2b011a5f540378373081832bd9cab11c53d038296aea2",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-chart-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "infrastructure_interruption",
+        "qualified": false,
+        "repair_count": 1,
+        "report_sha256": "b5e11518ad111f68c40bb36958fff7ac218cb2bb33353042003190bd7a9610d8",
+        "quality_execution_complete": false,
+        "completion_kind": "administrative_interruption_closure"
+      },
+      {
+        "id": "model-1-form-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "service_transport_error",
+        "qualified": false,
+        "repair_count": 1,
+        "report_sha256": "4ea8d339ba7b5fc64fc44199307010292ed5670836d3bdb87dfe70f3b83cfd6a",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-form-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "service_transport_error",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "e2977c9060c6f2ced3136d9f3a47c2fdd633c00d9d8c0253d130e5423a37eb00",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-comparison-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "749df2e0c9089c54b1e2fb1812e71c46eab893d7aa371aa3968dee0eda5297fb",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-comparison-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "4398a511b7032200c98932e5d4a93c1931d84b605a0499f26b5d2d808b5a7800",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-text-1",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "7d1feb40e210973b153f30e0724df2dbcdf62106744a7e4f752475cd80bfee90",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-text-1",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "37d30aa21a30faa1b52adbff738323c884e81d997361de9756f42e674170c377",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-overview-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "0f301236079f881337908d11c9d22257065342d8aa773ec1c9c2d6415a1f4125",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-overview-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "0a9b6bed1cfe25314c6e745aac56f92f753eeb058cf8c1885b4839c704174d50",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-recommendations-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "3d13d363ddefa1126e42cd978a476e4a56cec843eaa0243f4e449b1657650e9b",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-recommendations-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "b5d75da88e2deadf9e6ff13247afea1f4384c05e342514adc23e15dd00da9328",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-long-table-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "6b2e517cc4258d6ae490a7c6873448ca62fdc12f7316b1ec989a7f25e759d8c0",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-long-table-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 2,
+        "report_sha256": "6b497d29129ed22eea7029aed2ea01614351a88027ef590429199029cb916176",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-mixed-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "c482dcf9efb98c8965a5ab6fc5e860deeea443f44941b728972e0e6232838d24",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-mixed-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "18ed4db4e3e841232e174682868bee59f967a803d465b7f95b5d3951c00799d3",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-calculator-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "0bb9e98b8f76ab8847d3fd35708e622b2276fcb32e84c11c05312d1bfe367f73",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-calculator-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "e00c47c9c63f8920823db722dc7a5e926db72ee144712ab38a566b6d9f2e76fd",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-table-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "c37efc1308491670908ef3db36abeb28eedb8d7fe03b297a373a5fb6c01524e1",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-table-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "dfa5426693da67af0d1e3cf30d30747939d32edc3e8bcb4d777bc51bf1481767",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-chart-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "eee4ea09f4207fadf9ebad6ee0a85f0c9bc97db3605c150b25647ea6e5a58f0f",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-chart-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "model_violation",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "feaff2a5b1649abb4a38a3ead6e9dba9e21f6828b995091dbef229bd2e7e0b50",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-form-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "2e5dc16867b7107b5a52aca8ce806dc858f9c4ac86a825c91490f0d2663c23a0",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-form-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "service_transport_error",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "639550098669e249ad971a0db037b6e40a5e9cc0a5870db43488119c134e42cc",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-comparison-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "04694dbca27e9740ff04700b5f20288eb5d07e8f743652be5160d9936266ef6b",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-comparison-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "e707f4f55c12ecee1f957953321e02fe2c5d31625f16dadcc8643c76e97d1943",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-text-2",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "96f3f16274ea3d8afd6202a120b0f6e6432952f4a9406e776cd0bff770669840",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-text-2",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 0,
+        "report_sha256": "fbb82f3683c071a99fdb2a33e852d398278bb4fa3b436b5a0889dcce9a301e0d",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-overview-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "2edba0f54e7f146806e6e57e070ff41bdcabfbd0c290b090d374948d1c633c81",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-overview-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "1eb1e13f1cd21707617ec21956bd40953494c25eafe464406863e546fd1636c0",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-recommendations-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "fdc99748a5eb67c46fe0eeafc54d30151f4ba64c102f1a3295d09789a0be3a33",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-recommendations-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "4869f747375088f478f0b7272dd14d21637f5a0f7152b89c0d2c888f17c6fdf1",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-long-table-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "269fc959d3dce78ccd9abfd6045bdc2cf088f847d57af6aaea5d37e60499c230",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-long-table-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "validator_or_product_error",
+        "qualified": false,
+        "repair_count": 0,
+        "report_sha256": "4cf1982c6147677d4b76859dbf277fd4d52b9e56b60ce9b96c89d8ff25b1e918",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-rich-mixed-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "1ef3b108091c8ad028859853d6e462ec27fb5adbec09727f4fc7bfd3ea4f5a6f",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-rich-mixed-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "7c64ee9ddf05e3b2ddd74db42a60216bd976cc1a2217dd95cc6dae55c297f31e",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-calculator-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "259fdcc5f304838a803b7c85a4f45fe9a26594913e7582358b601e38e6c4723d",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-calculator-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "model_violation",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "6033afaef1298fb8298273b6b3e8483f77ca08aa7ebd40db36bdd59fd2894abb",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-table-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "validator_or_product_error",
+        "qualified": false,
+        "repair_count": 0,
+        "report_sha256": "7e96880c69e0e0168e128c11cfffbb87d1b33df106ef8e3a201f95c87a9a59c3",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-table-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "repaired_success",
+        "qualified": true,
+        "repair_count": 1,
+        "report_sha256": "c8892c761f033ba996379cdb5c8e3dd860a9e30583ebd040ad8e02c04cf56b31",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-chart-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "768114e778caa19ab9a8265fb1f67c5d71d5b9dcea7fce8ce7a8296cd81e6155",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-chart-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "59b42b2699043dda8e80fcf62417575cd3c175892363b2aa9830e93d98a74c50",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-form-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "validator_or_product_error",
+        "qualified": false,
+        "repair_count": 0,
+        "report_sha256": "57985b36026f3490d36518f4c5884f6aa00b092363f496c932e8f7018c5fb785",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-form-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "c45e7a5273c11ec6c6f93734ad671e7bbff555d209da9bbed1a6621f2adcd559",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-comparison-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "validator_or_product_error",
+        "qualified": false,
+        "repair_count": 1,
+        "report_sha256": "9b8345f95b47416c27dfc0db87d5299b196b730e9a5e95bed4723b278f4ca7d2",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-comparison-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "semantic_failure",
+        "qualified": false,
+        "repair_count": 2,
+        "report_sha256": "7020cece4e7bf6d89f7aa0c4e4e519e1d66b5ed515995f5e4326ff3bf69186d6",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-1-text-3",
+        "model": "Qwen3.5-397B-A17B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "05a5b1c663aa02978a296ba7e55a4459eac0acd1a5ff9d826fe00bb5187e829b",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      },
+      {
+        "id": "model-2-text-3",
+        "model": "Qwen3.6-27B",
+        "outcome": "first_pass",
+        "qualified": true,
+        "repair_count": 0,
+        "report_sha256": "209832a19e7c311aebd8942c93005cba82a6339af13735dae7f0a80cf918b240",
+        "quality_execution_complete": null,
+        "completion_kind": null
+      }
+    ]
+  },
+  "packages": [
+    {
+      "path": ".runtime/riu-completion-20261021/final-native-form-repair-20261026/installers/Reverie-2.5.0-linux-x64.AppImage",
+      "bytes": 398952270,
+      "sha256": "7adfefe629320af5a456556aa42d88fb7fa216e9b931334c1b80a6fe14777ca4"
+    },
+    {
+      "path": ".runtime/riu-completion-20261021/final-native-form-repair-20261026/installers/Reverie-2.5.0-linux-x64.deb",
+      "bytes": 356412712,
+      "sha256": "3ec158aec8c7d796186c499b320a410f55b5d039cd1dff4a5bf7488eb90f5c94"
+    }
+  ],
+  "evidence": {
+    "native-acceptance.json": {
+      "sha256": "dc8d3bb21aa2c2390684193b117aa8689663aec191a7fab191dc65cf8bca3f55"
+    },
+    "linux-install.json": {
+      "sha256": "5cf1d92f04b04f12f6fbc8752a5f54d7c173730a5eb90c362a621de2a36bfa04"
+    },
+    "linux-launchers.json": {
+      "sha256": "755c8ae8db440cb22375cc1bae42b7665901bc05dd60a3ea2156d52b4784a2d1"
+    },
+    "appimage-rich.json": {
+      "sha256": "e45050d2689ef58cf48b4485f95b654d667244e91f908d8c6263973ba798ce07"
+    },
+    "batch2-native-acceptance.json": {
+      "sha256": "24eb64308cb0ba8688527b30403312ae965b85e384bd5860c1c7883d71034c1e"
+    },
+    "batch2-linux-install.json": {
+      "sha256": "d726d5a5751a0c38fa516c9b2df824e2a0b16016203f3cd44bb435222c862ac8"
+    },
+    "batch2-linux-launchers.json": {
+      "sha256": "755c8ae8db440cb22375cc1bae42b7665901bc05dd60a3ea2156d52b4784a2d1"
+    },
+    "batch2-appimage-rich.json": {
+      "sha256": "fcad109b2edb264c9f586fa4136e2182da9994855cde5f87b7e5189dee30a0f8"
+    },
+    "batch2-rich-native.json": {
+      "sha256": "fcad109b2edb264c9f586fa4136e2182da9994855cde5f87b7e5189dee30a0f8"
+    },
+    "formal1-closed10-request-audit.json": {
+      "sha256": "97fe41e1da03c194a949d08e88d6716b82f7ab031da10cc248c54b290efe9dd3"
+    }
+  },
+  "platforms": {
+    "linux-x64": "Currentc059:actual deb install/upgrade/uninstall15 and installedrich24 passed under ordinary user with Chinese fonts; AppImageextract-and-run24passed. FUSE launch untested.",
+    "windows-x64": "Not built or run in corresponding OS; manual workflow prepared, not executed",
+    "macos-arm64": "Not built or run in corresponding OS; manual workflow prepared, not executed",
+    "macos-x64": "Not built or run in corresponding OS; manual workflow prepared, not executed"
+  },
+  "limitations": [
+    "Whole RIU incomplete; no release, commit, push, signing or notarization.",
+    "Model identifier-spacing failure preserved; images below are examples, not a whole-cohort pass.",
+    "AppImage FUSE-mounted launch was not tested; actual extract-and-run was tested."
+  ],
+  "example_images": [
+    {
+      "file": "overview-dark-narrow.png",
+      "source": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-overview-1-execution-1/rich-overview-1/generation-dark-460.png",
+      "sha256": "c5d3804d82359a235b575c7ca7354fb350a7f28c8dfc3f95fcecb5d837454dbc",
+      "edited": false
+    },
+    {
+      "file": "recommendations-dark-narrow.png",
+      "source": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-recommendations-1-execution-1/rich-recommendations-1/generation-dark-460.png",
+      "sha256": "10e24d550dbe30d10c414457d29441567f86a74c31fc6b09e02ebf4036bcc442",
+      "edited": false
+    }
+  ],
+  "external_verifier": {
+    "passed": 215
+  },
+  "native_rich": {
+    "passed": 24
+  },
+  "formal1": {
+    "status": "closed_partial_for_shared_source_fixes",
+    "completed": 10,
+    "qualified": 7,
+    "semantic_failure": 2,
+    "service_transport_error": 1,
+    "unexecuted": 50,
+    "manual_reviews_complete": 8,
+    "manual_reviews_passed": 6,
+    "manual_reviews_failed": 2,
+    "source_archived": true,
+    "complete": false
+  },
+  "historical_build_snapshot": "progress-build-21b.json",
+  "example_images_scope": "Unedited examples from closed partial formal cohort1/build21b, retained as historical visual examples.",
+  "operator_visual_checks": {
+    "cases_with_generated_capture_review": 54,
+    "fixed_actual_profile_review": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-operator-review.json",
+    "scope": "Generated captures and selected actual profiles reviewed separately. Interrupted or unexecuted phases remain incomplete.",
+    "remaining_cases": 0,
+    "remaining_pngs": 0,
+    "rich_cases_reviewed": 24,
+    "rich_pngs_reviewed": 389,
+    "rich_captured_answers_without_unresolved_P2": 19,
+    "latest_interactive_capture_addendum": "batch2-final-capture-review.json",
+    "latest_observer_revision": "batch2-observer-readability-chart-revision.json"
+  },
+  "current_example_images": [
+    {
+      "file": "batch2-overview-dark-narrow.png",
+      "source": ".runtime/riu-full-formal60-20261025-round2/model-2-rich-overview-1-execution-1/rich-overview-1/generation-dark-460.png",
+      "sha256": "455821a03c5c4722acf1eb6620f5bb9662d9019d82b93d527bdc72f357266aa9",
+      "model": "Qwen3.6-27B",
+      "outcome": "first_pass",
+      "build": "85ab811e5ef12ec9",
+      "edited": false
+    },
+    {
+      "file": "batch2-recommendations-dark-narrow.png",
+      "source": ".runtime/riu-full-formal60-20261025-round2/model-1-rich-recommendations-1-execution-1/rich-recommendations-1/modification-dark-460.png",
+      "sha256": "dc3bd4042c9c7b14ecb132abc76d3ecb000fd15890894b22ea00466101fdd183",
+      "model": "Qwen3.5-397B-A17B",
+      "outcome": "repaired_success after2normalfeedbacks",
+      "build": "85ab811e5ef12ec9",
+      "edited": false
+    }
+  ],
+  "observer_followup": {
+    "scope": "Apply the reviewed verifier-only overlay after all frozen work closes; never rerun models or change scores.",
+    "status": "applied_and_verified",
+    "public_source_applied": true,
+    "model_quality_samples": 0,
+    "model_scores_changed": false,
+    "at_utc": "2026-10-25T17:33:16.330089+00:00",
+    "frozen_cohort_manifest_sha256": "3dc47199e5dfba13baad3c90c14170bbd8e036541e38a120d0d6a37649b96112",
+    "frozen_reviewed_source_archive": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-reviewed-source.zip",
+    "source_delta": [
+      {
+        "path": "scripts/verification/riu_quality_benchmark.py",
+        "frozen_before_sha256": "88d5360d2ea98ccb737a5f20df1301acb73d06295a65a0b723e161cc0efed854",
+        "candidate_sha256": "1afc66ddb240b53f2a26647ee31873faa11ae68287bad4bd1d91c096d0c8a102"
+      },
+      {
+        "path": "ReverieCli-py/tests/test_riu_quality_verifier.py",
+        "frozen_before_sha256": "ab70dabbfaaa6128b171a13c8bb462a51082a69c853ad27a7c13f9cbb06b9ef1",
+        "candidate_sha256": "fdf48b26b955226d154d0875537173b10d23d95af54e98b0188bd63098234b14"
+      }
+    ],
+    "cohort_quality_executions": 59,
+    "cohort_closed_slots": 60,
+    "cohort_observer_assisted_slots": [
+      "model-2-comparison-1"
+    ],
+    "cohort_interrupted_slots": [
+      "model-2-chart-1"
+    ],
+    "pre_apply_readonly_audits_passed": false,
+    "canonical_regression_exit_code": 0,
+    "canonical_regression_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/postfreeze-observer-regression.xml",
+    "canonical_regression_tests_passed": 175,
+    "model_reports_unchanged": true,
+    "product_sources_and_native_artifacts_unchanged": true,
+    "remaining_limits": [
+      "Model chart zero branch still reports original360 instead of460.",
+      "Original model semantic/service failures, interrupted execution and missing platform proofs remain."
+    ]
+  },
+  "latest_canonical_verifier_regressions_passed": 209,
+  "postclosure_addendum_index": "batch2-postclosure-addendum-index.json",
+  "form_validation_followup": {
+    "report": "batch2-form-validation-followup.json",
+    "combined_tests_passed": 266,
+    "native_authored_checks_passed": 15,
+    "native_prompt_rebuild_pending": false,
+    "current_build": "c059be45303a7a67",
+    "latest_report": "batch2-native-form-repair-c059.json"
+  },
+  "latest_validation_report": "batch2-native-form-repair-c059.json",
+  "current_blockers": [
+    {
+      "id": "model_quality",
+      "status": "not_accepted",
+      "detail": "Closed cohort2:60slots,59completed evaluations,1interrupted.31automatic successes,4manually invalidated; remaining27 are not full manual acceptance. Source guidance changes and authored fixtures have0new model-quality samples. Preserve two-cohort cap; no third cohort or rescoring."
+    },
+    {
+      "id": "actual_platforms",
+      "status": "environment_unavailable",
+      "platforms": [
+        "windows-x64",
+        "macos-arm64",
+        "macos-x64"
+      ],
+      "detail": "Corresponding actual-system installation/runtime evidence unavailable. Workflow prepared and locally parsed, not pushed or remotely executed."
+    },
+    {
+      "id": "performance_scope",
+      "status": "limited_evidence",
+      "detail": "One local synthetic P4 run31checks; no model-performance or stability claim. AppImage extract-and-run tested; FUSE-mounted launch untested."
+    }
+  ],
+  "latest_native_addendum_index": "docs/verification/2026-10-25-full-riu/batch2-native-form-repair-c059-archive-index.json"
+}

@@ -1,0 +1,77 @@
+/* Answer-owned presentation. The surrounding Desktop and isolated views keep their themes. */
+.answer-markdown { color: var(--text); line-height: 1.75; --answer-info: var(--blue); --answer-success: var(--green); --answer-warning: var(--amber); --answer-danger: var(--red); }
+:root[data-theme="light"] .answer-markdown { --blue: #1d5c9f; --answer-info: #1d5c9f; --answer-success: #14633e; --answer-warning: #7a4e10; --answer-danger: #9b2836; }
+.answer-markdown h1, .answer-markdown h2, .answer-markdown h3 { line-height: 1.45; letter-spacing: -.02em; }
+.answer-markdown > h2 { margin: 30px 0 18px; }
+.answer-markdown > hr { margin: 28px 0; border: 0; border-top: 1px solid var(--border-soft); }
+.answer-markdown a { text-underline-offset: 4px; }
+.answer-markdown a > svg { display: inline-block; vertical-align: -.12em; margin-left: 3px; flex-shrink: 0; }
+.answer-markdown a:focus-visible, .answer-table-scroll:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 4px; }
+.answer-markdown img { max-width: 100%; height: auto; border-radius: 16px; }
+.answer-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 22px 0 28px; padding: 0; }
+.answer-metric { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; min-height: 116px; padding: 18px 12px; text-align: center; border-radius: 18px; background: color-mix(in srgb, var(--text) 9%, var(--bg)); }
+.answer-metrics-has-long-values { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 700px; }
+.answer-metric dt { order: 1; color: var(--text-2); font-size: var(--font-body); line-height: 1.45; }
+.answer-metric dd { margin: 0 0 8px; color: var(--text); font-size: 34px; font-weight: 650; line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.answer-metric dd.answer-metric-value-long { max-width: 100%; overflow-x: auto; scrollbar-width: thin; font-size: 18px; letter-spacing: -.025em; white-space: nowrap; overflow-wrap: normal; }
+.answer-metric-value-long:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.answer-metric small { order: 2; margin-top: 5px; color: var(--muted); font-size: var(--font-small); }
+.answer-table-section { min-width: 0; margin: 24px 0; }
+.answer-table-section > h3 { margin: 0 0 14px; font-size: var(--font-heading-md); }
+.answer-table-scroll { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.answer-markdown .answer-table-scroll table { width: 100%; margin: 0; border-collapse: collapse; font-size: inherit; line-height: 1.6; }
+.answer-markdown .answer-table-scroll th, .answer-markdown .answer-table-scroll td { border: 0; border-bottom: 1px solid var(--border); padding: 15px 16px; text-align: left; vertical-align: top; min-width: 90px; }
+.answer-markdown .answer-table-scroll th { color: var(--text); background: transparent; font-weight: 650; white-space: nowrap; }
+.answer-markdown .answer-table-scroll td { color: var(--text-2); }
+.answer-markdown .answer-table-scroll .answer-number { display: inline-block; white-space: pre; overflow-wrap: normal; }
+.answer-markdown .answer-table-scroll th:first-child, .answer-markdown .answer-table-scroll td:first-child { padding-left: 6px; min-width: 0; }
+.answer-markdown .answer-table-scroll td:last-child { min-width: 180px; }
+.answer-markdown .answer-table-scroll caption { caption-side: bottom; padding: 12px 6px 0; color: var(--muted); text-align: left; font-size: var(--font-small); }
+.answer-empty, .answer-table-empty { color: var(--muted); }
+.answer-table-empty { padding: 12px 6px; }
+.answer-badge { display: inline-block; max-width: 100%; padding: 3px 9px; border-radius: 6px; font-size: var(--font-small); font-weight: 550; line-height: 1.6; color: var(--text-2); background: var(--panel-3); vertical-align: middle; overflow-wrap: anywhere; }
+.answer-badge-info { color: var(--answer-info); background: color-mix(in srgb, var(--answer-info) 12%, transparent); }
+.answer-badge-success { color: var(--answer-success); background: color-mix(in srgb, var(--answer-success) 12%, transparent); }
+.answer-badge-warning { color: var(--answer-warning); background: color-mix(in srgb, var(--answer-warning) 12%, transparent); }
+.answer-badge-danger { color: var(--answer-danger); background: color-mix(in srgb, var(--answer-danger) 12%, transparent); }
+.answer-cards { margin: 18px 0; }
+.answer-card { min-width: 0; padding: 24px 0; border-bottom: 1px solid var(--border-soft); }
+.answer-card:first-child { padding-top: 0; }
+.answer-card:last-child { border-bottom: 0; padding-bottom: 0; }
+.answer-card-with-image { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); align-items: start; gap: 22px; }
+.answer-card-content { min-width: 0; }
+.answer-card-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 10px; }
+.answer-card-heading h3 { margin: 0; color: var(--text); font-size: var(--font-heading-md); font-weight: 600; }
+.answer-card-number { color: var(--text-2); }
+.answer-markdown .answer-card p { margin: 0 0 12px; color: var(--text-2); white-space: pre-wrap; }
+.answer-markdown .answer-card-image { width: 100%; aspect-ratio: 4 / 3; height: auto; object-fit: contain; border: 1px solid var(--border); background: var(--panel); border-radius: 18px; }
+.answer-image-fallback { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 100px; padding: 20px; color: var(--muted); background: var(--panel-2); }
+.answer-image-fallback span { min-width: 0; font-size: var(--font-small); }
+.answer-image-fallback.answer-card-image { display: flex; flex-direction: column; text-align: center; }
+.answer-sources { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 13px; }
+.answer-markdown .answer-source { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel-3); color: var(--text-2); font-size: var(--font-small); line-height: 1.6; text-decoration: none; }
+.answer-markdown .answer-source > svg { margin: 0; }
+.answer-source span { min-width: 0; overflow-wrap: anywhere; }
+.answer-card-links { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.answer-markdown .answer-card-links a { color: var(--text); border-bottom: 1px dotted var(--muted); }
+.answer-block-pending, .answer-block-fallback > p { color: var(--muted); font-size: var(--font-small); }
+.answer-metric dt, .answer-metric dd, .answer-metric small,
+.answer-markdown .answer-table td, .answer-markdown .answer-table caption,
+.answer-card-heading h3, .answer-badge, .answer-source span, .answer-image-fallback span {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.answer-markdown .answer-table th { white-space: pre; }
+.answer-markdown { container-type: inline-size; }
+@container (max-width: 420px) {
+  .answer-metrics { gap: 8px; }
+  .answer-metric { min-height: 96px; padding: 14px 6px; border-radius: 14px; }
+  .answer-metric dd { font-size: 28px; }
+  .answer-metric dd.answer-metric-value-long { font-size: 16px; }
+  .answer-metric dt { font-size: var(--font-small); }
+  .answer-card-with-image { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 14px; }
+}
+@container (max-width: 300px) {
+  .answer-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .answer-card-with-image { grid-template-columns: minmax(0, 1fr); }
+}

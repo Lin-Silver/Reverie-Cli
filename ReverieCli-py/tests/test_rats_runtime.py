@@ -226,6 +226,13 @@ class _RatsHandler(BaseHTTPRequestHandler):
             idempotency_key = str(body.get("idempotency_key") or "")
             request_material = dict(body)
             request_material.pop("id", None)
+            def reply_tool_result(result):
+                # Publish the replay record before the client can receive the
+                # first response and race a duplicate request against it.
+                if idempotency_key:
+                    self.server.idempotency[idempotency_key] = (request_material, result)
+                self._reply(200, request_id, result=result)
+
             if idempotency_key and idempotency_key in self.server.idempotency:
                 previous_material, previous_result = self.server.idempotency[idempotency_key]
                 if previous_material != request_material:
@@ -247,7 +254,7 @@ class _RatsHandler(BaseHTTPRequestHandler):
                 }
                 self.server.task_state = {"task_id": "run-test-task-1", "state": "running", "running": True, "progress": 0.0}
                 result = {"tool": tool_name, "dry_run": False, "output": self.server.task_state, "task": self.server.task, "idempotent_replay": False}
-                self._reply(200, request_id, result=result)
+                reply_tool_result(result)
             elif tool_name == "logs.read":
                 arguments = args.get("arguments", {})
                 result = {
@@ -265,12 +272,10 @@ class _RatsHandler(BaseHTTPRequestHandler):
                             "has_more": False,
                         },
                     }
-                self._reply(200, request_id, result=result)
+                reply_tool_result(result)
             else:
                 result = {"tool": tool_name, "dry_run": args.get("dry_run", False), "output": {"pong": True, "echo": args.get("arguments", {}).get("message")}, "idempotent_replay": False}
-                self._reply(200, request_id, result=result)
-            if idempotency_key:
-                self.server.idempotency[idempotency_key] = (request_material, result)
+                reply_tool_result(result)
         elif operation == "task.status":
             self._reply(
                 200,

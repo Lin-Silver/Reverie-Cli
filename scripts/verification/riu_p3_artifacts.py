@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -28,7 +29,9 @@ def main():
     package = args.package.resolve()
     output = args.output.resolve()
     if not output.is_relative_to(ROOT): raise ValueError("Evidence must stay in the repository.")
-    archive = CArchiveReader(str(package / "reverie.exe")).open_embedded_archive("PYZ.pyz")
+    kernel = "reverie.exe" if os.name == "nt" else "reverie"
+    application = "ReverieUI.exe" if os.name == "nt" else "ReverieUI"
+    archive = CArchiveReader(str(package / kernel)).open_embedded_archive("PYZ.pyz")
     modules = []
     for name in dict.fromkeys(["mcp", "mcp_apps", "views", "view_execution", "tools.mcp_dynamic", "agent.tool_executor", "sdk_bridge", *args.module]):
         frozen = archive.extract("reverie." + name)
@@ -54,7 +57,7 @@ process.stdout.write(JSON.stringify({files:results,build,trusted}));
     manifest = ROOT / "ReverieCli-py/reverie/agent/tool_manifest.json"
     shipped_manifest = package / "reverie-runtime/reverie/agent/tool_manifest.json"
     data_files = [{"file": "reverie/agent/tool_manifest.json", "matches_current_source": shipped_manifest.read_bytes() == manifest.read_bytes(), "source_sha256": sha256(manifest)}]
-    files = [{"path": str(package / name), "bytes": (package / name).stat().st_size, "sha256": sha256(package / name)} for name in ("ReverieUI.exe", "reverie.exe", "resources/app.asar")]
+    files = [{"path": str(package / name), "bytes": (package / name).stat().st_size, "sha256": sha256(package / name)} for name in (application, kernel, "resources/app.asar")]
     report = {"passed": all(item["matches_current_source"] for item in modules + data_files) and all(item["matches"] for item in ui_evidence["files"]), "frozen_modules": modules, "data_files": data_files, "ui": ui_evidence, "artifacts": files}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2), encoding="utf-8")

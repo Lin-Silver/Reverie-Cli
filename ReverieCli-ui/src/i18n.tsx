@@ -9,6 +9,11 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "表格": "Table",
+  "图片无法显示": "Image unavailable",
+  "暂无数据": "No data",
+  "正在整理内容…": "Formatting content…",
+  "此内容暂时无法排版，原始内容已保留。": "This content could not be formatted. The original is preserved.",
   "视图展示位置": "View display mode",
   "对话内": "Inline",
   "展开摘要": "Show full summary",

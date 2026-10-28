@@ -1,0 +1,27 @@
+{
+  "scope": "One local loopback request through the packaged Desktop; exploratory only, not a cohort sample.",
+  "exploratory_model_completions": 0,
+  "formal_model_quality_samples": 0,
+  "in_app_provider_request_tested": true,
+  "model": "unsloth/Qwen3.5-2B-GGUF",
+  "revision": "f6d5376be1edb4d416d56da11e5397a961aca8ae",
+  "model_bytes": 2012012800,
+  "model_sha256": "1b04acba824817554f4ce23639bc8495ff70453b8fcb047900c731521021f2c1",
+  "server_sha256": "3f2b53013c2eb596c8aca87e4740240a41f95bcebf72e61084d6d5ba0db761cc",
+  "desktop_executable_sha256": "d57754c6cc17997dc87c53946a2d8fc0b5934fdf522401152fb653d8ba2e3b7f",
+  "desktop_asar_sha256": "a212c005bc4d7d48bd040b23e082cf249af45d735674d510ee1cc021595cfa4d",
+  "kernel_executable_sha256": "a631c9ada325d208e14f3d144865ed85e6244332237d70d88b117663f0dc050f",
+  "smoke_script_sha256": "e875235e543d5423d6ea2dccdb5d930c841ac90576e9ea426bacf7543b3bf8e3",
+  "timeout_seconds": 5400,
+  "llama_template_kwargs": {
+    "enable_thinking": false
+  },
+  "server_context_tokens": 32768,
+  "server_threads": 3,
+  "checks": [],
+  "browser_errors": [],
+  "error": "RuntimeError: Packaged Desktop exited before its page was ready (exit code -11)",
+  "render_passed": false,
+  "provider_requests_started": 0,
+  "provider_responses_completed": 0
+}

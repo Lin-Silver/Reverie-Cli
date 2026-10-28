@@ -1,5 +1,7 @@
 # Reverie Intelligent UI：调研、技术规格与 AI 开发交接
 
+2026-10-24：Linux 当前包 **25dc25402c61887e** 已通过源码核对、Python **2284/24**、Desktop **387/1**、原生 P2/P3/P4 **24/26/31** 与隔离 **36**。原正式轮次及 native8 候选的失败保留，质量门仍未通过；当前执行新的完整双模型开发组。数值、原生按钮、框架等待、主题重绘修正及单次性能条件见[本次通用修正和验收](verification/2026-10-21-riu-completion/generic-batch-native9.md)。
+
 初版调研日期：**2026-10-08**；P3 官方契约复核：**2026-10-16**；产品体验资料再次复核：**2026-10-20**。P0–P2 已在 Windows 本地验证，P3 当前实现的协议范围见下方 profile；P4 已实现并完成 2026-10-17 Windows 本地验收，后续提示词修复与真实模型生成质量见 [续验记录](VERIFICATION_HISTORY.md#riu-prompt-quality-2026-10-17)。适用基线：本轮 RIU 续修源码及 [Cloud 暂停交接](CLOUD_CODEX_RIU_HANDOFF.md)，核心与 Desktop 版本均为 `2.5.0`，核心接口版本为 `1.0`；不能用旧 HEAD 或已发布安装包代替这些源码。
 
 本文定义待开发能力、实现约束、分期验收和可直接复制的 AI 提示词。当前能力以 [FEATURE_STATUS](FEATURE_STATUS.md) 为准，排期及状态只在 [ROADMAP](ROADMAP.md) 维护。本文中的模块名、动作、字段与限制是 **Reverie 设计约定**，除特别注明外均不是 OpenAI 的内部实现或公开 API。
@@ -10,7 +12,9 @@
 
 2026-10-20 重新读取 [Intelligent UI in ChatGPT](https://help.openai.com/en/articles/20001598-intelligent-ui-in-chatgpt)：官方当前用 Intelligent UI 描述按任务自动组织文本、视觉与交互内容的产品体验，简单问题仍可用文本。它不是供任意模型直接复刻该效果的兼容协议或质量保证。Reverie 的目标是用户不必刻意说 HTML/页面，模型也能在有实际交互价值时选择合适形式；当前实现和提示词不能据此宣称功能对等或超越。最新 [UI 指南](https://developers.openai.com/plugins/concepts/ui-guidelines)支持轻量任务内容与按空间需求选择展示位置；约 400px PiP 中应优先结果和关键控件，不能以大仪表盘模板替代任务需求。
 
-最新自动选择指导、Harness 与 Markdown 排版修复尚未打包，见 [暂停证据](VERIFICATION_HISTORY.md#riu-cloud-handoff-2026-10-20)。原生思考按原始内容保存，Markdown 块布局使用正常空白规则、代码块保留缩进；这不授权删除/隐藏思考。完整请求、首输出、有效工具、工具执行和本地帧渲染按各自计时边界记录，不能只用提示词字符数解释生成耗时。
+自动选择指导、Harness 与 Markdown 排版修复已包含在 2026-10-23 验收的 Linux 构建 `3824bc06ee6c6e24`，源码回归和确定性消费者验收见[继续实施记录](VERIFICATION_HISTORY.md#riu-completion-2026-10-22)；Windows 最终包与真实两模型质量门分别保留，原[暂停证据](VERIFICATION_HISTORY.md#riu-cloud-handoff-2026-10-20)不改写。本轮还加入表面及 SVG 标签配色、实际列表筛选、成功页再次编辑与安全初始化接线指导；恢复/纯重算不访问尚未返回的保存对象，真实用户操作在初始化后保存。旧会话摘要与作者建议分开投影，原工具结果和历史不改写。思考指导前置且不重复，终端与专用模式提示保持原样。原生思考按原始内容保存，Markdown 块布局使用正常空白规则、代码块保留缩进；这不授权删除/隐藏思考。完整请求、首输出、有效工具、工具执行和本地帧渲染按各自计时边界记录，不能只用提示词字符数解释生成耗时。
+
+当前作者指导要求约 400×400 首屏先显示一个清晰主要结果及关键输入，再安排次要指标和图表；新增控制条件应真正支配派生值，零、false 和空字符串按属性存在性恢复。完整宿主示例在通用工程指导之前，只出现一次。`render_view` 的缺失集成提醒是非阻断反馈，不改写原 HTML，也不能证明运行正确。质量验证按业务语义和真实操作验收，兼容内联或独立确认页、按钮或整卡选择、SVG 或 CSS 柱状图等实现；不得为了通过而限定单一模板。
 
 | 官方能力 | 已核实的产品行为 | Reverie 对标范围 |
 | --- | --- | --- |
@@ -25,6 +29,10 @@ Visualizations 页面明确：结果通常是生成时的数据快照；追问**
 DevDay 页面列出了 Plugin Extensions，但这不能证明 ChatGPT 的可视化生成与第三方组件共用同一套内部生成器。Reverie 可以实现类似公开体验，不能承诺相同模型质量、闭源协议、账户体系或云端服务。[DevDay 2026 扩展公告](https://learn.chatgpt.com/docs/whats-new/devday-2026#plugin-extensions)
 
 ### 1.1 可用于开发的公开契约
+
+2026-10-20 Cloud 再核对官方 Intelligent UI 与 UI guidelines：按任务选择文本/交互，PiP 避免承载过多控件，普通计算问答无需视图。Cloud 已构建 Linux `f83a5d6f50971c66`；上文“未打包”保留为暂停时的 Windows 状态。新质量矩阵默认每条样本分别启动 Desktop，拥有独立工作区、记忆和 profile；`--shared-profile` 仅用于标明范围的历史对照。目录、匿名文本、SSE、工具闭环和业务断言分别验收。见 [本轮记录](VERIFICATION_HISTORY.md#riu-cloud-runtime-2026-10-20)。
+
+2026-10-21 该矩阵已完整结束：15 个生成样本质量通过 0，3 个普通文本对照通过 3；无视图、已证实的语义失败、上游服务错误分开报告，不以注册成功替代业务验收。新增 MiniCPM 免费接口核对仅证明公开 Gradio/SSE 文本可用，未证明标准 tools 或 RIU 工具闭环。
 
 | 契约 | 官方依据 | 使用边界 |
 | --- | --- | --- |
@@ -153,6 +161,8 @@ UI 的事件标记只通知“有产物可读”，不是权限凭证。任意�
 ### 4.3 渲染隔离：必须先验证的技术门
 
 候选实现是宿主拥有的 `reverie-view:` 资源协议，加 `sandbox="allow-scripts"` 的 iframe；不给 `allow-same-origin`、顶层导航、弹窗、表单或下载权限，不加 preload，不暴露 Node 或 `window.reverie`。父页面仅增加必要的 `frame-src`，不放宽父页面 `script-src`，不关闭 `webSecurity`。
+
+本地报名或试填页面应使用 `type="button"` 的本地点击处理及页内验证/确认，必要时显式处理 Enter；原生 form submit 事件及 alert/confirm/prompt 模态弹窗受沙箱限制，不能依赖它们。2026-10-20 实际模型表单验证了“字段有效但真实点击不触发 submit”，补充作者指导而不扩大沙箱。合成 submit 事件仅用于定位，不能计入用户交互通过。
 
 **iframe 只是候选，不是已经证明的资源隔离。** Phase 0 必须在打包 Electron 中用无限同步循环和高频消息验证：聊天仍可输入、Stop/关闭视图仍可用、主进程能销毁视图。opaque origin 与 iframe sandbox 本身并不保证独立进程。若达不到这些门槛，使用独立 sandboxed WebContentsView/BrowserWindow 承载，隔离 session、禁用 preload，并通过可信包装层转发有限消息；不能以普通页面超时定时器声称解决死循环。其 inline 布局与生命周期成本在同一技术门内验证后定案。
 

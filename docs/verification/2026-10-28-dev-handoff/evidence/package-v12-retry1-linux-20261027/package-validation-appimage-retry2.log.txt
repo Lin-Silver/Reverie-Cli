@@ -1,0 +1,5 @@
+  • electron-builder  version=26.15.3 os=6.18.55
+  • loaded configuration  file=package.json ("build" field)
+  • packageManager not detected by file, falling back to environment detection  resolvedPackageManager=npm detected=/workspace/Reverie-Cli
+  • building        target=AppImage arch=x64 file=/dev/shm/riu-v12-retry1-20261027/.runtime/appimage-wrapper-retry2/Reverie-2.5.0-linux-x64.AppImage
+  • building embedded block map  file=/dev/shm/riu-v12-retry1-20261027/.runtime/appimage-wrapper-retry2/Reverie-2.5.0-linux-x64.AppImage

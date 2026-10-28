@@ -1,0 +1,14 @@
+{
+  "at_utc": "2026-10-25T07:13:06.964546+00:00",
+  "round": "/workspace/Reverie-Cli/.runtime/riu-full-formal60-20261025-round2",
+  "scope": "Closed and retained interrupted executions only; active excluded. Exact canonical JSON schema equality, including every function description and parameter, to unchanged native9 production tools. No quality score changes.",
+  "whole_round_finished": false,
+  "baseline_request": "/workspace/Reverie-Cli/.runtime/riu-dev-native9-qwen-pair-20261024-1/model-1-calculator-1-execution-1/request-0000.json",
+  "baseline_request_sha256": "a54416a13c56bb5c1d2c4cd12affe628b40a38e857b7f576827d01b1455fb600",
+  "baseline_report_sha256": "1c906d24e9ccb88924fefb2cd0b7d7513510ef81c2c5fa567afe6f69db03025b",
+  "baseline_complete_tool_schema_sha256": "062d0716d6f1c58182db048e68e97cc6f08ef8767dbe0194fa11b9bb0303d62a",
+  "production_tools": 27,
+  "closed_samples": 8,
+  "request_count": 50,
+  "all_complete_tool_schemas_match_native9_production_baseline": true
+}

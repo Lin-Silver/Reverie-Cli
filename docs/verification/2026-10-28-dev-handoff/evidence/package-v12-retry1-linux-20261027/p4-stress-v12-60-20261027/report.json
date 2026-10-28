@@ -1,0 +1,1665 @@
+{
+  "scope": "Production packaged Electron; synthetic loopback model; no external provider",
+  "checks": [
+    {
+      "name": "artifact-registration-to-interactive-p95-under-1s",
+      "passed": true,
+      "detail": {
+        "n": 60,
+        "p50_ms": 176.423,
+        "p95_ms": 286.16,
+        "max_ms": 360.888,
+        "samples_ms": [
+          302.726318359375,
+          203.916015625,
+          192.908935546875,
+          199.5439453125,
+          360.887939453125,
+          306.384033203125,
+          143.429931640625,
+          188.634765625,
+          163.38525390625,
+          143.122802734375,
+          145.219970703125,
+          165.9638671875,
+          220.855712890625,
+          147.9189453125,
+          142.62890625,
+          142.014892578125,
+          132.242919921875,
+          145.884765625,
+          178.861083984375,
+          175.1552734375,
+          278.358154296875,
+          212.31396484375,
+          151.169921875,
+          193.776123046875,
+          161.903076171875,
+          150.988037109375,
+          201.14208984375,
+          160.81201171875,
+          235.35400390625,
+          136.60009765625,
+          221.7109375,
+          182.26806640625,
+          207.579833984375,
+          172.261962890625,
+          134.371826171875,
+          143.050048828125,
+          176.423095703125,
+          198.043212890625,
+          180.0400390625,
+          201.65673828125,
+          136.260986328125,
+          175.4521484375,
+          192.9169921875,
+          250.26806640625,
+          162.538818359375,
+          170.462890625,
+          140.333984375,
+          224.27099609375,
+          150.952880859375,
+          286.159912109375,
+          165.4609375,
+          191.81396484375,
+          195.2080078125,
+          196.050048828125,
+          213.619140625,
+          158.8740234375,
+          176.123779296875,
+          204.5791015625,
+          163.5390625,
+          220.22119140625
+        ]
+      }
+    },
+    {
+      "name": "display-mode-buttons-at-least-32px",
+      "passed": true,
+      "detail": [
+        {
+          "label": "返回对话内",
+          "height": 32
+        },
+        {
+          "label": "在工作面板中放大",
+          "height": 32
+        },
+        {
+          "label": "画中画",
+          "height": 32
+        }
+      ]
+    },
+    {
+      "name": "same-js-document-fullscreen",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "same-js-document-pip",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "same-js-document-inline",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "card-carousel-is-content-layout",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "invalid-display-mode-explicit-error",
+      "passed": true,
+      "detail": {
+        "code": -32602,
+        "message": "Unknown display mode. Card and carousel are content layouts."
+      }
+    },
+    {
+      "name": "iframe-escape-returns-host-focus",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "tab-enter-escape-host-navigation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "theme-AA-light",
+      "passed": true,
+      "detail": {
+        "bg": "rgb(249, 249, 252)",
+        "fg": "rgb(34, 36, 45)",
+        "contrast": 14.712859554795893
+      }
+    },
+    {
+      "name": "theme-AA-dark",
+      "passed": true,
+      "detail": {
+        "bg": "rgb(21, 22, 28)",
+        "fg": "rgb(243, 243, 247)",
+        "contrast": 16.30906414343467
+      }
+    },
+    {
+      "name": "live-language-without-reload",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "reduced-motion-context-and-css",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1080x700-composer-visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1080x700-no-horizontal-overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "empty-data-text-equivalent",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "upper-bound-data-and-recoverable-error",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "local-input-p95-under-100ms",
+      "passed": true,
+      "detail": {
+        "n": 60,
+        "p50_ms": 37.7,
+        "p95_ms": 47,
+        "max_ms": 62.9,
+        "samples_ms": [
+          62.89999999990687,
+          46.3000000002794,
+          51.10000000009313,
+          43.3000000002794,
+          45.89999999990687,
+          33.3000000002794,
+          50.299999999813735,
+          40,
+          39.299999999813735,
+          33.5,
+          38.1999999997206,
+          33.6999999997206,
+          38.90000000037253,
+          33.299999999813735,
+          47,
+          33.200000000186265,
+          32.60000000009313,
+          34.200000000186265,
+          41,
+          37.39999999990687,
+          32.39999999990687,
+          34.90000000037253,
+          35,
+          39.200000000186265,
+          39.39999999990687,
+          32.1999999997206,
+          39.700000000186265,
+          43,
+          38.09999999962747,
+          33.5,
+          32.3000000002794,
+          44.09999999962747,
+          39.39999999990687,
+          41.299999999813735,
+          35.60000000009313,
+          39.299999999813735,
+          36.39999999990687,
+          45.3000000002794,
+          35.5,
+          32.5,
+          42.60000000009313,
+          37.700000000186265,
+          32.299999999813735,
+          33.1999999997206,
+          40.8000000002794,
+          36.6999999997206,
+          45.6999999997206,
+          39.60000000009313,
+          32.10000000009313,
+          32.799999999813735,
+          46.5,
+          39.6999999997206,
+          32.39999999990687,
+          33.10000000009313,
+          32.799999999813735,
+          37.40000000037253,
+          35.5,
+          41.700000000186265,
+          35.799999999813735,
+          43.60000000009313
+        ]
+      }
+    },
+    {
+      "name": "refresh-restores-display-and-private-state",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "process-restart-restores-view-and-private-state",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "followup-produces-traceable-new-revision",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "revision-state-isolated",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "missing-file-retains-summary-and-retry",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "missing-file-retry-recovers",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "latest-history-view-stays-visible-after-lazy-load",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "100-history-views-lazily-mounted",
+      "passed": true,
+      "detail": {
+        "frame_counts": [
+          2,
+          2,
+          2
+        ],
+        "total_view_rows": 100
+      }
+    },
+    {
+      "name": "long-summary-expands-without-reloading-view",
+      "passed": true,
+      "detail": {
+        "collapsed_height": 107.5625,
+        "expanded_height": 165.125,
+        "text": {
+          "height": 57.5625,
+          "lineHeight": 19.2
+        },
+        "same_document": true
+      }
+    },
+    {
+      "name": "close-releases-frame-and-resource-token",
+      "passed": true,
+      "detail": {
+        "new_frame_url": ""
+      }
+    },
+    {
+      "name": "closed-view-does-not-stop-chat",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "private-ui-state-and-html-not-in-followups",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "packaged-plain-client-summary-fallback",
+      "passed": true,
+      "detail": {
+        "exit_code": 0
+      }
+    }
+  ],
+  "measurements": {
+    "artifact_creation_to_commit_ms": [
+      6.237,
+      2.2369999999999997,
+      2.341,
+      2.3089999999999997,
+      2.6809999999999996,
+      1.406,
+      1.542,
+      2.236,
+      2.297,
+      1.593,
+      1.764,
+      2.092,
+      1.4809999999999999,
+      2.33,
+      2.216,
+      1.3519999999999999,
+      3.543,
+      1.686,
+      2.083,
+      1.405,
+      1.35,
+      4.3,
+      1.6280000000000001,
+      2.186,
+      1.621,
+      1.306,
+      2.311,
+      2.2529999999999997,
+      1.564,
+      2.212,
+      1.631,
+      1.488,
+      1.6900000000000002,
+      1.5659999999999998,
+      2.197,
+      1.441,
+      2.1470000000000002,
+      7.712,
+      1.879,
+      1.366,
+      2.179,
+      3.159,
+      2.563,
+      1.391,
+      1.221,
+      2.697,
+      1.375,
+      2.048,
+      1.5130000000000001,
+      5.359,
+      1.4580000000000002,
+      1.392,
+      1.615,
+      1.853,
+      1.9780000000000002,
+      1.66,
+      6.458,
+      1.498,
+      2.964,
+      2.5260000000000002
+    ],
+    "render_phases": [
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107970717.2002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107970773.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107970898.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107970902.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107971701.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107971720.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107971849.4001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107971862
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107972798.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107972803.1
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107972913
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107972938.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107973455.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107973469.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107973595.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107973646.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107974549.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107974584.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107974789.8
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107974885.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107976003.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107976062.1
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107976264.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107976281.8
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107977282.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107977300.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107977378.4001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107977415.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107977917.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107977923.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107978067.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107978073.1
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107979035.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107979047.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107979145.8
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107979166.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107980165.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107980171.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107980264
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107980271.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107981300.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107981308.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107981394.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107981404.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107982433.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107982437.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107982555
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107982567.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107983651
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107983656.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107983798.8
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107983874.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107984831.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107984839.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107984917.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107984940.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107986021.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107986032.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107986115.4001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107986137.7002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107987204.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107987215.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107987299.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107987309.8
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107988396.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107988404.1
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107988487.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107988495.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107989569.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107989576.4001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107989675.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107989679.1
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107990902.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107990907.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107991002.8
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107991006.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107992053.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107992064.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107992189.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107992194.7002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107993282.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107993297.4001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107993489.5
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107993526
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107994785.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107994790.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107994901
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107994912.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107996017.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107996021.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107996114.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107996143.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107997230.2002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107997237.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107997384.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107997419.9001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107998016.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107998020.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107998105.3
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107998145.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793107999253.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793107999264.1
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793107999358.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793107999370.8
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108000573
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108000575.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108000717.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108000731.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108001781.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108001789.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108001905.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108001911.3
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108003052.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108003064.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108003220.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108003279.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108004501.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108004507.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108004599.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108004606.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108005803.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108005814.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108005974.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108005983.1
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108007235.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108007246.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108007373.4001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108007405.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108008566.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108008573
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108008711.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108008750.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108009998.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108010004.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108010138.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108010172.7002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108011302
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108011306.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108011397.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108011404.9001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108012585.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108012591.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108012686.5
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108012694.1
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108013996.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108014002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108014107.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108014136
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108015379.9001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108015386.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108015498.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108015517.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108016731
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108016744.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108016872.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108016879.1
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108018183.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108018202.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108018351
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108018356
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108019581.2002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108019588.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108019681.9001
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108019685.8
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108021132.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108021141.2002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108021249.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108021259.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108022511.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108022518.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108022649.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108022659.2002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108023965.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108023982.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108024105.3
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108024180
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108025481.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108025489.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108025592.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108025606
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108027019.4001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108027036.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108027147
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108027163.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108028608.9001
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108028620.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108028705.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108028736
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108030149.2002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108030165.7002
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108030276.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108030321.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108031699.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108031704.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108031803.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108031806.9001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108033192.5
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108033240.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108033390.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108033396.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108034581.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108034588.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108034690.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108034707.7002
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108036213.3
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108036232.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108036368
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108036400.6
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108037772.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108037784.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108037915.3
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108037935.4001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108039449.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108039457.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108039570.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108039585.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108041056.1
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108041064.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108041194.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108041226.9001
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108042717.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108042728.6
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108042835.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108042844.1
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108044398.7002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108044403.9001
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108044508.6
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108044513.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108046101.8
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108046108.3
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108046260.7002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108046277.8
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108047843.2002
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108047847.5
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108047968.2002
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108047975.5
+        }
+      ],
+      [
+        {
+          "phase": "resolve-start",
+          "epoch": 1793108049835.6
+        },
+        {
+          "phase": "resolved",
+          "epoch": 1793108049840.8
+        },
+        {
+          "phase": "frame-initialize",
+          "epoch": 1793108049973.1
+        },
+        {
+          "phase": "interactive",
+          "epoch": 1793108049979.1
+        }
+      ]
+    ],
+    "registration_to_interactive_upper_bound": {
+      "n": 60,
+      "p50_ms": 176.423,
+      "p95_ms": 286.16,
+      "max_ms": 360.888,
+      "samples_ms": [
+        302.726318359375,
+        203.916015625,
+        192.908935546875,
+        199.5439453125,
+        360.887939453125,
+        306.384033203125,
+        143.429931640625,
+        188.634765625,
+        163.38525390625,
+        143.122802734375,
+        145.219970703125,
+        165.9638671875,
+        220.855712890625,
+        147.9189453125,
+        142.62890625,
+        142.014892578125,
+        132.242919921875,
+        145.884765625,
+        178.861083984375,
+        175.1552734375,
+        278.358154296875,
+        212.31396484375,
+        151.169921875,
+        193.776123046875,
+        161.903076171875,
+        150.988037109375,
+        201.14208984375,
+        160.81201171875,
+        235.35400390625,
+        136.60009765625,
+        221.7109375,
+        182.26806640625,
+        207.579833984375,
+        172.261962890625,
+        134.371826171875,
+        143.050048828125,
+        176.423095703125,
+        198.043212890625,
+        180.0400390625,
+        201.65673828125,
+        136.260986328125,
+        175.4521484375,
+        192.9169921875,
+        250.26806640625,
+        162.538818359375,
+        170.462890625,
+        140.333984375,
+        224.27099609375,
+        150.952880859375,
+        286.159912109375,
+        165.4609375,
+        191.81396484375,
+        195.2080078125,
+        196.050048828125,
+        213.619140625,
+        158.8740234375,
+        176.123779296875,
+        204.5791015625,
+        163.5390625,
+        220.22119140625
+      ]
+    },
+    "local_input_to_two_animation_frames_1000_rows": {
+      "n": 60,
+      "p50_ms": 37.7,
+      "p95_ms": 47,
+      "max_ms": 62.9,
+      "samples_ms": [
+        62.89999999990687,
+        46.3000000002794,
+        51.10000000009313,
+        43.3000000002794,
+        45.89999999990687,
+        33.3000000002794,
+        50.299999999813735,
+        40,
+        39.299999999813735,
+        33.5,
+        38.1999999997206,
+        33.6999999997206,
+        38.90000000037253,
+        33.299999999813735,
+        47,
+        33.200000000186265,
+        32.60000000009313,
+        34.200000000186265,
+        41,
+        37.39999999990687,
+        32.39999999990687,
+        34.90000000037253,
+        35,
+        39.200000000186265,
+        39.39999999990687,
+        32.1999999997206,
+        39.700000000186265,
+        43,
+        38.09999999962747,
+        33.5,
+        32.3000000002794,
+        44.09999999962747,
+        39.39999999990687,
+        41.299999999813735,
+        35.60000000009313,
+        39.299999999813735,
+        36.39999999990687,
+        45.3000000002794,
+        35.5,
+        32.5,
+        42.60000000009313,
+        37.700000000186265,
+        32.299999999813735,
+        33.1999999997206,
+        40.8000000002794,
+        36.6999999997206,
+        45.6999999997206,
+        39.60000000009313,
+        32.10000000009313,
+        32.799999999813735,
+        46.5,
+        39.6999999997206,
+        32.39999999990687,
+        33.10000000009313,
+        32.799999999813735,
+        37.40000000037253,
+        35.5,
+        41.700000000186265,
+        35.799999999813735,
+        43.60000000009313
+      ]
+    },
+    "history": {
+      "view_count": 100,
+      "message_count": 200,
+      "first_session_load_to_interactive_ms": 548.5639140001695,
+      "earlier_page_load_ms": [
+        346.79057699986515,
+        286.03056900010415
+      ],
+      "mounted_frames": [
+        2,
+        2,
+        2
+      ]
+    },
+    "method": "Nearest-rank quantiles. Commit-to-ready starts at the trusted view_ready.committed_at timestamp after atomic persistence. HTML/model generation and artifact persistence are excluded and recorded separately. Input samples measure local input dispatch, rendering and two requestAnimationFrame callbacks, excluding CDP roundtrip and all model wait; not physical display/photon latency. History includes core I/O and host render; no model request."
+  },
+  "fixture": {
+    "html_bytes": 7472,
+    "max_data_rows": 1000,
+    "sha256": "1786633df13f7f8a1805f731d9b8d17a408b5850e31103c1ab40420f57cad021"
+  },
+  "hardware": {
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+    "cpu": "",
+    "logical_cpus": 3
+  },
+  "output": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-stress-v12-60-20261027",
+  "build": {
+    "projectRoot": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-stress-v12-60-20261027/workspace",
+    "kernelPath": "/dev/shm/riu-v12-retry1-20261027/tmp-appimage-rich-retry1/appimage_extracted_153382780d7fbcb6c4317c7f5cc608a9/reverie",
+    "coreAppRoot": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-stress-v12-60-20261027/app-root",
+    "runtimeRoot": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-stress-v12-60-20261027/desktop-home/.reverie/desktop",
+    "desktopExecutable": "/dev/shm/riu-v12-retry1-20261027/tmp-appimage-rich-retry1/appimage_extracted_153382780d7fbcb6c4317c7f5cc608a9/ReverieUI",
+    "desktopBuild": {
+      "version": "2.5.0",
+      "id": "fcce0356b0365178",
+      "builtAt": "2026-10-27T12:46:30.360Z",
+      "platform": "linux",
+      "arch": "x64"
+    }
+  },
+  "source_retrieval": {
+    "fixture_source_evidence_request_indices": [],
+    "full_html_request_indices": [],
+    "note": "Initial generation and explicit revisions may retrieve original workspace source snippets through FastContext. This is distinct from reattaching a registered artifact or private runtime state."
+  },
+  "passed": true
+}

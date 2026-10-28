@@ -320,10 +320,8 @@ def default_opencode_config() -> Dict[str, Any]:
         "selected_model_display_name": OPENCODE_DEFAULT_MODEL_DISPLAY_NAME,
         "api_url": OPENCODE_DEFAULT_API_URL,
         "endpoint": OPENCODE_DEFAULT_ENDPOINT,
-        # Client identity sent to the gateway. Empty means Reverie's own
-        # identity; set these to mimic another client (e.g. `opencode` and
-        # `opencode/0.x.y`) when a reverse proxy in front of the free models
-        # only forwards requests that look like the official client.
+        # Empty values send Reverie's own identity. Gateway-specific overrides
+        # identify the actual caller; they do not grant free-tier access.
         "client_name": "",
         "user_agent": "",
         "use_builtin_model_catalog": False,
@@ -337,7 +335,13 @@ def default_opencode_config() -> Dict[str, Any]:
 
 
 def _opencode_models_url(api_url: Any) -> str:
-    return _append_opencode_path(resolve_opencode_sdk_base_url(api_url), "models")
+    base = resolve_opencode_sdk_base_url(api_url)
+    parts = urlsplit(base)
+    # The official inference router separates its aggregate catalog from the
+    # OpenAI transport route. Custom proxies keep their configured path.
+    if parts.hostname == "opencode.ai" and parts.path.rstrip("/") == "/inference/openai/v1":
+        base = urlunsplit((parts.scheme, parts.netloc, "/inference/v1", parts.query, ""))
+    return _append_opencode_path(base, "models")
 
 
 def fetch_opencode_model_catalog(
@@ -563,9 +567,9 @@ def resolve_opencode_session_id(session_id: Any = "") -> str:
 def resolve_opencode_client_identity(opencode_config: Any) -> Dict[str, str]:
     """Resolve the client name and User-Agent to present to the gateway.
 
-    Empty config values fall back to Reverie's own identity. Setting them lets a
-    non-OpenCode client borrow the official client's identity so a reverse proxy
-    that only forwards recognised clients still reaches the free models.
+    Empty config values fall back to Reverie's own identity. Overrides describe
+    the actual caller for a configured gateway; they do not authorize a client
+    to use models that the service restricts to another application.
     """
     client_name = OPENCODE_CLIENT_NAME
     user_agent = OPENCODE_USER_AGENT

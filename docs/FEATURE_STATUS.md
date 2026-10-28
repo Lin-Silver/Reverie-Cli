@@ -1,8 +1,28 @@
 # 功能状态与已知缺口
 
-状态汇总更新：**2026-10-20，版本 2.5.0**。逐项功能审查基线为 2026-10-05–06，后续检查按日期注明范围。本文描述当前实现；开发优先级和闭环条件统一维护在 [ROADMAP](ROADMAP.md)。[审查报告](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05)保留修复前复现，[首轮修复报告](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05)、[请求 / 个人资料修复报告](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05)与[工作面板修复报告](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06)记录后续改动和验证。G24–G27 来自 [MCP 客户端边界附录](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-addendum-2026-10-05)，G28–G32 来自 [跨平台身份与语言覆盖附录](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05)。
+2026-10-28 GitHub 接续更新：用户已明确授权将本轮全部仓库改动提交到新的 `dev` 分支；本轮授权覆盖此前禁止提交/推送的限制，不含版本升级或 Release。[接续说明](CONTINUE_RIU.md)、[新会话提示词](CODEX_CLOUD_CONTINUATION_PROMPT.md)与[可克隆 goal/关键证据](verification/2026-10-28-dev-handoff/README.md)已补齐。**最新源码还包含保留 v12 之后的 Linux 安装链接启动器修复；它的回归测试已有覆盖，但包含此修复的新安装包尚未验收，优先完成此项。** 此前 v12 通过记录仅对应原包；整体 RIU 仍未完成。实际提交 SHA 与远端推送结果以交付消息及 GitHub 分支为准。
+
+2026-10-27 最新状态：参考图中的统计卡片、总览表、图文推荐、徽标、来源与链接已在当前源码 Linux x64 包验证。v12 build `fcce0356b0365178` 的 AppImage 真实 FUSE 挂载下，富格式 **86/86**、P2 **24/24**；提取后的同包程序 P3 **26/26**、P4 **31/31**、隔离 **36/36**。P4 基线输入/注册交互 P95 为51.8/332.864ms；同包扩展60次压力循环31/31通过，注册交互/输入 P95 为286.16/47ms，最大360.888/62.9ms。压力仍属合成本地运行。当前 deb 在 rootless Bubblewrap 隔离根中，以宿主 Debian 13 的依赖清单完成 v11 安装、v12 升级与卸载，未用 `--force-depends`，且宿主机状态无变化；这不是宿主系统级安装或桌面启动验证。当前源码 Qwen3.5-4B 一次合成应用内请求精确呈现四项指标、两行表格和带徽标/来源/链接的推荐卡，深浅主题和1280/460px布局通过，浏览器错误0；正式模型质量样本仍为0。
+
+Debian 13 只读 APT 依赖模拟通过，当前 t64 兼容包满足 v12 deb 必需依赖；Bubblewrap 隔离全生命周期测试也在依赖满足状态下安装、升级和卸载成功，未执行宿主系统级安装。仓库 `package-validation.mjs` 对已核验 v12 载荷在新临时输出目录重试 deb/AppImage 均退出0；最初两次退出1的日志保留，原因未确定。旧 v11 Pillow 缺件和 v12 首次 OOM 也保留。整体尚未达标：Windows/macOS 实机、物理输入与辅助技术、长时稳定性未验收；正式模型质量仍未接受，且不得启动第三组。详细结果见[实施清单](RIU_COMPLETION_PLAN.md)、[路线与包重建证据](verification/2026-10-27-static-rich-routing/README.md)、[结构化记录](verification/2026-10-27-static-rich-routing/package-rebuilds.json)。
+
+完整 RIU 仍未验收达标。第2正式组按两组上限收尾：60个位置中59份完成评测、1份中断，原始自动31项合格、4项被人工否定，剩余27项不等于完整人工验收。模型质量、Windows/macOS实机、物理输入与辅助技术仍未验收；当前 Linux 构建成功不关闭这些缺口。见[实施清单](RIU_COMPLETION_PLAN.md)与[当前原生证据](verification/2026-10-26-rich-answer-ui/native-package-suites.json)。
+
+上一阶段（2026-10-25）：已按用户参考图实现**回答 UI/UX 与格式样式**：统计卡片、状态表格、图文推荐、来源与链接，支持深浅主题、窄容器、流式输出和会话重开。[格式说明](RICH_ANSWER_UI.md)与[实际原生截图和验证](verification/2026-10-25-rich-answer-ui/README.md)已记录。当时 Linux 包 **c9df6ba5417e0851**；Desktop **407/1**、Python **2314/24**、类型检查通过，最终包原生 P2/P3/隔离 **24/26/36** 通过。真实模型回答及两张远程图片实际显示成功，完整 27 工具和采样设置保留。旧正式矩阵依最新优先级停在 15 项，不宣称完成 36 项或整体模型质量验收。
+
+状态汇总更新：**2026-10-24，版本 2.5.0**。逐项功能审查基线为 2026-10-05–06，后续检查按日期注明范围。本文描述当前实现；开发优先级和闭环条件统一维护在 [ROADMAP](ROADMAP.md)。[审查报告](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05)保留修复前复现，[首轮修复报告](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05)、[请求 / 个人资料修复报告](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05)与[工作面板修复报告](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06)记录后续改动和验证。G24–G27 来自 [MCP 客户端边界附录](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-addendum-2026-10-05)，G28–G32 来自 [跨平台身份与语言覆盖附录](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05)。
 
 ## 如何读状态
+
+2026-10-23 继续实施中：Python 全量 **2214/24**、验证器 **114**、六组重点检查 **244**，Desktop **387/1**、类型、文档和 diff 检查通过，源码前后哈希一致。Linux 新包 **3824bc06ee6c6e24** 的 14 个冻结模块、71 个 UI 文件、独立 CLI 10 个模块及信任清单通过核对；P2 **24/24**、P3 **26/26**、隔离 **36/36**。安全接线示例区分恢复/纯重算与初始化后的用户保存，并补充按钮及 SVG 标签配色；重开会话的摘要不再混入模型作者建议，原工具输出、建议、历史和模型 HTML 保持不变。
+
+P4 首轮及同构建诊断轮均为 **30/31**，输入 P95/最大分别 **107.7/165ms**、**101.3/161.2ms**。测得闲置旧包文件缓存后释放约 1.764GB，未删除文件或改动源码、夹具、60 个样本与 100ms 门槛；该条件下第三轮 **31/31**，注册上界 P95/最大 **266.625/336.359ms**，本地输入至两帧 **68.9/96.9ms**。三轮及资源条件完整保留，不能据此断言前两次原因或稳定达标；本地测量不代表模型生成或物理显示延迟。
+
+GPT-OSS-120B 的 native6 开发轮次生成 **0/5**、文本 **1/1**，实际五份页面 74 条记录及 22 张代表截图已复核。旧强模型开发与人工失败亦保留；当前进行相同 397B/计算器前后构建观察，随后按冻结两个 Qwen 模型完整执行正式 **30+6**。见[本包原生验收](verification/2026-10-21-riu-completion/native-build-3824bc06ee6c6e24.json)和[本轮记录](verification/2026-10-21-riu-completion/progress.md)。
+
+2026-10-20 Cloud 续验基线为 `350c5ba`。匿名 Chat 复用无认证 HTTP 路径，避免 SDK 在请求前要求密钥；主模型请求的 SDK/直接 HTTP 重试入口遵守 Retry-After 秒数或日期，服务显式提供冷却时间的 402 按限流有界等待，普通 402 仍失败，Stop 可取消。Linux 最新源码与验证器全量 **2103 passed / 24 skipped**，Desktop **383 passed / 1 skipped**，类型检查通过；原 Windows 2098/2/1 失败仍保留。已构建 Linux CLI/目录包 `f83a5d6f50971c66` 并核对源码，P2 24/24、P3 26/26、P4 31/31、隔离 36/36 是实际消费者证据，不能代替 Windows 新包或真实模型质量。见 [Cloud 续验](VERIFICATION_HISTORY.md#riu-cloud-runtime-2026-10-20)。
+
+2026-10-21 固定任务矩阵完成 15 生成 + 3 文本：生成 10 次 model_no_view、2 次复核语义失败、3 次上游 usage_missing 错误，质量通过 0/15；文本 3/3。真实模型质量门保持未通过，原始异常、环境中断与一次验证器时序重跑分别保留。按用户线索找到 MiniCPM-V 4.6 的公开免费 Key 公告，但当前官方标准 API 要求注册 Key；另已匿名实测官方 MiniCPM5-2B Space 的 Gradio/SSE API，未暴露 tools，不能当第二个工具闭环来源。见[免费接口核对](verification/2026-10-20-riu-cloud/free-api-search.md)。
 
 2026-10-20 暂停交接：用户因关机要求将当前源码保存到 GitHub 并交由 Cloud 续修。[交接提示词](CLOUD_CODEX_RIU_HANDOFF.md)和[结构化记录](verification/2026-10-20-riu-continuation.json)说明最新状态。自动选择交互视图的指导、Desktop 按需初始化检索、空 Harness 快速返回、失败命令重跑成功后的门禁修复及思考区 Markdown 空白排版已改源码，**尚未重建最终包**。最新 Desktop 383/1、类型检查通过；Python 全量 2098/2/1，Windows 粘贴输入测试单独重跑通过但根因未闭环。此前 `2cfd719ac18e73a4` 的通过不能覆盖这些后续修改。云端按用户最新要求优先验证合法 OpenCode 匿名免费来源，并修复实际发现的 source 客户端问题；模型生成与视觉质量门继续保留。
 
@@ -60,7 +80,7 @@
 
 ## 缺口登记
 
-**G33 — Intelligent UI / MCP Apps：P0–P4 宿主已实现；真实模型生成质量仍按模型和样本限定。** 标准 `inline/fullscreen/pip` 复用同一 iframe，支持动态主题/语言/尺寸、键盘与焦点、窄窗、私有状态、分页历史与资源回收；长摘要可展开，展示按钮增大。后续确认 Writer 失败涉及实际提示词/工具不一致，已修正模式、MCP/插件注入、Atlas 账本、原始模型 ID、媒体前置条件、空 harness 和 Desktop 自动批准等路径。生成视图说明提供可用的宿主集成示例；工具对明显的不支持 API 给出静态提示。原始失败和当前源码/包/真实模型结果见 [提示词与生成质量续验](VERIFICATION_HISTORY.md#riu-prompt-quality-2026-10-17)；早期性能与交付范围保留在 [P4 记录](VERIFICATION_HISTORY.md#riu-p4-delivery-2026-10-17)。关键词检查或 `render_view` 注册成功不等于模型质量通过，不宣称 OpenAI 功能/效果对等。P3 仍为 ext-apps 2.0.3/UI 2026-01-26 离线 profile，原执行/审批/会话锁继续生效；Linux/macOS、原生 IME/屏幕阅读器、HTTP/SSE UI、完整 window.openai 与 Plugin Extensions 未验证或另属范围，G24/G26 保留。
+**G33 — Intelligent UI / MCP Apps：P0–P4 宿主已实现；真实模型生成质量仍按模型和样本限定。** 标准 `inline/fullscreen/pip` 复用同一 iframe，支持动态主题/语言/尺寸、键盘与焦点、窄窗、私有状态、分页历史与资源回收；长摘要可展开，展示按钮增大。后续确认 Writer 失败涉及实际提示词/工具不一致，已修正模式、MCP/插件注入、Atlas 账本、原始模型 ID、媒体前置条件、空 harness 和 Desktop 自动批准等路径。生成视图说明提供可用的宿主集成示例；工具对明显的不支持 API 给出静态提示。原始失败和当前源码/包/真实模型结果见 [提示词与生成质量续验](VERIFICATION_HISTORY.md#riu-prompt-quality-2026-10-17)；早期性能与交付范围保留在 [P4 记录](VERIFICATION_HISTORY.md#riu-p4-delivery-2026-10-17)。关键词检查或 `render_view` 注册成功不等于模型质量通过，不宣称 OpenAI 功能/效果对等。P3 仍为 ext-apps 2.0.3/UI 2026-01-26 离线 profile，原执行/审批/会话锁继续生效；Linux 原生 Xvfb 已有本轮包与消费者证据；macOS、原生 IME/屏幕阅读器、HTTP/SSE UI、完整 window.openai 与 Plugin Extensions 未验证或另属范围，G24/G26 保留。
 
 2026-10-18–20 续修：按完整生产请求去重工具参数说明，保留全部原生 schema、用户固定 Skill、安全约束和可运行示例；忽略默认规则注释，修正显式视图工具范围被否定文件指令误触发检索。移除原生思考的内容过滤及 CLI 猜测删段，保存失败/中断的原始文本。画中画增加高度、短摘要可展开，内容仍须自行组织结果与关键控件。最终 Windows Desktop **2.5.0 / 2cfd719ac18e73a4** 通过 P2/P3/P4 与隔离回归；便携启动器修复深路径漏件，真实新解压 1084 个文件全部匹配。安装/卸载、其他平台及跨模板生成质量仍有独立门禁，见[本轮续验](VERIFICATION_HISTORY.md#riu-quality-2026-10-20)。提示词缩短或宿主通过不代表模型生成稳定。
 
@@ -85,7 +105,7 @@ P1 优先影响执行正确性或核心闭环；P2 影响规模、体验或验�
 | G15 | P2 | 认证插件 / MCP / RATS 的真实授权生命周期缺当前证据 | 外部 Engine RATS 集成单独运行 11 项通过；其他真实认证插件 / MCP 生命周期仍缺验收，静态注册不是授权成功 |
 | G16 | P2 | 检索性能与质量基准覆盖不足 | 缺少验收；历史 SWE-bench 24 项 / 冻结 7 项不是完整 300 项或跨语言结论 |
 | G17 | P2 | 同版本改包和启动路径识别 | 已加入构建 ID、时间与实际启动路径；本轮便携版首次启动被自动审批拦截，未验证首次解压；已编译 GUI 验证见修复报告 |
-| G18 | P2 | 当前 Linux / macOS GUI、长运行与原生设备验证不足 | 缺少验收；CI 配置存在，本次在 Windows 核对，未重验其他平台 |
+| G18 | P2 | macOS GUI、长运行与原生设备验证不足 | 2026-10-20–21 Linux Xvfb 原生 CLI/GUI 与当前包消费者已验证；macOS、实机设备及长运行仍缺验收，不能用 CI 配置替代 |
 | G19 | P1 | 内置 Engine 原生窗口 / 输入呈现 | 已实现并有真实 Windows 帧、按键 / 鼠标、缩放与关闭验证；其他平台未验收 |
 | G20 | P2 | 完整渲染材质、设备音频与原生 Live2D 尚未闭环 | 功能缺失 / 缺少验收；基础纹理可用，Cubism manifest / bridge 不代表角色已渲染 |
 | G21 | P2 | Gamer 生产深度和迁移覆盖有限 | 已实现但有限；切片和程序化候选可用，不支持通用 AAA / 3D 开放世界交付 |

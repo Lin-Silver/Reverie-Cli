@@ -1,0 +1,54 @@
+"""Actual delayed Electron windows for the verification lifecycle helper."""
+from pathlib import Path
+import importlib.util
+import os
+import socket
+import subprocess
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('desktop_wait_native', ROOT / 'scripts/verification/desktop_process.py')
+desktop = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(desktop)
+
+
+@pytest.mark.parametrize('mode', ['delayed', 'exit', 'none'])
+def test_waiter_observes_only_an_actual_owned_electron_window(tmp_path, mode):
+    electron = ROOT / 'ReverieCli-ui/node_modules/electron/dist/electron'
+    if not electron.exists() or not os.environ.get('DISPLAY'):
+        pytest.skip('The native lifecycle fixture requires Electron and a display')
+    from playwright.sync_api import sync_playwright
+    fixture = tmp_path / 'main.cjs'
+    fixture.write_text('''const {app,BrowserWindow}=require('electron');let window;
+      app.whenReady().then(()=>{
+        require('fs').writeFileSync(process.env.REVERIE_TEST_READY,'ready');
+        if(process.env.REVERIE_TEST_MODE==='exit'){setTimeout(()=>app.quit(),700);return}
+        if(process.env.REVERIE_TEST_MODE==='none')return;
+        setTimeout(()=>{window=new BrowserWindow({show:false});
+          window.loadURL('data:text/html,<title>Owned delayed window</title>')},1800);
+      });''')
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    marker = tmp_path / 'ready'
+    env = {**os.environ, 'REVERIE_TEST_MODE': mode, 'REVERIE_TEST_READY': str(marker)}
+    env.pop('ELECTRON_RUN_AS_NODE', None)
+    with (tmp_path / 'electron.log').open('w') as log, sync_playwright() as playwright:
+        process = subprocess.Popen([str(electron), '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+            f'--remote-debugging-port={port}', str(fixture)], env=env, stdout=log, stderr=log,
+            **desktop.launch_options())
+        try:
+            if mode == 'delayed':
+                browser, page = desktop.wait_for_packaged_page(playwright, process, port, attempts=24)
+                page.wait_for_function('()=>document.title==="Owned delayed window"')
+                assert page.title() == 'Owned delayed window'
+                assert len([p for c in browser.contexts for p in c.pages]) == 1
+                browser.close()
+            else:
+                with pytest.raises(RuntimeError, match='exited' if mode == 'exit' else 'window page'):
+                    desktop.wait_for_packaged_page(playwright, process, port, attempts=8)
+        finally:
+            desktop.stop_process(process)
+        assert process.poll() is not None
+        assert marker.exists(), 'The fixture must initialize successfully before testing exit/no-window behavior'

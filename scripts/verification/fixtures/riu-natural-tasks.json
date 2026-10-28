@@ -1,6 +1,6 @@
 {
-  "version": "2026-10-20.2",
-  "common": "请用中文帮助我完成下面的任务。数据都是假设的，不需要联网。",
+  "version": "2026-10-24.1",
+  "common": "请用中文帮助我完成下面的任务。数据都是假设的，不需要联网。本次任务不要调用 web_search、web_fetch、browser_controler、text_to_image 或 text_to_video；其余工具仍按原权限使用。",
   "forbidden_tools": ["web_search", "web_fetch", "browser_controler", "text_to_image", "text_to_video"],
   "tasks": [
     {"id":"calculator","prompt":"我的单次通勤票价12元，每月22天，一年12个月，先按每天单程1次算。帮我看看年度费用，票价、天数和月数变化时会怎样；金额保留两位小数，零天数应为零，负数不合理。","modify":"再考虑往返：增加默认选中的“往返”开关，选中时每天2次，取消时1次。请修改刚才那一份。","control":"天数","value":"20","initial":3168,"changed":2880,"modified":6336},

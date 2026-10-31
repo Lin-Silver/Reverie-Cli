@@ -15,11 +15,12 @@ spec.loader.exec_module(benchmark)
 @pytest.fixture(scope='module')
 def browser():
     from playwright.sync_api import sync_playwright
-    executable = shutil.which('chromium') or shutil.which('chromium-browser')
-    if not executable:
-        pytest.skip('Chromium is required for actual DOM calibration fixtures')
     with sync_playwright() as playwright:
-        instance = playwright.chromium.launch(executable_path=executable, headless=True)
+        bundled = Path(playwright.chromium.executable_path)
+        executable = str(bundled) if bundled.is_file() else shutil.which('chromium') or shutil.which('chromium-browser')
+        if not executable:
+            pytest.skip('Chromium is required for actual DOM calibration fixtures')
+        instance = playwright.chromium.launch(executable_path=executable, headless=True, chromium_sandbox=True)
         yield instance
         instance.close()
 
@@ -62,7 +63,7 @@ def test_missing_numeric_values_are_semantic_failures_while_actual_zero_is_valid
             benchmark.numeric_control_value(field, '天数')
         assert benchmark.classify_quality_error(error.value, 'browser-generation') == 'semantic_failure'
         checks = []
-        task = json.loads(benchmark.TASK_FILE.read_text())['tasks'][0]
+        task = json.loads(benchmark.TASK_FILE.read_text(encoding="utf-8"))['tasks'][0]
         with pytest.raises(benchmark.MissingBusinessControl):
             benchmark.semantic_checks(page, task, record=checks.append)
         assert any(item['name'] == 'required-numeric-control' and not item['passed'] for item in checks)
@@ -95,7 +96,7 @@ def test_actual_apply_button_drives_chart_and_zero_state_but_inert_button_does_n
           </script>''')
         if works:
             page.evaluate('()=>document.querySelector("button").addEventListener("click",render)')
-        task = next(task for task in json.loads(benchmark.TASK_FILE.read_text())['tasks'] if task['id'] == 'chart')
+        task = next(task for task in json.loads(benchmark.TASK_FILE.read_text(encoding="utf-8"))['tasks'] if task['id'] == 'chart')
         checks, _ = benchmark.semantic_checks(page, task)
         by_name = {item['name']: item for item in checks}
         for name in ['local-recalculation', 'zero-state', 'invalid-input-feedback', 'chart-readable-data']:
@@ -166,7 +167,7 @@ def test_filter_and_two_step_native_radio_confirmation_use_real_actions(browser,
                 const name=document.querySelector('input:checked').value;confirmedNames.push(name);
                 document.querySelector('#chosen').textContent='已选择路线：'+name;
             }''')
-        task = next(task for task in json.loads(benchmark.TASK_FILE.read_text())['tasks'] if task['id'] == 'comparison')
+        task = next(task for task in json.loads(benchmark.TASK_FILE.read_text(encoding="utf-8"))['tasks'] if task['id'] == 'comparison')
         checks, _ = benchmark.semantic_checks(page, task)
         choice_checks = [item for item in checks if item['name'] == 'selection-feedback']
         assert len(choice_checks) == 2

@@ -21,10 +21,11 @@ spec.loader.exec_module(benchmark)
 def verifier_browser():
     """Real DOM regressions for the external verifier, never model quality samples."""
     from playwright.sync_api import sync_playwright
-    executable = shutil.which('chromium') or shutil.which('chromium-browser')
-    if not executable:
-        pytest.skip('Chromium is needed for verifier DOM regression fixtures')
     with sync_playwright() as playwright:
+        bundled = Path(playwright.chromium.executable_path)
+        executable = str(bundled) if bundled.is_file() else shutil.which('chromium') or shutil.which('chromium-browser')
+        if not executable:
+            pytest.skip('Chromium is needed for verifier DOM regression fixtures')
         browser = playwright.chromium.launch(executable_path=executable, headless=True, chromium_sandbox=True)
         yield browser
         browser.close()

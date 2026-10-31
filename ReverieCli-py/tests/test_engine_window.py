@@ -28,7 +28,7 @@ def test_input_defaults_match_native_pyglet_symbols_in_an_isolated_process():
     import sys
 
     # Import the real window constants without changing the parent runtime's
-    # renderer mode; this process uses Pyglet's supported headless backend.
+    # renderer mode; only Linux uses Pyglet's EGL headless backend.
     result = subprocess.run([sys.executable, "-c", """
 from reverie.engine.input import InputMap
 from pyglet.window import key, mouse
@@ -40,7 +40,7 @@ for symbol, action in [(key.W, 'move_up'), (key.S, 'move_down'), (key.A, 'move_l
     assert inputs.get_action(symbol) == action
 assert inputs.get_action(mouse.LEFT, is_mouse=True) == 'attack'
 assert inputs.get_action(mouse.RIGHT, is_mouse=True) == 'interact'
-"""], env={**os.environ, "PYGLET_HEADLESS": "false" if sys.platform == "win32" else "true"}, capture_output=True, text=True, timeout=30)
+"""], env={**os.environ, "PYGLET_HEADLESS": "true" if sys.platform == "linux" else "false"}, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

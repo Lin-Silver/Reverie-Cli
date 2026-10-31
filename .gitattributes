@@ -3,3 +3,8 @@
 docs/verification/2026-10-28-dev-handoff/evidence/**/*.log.txt -whitespace
 docs/verification/2026-10-28-dev-handoff/check-*.txt -whitespace
 docs/verification/2026-10-27-static-rich-routing/v6-*.log -whitespace
+
+# Imported upstream bytes are covered by elayadesign-source.json checksums.
+ReverieCli-py/reverie/builtin_skills/design-to-motion/** -text -whitespace
+ReverieCli-py/reverie/builtin_skills/landing-page-design/** -text -whitespace
+ReverieCli-py/reverie/builtin_skills/ELAYA_LICENSE -text -whitespace

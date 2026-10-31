@@ -52,6 +52,8 @@ jobs:
           from pathlib import Path
           root = Path('.runtime/recheck-assets')
           manifest = json.loads((root/'reverie-kernel-macos-arm64.json').read_text())
+          source = json.loads((root/'source-run.json').read_text())
+          assert manifest['commit'] == source['head_sha']
           core = root/manifest['asset_name']
           assert core.resolve().parent == root.resolve()
           assert hashlib.sha256(core.read_bytes()).hexdigest() == manifest['sha256']
@@ -71,10 +73,19 @@ jobs:
           python - <<'PY'
           import hashlib, json
           from pathlib import Path
+          import subprocess
           root = Path('.runtime/recheck-assets')
           manifest = json.loads((root/'reverie-kernel-macos-arm64.json').read_text())
           core, = Path('.runtime/recheck-installed').glob('*.app/Contents/reverie')
-          assert hashlib.sha256(core.read_bytes()).hexdigest() == manifest['sha256']
+          # Desktop has an onedir kernel; the standalone asset is onefile.
+          info = json.loads(subprocess.check_output([str(core.resolve()), '--kernel-info'], text=True, timeout=120))
+          assert info == manifest['kernel']
+          image, = root.glob('*.dmg')
+          (root/'installed-package.json').write_text(json.dumps({
+              'dmg_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
+              'installed_kernel_sha256': hashlib.sha256(core.read_bytes()).hexdigest(),
+              'kernel': info,
+          }, indent=2))
           PY
       - name: Run current verifiers on the installed package
         env:

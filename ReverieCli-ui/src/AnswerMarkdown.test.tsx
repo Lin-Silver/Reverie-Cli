@@ -73,6 +73,15 @@ describe("rich answer content", () => {
     expect(document.activeElement).toBe(link);
   });
 
+  it("shows the full invalid block when streaming ends without a text change", () => {
+    const body = fence({ type: "table", columns: ["项目"], rows: [["项目一", "不能丢失"]] });
+    const { rerender } = render(<AnswerMarkdown streaming>{body}</AnswerMarkdown>);
+    expect(screen.getByRole("status").textContent).toBe("正在整理内容…");
+    rerender(<AnswerMarkdown>{body}</AnswerMarkdown>);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.querySelector("pre")?.textContent).toContain("不能丢失");
+  });
+
   it("preserves invalid or unsupported final blocks in full instead of silently hiding data", () => {
     const malformed = { type: "table", columns: ["名称"], rows: [["项目", "不能丢失的第二格"]] };
     render(<AnswerMarkdown>{fence(malformed)}</AnswerMarkdown>);

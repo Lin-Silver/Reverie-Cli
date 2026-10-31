@@ -60,7 +60,9 @@ def test_pinning_promotes_one_skill_into_a_mandatory_prompt_block(tmp_path: Path
     # A pin must not drag the other skills' bodies into the prompt.
     assert "release-notes" not in block
 
-    catalog = manager.describe_for_prompt()
+    # This case tests pin/catalog separation, not which entries fit an 8k
+    # budget. Absolute SKILL.md paths grow with the checkout and basetemp.
+    catalog = manager.describe_for_prompt(max_chars=64_000)
     assert "### Pinned skills (mandatory)" in catalog
     assert "- mesh-drafting [PINNED]:" in catalog
     assert "- release-notes:" in catalog

@@ -4299,6 +4299,10 @@ class ReverieInterface:
                 _persist_history_if_changed()
                 turn_thinking = "".join(thinking_chunks)
                 streamed_output = "".join(output_chunks).strip()
+                # A persisted partial answer can precede a transport failure.
+                # Extract the failure before choosing that answer from history;
+                # otherwise selecting it silently drops the trailing error.
+                streamed_output, turn_error = _split_prompt_error(streamed_output)
                 final_assistant_output = ""
                 for history_message in reversed(self.agent.get_history()):
                     if not isinstance(history_message, dict) or history_message.get("role") != "assistant":
@@ -4312,7 +4316,6 @@ class ReverieInterface:
                     final_assistant_output or streamed_output,
                     turn_thinking,
                 )
-                turn_output, turn_error = _split_prompt_error(turn_output)
                 return turn_output, turn_thinking, turn_error
 
             active_prompt = prompt_text

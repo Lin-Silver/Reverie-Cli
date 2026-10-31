@@ -196,6 +196,9 @@ def test_desktop_self_contained_static_rich_answer_uses_direct_response_route(tm
     assert '```reverie-ui\n{"type":"metrics"' in prompt
     assert '"type":"table"' in prompt
     assert '"type":"cards"' in prompt
+    assert '"text":"开发中","tone":"info"' in prompt
+    assert '"image":{"url":"https://example.org/image.png","alt":"图片说明"}' in prompt
+    assert "Only use a supplied image URL" in prompt
     assert agent.system_prompt not in prompt
     request_messages = agent._build_messages()
     assert [message["role"] for message in request_messages] == ["system", "user"]

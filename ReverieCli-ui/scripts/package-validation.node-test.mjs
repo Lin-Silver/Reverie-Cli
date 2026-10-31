@@ -4,7 +4,22 @@ import { mkdtempSync, mkdirSync, writeFileSync, statSync, symlinkSync, rmSync, r
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { normalizeLinuxPayload } from './package-validation.mjs';
+import { normalizeLinuxPayload, stageLinuxIconFile } from './package-validation.mjs';
+
+test('the separately installed Linux icon is readable without changing a private-mode source', { skip: process.platform === 'win32' }, () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), 'riu-icon-mode-'));
+  try {
+    const source = path.join(temporary, 'source icon.png');
+    writeFileSync(source, 'icon bytes', { mode: 0o600 });
+    const target = stageLinuxIconFile(source, path.join(temporary, 'package with spaces'));
+    assert.equal(statSync(target).mode & 0o777, 0o644);
+    assert.equal(statSync(source).mode & 0o777, 0o600);
+    assert.equal(readFileSync(target, 'utf8'), readFileSync(source, 'utf8'));
+    assert.notEqual(target, source);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
 
 test('a restrictive build umask does not make installed code unreadable to other users', { skip: process.platform === 'win32' }, () => {
   const temporary = mkdtempSync(path.join(tmpdir(), 'riu-package-mode-'));
@@ -32,6 +47,15 @@ test('a restrictive build umask does not make installed code unreadable to other
 test('the Linux distribution command always normalizes payload permissions before packaging', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.match(manifest.scripts['dist:linux'], /scripts\/package-validation\.mjs/);
+});
+
+test('the Debian package declares graphics and audio libraries required by Electron', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(manifest.build.deb.depends.includes('libgbm1'));
+  // Debian 13's libasound2t64 provides libasound2; older systems use libasound2.
+  assert.ok(manifest.build.deb.depends.includes('libasound2'));
+  assert.ok(manifest.build.deb.depends.includes('libgl1'));
+  assert.ok(manifest.build.deb.depends.includes('libgtk-3-0'));
 });
 
 test('the Linux desktop launcher resolves its real directory when invoked through an installed symlink', { skip: process.platform === 'win32' }, () => {

@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -32,68 +33,6 @@ _TASK_STATE_MARKERS = {
 _LOCAL_TZ = datetime.now().astimezone().tzinfo
 _HARNESS_RUN_HISTORY_REL_PATH = Path("harness") / "prompt_runs.jsonl"
 _MAX_HARNESS_RUN_HISTORY = 200
-_VERIFICATION_HINTS = {
-    "test": [
-        "pytest",
-        "unittest",
-        "nose",
-        "vitest",
-        "jest",
-        "ava",
-        "mocha",
-        "go test",
-        "cargo test",
-        "dotnet test",
-        "mvn test",
-        "gradle test",
-        "./gradlew test",
-        "ctest",
-        "phpunit",
-        "rspec",
-        "bun test",
-    ],
-    "e2e": [
-        "playwright",
-        "cypress",
-        "selenium",
-        "puppeteer",
-    ],
-    "lint": [
-        "ruff",
-        "flake8",
-        "pylint",
-        "eslint",
-        "shellcheck",
-        "golangci-lint",
-        "cargo clippy",
-        "npm run lint",
-        "pnpm lint",
-        "yarn lint",
-    ],
-    "typecheck": [
-        "mypy",
-        "pyright",
-        "tsc --noemit",
-        "tsc --noEmit",
-        "npm run typecheck",
-        "pnpm typecheck",
-        "yarn typecheck",
-    ],
-    "build": [
-        "npm run build",
-        "pnpm build",
-        "yarn build",
-        "cargo build",
-        "dotnet build",
-        "mvn package",
-        "mvn verify",
-        "gradle build",
-        "./gradlew build",
-        "cmake --build",
-        "python -m build",
-        "make build",
-    ],
-}
 _TOOL_FAILURE_HINTS = {
     "schema_mismatch": [
         "parameter validation failed",
@@ -200,16 +139,157 @@ def _compact_text(value: Any, limit: int = 180) -> str:
     return f"{text[: max(limit - 3, 1)].rstrip()}..."
 
 
-def _classify_verification_command(command_name: Any) -> List[str]:
-    normalized = _normalize_command_text(command_name)
-    if not normalized:
+def _classify_verification_command(command_name: Any, *, _depth: int = 0) -> List[str]:
+    """Recognise executed check entrypoints, not mentions in arbitrary arguments.
+
+    This is a conservative command classifier, not an interpretation of shell
+    programs. Unsupported shell syntax is left unclassified rather than letting
+    an echo, help command, or masked pipeline certify verification.
+    """
+    source = str(command_name or "").strip()
+    if _depth > 8 or not source or any(token in source for token in ("\n", "\r", "`", "$(")):
+        return []
+    try:
+        # Keep quote delimiters until after identifying control operators. A
+        # quoted literal '&&' passed to echo is not a shell AND chain.
+        lexer = shlex.shlex(source, posix=False, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    if not tokens:
+        return []
+    # PowerShell's leading call operator invokes the following executable. A
+    # trailing/background ampersand remains unsupported below.
+    if tokens[0] == "&":
+        tokens = tokens[1:]
+        if not tokens:
+            return []
+    # AND chains reaching exit zero ran every member. Other operators can hide
+    # a check's failure or start it in the background before it has completed.
+    if "&&" in tokens:
+        if any(token in {";", "|", "||", "&"} for token in tokens):
+            return []
+        groups: List[List[str]] = [[]]
+        for token in tokens:
+            if token == "&&":
+                groups.append([])
+            else:
+                groups[-1].append(token)
+        if any(not group for group in groups):
+            return []
+        return sorted({category for group in groups for category in _classify_verification_command(" ".join(group), _depth=_depth + 1)})
+    if any(token in {";", "|", "||", "&"} for token in tokens):
+        return []
+    tokens = [token[1:-1] if len(token) >= 2 and token[0] in {'"', "'"} and token[-1] == token[0] else token
+              for token in tokens]
+
+    def executable(token: str) -> str:
+        return re.split(r"[\\/]", token)[-1].lower().removesuffix(".exe").removesuffix(".cmd")
+
+    command = executable(tokens[0])
+    args = tokens[1:]
+    # Common wrappers still identify the real executable. Avoid arbitrary
+    # module/script source and package-manager options with ambiguous values.
+    if command in {"sh", "bash", "zsh"}:
+        if len(args) == 2 and args[0] in {"-c", "-lc"}:
+            return _classify_verification_command(args[1], _depth=_depth + 1)
+        return []
+    if command in {"powershell", "pwsh"}:
+        while args and args[0].lower() in {"-noprofile", "-nologo", "-noninteractive"}:
+            args = args[1:]
+        if len(args) != 2 or args[0].lower() not in {"-command", "-c"}:
+            return []
+        program = args[1].strip()
+        # A quoted string expression in PowerShell merely prints its value;
+        # invocation of a quoted executable requires the explicit & operator.
+        if not program or program[0] in {'"', "'"}:
+            return []
+        return _classify_verification_command(program, _depth=_depth + 1)
+    if command == "cmd":
+        while args and args[0].lower() in {"/d", "/s", "/q"}:
+            args = args[1:]
+        if len(args) < 2 or args[0].lower() != "/c":
+            return []
+        program = args[1] if len(args) == 2 else shlex.join(args[1:])
+        return _classify_verification_command(program, _depth=_depth + 1)
+    if command == "env":
+        while args and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", args[0]):
+            args = args[1:]
+        return _classify_verification_command(shlex.join(args), _depth=_depth + 1) if args else []
+    if command == "uv" and args and args[0] == "run":
+        args = args[1:]
+        while args and args[0] in {"--no-sync", "--frozen", "--locked", "--offline"}:
+            args = args[1:]
+        if not args or args[0].startswith("-"):
+            return []
+        return _classify_verification_command(shlex.join(args), _depth=_depth + 1)
+
+    python_module = False
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", command) or command == "py":
+        # Python's -c may merely print a runner name. Only a real -m entrypoint
+        # is meaningful, with an optional Windows Python launcher selector.
+        if command == "py" and args and re.fullmatch(r"-\d+(?:\.\d+)*", args[0]):
+            args = args[1:]
+        if len(args) < 2 or args[0] != "-m":
+            return []
+        command, args = args[1].lower(), args[2:]
+        python_module = True
+
+    discovery_flags = {"--help", "-h", "/?", "-?", "--version", "-version", "-help",
+                       "--collect-only", "--co", "--fixtures", "--fixtures-per-test", "--markers",
+                       "--trace-config", "--listtests", "--list-tests", "--list", "--if-present",
+                       "--showconfig", "--listfilesonly", "--info", "--list-sdks", "--list-runtimes", "--tasks"}
+    if any(arg == "-V" or arg.lower() in discovery_flags for arg in args):
         return []
 
-    matches: List[str] = []
-    for category, hints in _VERIFICATION_HINTS.items():
-        if any(hint in normalized for hint in hints):
-            matches.append(category)
-    return matches
+    if command in {"npm", "pnpm", "yarn", "bun", "npx"}:
+        if not args:
+            return []
+        if command == "npx" or args[0] in {"exec", "x"}:
+            forwarded = args if command == "npx" else args[1:]
+            while forwarded and forwarded[0] in {"--", "--yes", "-y", "--no-install"}:
+                forwarded = forwarded[1:]
+            return _classify_verification_command(shlex.join(forwarded), _depth=_depth + 1) if forwarded else []
+        if args[0] == "run":
+            args = args[1:]
+        elif command == "npm" and args[0] not in {"test", "t"}:
+            return []
+        if not args or args[0].startswith("-"):
+            return []
+        action = args[0].lower().split(":", 1)[0]
+        return {"test": ["test"], "t": ["test"], "e2e": ["e2e"], "lint": ["lint"],
+                "typecheck": ["typecheck"], "build": ["build"]}.get(action, [])
+
+    direct = {
+        "pytest": "test", "unittest": "test", "nose": "test", "nosetests": "test",
+        "vitest": "test", "jest": "test", "ava": "test", "mocha": "test",
+        "ctest": "test", "phpunit": "test", "rspec": "test",
+        "flake8": "lint", "pylint": "lint", "eslint": "lint", "shellcheck": "lint",
+        "mypy": "typecheck", "pyright": "typecheck", "tsc": "typecheck",
+    }
+    if command in direct:
+        if command == "vitest" and args and args[0] in {"list", "init"}:
+            return []
+        return [direct[command]]
+    if command == "build" and python_module:
+        return ["build"]
+    if command == "ruff":
+        return ["lint"] if args and (args[0] == "check" or args[0] == "format" and "--check" in args) else []
+    if command in {"playwright", "cypress"}:
+        return ["e2e"] if args and args[0] == ("test" if command == "playwright" else "run") else []
+    tasks = {
+        "go": {"test": "test"}, "cargo": {"test": "test", "clippy": "lint", "build": "build", "check": "typecheck"},
+        "dotnet": {"test": "test", "build": "build"}, "mvn": {"test": "test", "verify": "build", "package": "build"},
+        "gradle": {"test": "test", "build": "build"}, "gradlew": {"test": "test", "build": "build"},
+        "make": {"test": "test", "build": "build"}, "cmake": {"--build": "build"},
+        "golangci-lint": {"run": "lint"},
+    }
+    if command in tasks:
+        action = next((arg.lower() for arg in args if not arg.startswith("-") or arg == "--build"), "")
+        return [tasks[command][action]] if action in tasks[command] else []
+    return []
 
 
 def _harness_run_history_path(project_data_dir: Path) -> Path:
@@ -380,7 +460,11 @@ def summarize_command_audit(
         ).strip()
         if command_name:
             commands[command_name] += 1
-            matched_categories = _classify_verification_command(command_name)
+            # A requested or blocked command is intent, not evidence that a check ran.
+            matched_categories = (
+                _classify_verification_command(item.get("command") or command_name)
+                if event_name in {"command_result", "command_timeout"} else []
+            )
             if matched_categories:
                 explicit_verification_commands += 1
             if matched_categories and command_name not in verification_examples and len(verification_examples) < 5:
@@ -398,7 +482,7 @@ def summarize_command_audit(
     failed_verification_commands = 0
     latest_results = {}
     for index, item in enumerate(entries):
-        if str(item.get("event", "") or "").strip().lower() != "command_result":
+        if str(item.get("event", "") or "").strip().lower() not in {"command_result", "command_timeout"}:
             continue
         exit_code = item.get("exit_code")
         command_name = str(
@@ -407,7 +491,7 @@ def summarize_command_audit(
             or item.get("tool")
             or ""
         ).strip()
-        matched_categories = _classify_verification_command(command_name)
+        matched_categories = _classify_verification_command(item.get("command") or command_name)
         command_key = (str(item.get("cwd", "") or ""), command_name or f"<unknown:{index}>")
         latest_results[command_key] = (exit_code, bool(matched_categories))
         if exit_code == 0:
@@ -474,8 +558,20 @@ def _classify_tool_failure(error_text: Any, result_text: Any = "") -> str:
     return "other"
 
 
-def summarize_operation_history(operation_history: Any) -> Dict[str, Any]:
+def summarize_operation_history(
+    operation_history: Any,
+    *,
+    started_at: Optional[str] = None,
+    ended_at: Optional[str] = None,
+) -> Dict[str, Any]:
     operations = list(getattr(operation_history, "operations", []) or [])
+    if started_at or ended_at:
+        # Use the same timestamp policy as command evidence. Keep the caller's
+        # full history untouched for workspace diagnostics and rollback.
+        operations = [entry["operation"] for entry in _filter_entries_by_window(
+            ({"timestamp": getattr(operation, "timestamp", None), "operation": operation} for operation in operations),
+            started_at=started_at, ended_at=ended_at,
+        )]
     by_type = Counter()
     tools = Counter()
     tool_failures = 0
@@ -706,8 +802,12 @@ def persist_prompt_harness_run(
     task_snapshot = dict(workspace_audit.get("task_snapshot", {}) or {})
     checkpoints = dict(harness_report.get("checkpoints", {}) or {})
     operation_history = dict(harness_report.get("operation_history", {}) or {})
-    completion_gate = dict(workspace_audit.get("completion_gate", {}) or harness_report.get("completion_gate", {}) or {})
-    recovery_playbooks = list(workspace_audit.get("recovery_playbooks", []) or harness_report.get("recovery_playbooks", []) or [])
+    # Persist this prompt's bounded decision, including an explicitly empty
+    # recovery list. Workspace readiness belongs to its historical capability
+    # audit and must not override a failed or unfinished current request.
+    # Reports predating the current-window fields retain their legacy fallback.
+    completion_gate = dict(harness_report.get("completion_gate", workspace_audit.get("completion_gate", {})) or {})
+    recovery_playbooks = list(harness_report.get("recovery_playbooks", workspace_audit.get("recovery_playbooks", [])) or [])
 
     entry = {
         "timestamp": str(getattr(prompt_result, "ended_at", "") or ""),
@@ -983,7 +1083,7 @@ def build_recovery_playbooks(
         )
 
     needs_verification_recovery = (
-        verification_summary.get("explicit_commands", 0) == 0
+        verification_summary.get("successful_commands", 0) == 0
         and (
             bool(task_snapshot.get("active"))
             or bool(git_workspace.get("is_dirty"))
@@ -1097,15 +1197,22 @@ def build_completion_gate(
         reasons.append("Multiple tasks are in progress, so the active lane is still ambiguous.")
         next_actions.append("Collapse the task ledger to one active lane before closing.")
 
-    if status == "ready" and task_snapshot.get("active"):
+    if status == "ready" and (task_snapshot.get("active") or task_summary.get("in_progress", 0) > 0):
         status = "continue"
         label = "Continue implementation"
         confidence = 82
-        reasons.append(f"Active task still open: {task_snapshot.get('active')}.")
+        reasons.append(f"Active task still open: {task_snapshot.get('active') or str(task_summary.get('in_progress')) + ' task(s) outside the preview'}.")
         next_actions.append("Finish or explicitly block the active task before treating the run as done.")
 
+    if status == "ready" and task_summary.get("not_started", 0) > 0:
+        status = "continue"
+        label = "Continue pending tasks"
+        confidence = 82
+        reasons.append(f"{task_summary['not_started']} task(s) have not been started.")
+        next_actions.append("Complete the pending tasks or record their actual disposition before closing.")
+
     verification_gap = (
-        verification_summary.get("explicit_commands", 0) == 0
+        verification_summary.get("successful_commands", 0) == 0
         and (
             bool(task_snapshot.get("active"))
             or bool(git_workspace.get("is_dirty"))
@@ -1123,7 +1230,7 @@ def build_completion_gate(
         confidence = 60
         reasons.append("No active task ledger or command evidence is present, so this gate is informational rather than authoritative.")
 
-    if status == "ready" and verification_summary.get("explicit_commands", 0) > 0:
+    if status == "ready" and verification_summary.get("successful_commands", 0) > 0:
         reasons.append(
             f"Explicit verification is present across {', '.join((verification_summary.get('categories', {}) or {}).keys()) or 'at least one category'}."
         )
@@ -1315,7 +1422,7 @@ def build_harness_capability_report(
     evaluation_signals = {
         "command_exec_visible": "command_exec" in visible_tool_names,
         "audited_commands": audit_summary.get("entries", 0) > 0,
-        "successful_verification_commands": audit_summary.get("successful_commands", 0) > 0,
+        "successful_verification_commands": verification_summary.get("successful_commands", 0) > 0,
         "explicit_verification": verification_summary.get("explicit_commands", 0) > 0,
         "task_closure": task_summary.get("completed", 0) > 0 or task_summary.get("total", 0) == 0,
     }
@@ -1555,7 +1662,7 @@ def build_harness_prompt_guidance(
 
     lines = [
         "## Harness Runtime",
-        "- Scope: this block is workspace telemetry for the current turn (ledger, audit trail, git state, gate status). It describes the project and the run, not you. Do not quote, summarize, or paraphrase it in a user-facing answer or in a visible reasoning trace, and do not treat its gate label as a statement about your own ability or quality.",
+        "- Scope: this block is workspace history telemetry (ledger, audit trail, git state, gate status). Command evidence may predate the current turn; run fresh verification for new changes. It describes the project, not you. Do not quote, summarize, or paraphrase it in a user-facing answer or in a visible reasoning trace, and do not treat its gate label as a statement about your own ability or quality.",
         f"- Active mode: `{report.get('mode', normalize_mode(mode or 'reverie'))}`.",
     ]
 
@@ -1583,7 +1690,7 @@ def build_harness_prompt_guidance(
             f"{f' across {verification_categories}' if verification_categories else ''}."
         )
     else:
-        lines.append("- Verification posture: no explicit test/build/lint/browser evidence is visible yet in the current audit window.")
+        lines.append("- Verification posture: no completed test/build/lint/browser command is visible in the workspace audit history.")
 
     if git_workspace.get("available"):
         branch = str(git_workspace.get("branch", "") or "").strip() or "(detached)"
@@ -1647,7 +1754,11 @@ def build_prompt_harness_report(
     mcp_runtime: Any = None,
 ) -> Dict[str, Any]:
     task_summary = _parse_task_entries(Path(project_root))
-    operation_summary = summarize_operation_history(operation_history)
+    operation_summary = summarize_operation_history(
+        operation_history,
+        started_at=str(getattr(prompt_result, "started_at", "") or ""),
+        ended_at=str(getattr(prompt_result, "ended_at", "") or ""),
+    )
     checkpoint_summary = summarize_checkpoints(
         rollback_manager,
         session_id=str(getattr(prompt_result, "session_id", "") or ""),
@@ -1681,18 +1792,43 @@ def build_prompt_harness_report(
         mcp_runtime=mcp_runtime,
     )
 
+    # Workspace diagnostics cover its entire history; they cannot certify this
+    # particular run. Use the prompt's bounded command window for its decision.
+    verification_summary = dict(command_summary.get("verification", {}) or {})
+    task_snapshot = summarize_task_snapshot(task_summary)
+    git_workspace = dict((workspace_audit.get("artifacts", {}) or {}).get("git_workspace", {}) or {})
+    completion_gate = build_completion_gate(
+        task_summary=task_summary, task_snapshot=task_snapshot,
+        audit_summary=command_summary, verification_summary=verification_summary,
+        operation_summary=operation_summary, git_workspace=git_workspace,
+    )
+    if getattr(prompt_result, "success", True) is False or getattr(prompt_result, "error", ""):
+        completion_gate = {
+            "status": "blocked", "label": "Prompt execution failed", "confidence": 95,
+            "reasons": ["The current prompt did not complete successfully.", *completion_gate["reasons"]][:4],
+            "next_actions": ["Inspect the recorded prompt error and recover before claiming completion.",
+                             *completion_gate["next_actions"]][:3],
+        }
+    recovery_playbooks = build_recovery_playbooks(
+        task_summary=task_summary, task_snapshot=task_snapshot,
+        audit_summary=command_summary, verification_summary=verification_summary,
+        operation_summary=operation_summary, checkpoint_summary=checkpoint_summary,
+        history_summary=workspace_audit.get("history_summary", {}) or {}, git_workspace=git_workspace,
+    )
+
     return {
+        "evidence_scope": "current_prompt_command_window; workspace_audit is historical capability context",
         "mode": str(getattr(prompt_result, "mode", "reverie") or "reverie"),
         "duration_seconds": float(getattr(prompt_result, "duration_seconds", 0.0) or 0.0),
         "auto_followup_count": int(getattr(prompt_result, "auto_followup_count", 0) or 0),
         "task_artifacts": task_summary,
         "operation_history": operation_summary,
         "command_window": command_summary,
-        "verification": dict(command_summary.get("verification", {}) or {}),
+        "verification": verification_summary,
         "checkpoints": checkpoint_summary,
         "activity": activity_summary,
         "ui_events": ui_summary,
         "workspace_audit": workspace_audit,
-        "completion_gate": dict(workspace_audit.get("completion_gate", {}) or {}),
-        "recovery_playbooks": list(workspace_audit.get("recovery_playbooks", []) or []),
+        "completion_gate": completion_gate,
+        "recovery_playbooks": recovery_playbooks,
     }

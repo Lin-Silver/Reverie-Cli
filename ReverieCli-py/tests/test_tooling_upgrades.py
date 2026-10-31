@@ -1770,7 +1770,8 @@ def test_harness_prompt_guidance_mentions_task_ledger_and_recovery(tmp_path: Pat
     )
 
     assert "Harness Runtime" in guidance
-    assert "workspace telemetry for the current turn" in guidance
+    assert "workspace history telemetry" in guidance
+    assert "run fresh verification for new changes" in guidance
     assert "confidence" not in guidance
     assert "Audit harness" in guidance
     assert "automatic checkpoints before user turns and tool calls" in guidance

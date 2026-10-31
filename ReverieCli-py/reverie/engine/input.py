@@ -26,33 +26,30 @@ class InputMap:
     mouse_map: Dict[int, str] = field(default_factory=dict)
     
     def __post_init__(self):
-        # Importing pyglet.window creates a graphics context. Only real engine
-        # input needs it; loading terminal tool metadata must stay window-free.
-        try:
-            from pyglet.window import key, mouse
-        except ImportError:
-            key = mouse = None
-        if not self.keyboard_map and key:
-            # Default keyboard mappings
+        # Pyglet's public key symbols are platform-independent (ASCII for
+        # letters, X11 keysyms for navigation). Importing pyglet.window just to
+        # get them creates a shadow GL window, breaking even headless smoke
+        # runs on machines without DISPLAY. Keep input data context-free.
+        if not self.keyboard_map:
             self.keyboard_map = {
-                key.W: InputAction.MOVE_UP.value,
-                key.S: InputAction.MOVE_DOWN.value,
-                key.A: InputAction.MOVE_LEFT.value,
-                key.D: InputAction.MOVE_RIGHT.value,
-                key.SPACE: InputAction.JUMP.value,
-                key.E: InputAction.INTERACT.value,
-                key.ESCAPE: InputAction.PAUSE.value,
-                key.UP: InputAction.MOVE_UP.value,
-                key.DOWN: InputAction.MOVE_DOWN.value,
-                key.LEFT: InputAction.MOVE_LEFT.value,
-                key.RIGHT: InputAction.MOVE_RIGHT.value,
+                ord("w"): InputAction.MOVE_UP.value,
+                ord("s"): InputAction.MOVE_DOWN.value,
+                ord("a"): InputAction.MOVE_LEFT.value,
+                ord("d"): InputAction.MOVE_RIGHT.value,
+                ord(" "): InputAction.JUMP.value,
+                ord("e"): InputAction.INTERACT.value,
+                0xFF1B: InputAction.PAUSE.value,  # Escape
+                0xFF52: InputAction.MOVE_UP.value,
+                0xFF54: InputAction.MOVE_DOWN.value,
+                0xFF51: InputAction.MOVE_LEFT.value,
+                0xFF53: InputAction.MOVE_RIGHT.value,
             }
         
-        if not self.mouse_map and mouse:
+        if not self.mouse_map:
             # Default mouse mappings
             self.mouse_map = {
-                mouse.LEFT: InputAction.ATTACK.value,
-                mouse.RIGHT: InputAction.INTERACT.value,
+                1: InputAction.ATTACK.value,  # Pyglet mouse.LEFT
+                4: InputAction.INTERACT.value,  # Pyglet mouse.RIGHT
             }
     
     def get_action(self, key_code: int, is_mouse: bool = False) -> Optional[str]:

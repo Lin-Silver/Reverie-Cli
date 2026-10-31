@@ -1115,7 +1115,7 @@ describe("desktop GUI interactions", () => {
     const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
     Object.defineProperties(transcript, { clientHeight: { configurable: true, value: 220 }, scrollHeight: { configurable: true, value: 800 } });
     act(() => resized());
-    expect(transcript.style.getPropertyValue("--transcript-height")).toBe("220px");
+    expect(transcript.style.getPropertyValue("--transcript-height")).toBe("");
     expect(transcript.scrollTop).toBe(800);
     transcript.scrollTop = 100;
     fireEvent.scroll(transcript);
@@ -1293,6 +1293,8 @@ describe("desktop GUI interactions", () => {
   });
 
   it.each([false, true])("keeps failed-turn diagnostics in the transcript and leaves the composer available for retry (transport error: %s)", async (transportError) => {
+    const resizes: Array<() => void> = [];
+    vi.stubGlobal("ResizeObserver", class { constructor(private callback: () => void) {} observe(element: Element) { if (element.classList.contains("transcript")) resizes.push(this.callback); } disconnect() {} });
     const { api, emitCoreEvent } = installDesktopApi();
     const original = api.request.getMockImplementation()!;
     const detail = "Provider failed with a long diagnostic. 中文 " + "details ".repeat(120);
@@ -1314,6 +1316,13 @@ describe("desktop GUI interactions", () => {
     expect(document.querySelector(".composer .persistent-error")).toBeNull();
     expect(screen.getAllByText(detail.trim())).toHaveLength(1);
     expect((composer as HTMLTextAreaElement).disabled).toBe(false);
+    const transcript = document.querySelector<HTMLDivElement>(".transcript")!;
+    Object.defineProperty(transcript, "clientHeight", { configurable: true, value: 220 });
+    act(() => resizes.forEach(resize => resize()));
+    // Resizing bounds only the error diagnostic. An inherited variable on the
+    // whole transcript would invalidate the styles of every loaded message.
+    expect(document.querySelector<HTMLElement>(".inline-error")!.style.getPropertyValue("--transcript-height")).toBe("220px");
+    expect(transcript.style.getPropertyValue("--transcript-height")).toBe("");
     await user.type(composer, " revised");
     expect((composer as HTMLTextAreaElement).value).toContain("revised");
   });
@@ -2884,6 +2893,140 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("Reading record 60")).toBeTruthy();
     expect(document.querySelectorAll(".transcript .message")).toHaveLength(120);
     expect(transcript.scrollTop).toBe(320);
+  });
+
+  it("keeps an existing view mounted when an earlier page reveals its older revision", async () => {
+    const viewId = "v0123456789abcdef";
+    const messages: SessionState["messages"] = Array.from({ length: 80 }, (_, index) => ({ role: "user", content: `View history record ${index}` }));
+    for (const [index, revision] of [[9, 1], [69, 2]]) {
+      const callId = `history-view-${revision}`;
+      messages[index] = { role: "assistant", content: "", tool_calls: [{ id: callId, function: { name: "render_view", arguments: "{}" } }] };
+      messages[index + 1] = {
+        role: "tool", name: "render_view", tool_call_id: callId,
+        content: `Interactive view ready: "History chart revision ${revision}" (view_id=${viewId}, revision=${revision}). It is shown to the user in the Reverie view panel. Summary: History chart.`,
+      };
+    }
+    const { request } = installDesktopApi({ initialSession: { ...baseSession, messages } });
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => action === "getView" ? {
+      type: "view.resolved", view: {
+        sessionId: baseSession.id, viewId, revision: 2, title: "History chart revision 2", summary: "History chart.",
+        mimeType: "text/html", policyId: "local-offline-v1", state: null,
+        url: `reverie-view://${baseSession.id}/${viewId}/2/index.html`,
+      },
+    } as never : original(action, payload));
+    const { container } = render(<App />);
+    const frame = await waitFor(() => {
+      const frame = container.querySelector(".message-column iframe");
+      expect(frame).toBeTruthy();
+      return frame!;
+    });
+    const mount = container.querySelector(".message-column .interactive-view-mount");
+    expect(mount).toBeTruthy();
+    expect(screen.queryByText("View history record 0")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更早的消息" }));
+
+    expect(await screen.findByText("View history record 0")).toBeTruthy();
+    expect(container.querySelectorAll(".message-column .interactive-view-mount")).toHaveLength(1);
+    expect(container.querySelector(".message-column .interactive-view-mount")).toBe(mount);
+    expect(container.querySelector(".message-column iframe")).toBe(frame);
+    expect(screen.getByText("History chart revision 2")).toBeTruthy();
+    expect(screen.queryByText("History chart revision 1")).toBeNull();
+    expect(request.mock.calls.filter(([action]) => action === "getView")).toHaveLength(1);
+  });
+
+  it("preserves expanded history and link focus when the first view is appended", async () => {
+    const viewId = "v1234567890abcdef";
+    const messages: SessionState["messages"] = [{
+      role: "assistant", content: "Review the [saved reference](https://example.invalid/reference).", reasoning_content: "Keep this earlier reasoning open.",
+    }];
+    const { request, releasePrompt } = installDesktopApi({ initialSession: { ...baseSession, messages }, initialPreferences: { expandReasoning: false }, gatePrompt: true });
+    const original = request.getMockImplementation()!;
+    let appended = false;
+    request.mockImplementation(async (action, payload) => {
+      if (action === "getView") return { type: "view.resolved", view: {
+        sessionId: baseSession.id, viewId, revision: 1, title: "Appended chart", summary: "New chart.",
+        mimeType: "text/html", policyId: "local-offline-v1", state: null,
+        url: `reverie-view://${baseSession.id}/${viewId}/1/index.html`,
+      } } as never;
+      const response = await original(action, payload);
+      if (action === "runPrompt") appended = true;
+      if (action === "getSession" && appended) return { type: "session", session: { ...baseSession, messages: [
+        { role: "system", content: "Fresh workspace memory inserted before the visible history." },
+        ...JSON.parse(JSON.stringify(messages)),
+        { role: "user", content: "Append a chart" },
+        { role: "assistant", content: "", tool_calls: [{ id: "appended-view", function: { name: "render_view", arguments: "{}" } }] },
+        { role: "tool", name: "render_view", tool_call_id: "appended-view", content: `Interactive view ready: "Appended chart" (view_id=${viewId}, revision=1). It is shown to the user in the Reverie view panel. Summary: New chart.` },
+        { role: "assistant", content: "Appended chart is ready." },
+      ] }, sessions: desktopState.sessions };
+      return response;
+    });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const link = await screen.findByRole("link", { name: "saved reference" });
+    await user.type(screen.getByRole("textbox", { name: /向 Test Model 提问/ }), "Append a chart{Enter}");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.objectContaining({ prompt: "Append a chart" })));
+    const reasoning = container.querySelector<HTMLDetailsElement>(".message-column .reasoning-block")!;
+    await user.click(reasoning.querySelector("summary")!);
+    expect(await screen.findByText("Keep this earlier reasoning open.")).toBeTruthy();
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    await act(async () => releasePrompt());
+
+    expect(await screen.findByText("Appended chart is ready.")).toBeTruthy();
+    expect(container.querySelector(".message-column iframe")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "saved reference" })).toBe(link);
+    expect(container.querySelector(".message-column .reasoning-block")).toBe(reasoning);
+    expect(reasoning.open).toBe(true);
+    expect(screen.getByText("Keep this earlier reasoning open.")).toBeTruthy();
+    expect(document.activeElement).toBe(link);
+  });
+
+  it("keeps the streamed answer and reasoning nodes when it is saved and another turn starts", async () => {
+    const answer = "Review the [streamed reference](https://example.invalid/streamed).";
+    const reasoningText = "Native reasoning remains expandable.";
+    const { request, emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true, initialPreferences: { expandReasoning: false } });
+    const original = request.getMockImplementation()!;
+    let finished = false;
+    request.mockImplementation(async (action, payload) => {
+      if (action === "runPrompt" && finished) return new Promise(() => {});
+      const response = await original(action, payload);
+      if (action === "runPrompt") {
+        finished = true;
+        const result = response as Extract<typeof response, { result: { success: boolean } }>;
+        return { ...result, result: { ...result.result, output_text: answer, thinking_text: reasoningText } };
+      }
+      if (action === "getSession" && finished) return { type: "session", session: { ...baseSession, messages: [
+        { role: "system", content: "Workspace memory." },
+        { role: "user", content: "Give a static answer" },
+        { role: "assistant", content: answer, reasoning_content: reasoningText },
+      ] }, sessions: desktopState.sessions };
+      return response;
+    });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "Give a static answer{Enter}");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.anything()));
+    await act(async () => {
+      emitCoreEvent({ type: "reasoning.delta", text: reasoningText });
+      emitCoreEvent({ type: "assistant.delta", text: answer });
+      await new Promise(resolve => setTimeout(resolve, 180));
+    });
+    const link = await screen.findByRole("link", { name: "streamed reference" });
+    const reasoning = container.querySelector<HTMLDetailsElement>(".reasoning-block")!;
+    await user.click(reasoning.querySelector("summary")!);
+    link.focus();
+    await act(async () => releasePrompt());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "停止" })).toBeNull());
+    expect(screen.getByRole("link", { name: "streamed reference" })).toBe(link);
+    expect(container.querySelector(".reasoning-block")).toBe(reasoning);
+    expect(reasoning.open).toBe(true);
+    expect(document.activeElement).toBe(link);
+    await user.type(composer, "A follow-up{Enter}");
+    expect(screen.getByRole("link", { name: "streamed reference" })).toBe(link);
+    expect(container.querySelector(".reasoning-block")).toBe(reasoning);
   });
 
   it("requests one context reading after bootstrap and one after a session switch", async () => {

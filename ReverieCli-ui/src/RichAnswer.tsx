@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { memo, useId, useState, type ReactNode } from "react";
 import { ArrowUpRight, Globe, ImageOff } from "lucide-react";
 import { answerExternalUrl, answerImageUrl, isAnswerNumericText, type AnswerBadge, type AnswerBlock, type AnswerCell, type AnswerLink } from "./answer-blocks";
 import { useI18n } from "./i18n";
@@ -38,7 +38,7 @@ function Sources({ items }: { items: AnswerLink[] }) {
   </div>;
 }
 
-export function RichAnswer({ block }: { block: AnswerBlock }) {
+export const RichAnswer = memo(function RichAnswer({ block }: { block: AnswerBlock }) {
   const { t } = useI18n();
   const titleId = useId();
   if (block.type === "metrics") return <dl className={`answer-metrics${block.items.some(item => String(item.value).length > 10) ? " answer-metrics-has-long-values" : ""}`}>
@@ -65,4 +65,4 @@ export function RichAnswer({ block }: { block: AnswerBlock }) {
       {Boolean(item.links?.length) && <div className="answer-card-links">{item.links!.map((itemLink, linkIndex) => <AnswerExternalLink key={linkIndex} url={itemLink.url}>{itemLink.label}</AnswerExternalLink>)}</div>}
     </div>
   </article>)}</div>;
-}
+});

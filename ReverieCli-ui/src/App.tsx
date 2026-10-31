@@ -137,6 +137,8 @@ import {
   messageReasoningText,
   previousTurnBoundary,
   resolveToolResultNames,
+  reuseSessionMessages,
+  inlineStaticTurnMessages,
   sessionIsEmpty,
   toolCallRecords,
   visibleSessionMessages,
@@ -195,7 +197,7 @@ import {
   loadStructuredDraft,
   saveStructuredDraft,
 } from "./drafts";
-import { InputContext, AttachmentCards, QueueStrip, GoalSummary, useInputControls } from "./ComposerExtras";
+import { InputContext, AttachmentCards, QueueStrip, GoalSummary, useInputControls, type InputControls } from "./ComposerExtras";
 import { loadQueue, saveQueue, ownerKey, type QueuedMessage } from "./execution-state";
 import { useSidebarOrganization } from "./sidebar-organization";
 import type { ComposerAttachment } from "../electron/attachments";
@@ -1295,7 +1297,9 @@ function ToolCallList({ message }: { message: SessionMessage }) {
  * rebuild the markdown of every message above it. Both props come straight from
  * state, so their identities are stable between renders.
  */
-const Message = memo(function Message({ message, preferences }: { message: SessionMessage; preferences: UiPreferences }) {
+interface InlineLiveRow { turn: LiveTurn; running: boolean; first: number }
+
+const Message = memo(function Message({ message, preferences, live }: { message: SessionMessage; preferences: UiPreferences; live?: InlineLiveRow }) {
   const { language, t } = useI18n();
   const text = messageText(message.content, language);
   const reasoning = messageReasoningText(message);
@@ -1309,7 +1313,7 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
   const visibleText = provisionalThinking ? "" : text;
   const userParts = message.role === "user" && Array.isArray(message.content) ? message.content.map(asRecord) : null;
   const hasLocalMedia = userParts?.some(part => ["local_image", "local_video"].includes(String(part.type)) && typeof part.file_path === "string");
-  if (message.role === "system" || (!visibleText && !visibleReasoning && !visibleCalls && !hasLocalMedia)) return null;
+  if (message.role === "system" || (!live && !visibleText && !visibleReasoning && !visibleCalls && !hasLocalMedia)) return null;
   if (message.role === "tool") {
     return preferences.showToolResults
       ? <HistoryToolResult message={message} text={text} defaultExpanded={preferences.expandToolResults} />
@@ -1317,15 +1321,18 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
   }
   const user = message.role === "user";
   const userName = preferences.userDisplayName || t("你");
-  const technicalOnly = message.role === "assistant" && !visibleText && (visibleReasoning || visibleCalls);
+  const technicalOnly = !live && message.role === "assistant" && !visibleText && (visibleReasoning || visibleCalls);
+  const liveActivity = live?.turn.segments?.flatMap(segment => segment.kind === "activity" ? segment.events : []) ?? [];
   return (
-    <article className={`message ${message.role} ${technicalOnly ? "technical-only" : ""}`}>
+    <article className={`message ${message.role} ${technicalOnly ? "technical-only" : ""} ${live ? user ? "live-user-message" : "live-message" : ""}`}>
       {!technicalOnly && <div className="message-heading">
         {user ? <UserAvatar name={userName} url={preferences.userAvatarUrl} /> : <div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div>}
         <strong>{user ? userName : "Reverie"}</strong>
+        {live && !user && <span className={`live-status ${live.running ? "working" : "success"}`}>{t(live.running ? "正在处理" : "已完成")}</span>}
       </div>}
       <div className="message-body">
-        {visibleReasoning && <HistoryReasoning text={reasoning} defaultExpanded={preferences.expandReasoning} />}
+        {!user && liveActivity.length > 0 && preferences.showLiveActivity && <ActivityGroup key="live-activity" events={liveActivity} />}
+        {visibleReasoning && <HistoryReasoning key="reasoning" text={reasoning} defaultExpanded={preferences.expandReasoning} active={Boolean(live?.running && live.turn.segments?.at(-1)?.kind === "reasoning")} />}
         {visibleCalls && <ToolCallList message={message} />}
         {userParts ? userParts.map((part, index) => {
           if (["local_image", "local_video"].includes(String(part.type)) && typeof part.file_path === "string") {
@@ -1336,7 +1343,8 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
           }
           const value = messageText([part], language);
           return value ? <div key={index} className="user-text">{value}</div> : null;
-        }) : visibleText && (message.role === "assistant" ? <Markdown>{visibleText}</Markdown> : <div className="user-text">{visibleText}</div>)}
+        }) : visibleText && (message.role === "assistant" ? <StreamingMarkdown key="answer" running={live?.running ?? false}>{visibleText}</StreamingMarkdown> : <div className="user-text">{visibleText}</div>)}
+        {live?.running && !user && <div className="typing"><span /><span /><span /></div>}
       </div>
     </article>
   );
@@ -1349,6 +1357,17 @@ const Message = memo(function Message({ message, preferences }: { message: Sessi
 function InlineError({ detail }: { detail: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const block = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = block.current;
+    const viewport = element?.closest<HTMLElement>(".transcript");
+    if (!element || !viewport) return;
+    const resize = () => element.style.setProperty("--transcript-height", `${viewport.clientHeight}px`);
+    resize();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    observer?.observe(viewport);
+    return () => observer?.disconnect();
+  }, []);
   const htmlResponse = /<!doctype\s+html|<html[\s>]/i.test(detail);
   const summary = htmlResponse ? t(/Attention Required!.*Cloudflare/i.test(detail)
     ? "供应商返回了 Cloudflare 拦截页面，本轮未获得模型回复。请检查供应商地址或稍后重试。"
@@ -1360,7 +1379,7 @@ function InlineError({ detail }: { detail: string }) {
     }).catch(() => {});
   }, [detail]);
   return (
-    <div className="inline-error" role="alert">
+    <div className="inline-error" role="alert" ref={block}>
       <div className="inline-error-head">
         <AlertCircle size={15} />
         <strong>{t("本轮出错")}</strong>
@@ -1735,11 +1754,8 @@ function Composer({
   useEffect(() => setSelected(0), [mentionItems]);
   const dragDepth = useRef(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
-  useEffect(() => {
-    if (!textarea.current) return;
-    textarea.current.style.height = "auto";
-    textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 220)}px`;
-  }, [value]);
+  // Chromium sizes the field from its contents. Resetting height and reading
+  // scrollHeight on every keystroke forces layout of a long transcript twice.
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
@@ -1874,17 +1890,70 @@ function Composer({
 
 const HISTORY_PAGE_SIZE = 60;
 
-const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey, sessionId }: {
+function HistoryChunk({ children }: { children: ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = outer.current;
+    const inner = content.current;
+    if (!box || !inner) return;
+    let previous = -1;
+    const resize = (height: number) => {
+      if (!Number.isFinite(height) || height < 0 || height === previous) return;
+      previous = height;
+      box.style.height = `${height}px`;
+      box.style.contain = "size layout style paint";
+    };
+    // The first layout uses normal flow. ResizeObserver supplies the actual
+    // height after layout, including message margins, without forcing the
+    // entire conversation to lay out inside React's commit. The inner flow
+    // root stays live for fonts, images, expanded details and wrapping.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target === inner) resize(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+      }
+    });
+    observer?.observe(inner);
+    return () => observer?.disconnect();
+  }, []);
+  return <div className="history-render-chunk is-static" ref={outer}><div className="history-chunk-content" ref={content}>{children}</div></div>;
+}
+
+const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey, sessionId, live }: {
   messages: SessionMessage[];
   preferences: UiPreferences;
   transcript: RefObject<HTMLDivElement | null>;
   readingKey: string;
   sessionId: string;
+  live?: InlineLiveRow;
 }) {
   const { t } = useI18n();
   const [start, setStart] = useState(() => readingPositions.get(readingKey)?.first ?? Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const first = Math.min(start, Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const rows = useMemo(() => groupTranscriptMessages(messages.slice(first), sessionId), [messages, first, sessionId]);
+  // Existing structured history always retains its original flat parent. A
+  // conversation that starts static keeps its old chunks when a first tool or
+  // view arrives; only that newly appended tail uses the original flat path.
+  const [staticEnd, setStaticEnd] = useState(() =>
+    groupTranscriptMessages(messages, sessionId).some(row => row.kind !== "message") ? 0 : Infinity,
+  );
+  const firstStructured = rows.find(row => row.kind !== "message");
+  if (staticEnd === Infinity && firstStructured) setStaticEnd(first + firstStructured.index);
+  // Keep all loaded history available to reading, search and keyboard users,
+  // while giving Chromium bounded paint regions instead of one huge subtree.
+  // Absolute message offsets keep existing chunks stable when earlier pages
+  // are prepended. Views retain their original lifecycle/portal ownership.
+  const chunks = useMemo(() => {
+    const result: Array<{ key: number; rows: typeof rows }> = [];
+    for (const row of rows) {
+      if (first + row.index >= staticEnd) continue;
+      const key = Math.floor((first + row.index) / 20);
+      let chunk = result.at(-1);
+      if (!chunk || chunk.key !== key) { chunk = { key, rows: [] }; result.push(chunk); }
+      chunk.rows.push(row);
+    }
+    return result;
+  }, [first, rows, staticEnd]);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
   useLayoutEffect(() => {
     readingPositions.set(readingKey, { top: 0, follow: true, ...readingPositions.get(readingKey), first });
@@ -1911,13 +1980,17 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => container.removeEventListener("scroll", onScroll);
   }, [first, transcript, loadEarlier]);
-  return <>
-    {first > 0 && <button type="button" className="history-load-earlier" onClick={loadEarlier}>{t("加载更早的消息")}</button>}
-    {rows.map(row => row.kind === "activity"
+  const renderRow = (row: typeof rows[number]) => row.kind === "activity"
       ? (preferences.showToolCalls || preferences.showToolResults) && <ActivityGroup key={`activity-${first + row.index}`} events={row.events.map(event => ({ ...event, ...(!preferences.showToolCalls ? { arguments: undefined } : {}), ...(!preferences.showToolResults ? { output: undefined } : {}) }))} defaultExpanded={preferences.expandToolResults} />
       : row.kind === "view"
         ? <InteractiveView key={`view-${row.view.viewId || first + row.index}`} segment={row.view} />
-        : <Message key={`${row.message.role}-${first + row.index}`} message={row.message} preferences={preferences} />)}
+        : <Message key={`${row.message.role}-${first + row.index}`} message={row.message} preferences={preferences} live={live && first + row.index >= live.first ? live : undefined} />;
+  return <>
+    {first > 0 && <button type="button" className="history-load-earlier" onClick={loadEarlier}>{t("加载更早的消息")}</button>}
+    {chunks.map(chunk => <HistoryChunk key={chunk.key}>
+      {chunk.rows.map(renderRow)}
+    </HistoryChunk>)}
+    {rows.filter(row => first + row.index >= staticEnd).map(renderRow)}
   </>;
 });
 
@@ -1928,6 +2001,7 @@ function isStoppedPrompt(detail: string) {
 }
 
 function ChatView({
+  controls,
   session,
   liveTurn,
   running,
@@ -1960,6 +2034,7 @@ function ChatView({
   resolveApproval,
   contextUsage,
 }: {
+  controls: InputControls | null;
   session: SessionState | null;
   liveTurn: LiveTurn | null;
   running: boolean;
@@ -1999,12 +2074,15 @@ function ChatView({
     () => resolveToolResultNames(visibleSessionMessages(liveTurn?.historyMessageCount === undefined ? session?.messages ?? [] : (session?.messages ?? []).slice(0, liveTurn.historyMessageCount))),
     [session?.messages, liveTurn?.historyMessageCount],
   );
+  const inlineMessages = useMemo(() => inlineStaticTurnMessages(liveTurn), [liveTurn]);
+  const renderedHistory = useMemo(() => inlineMessages ? [...visibleMessages, ...inlineMessages] : visibleMessages, [visibleMessages, inlineMessages]);
+  const inlineLive = useMemo(() => inlineMessages && liveTurn ? { turn: liveTurn, running, first: visibleMessages.length } : undefined, [inlineMessages, liveTurn, running, visibleMessages.length]);
   const canRewind = previousTurnBoundary(session?.messages ?? []) !== null;
   const taskListEvent = [...(liveTurn?.events ?? [])].reverse().find(event => Array.isArray(event.task_list));
   const tasks = taskListEntries(taskListEvent?.task_list ?? session?.metadata?.task_list);
   const runState = asRecord(session?.metadata?.prompt_run).state;
   const resumable = runState === "running" || runState === "interrupted";
-  const inputOwner=useInputControls();
+  const inputOwner = controls;
   const readingKey=ownerKey(inputOwner?.projectRoot || "",session?.id || "new");
   const followOutput = useRef(true);
   const hasTranscriptContent = visibleMessages.length > 0 || Boolean(liveTurn);
@@ -2026,7 +2104,6 @@ function ChatView({
       if (followOutput.current) setHasNewContent(false);
     };
     const resize = () => {
-      container.style.setProperty("--transcript-height", `${container.clientHeight}px`);
       if (followOutput.current) container.scrollTop = hasTranscriptContent ? container.scrollHeight : 0;
     };
     resize();
@@ -2046,7 +2123,10 @@ function ChatView({
     const container = transcript.current;
     if (!container) return;
     if (!followOutput.current) { setHasNewContent(true); return; }
-    container.scrollTop = hasTranscriptContent ? container.scrollHeight : 0;
+    // The observer above follows content/viewport size changes after layout.
+    // Reading scrollHeight for every token here forces an extra synchronous
+    // document layout before the browser can paint the streaming update.
+    if (typeof ResizeObserver === "undefined") container.scrollTop = hasTranscriptContent ? container.scrollHeight : 0;
   }, [session?.id, session?.messages.length, liveTurn?.assistantText, liveTurn?.reasoningText, liveTurn?.events, liveTurn?.error]);
   return (
     <div className={`chat-view ${hasTranscriptContent ? "" : "is-empty"}`}>
@@ -2068,12 +2148,13 @@ function ChatView({
           <WelcomeHeader workspace={projectNameFromPath(inputOwner?.projectRoot || "")} />
         ) : (
           <div className="message-column" ref={transcriptContent}>
-            <HistoryMessages key={`history:${readingKey}`} messages={visibleMessages} preferences={preferences} transcript={transcript} readingKey={readingKey} sessionId={session?.id ?? ""} />
-            {liveTurn && <LiveMessage key={`live:${readingKey}`} turn={liveTurn} running={running} preferences={preferences} />}
+            <HistoryMessages key={`history:${readingKey}`} messages={renderedHistory} preferences={preferences} transcript={transcript} readingKey={readingKey} sessionId={session?.id ?? ""} live={inlineLive} />
+            {liveTurn && !inlineMessages && <LiveMessage key={`live:${readingKey}`} turn={liveTurn} running={running} preferences={preferences} />}
           </div>
         )}
       </div>
       {hasNewContent && <button type="button" className="return-latest" onClick={() => { followLatest(); if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight; }}>{t("回到最新")}</button>}
+      <InputContext.Provider value={controls}>
       <div className="chat-input-stack">
       {approval && <ApprovalPanel approval={approval} resolve={resolveApproval} />}
       <Composer
@@ -2102,6 +2183,7 @@ function ChatView({
         disabled={sessionBusy}
       />
       </div>
+      </InputContext.Provider>
       {!hasTranscriptContent && <StarterActions choose={chooseStarter} />}
     </div>
   );
@@ -5761,7 +5843,13 @@ export default function App() {
       } : current);
       const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id });
       if (!ownsView()) return result.success;
-      setSession(refreshed.session);
+      // A JSON snapshot recreates every object even when only the new turn was
+      // appended. Keep unchanged message identities so memoized history does
+      // not parse and render the entire loaded conversation again at completion.
+      setSession(previous => previous?.id === refreshed.session.id ? {
+        ...refreshed.session,
+        messages: reuseSessionMessages(previous.messages, refreshed.session.messages),
+      } : refreshed.session);
       setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
       if (!result.success) {
         setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id)]: stopped ? "" : "failed" }));
@@ -6672,32 +6760,13 @@ export default function App() {
     }
   }, [gitBusy, initialize, refreshGitStatus, running, sessionBusy, state, t, toast]);
 
-  const activeSessionId = session?.id ?? state?.sessions.current_session_id ?? "";
-  const page = useMemo(() => {
-    if (!state) return null;
-    if (view === "tools") return <ToolsView mode={state.workspace.mode} />;
-    if (view === "rats") return <RatsView />;
-    if (view === "tasks") return <RtpTasksView preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
-    if (view === "subagents") return <SubagentsView />;
-    if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
-    if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
-    if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
-    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} />;
-    return <ChatView session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
-        updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
-  }, [state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
-
-  if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
-  if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
-  const selectedModelSource = state.models.sources.find(source => source.id === state.workspace.active_source);
-  const streamRequired = state.workspace.mode === "writer" && state.workspace.active_source === "sensenova";
-  const streamSetting = state.settings.items.find(item => item.key === "stream_responses");
+  const selectedModelSource = state?.models.sources.find(source => source.id === state.workspace.active_source);
+  const streamRequired = state?.workspace.mode === "writer" && state.workspace.active_source === "sensenova";
+  const streamSetting = state?.settings.items.find(item => item.key === "stream_responses");
   const streaming = streamRequired || streamSetting?.value !== false;
-
-  return (
-    <I18nProvider language={uiPreferences.language}>
-    <ViewPresentationProvider scope={projectRoot} persisted={uiPreferences.viewPresentations}>
-    <InputContext.Provider value={{
+  // Only the sidebar and input controls consume this context. Keeping it out
+  // of the transcript avoids propagating every keystroke through rich history.
+  const inputControls: InputControls | null = state ? {
       projectRoot, sessionId: session?.id ?? "", behavior: sendBehavior, setBehavior: setSendBehavior,
       streaming, streamReady: Boolean(streamSetting), streamSettingBusy, streamRequired, toggleStreaming: () => void updateSetting("stream_responses", !streaming),
       paste: () => void pasteImage(), retryAttachment: (item, copy) => void retryAttachment(item, copy),
@@ -6712,13 +6781,38 @@ export default function App() {
       forceStop: () => { setConfirmation({ title: t("强制停止核心？"), message: t("当前操作可能尚未完成；只保存最后持久化记录，队列保持暂停。"), label: t("强制停止"), danger: true, action: () => { setQueuePaused(true); void window.reverie.cancel({projectRoot:state.workspace.project_root,sessionId:session?.id || ""}); } }); },
       vision: selectedModelSource?.models.find(model => model.id === selectedModelSource.selected_model_id)?.vision,
       running, approval: Boolean(approval), sessionStates, steer: () => void sendPrompt("steer"),
-    }}>
+  } : null;
+
+  const activeSessionId = session?.id ?? state?.sessions.current_session_id ?? "";
+  const page = useMemo(() => {
+    if (!state) return null;
+    if (view === "tools") return <ToolsView mode={state.workspace.mode} />;
+    if (view === "rats") return <RatsView />;
+    if (view === "tasks") return <RtpTasksView preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
+    if (view === "subagents") return <SubagentsView />;
+    if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
+    if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
+    if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
+    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} />;
+    return <ChatView controls={inputControls} session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
+        updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
+  }, [inputControls, state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
+
+  if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
+  if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
+
+  return (
+    <I18nProvider language={uiPreferences.language}>
+    <ViewPresentationProvider scope={projectRoot} persisted={uiPreferences.viewPresentations}>
+
     <div
       ref={shellRef}
       className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${uiPreferences.inspectorOpen ? "with-inspector" : ""} ${paneResizing ? "pane-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
     >
+      <InputContext.Provider value={inputControls}>
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
+      </InputContext.Provider>
       <main className={`main-area ${gitStatus ? "with-git-status" : ""}`}>
         <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
         <div className="content-area">{page}</div>
@@ -6784,7 +6878,6 @@ export default function App() {
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.label} danger={confirmation.danger} close={() => setConfirmation(null)} confirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} />}
       <Toasts items={toasts} onDismiss={(id) => setToasts((items) => items.filter((item) => item.id !== id))} />
     </div>
-    </InputContext.Provider>
     </ViewPresentationProvider>
     </I18nProvider>
   );

@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { groupTranscriptMessages, messageReasoningText, previousTurnBoundary, resolveToolResultNames, sessionIsEmpty, toolCallNames, toolCallRecords, visibleSessionMessages } from "./session-utils";
-import type { SessionState } from "./types";
+import { groupTranscriptMessages, inlineStaticTurnMessages, messageReasoningText, previousTurnBoundary, resolveToolResultNames, reuseSessionMessages, sessionIsEmpty, toolCallNames, toolCallRecords, visibleSessionMessages } from "./session-utils";
+import type { LiveTurn, SessionState } from "./types";
+
+describe("inline static turns", () => {
+  const turn: LiveTurn = { userText: "Show the supplied data", assistantText: "Answer", reasoningText: "Native thought", events: [], error: "",
+    segments: [{ kind: "reasoning", text: "Native thought" }, { kind: "assistant", text: "Answer" }] };
+  it("preserves the exact text and native reasoning in the eventual history slots", () => {
+    expect(inlineStaticTurnMessages(turn)).toEqual([
+      { role: "user", content: "Show the supplied data" },
+      { role: "assistant", content: "Answer", reasoning_content: "Native thought" },
+    ]);
+  });
+  it.each<Partial<LiveTurn>>([
+    { resumed: true }, { stopped: true }, { error: "Provider failed" },
+    { attachments: [{ name: "image.png", relativePath: "image.png", size: 64 }] },
+    { events: [{ event: "tool_start", tool_name: "file_ops" }] },
+    { events: [{ type: "approval.request" }] },
+    { segments: [{ kind: "view", view: { sessionId: "s", viewId: "v", revision: 1, title: "Chart", summary: "Live view", status: "ready" } }] },
+    { segments: [{ kind: "assistant", text: "Answer" }, { kind: "reasoning", text: "Native thought" }] },
+    { segments: [{ kind: "assistant", text: "First" }, { kind: "assistant", text: "Answer" }] },
+    { assistantText: "A corrected final answer" },
+  ])("keeps structured, interrupted or interleaved turns on the existing path (%j)", patch => {
+    expect(inlineStaticTurnMessages({ ...turn, ...patch })).toBeNull();
+  });
+});
 
 const session = (messages: SessionState["messages"]): SessionState => ({
   id: "session-1",
@@ -12,6 +35,28 @@ const session = (messages: SessionState["messages"]): SessionState => ({
 });
 
 describe("session interaction helpers", () => {
+  it.each([0, 1])("preserves visible message identities when workspace memory is inserted at raw offset %s", offset => {
+    const previous = [{ role: "user", content: "question" }, { role: "assistant", content: "answer", reasoning_content: "original trace" }];
+    const incoming = JSON.parse(JSON.stringify(previous));
+    incoming.splice(offset, 0, { role: "system", content: "new workspace memory" });
+    incoming.push({ role: "user", content: "next question" });
+    const restored = reuseSessionMessages(previous, incoming);
+    const visible = visibleSessionMessages(restored);
+    expect(visible[0]).toBe(previous[0]);
+    expect(visible[1]).toBe(previous[1]);
+    expect(restored[offset]).toBe(incoming[offset]);
+    expect(restored).toEqual(incoming);
+  });
+
+  it("keeps refreshed hidden memory and changed reasoning instead of reusing stale records", () => {
+    const previous = [{ role: "system", content: "old memory" }, { role: "user", content: "question" }, { role: "assistant", content: "answer", reasoning_content: "old trace" }];
+    const incoming = [{ role: "system", content: "new memory" }, { role: "user", content: "question" }, { role: "assistant", content: "answer", reasoning_content: "new trace" }];
+    const restored = reuseSessionMessages(previous, incoming);
+    expect(restored).toEqual(incoming);
+    expect(restored[0]).toBe(incoming[0]);
+    expect(restored[1]).toBe(previous[1]);
+    expect(restored[2]).toBe(incoming[2]);
+  });
   it("keeps native reasoning from a failed answerless attempt visible in restored history", () => {
     const reasoning = "  The system prompt says to use tools. Raw model output.\n";
     const rows = groupTranscriptMessages([{ role: "assistant", content: null, reasoning_content: reasoning }]);

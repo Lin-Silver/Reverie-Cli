@@ -203,6 +203,33 @@ def test_prompt_error_is_detected_after_partial_assistant_output() -> None:
     assert error == "Error processing message: upstream provider rejected the continuation"
 
 
+@pytest.mark.parametrize("runtime_surface", ["terminal", "desktop"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_saved_partial_answer_cannot_hide_a_later_provider_failure(tmp_path, monkeypatch, runtime_surface, stream):
+    interface = ReverieInterface(tmp_path, headless=True, runtime_surface=runtime_surface)
+    config = Config(models=[ModelConfig(model="fake", model_display_name="Fake", base_url="https://example.test/v1", api_key="test")], active_model_index=0, stream_responses=stream)
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+
+    class Agent(_FakeAgent):
+        def process_message(self, user_message, **kwargs):
+            self.messages.extend([{"role": "user", "content": user_message}, {"role": "assistant", "content": "Only the first step finished."}])
+            yield "Only the first step finished."
+            yield "Error processing message: provider disconnected before the final answer"
+
+    monkeypatch.setattr(interface, "_init_agent", lambda **kwargs: setattr(interface, "agent", Agent()))
+    result = interface.run_prompt_once("Inspect the project", no_index=True)
+
+    assert result.success is False
+    assert result.error == "Error processing message: provider disconnected before the final answer"
+    assert result.output_text == "Only the first step finished."
+    assert result.auto_followup_count == 0
+    assert interface.session_manager.get_current_session().metadata["prompt_run"]["state"] == "interrupted"
+
+
 def test_completed_requirements_task_does_not_force_another_model_turn():
     events = [
         {"event": "tool_result", "tool_name": "str_replace_editor", "success": True,

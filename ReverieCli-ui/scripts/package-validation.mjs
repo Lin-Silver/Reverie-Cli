@@ -1,5 +1,5 @@
 // Installable validation packages never infer or contact a publication target.
-import { chmodSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { chmodSync, constants, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build, Platform, Arch } from 'electron-builder';
@@ -18,6 +18,19 @@ export function normalizeLinuxPayload(root) {
     }
   };
   visit(realpathSync(root));
+}
+
+export function stageLinuxIconFile(source, output) {
+  if (!lstatSync(source).isFile()) throw new Error('Linux icon must be a regular image file');
+  mkdirSync(output, { recursive: true });
+  const directory = mkdtempSync(path.join(output, '.linux-icon-'));
+  chmodSync(directory, 0o755);
+  const target = path.join(directory, path.basename(source));
+  copyFileSync(source, target, constants.COPYFILE_EXCL);
+  // FPM adds the icon separately from appOutDir, so afterPack's payload
+  // normalization cannot reach it. Never change the checkout's source mode.
+  chmodSync(target, 0o644);
+  return target;
 }
 
 async function main() {
@@ -46,9 +59,16 @@ async function main() {
   const prepackaged = options['--prepackaged'] ? realpathSync(path.resolve(ui, options['--prepackaged'])) : undefined;
   if (prepackaged && !local(prepackaged)) throw new Error('Prepackaged payload must remain repository-local');
   if (prepackaged && process.platform === 'linux') normalizeLinuxPayload(prepackaged);
+  let linuxIcon;
+  if (process.platform === 'linux') {
+    const metadata = JSON.parse(readFileSync(path.join(ui, 'package.json'), 'utf8'));
+    if (typeof metadata.build?.linux?.icon !== 'string') throw new Error('Linux packaging requires an explicit icon file');
+    linuxIcon = stageLinuxIconFile(path.resolve(ui, metadata.build.linux.icon), output);
+  }
   await build({ projectDir: ui, prepackaged, publish: 'never',
     targets: platform.createTarget(names, architecture === 'x64' ? Arch.x64 : Arch.arm64),
     config: { publish: null, compression: 'normal', directories: { output },
+      ...(linuxIcon ? { linux: { icon: linuxIcon } } : {}),
       afterPack: async context => {
         if (context.electronPlatformName === 'linux') normalizeLinuxPayload(context.appOutDir);
       },

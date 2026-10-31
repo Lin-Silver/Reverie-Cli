@@ -139,16 +139,14 @@ That packaged executable is intended to carry the built-in Reverie-Gamer flows i
 
 ## Documentation Maintenance
 
-The 2026-10-08 consolidation uses [docs/README.md](README.md) as the navigation entry. Current capability, priorities and release notes belong in `FEATURE_STATUS.md`, `ROADMAP.md` and `changelog.md` respectively.
+Use [docs/README.md](README.md) as the navigation entry and [changelog.md](changelog.md) for versioned release summaries. Keep private development plans, AI instructions and local verification artifacts outside the tracked documentation.
 
-Keep the date, host, command, test scope, failures, skipped paths and local-artifact limits. Keep original machine-readable JSON evidence in `docs/verification/`; do not replace it with a prose summary. Avoid adding another top-level dated report for each iteration.
-
-Before removing a superseded document, migrate its unique content, add a stable destination anchor, update incoming links and run the documentation checker. Do not remove third-party Skill resources, license notices or upstream changelogs as product-document duplicates. New release entries must have one version heading; same-version updates are dated subsections and unverified releases remain Unreleased.
+Before removing a superseded document, migrate its unique content, update incoming links and run the documentation checker. Preserve third-party Skill resources, license notices and upstream changelogs.
 
 When you change user-facing behavior, update the docs in the same change:
 
 - `README.md` for the English project overview and onboarding
-- `docs/README.md` for document navigation and evidence classification
+- `docs/README.md` for document navigation
 - `docs/README.zh-CN.md` for the Chinese onboarding guide
 - `docs/DESKTOP_GUIDE.md` and `docs/SKILLS.md` for Desktop dispatch, Skills and persistence boundaries
 - `docs/CONFIGURATION.md` for config and runtime-storage changes
@@ -162,7 +160,7 @@ If the change affects runtime storage or spec/steering paths, also update `Rever
 
 The command catalog in `ReverieCli-py/reverie/cli/help_catalog.py` is the authoritative source for command descriptions, not proof of implementation in every client surface.
 
-Keep dated reports as dated evidence. Link newly closed gaps to an actual test/build/runtime result rather than relabelling old evidence as fresh. `.runtime`, screenshots and local packages are ignored local materials; public guides must remain useful without them. `check_docs.py` checks local file/heading links, reports local artifact dependencies separately, and does not check external HTTP content or validate prose claims. CI runs that offline check.
+Public guides must remain useful without local screenshots, packages or verification reports. `check_docs.py` checks local file and heading links and reports local artifact dependencies separately. It does not check external HTTP content or validate prose claims. CI runs this offline check.
 
 ## Practical Rules
 

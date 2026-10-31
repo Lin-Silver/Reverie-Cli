@@ -17,53 +17,50 @@
 
 ## 版本索引
 
-| 版本 | 原记录日期 | 本地语义版本标签 / 日期 | 更新主题 |
-| --- | --- | --- | --- |
-| [v2.5.3](#v2-5-3) | 2026-10-31 | `v2.5.3` | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
-| [v2.5.0](#v2-5-0) | 2026-07-17 | `v2.5.0` / 2026-07-17 | Trusted Portable Core and Multi-Platform Releases |
-| [v2.4.0](#v2-4-0) | 2026-07-16 | `v2.4.0` / 2026-07-17 | Desktop, Context Engine, and Release Upgrade |
-| [v2.3.4](#v2-3-4) | 2026-07-06 | `v2.3.4` / 2026-07-06 | Writer, Sources, Memory, and Engine Upgrades |
-| [v2.3.3](#v2-3-3) | 2026-05-04 | `v2.3.3` / 2026-05-04 | Reverie UI SDK Bridge and Plugin Releases |
-| [v2.3.2](#v2-3-2) | 2026-05-02 | `v2.3.2` / 2026-05-02 | NVIDIA Profiles and Global Config Reliability |
-| [v2.3.1](#v2-3-1) | 2026-04-19 | 本地未见对应标签 | Base Reverie Subagents |
-| [v2.3.0](#v2-3-0) | 2026-04-15 | 本地未见对应标签 | Harness Runtime Audit and Prompt-Run Stability Upgrade |
-| [v2.2.0](#v2-2-0) | 2026-04-11 | 本地未见对应标签 | Large-Scale 3D Game Generation Upgrade |
-| [v2.1.24](#v2-1-24) | 2026-04-09 | 本地未见对应标签 | TUI Stability and Build Flow Cleanup |
-| [v2.1.21](#v2-1-21) | 2026-04-04 | 本地未见对应标签 | TUI Performance, Streaming Controls, and Settings Upgrade；Squad Search Upgrade |
-| [v2.1.20](#v2-1-20) | 2026-04-04 | 本地未见对应标签 | Alert Network Upgrade |
-| [v2.1.19](#v2-1-19) | 2026-04-04 | 本地未见对应标签 | Patrol Route Upgrade |
-| [v2.1.18](#v2-1-18) | 2026-04-04 | 本地未见对应标签 | Regional Encounter Upgrade |
-| [v2.1.17](#v2-1-17) | 2026-04-04 | 本地未见对应标签 | Region Objective Upgrade |
-| [v2.1.16](#v2-1-16) | 2026-04-03 | 本地未见对应标签 | Region Travel Upgrade |
-| [v2.1.15](#v2-1-15) | 2026-04-03 | 本地未见对应标签 | Detour Reward Upgrade |
-| [v2.1.14](#v2-1-14) | 2026-04-03 | 本地未见对应标签 | Encounter Director Upgrade |
-| [v2.1.13](#v2-1-13) | 2026-04-03 | 本地未见对应标签 | Guard Loop Upgrade |
-| [v2.1.12](#v2-1-12) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Guided Quest Arc and Gateway Priming |
-| [v2.1.11](#v2-1-11) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Guardian Finale and Boss Encounter Template |
-| [v2.1.10](#v2-1-10) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Region Gateways and NPC Anchors |
-| [v2.1.9](#v2-1-9) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Continuity, Expansion Backlog, and Resume State |
-| [v2.1.8](#v2-1-8) | 2026-04-03 | 本地未见对应标签 | Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder |
-| [v2.1.7](#v2-1-7) | 2026-04-03 | `v2.1.7` / 2026-04-03 | Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal |
-| [v2.1.6](#v2-1-6) | 2026-03-30 | `v2.1.6` / 2026-03-29 | Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup |
-| [v2.1.5](#v2-1-5) | 2026-03-28 | 本地未见对应标签 | Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration |
-| [v2.1.4](#v2-1-4) | 2026-03-27 | `2.1.4` / 2026-03-27 | LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh |
-| [v2.1.3](#v2-1-3) | 2026-03-15 / 2026-03-16 | `v2.1.3` / 2026-03-18 | Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite；Computer Controller, Mode Switching, and Context Intelligence |
-| [v2.1.2](#v2-1-2) | 2026-03-14 | `2.1.2` / 2026-03-14 | Workspace Sandbox & Command Audit |
-| [v2.1.1](#v2-1-1) | 2026-03-12 | `2.1.1` / 2026-03-12 | Command Flow, UX, and Memory Upgrade |
-| [v2.1.0](#v2-1-0) | 2026-02-27 | `2.1.0` / 2026-02-27 | Session Memory & Reliability |
-| [v2.0.4](#v2-0-4) | 2026-02-22（年份纠正） | `2.0.4` / 2026-02-22 | Provider Relay Fix & Enhancement |
-| [v2.0.3](#v2-0-3) | 2026-02-17 | `2.0.3` / 2026-02-18 | Critical Fixes & Enhanced Context Management |
-| [v2.0.2](#v2-0-2) | 2026-02-15 | `2.0.2` / 2026-02-15 | Provider Integration |
-| [v2.0.1](#v2-0-1) | 2026-02-13 | `2.0.1` / 2026-02-14 | Text-to-Image Integration & Stability Fixes |
-| [v2.0.0](#v2-0-0) | 2026-02-04 | `2.0.0` / 2026-02-08 | Reverie-Gamer Mode & Game Dev Toolchain |
-| [v1.4.1](#v1-4-1) | 2026-01-17 | 本地未见对应标签 | Advanced Context Engine & Nexus Integration |
-| [v1.4.0](#v1-4-0) | 2026-01-12 | `1.4.0` / 2026-01-14 | Reverie-Ant Autonomous Agentic Enhancement |
-| [v1.3.1](#v1-3-1) | 2026-01-04 | 本地未见对应标签 | Thinking Display Update |
-| [v1.3.0](#v1-3-0) | 2025-12-28 | `1.3.0` / 2025-12-28 | Dreamscape Update |
-| [1.2.5 标签基线](#early-tag-baseline) | 原 README 无发布日期 | `1.2.5` / 2025-12-26 | 早期 Context Engine / CLI；版本命名冲突另注 |
-
-历史例外见 [日期、缺号与证据说明](#history-provenance)，包括未发布的 2.3.5 开发草案；没有为了补齐编号而编造 2.1.22 / 2.1.23 的更新。
-
+| 版本 | 日期 | 更新主题 |
+| --- | --- | --- |
+| [v2.5.3](#v2-5-3) | 2026-10-31 | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
+| [v2.5.0](#v2-5-0) | 2026-07-17 | Trusted Portable Core and Multi-Platform Releases |
+| [v2.4.0](#v2-4-0) | 2026-07-16 | Desktop, Context Engine, and Release Upgrade |
+| [v2.3.4](#v2-3-4) | 2026-07-06 | Writer, Sources, Memory, and Engine Upgrades |
+| [v2.3.3](#v2-3-3) | 2026-05-04 | Reverie UI SDK Bridge and Plugin Releases |
+| [v2.3.2](#v2-3-2) | 2026-05-02 | NVIDIA Profiles and Global Config Reliability |
+| [v2.3.1](#v2-3-1) | 2026-04-19 | Base Reverie Subagents |
+| [v2.3.0](#v2-3-0) | 2026-04-15 | Harness Runtime Audit and Prompt-Run Stability Upgrade |
+| [v2.2.0](#v2-2-0) | 2026-04-11 | Large-Scale 3D Game Generation Upgrade |
+| [v2.1.24](#v2-1-24) | 2026-04-09 | TUI Stability and Build Flow Cleanup |
+| [v2.1.21](#v2-1-21) | 2026-04-04 | TUI Performance, Streaming Controls, and Settings Upgrade；Squad Search Upgrade |
+| [v2.1.20](#v2-1-20) | 2026-04-04 | Alert Network Upgrade |
+| [v2.1.19](#v2-1-19) | 2026-04-04 | Patrol Route Upgrade |
+| [v2.1.18](#v2-1-18) | 2026-04-04 | Regional Encounter Upgrade |
+| [v2.1.17](#v2-1-17) | 2026-04-04 | Region Objective Upgrade |
+| [v2.1.16](#v2-1-16) | 2026-04-03 | Region Travel Upgrade |
+| [v2.1.15](#v2-1-15) | 2026-04-03 | Detour Reward Upgrade |
+| [v2.1.14](#v2-1-14) | 2026-04-03 | Encounter Director Upgrade |
+| [v2.1.13](#v2-1-13) | 2026-04-03 | Guard Loop Upgrade |
+| [v2.1.12](#v2-1-12) | 2026-04-03 | Reverie-Gamer Guided Quest Arc and Gateway Priming |
+| [v2.1.11](#v2-1-11) | 2026-04-03 | Reverie-Gamer Guardian Finale and Boss Encounter Template |
+| [v2.1.10](#v2-1-10) | 2026-04-03 | Reverie-Gamer Region Gateways and NPC Anchors |
+| [v2.1.9](#v2-1-9) | 2026-04-03 | Reverie-Gamer Continuity, Expansion Backlog, and Resume State |
+| [v2.1.8](#v2-1-8) | 2026-04-03 | Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder |
+| [v2.1.7](#v2-1-7) | 2026-04-03 | Tool Discovery Upgrade, Mode-Aware Tool Browser, Prompt Slimming, and Snapshot Removal |
+| [v2.1.6](#v2-1-6) | 2026-03-30 | Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup |
+| [v2.1.5](#v2-1-5) | 2026-03-28 | Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration |
+| [v2.1.4](#v2-1-4) | 2026-03-27 | LLM-First Rotation, Context Intelligence, MCP, and Provider Refresh |
+| [v2.1.3](#v2-1-3) | 2026-03-15 / 2026-03-16 | Post-Release Updates (Still v2.1.3) - Reverie-Gamer Production Upgrade + Reverie Engine Lite；Computer Controller, Mode Switching, and Context Intelligence |
+| [v2.1.2](#v2-1-2) | 2026-03-14 | Workspace Sandbox & Command Audit |
+| [v2.1.1](#v2-1-1) | 2026-03-12 | Command Flow, UX, and Memory Upgrade |
+| [v2.1.0](#v2-1-0) | 2026-02-27 | Session Memory & Reliability |
+| [v2.0.4](#v2-0-4) | 2026-02-22（年份纠正） | Provider Relay Fix & Enhancement |
+| [v2.0.3](#v2-0-3) | 2026-02-17 | Critical Fixes & Enhanced Context Management |
+| [v2.0.2](#v2-0-2) | 2026-02-15 | Provider Integration |
+| [v2.0.1](#v2-0-1) | 2026-02-13 | Text-to-Image Integration & Stability Fixes |
+| [v2.0.0](#v2-0-0) | 2026-02-04 | Reverie-Gamer Mode & Game Dev Toolchain |
+| [v1.4.1](#v1-4-1) | 2026-01-17 | Advanced Context Engine & Nexus Integration |
+| [v1.4.0](#v1-4-0) | 2026-01-12 | Reverie-Ant Autonomous Agentic Enhancement |
+| [v1.3.1](#v1-3-1) | 2026-01-04 | Thinking Display Update |
+| [v1.3.0](#v1-3-0) | 2025-12-28 | Dreamscape Update |
+| [1.2.5 标签基线](#early-tag-baseline) | 原 README 无发布日期 | 早期 Context Engine / CLI；版本命名冲突另注 |
 
 <a id="v2-5-0"></a>
 

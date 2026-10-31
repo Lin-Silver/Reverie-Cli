@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1600" viewBox="0 0 2400 1600" fill="none">
+  <defs>
+    <linearGradient id="sky" x1="200" y1="0" x2="2160" y2="1600" gradientUnits="userSpaceOnUse"><stop stop-color="#B7CFEB"/><stop offset=".42" stop-color="#D9E0EF"/><stop offset=".72" stop-color="#E9D8DF"/><stop offset="1" stop-color="#BDC6EC"/></linearGradient>
+    <linearGradient id="blue" x1="340" y1="1200" x2="1730" y2="420" gradientUnits="userSpaceOnUse"><stop stop-color="#6D91CF"/><stop offset=".46" stop-color="#A8C0E6"/><stop offset="1" stop-color="#F4F5FC" stop-opacity=".5"/></linearGradient>
+    <linearGradient id="pearl" x1="1270" y1="200" x2="1850" y2="1380" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF" stop-opacity=".9"/><stop offset=".4" stop-color="#DADAF4" stop-opacity=".25"/><stop offset=".77" stop-color="#DDAECB" stop-opacity=".6"/><stop offset="1" stop-color="#F8E9DE" stop-opacity=".8"/></linearGradient>
+    <linearGradient id="edge" x1="740" y1="1370" x2="1990" y2="290" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF" stop-opacity="0"/><stop offset=".5" stop-color="#FFFFFF" stop-opacity=".8"/><stop offset="1" stop-color="#FFFFFF" stop-opacity=".05"/></linearGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="65"/></filter>
+  </defs>
+  <path fill="url(#sky)" d="M0 0h2400v1600H0z"/>
+  <ellipse cx="2010" cy="310" rx="600" ry="360" fill="#FCF4E9" opacity=".6" filter="url(#soft)"/>
+  <path d="M-240 1450C120 580 950 1640 1400 790S2130-260 2680 310V1810H-240Z" fill="url(#blue)"/>
+  <path d="M400 1810C380 1180 1510 1420 1310 690S1830-380 2450-130V1700Z" fill="url(#pearl)"/>
+  <path d="M-240 1450C120 580 950 1640 1400 790S2130-260 2680 310" stroke="url(#edge)" stroke-width="5"/>
+  <path d="M400 1810C380 1180 1510 1420 1310 690S1830-380 2450-130" stroke="url(#edge)" stroke-width="3"/>
+</svg>

@@ -1,12 +1,48 @@
 import { normalizeViewDisplayPreferences, type ViewDisplayPreference } from "./view-display-preferences";
+import { normalizeThemePreference, type ThemePreference } from "./appearance";
+export type UiVariant = "classic" | "liquid-glass";
 export type UiLanguage = "zh-CN" | "en-US";
 export type StartupModePreference = "gui" | "tui";
 export type AccentPreference = "violet" | "blue" | "teal" | "rose" | "amber";
 export type FontSizePreference = "compact" | "comfortable" | "large";
 export type MessageWidthPreference = "focused" | "balanced" | "wide";
-export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "ember-manuscript" | "custom";
+export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "ember-manuscript" | "liquid-glass" | "custom";
+
+export interface LiquidGlassAppearance {
+  theme: ThemePreference;
+  accent: AccentPreference;
+  backgroundPreset: BackgroundPreset;
+  backgroundPath: string;
+  backgroundOpacity: number;
+  backgroundBlur: number;
+  backgroundDim: number;
+}
+
+const GLASS_DEFAULTS: LiquidGlassAppearance = {
+  theme: "system", accent: "violet", backgroundPreset: "liquid-glass",
+  backgroundPath: "", backgroundOpacity: 1, backgroundBlur: 0, backgroundDim: 0,
+};
+
+export function normalizeUiVariant(value: unknown): UiVariant {
+  return value === "liquid-glass" ? "liquid-glass" : "classic";
+}
+
+function normalizeGlassAppearance(value: unknown): LiquidGlassAppearance {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return {
+    theme: normalizeThemePreference(source.theme),
+    accent: enumValue(source.accent, ["violet", "blue", "teal", "rose", "amber"], GLASS_DEFAULTS.accent),
+    backgroundPreset: enumValue(source.backgroundPreset, ["none", "aurora-archive", "moss-library", "ember-manuscript", "liquid-glass", "custom"], GLASS_DEFAULTS.backgroundPreset),
+    backgroundPath: String(source.backgroundPath ?? "").trim(),
+    backgroundOpacity: clamp(source.backgroundOpacity, 0, 1, GLASS_DEFAULTS.backgroundOpacity),
+    backgroundBlur: clamp(source.backgroundBlur, 0, 24, GLASS_DEFAULTS.backgroundBlur),
+    backgroundDim: clamp(source.backgroundDim, 0, 0.8, GLASS_DEFAULTS.backgroundDim),
+  };
+}
 
 export interface StoredUiPreferences {
+  uiVariant: UiVariant;
+  liquidGlassAppearance: LiquidGlassAppearance;
   language: UiLanguage;
   userDisplayName: string;
   userAvatarUrl: string;
@@ -47,6 +83,8 @@ const INSPECTOR_MIN_WIDTH = 380;
 const INSPECTOR_MAX_WIDTH = 1100;
 
 export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
+  uiVariant: "classic",
+  liquidGlassAppearance: GLASS_DEFAULTS,
   language: "zh-CN",
   userDisplayName: "",
   userAvatarUrl: "",
@@ -109,6 +147,8 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     ? value as Record<string, unknown>
     : {};
   return {
+    uiVariant: normalizeUiVariant(source.uiVariant),
+    liquidGlassAppearance: normalizeGlassAppearance(source.liquidGlassAppearance),
     language: enumValue(source.language, ["zh-CN", "en-US"] as const, DEFAULT_UI_PREFERENCES.language),
     userDisplayName: String(source.userDisplayName ?? "").trim().slice(0, 32),
     userAvatarUrl: typeof source.userAvatarUrl === "string" && source.userAvatarUrl.length <= 512 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(source.userAvatarUrl) ? source.userAvatarUrl : "",
@@ -118,7 +158,7 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     messageWidth: enumValue(source.messageWidth, ["focused", "balanced", "wide"] as const, DEFAULT_UI_PREFERENCES.messageWidth),
     backgroundPreset: enumValue(
       source.backgroundPreset,
-      ["none", "aurora-archive", "moss-library", "ember-manuscript", "custom"] as const,
+      ["none", "aurora-archive", "moss-library", "ember-manuscript", "liquid-glass", "custom"] as const,
       source.backgroundPath ? "custom" : DEFAULT_UI_PREFERENCES.backgroundPreset,
     ),
     backgroundPath: String(source.backgroundPath ?? "").trim(),
@@ -141,14 +181,37 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
   };
 }
 
-export function mergeUiPreferences(current: unknown, patch: unknown): StoredUiPreferences {
+export function initializeUiPreferences(value: unknown, existingInstallation: boolean): StoredUiPreferences {
+  return normalizeUiPreferences(value ?? { uiVariant: existingInstallation ? "classic" : "liquid-glass" });
+}
+
+export function effectiveUiPreferences(preferences: StoredUiPreferences): StoredUiPreferences {
+  return preferences.uiVariant === "liquid-glass" ? { ...preferences, ...preferences.liquidGlassAppearance } : preferences;
+}
+
+export function uiThemePreference(preferences: StoredUiPreferences, classicTheme: unknown): ThemePreference {
+  return preferences.uiVariant === "liquid-glass" ? preferences.liquidGlassAppearance.theme : normalizeThemePreference(classicTheme);
+}
+
+export function mergeUiPreferences(current: unknown, patch: unknown, owner?: UiVariant): StoredUiPreferences {
   const base = normalizeUiPreferences(current);
   const update = patch && typeof patch === "object" && !Array.isArray(patch)
-    ? patch as Record<string, unknown>
+    ? { ...patch as Record<string, unknown> }
     : {};
+  const target = owner ?? normalizeUiVariant(update.uiVariant ?? base.uiVariant);
+  const glass = { ...base.liquidGlassAppearance };
+  if (target === "liquid-glass") {
+    for (const key of ["accent", "backgroundPreset", "backgroundPath", "backgroundOpacity", "backgroundBlur", "backgroundDim"] as const) {
+      if (Object.hasOwn(update, key)) {
+        Object.assign(glass, { [key]: update[key] });
+        delete update[key];
+      }
+    }
+  }
   return normalizeUiPreferences({
     ...base,
     ...update,
+    liquidGlassAppearance: glass,
     archivedSessions: update.archivedSessions ?? base.archivedSessions,
     recentProjects: update.recentProjects ?? base.recentProjects,
     viewPresentations: { ...base.viewPresentations, ...normalizeViewDisplayPreferences(update.viewPresentations) },

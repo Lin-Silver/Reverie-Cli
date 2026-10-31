@@ -9,6 +9,16 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "界面版本": "Interface",
+  "经典界面": "Classic",
+  "熟悉的布局与原有外观": "Your familiar layout and appearance",
+  "通透材质，专注于你的创作": "Luminous materials. Space to create.",
+  "随时切换；每套界面分别保留主题、强调色与背景。": "Switch anytime. Each interface remembers its theme, accent and background.",
+  "流光": "Luminance",
+  "柔和光线与通透曲面": "Soft light and translucent contours",
+  "工作空间": "Workspace",
+  "连接与任务": "Connections & tasks",
+  "资源库": "Library",
   "视图展示位置": "View display mode",
   "对话内": "Inline",
   "展开摘要": "Show full summary",

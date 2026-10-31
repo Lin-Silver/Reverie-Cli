@@ -28,12 +28,12 @@ interface ReverieDesktopApi {
   selectCoreData(): Promise<string | null>;
   paths(): Promise<DesktopPaths>;
   appearance(): Promise<{ theme: "system" | "dark" | "light"; resolved: "dark" | "light" }>;
-  setAppearance(theme: "system" | "dark" | "light"): Promise<{ theme: "system" | "dark" | "light"; resolved: "dark" | "light" }>;
+  setAppearance(theme: "system" | "dark" | "light", owner?: "classic" | "liquid-glass"): Promise<{ theme: "system" | "dark" | "light"; resolved: "dark" | "light" }>;
   onAppearance(listener: (appearance: { theme: "system" | "dark" | "light"; resolved: "dark" | "light" }) => void): () => void;
   uiPreferences(): Promise<UiPreferences>;
-  setUiPreferences(patch: Partial<UiPreferences>): Promise<UiPreferences>;
+  setUiPreferences(patch: Partial<UiPreferences>, owner?: "classic" | "liquid-glass"): Promise<UiPreferences>;
   selectBackground(): Promise<UiPreferences | null>;
-  clearBackground(): Promise<UiPreferences>;
+  clearBackground(owner?: "classic" | "liquid-glass"): Promise<UiPreferences>;
   reveal(target: string): Promise<boolean>;
   openExternal(url: string): Promise<boolean>;
   selectRatsProvider(providerId: string): Promise<string | null>;

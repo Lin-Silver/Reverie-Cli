@@ -65,3 +65,8 @@ describe("side pane drag geometry", () => {
     expect(paneDragLimit(Number.NaN, 0, INSPECTOR_MIN_WIDTH)).toBe(INSPECTOR_MIN_WIDTH);
   });
 });
+
+ it("reserves glass gutters without shrinking the reading column", () => {
+  expect(paneDragLimit(1280, 268, 1100, 24)).toBe(568);
+  expect(paneDragLimit(1280, 268, 1100)).toBe(592);
+});

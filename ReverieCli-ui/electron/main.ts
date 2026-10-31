@@ -35,7 +35,11 @@ import {
 } from "./workspace-lifecycle";
 import {
   mergeUiPreferences,
+  effectiveUiPreferences,
+  initializeUiPreferences,
+  normalizeUiVariant,
   normalizeUiPreferences,
+  uiThemePreference,
   type StoredUiPreferences,
 } from "./preferences";
 import { VIEW_SCHEME, ViewHost } from "./view-host";
@@ -149,9 +153,10 @@ async function log(message: string): Promise<void> {
 
 async function readDesktopSettings(): Promise<DesktopSettings> {
   try {
-    return JSON.parse(await readFile(runtimePaths.settings, "utf8")) as DesktopSettings;
+    const settings = JSON.parse(await readFile(runtimePaths.settings, "utf8")) as DesktopSettings;
+    return { ...settings, ui: initializeUiPreferences(settings.ui, true) };
   } catch {
-    return {};
+    return { ui: initializeUiPreferences(undefined, existsSync(runtimePaths.settings)) };
   }
 }
 
@@ -237,13 +242,14 @@ function attachmentDetails(projectRoot: string, items: ComposerAttachment[]): Co
 }
 
 function uiPreferencesPayload(preferences: StoredUiPreferences): JsonRecord {
+  preferences = effectiveUiPreferences(preferences);
   const backgroundPath = preferences.backgroundPath && existsSync(preferences.backgroundPath)
     ? preferences.backgroundPath
     : "";
-  const { backgroundPath: _storedPath, ...rest } = preferences;
+  const { backgroundPath: _storedPath, liquidGlassAppearance: _glass, ...rest } = preferences;
   return {
     ...rest,
-    backgroundUrl: preferences.backgroundPreset === "custom" && backgroundPath
+    backgroundUrl: backgroundPath
       ? pathToFileURL(backgroundPath).href
       : "",
     backgroundName: backgroundPath ? path.basename(backgroundPath) : "",
@@ -548,7 +554,7 @@ async function activateWorkspace(projectRoot: string): Promise<string> {
 async function createWindow(): Promise<void> {
   const executable = await selectKernelPath(false);
   const settings = await readDesktopSettings();
-  nativeTheme.themeSource = normalizeThemePreference(settings.theme);
+  nativeTheme.themeSource = uiThemePreference(normalizeUiPreferences(settings.ui), settings.theme);
   const appearance = windowAppearance(nativeTheme.shouldUseDarkColors);
   const repositoryCoreRoot = app.isPackaged ? findRepositoryCoreRoot(executableHome) : null;
   const defaultProjectRoot = app.isPackaged
@@ -1026,10 +1032,16 @@ ipcMain.handle("desktop:paths", async () => ({
 
 ipcMain.handle("desktop:appearance", () => appearancePayload());
 
-ipcMain.handle("desktop:set-appearance", async (_event, value: unknown) => {
+ipcMain.handle("desktop:set-appearance", async (_event, value: unknown, owner?: unknown) => {
   const theme = normalizeThemePreference(value);
-  nativeTheme.themeSource = theme;
-  await updateDesktopSettings({ theme });
+  const updated = await mutateDesktopSettings((settings) => {
+    const ui = normalizeUiPreferences(settings.ui);
+    const target = owner === undefined ? ui.uiVariant : normalizeUiVariant(owner);
+    return target === "liquid-glass"
+      ? { ...settings, ui: { ...ui, liquidGlassAppearance: { ...ui.liquidGlassAppearance, theme } } }
+      : { ...settings, theme };
+  });
+  nativeTheme.themeSource = uiThemePreference(normalizeUiPreferences(updated.ui), updated.theme);
   applyWindowAppearance();
   const appearance = appearancePayload();
   mainWindow?.webContents.send("desktop:appearance-changed", appearance);
@@ -1041,16 +1053,22 @@ ipcMain.handle("desktop:ui-preferences", async () => {
   return uiPreferencesPayload(normalizeUiPreferences(settings.ui));
 });
 
-ipcMain.handle("desktop:set-ui-preferences", async (_event, patch: JsonRecord) => {
+ipcMain.handle("desktop:set-ui-preferences", async (_event, patch: JsonRecord, owner?: unknown) => {
   const safePatch = { ...(patch ?? {}) };
   delete safePatch.backgroundPath;
   delete safePatch.backgroundUrl;
   delete safePatch.backgroundName;
+  delete safePatch.liquidGlassAppearance;
   const updated = await mutateDesktopSettings((settings) => ({
     ...settings,
-    ui: mergeUiPreferences(settings.ui, safePatch),
+    ui: mergeUiPreferences(settings.ui, safePatch, owner === undefined ? undefined : normalizeUiVariant(owner)),
   }));
   const ui = normalizeUiPreferences(updated.ui);
+  if (Object.hasOwn(safePatch, "uiVariant")) {
+    nativeTheme.themeSource = uiThemePreference(ui, updated.theme);
+    applyWindowAppearance();
+    mainWindow?.webContents.send("desktop:appearance-changed", appearancePayload());
+  }
   // Pane controls already reconcile their own optimistic, sequenced requests.
   // A full snapshot here can roll back a newer pane request while saving a view.
   const passive: JsonRecord = {};
@@ -1071,28 +1089,30 @@ ipcMain.handle("desktop:select-background", async () => {
   if (result.canceled || !result.filePaths[0]) return null;
   const source = path.resolve(result.filePaths[0]);
   const extension = path.extname(source).toLowerCase() || ".png";
-  const destination = path.join(runtimePaths.backgrounds, `workspace-background${extension}`);
+  const owner = preferences.uiVariant;
+  const destination = path.join(runtimePaths.backgrounds, `workspace-background-${owner}-${Date.now()}${extension}`);
   if (source.toLowerCase() !== destination.toLowerCase()) {
     await copyFile(source, destination);
   }
   let previousBackgroundPath = "";
   const updated = await mutateDesktopSettings((settings) => {
     const current = normalizeUiPreferences(settings.ui);
-    previousBackgroundPath = current.backgroundPath;
+    const appearance = effectiveUiPreferences({ ...current, uiVariant: owner });
+    previousBackgroundPath = appearance.backgroundPath;
     return {
       ...settings,
-      ui: {
-        ...current,
+      ui: mergeUiPreferences(current, {
         backgroundPreset: "custom",
         backgroundPath: destination,
-        backgroundOpacity: current.backgroundOpacity < 0.72 ? 0.9 : current.backgroundOpacity,
-      },
+        backgroundOpacity: appearance.backgroundOpacity < 0.72 ? 0.9 : appearance.backgroundOpacity,
+      }, owner),
     };
   });
   if (
     previousBackgroundPath
     && path.dirname(previousBackgroundPath).toLowerCase() === runtimePaths.backgrounds.toLowerCase()
     && previousBackgroundPath.toLowerCase() !== destination.toLowerCase()
+    && ![updated.ui?.backgroundPath, updated.ui?.liquidGlassAppearance.backgroundPath].includes(previousBackgroundPath)
   ) {
     await rm(previousBackgroundPath, { force: true }).catch(() => undefined);
   }
@@ -1100,16 +1120,18 @@ ipcMain.handle("desktop:select-background", async () => {
   return uiPreferencesPayload(ui);
 });
 
-ipcMain.handle("desktop:clear-background", async () => {
+ipcMain.handle("desktop:clear-background", async (_event, owner?: unknown) => {
   let backgroundPath = "";
   const updated = await mutateDesktopSettings((settings) => {
     const current = normalizeUiPreferences(settings.ui);
-    backgroundPath = current.backgroundPath;
-    return { ...settings, ui: { ...current, backgroundPreset: "none", backgroundPath: "" } };
+    const target = owner === undefined ? current.uiVariant : normalizeUiVariant(owner);
+    backgroundPath = effectiveUiPreferences({ ...current, uiVariant: target }).backgroundPath;
+    return { ...settings, ui: mergeUiPreferences(current, { backgroundPreset: target === "liquid-glass" ? "liquid-glass" : "none", backgroundPath: "" }, target) };
   });
   if (
     backgroundPath
     && path.dirname(backgroundPath).toLowerCase() === runtimePaths.backgrounds.toLowerCase()
+    && ![updated.ui?.backgroundPath, updated.ui?.liquidGlassAppearance.backgroundPath].includes(backgroundPath)
   ) {
     await rm(backgroundPath, { force: true }).catch(() => undefined);
   }

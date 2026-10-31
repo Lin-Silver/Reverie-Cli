@@ -51,7 +51,7 @@ export function clampInspectorWidth(value: number): number {
  * currently occupying. Without this a wide drag on a narrow window would push
  * the conversation column to zero and the transcript would vanish.
  */
-export function paneDragLimit(available: number, otherPane: number, maximum: number): number {
+export function paneDragLimit(available: number, otherPane: number, maximum: number, gutter = 0): number {
   if (!Number.isFinite(available) || available <= 0) return maximum;
-  return Math.max(0, Math.min(maximum, available - otherPane - MAIN_AREA_MIN_WIDTH));
+  return Math.max(0, Math.min(maximum, available - otherPane - MAIN_AREA_MIN_WIDTH - gutter));
 }

@@ -8,12 +8,14 @@ import {
 } from "./layout";
 
 export type AccentPreference = "violet" | "blue" | "teal" | "rose" | "amber";
+export type UiVariant = "classic" | "liquid-glass";
 export type StartupModePreference = "gui" | "tui";
 export type FontSizePreference = "compact" | "comfortable" | "large";
 export type MessageWidthPreference = "focused" | "balanced" | "wide";
-export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "ember-manuscript" | "custom";
+export type BackgroundPreset = "none" | "aurora-archive" | "moss-library" | "ember-manuscript" | "liquid-glass" | "custom";
 
 export interface UiPreferences {
+  uiVariant: UiVariant;
   language: UiLanguage;
   userDisplayName: string;
   userAvatarUrl: string;
@@ -44,6 +46,7 @@ export interface UiPreferences {
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  uiVariant: "classic",
   language: "zh-CN",
   userDisplayName: "",
   userAvatarUrl: "",
@@ -97,6 +100,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     ? source.archivedSessions as Record<string, unknown>
     : {};
   return {
+    uiVariant: enumValue(source.uiVariant, ["classic", "liquid-glass"], DEFAULT_UI_PREFERENCES.uiVariant),
     language: normalizeUiLanguage(source.language),
     userDisplayName: String(source.userDisplayName ?? "").trim().slice(0, 32),
     userAvatarUrl: typeof source.userAvatarUrl === "string" && source.userAvatarUrl.length <= 512 * 1024 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(source.userAvatarUrl) ? source.userAvatarUrl : "",
@@ -106,7 +110,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
     messageWidth: enumValue(source.messageWidth, ["focused", "balanced", "wide"] as const, DEFAULT_UI_PREFERENCES.messageWidth),
     backgroundPreset: enumValue(
       source.backgroundPreset,
-      ["none", "aurora-archive", "moss-library", "ember-manuscript", "custom"] as const,
+      ["none", "aurora-archive", "moss-library", "ember-manuscript", "liquid-glass", "custom"] as const,
       source.backgroundUrl ? "custom" : DEFAULT_UI_PREFERENCES.backgroundPreset,
     ),
     backgroundUrl: String(source.backgroundUrl ?? ""),
@@ -135,7 +139,7 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
 export function backgroundPresetUrl(preset: BackgroundPreset): string {
   if (preset === "none" || preset === "custom") return "";
   const baseUrl = typeof document === "undefined" ? "file:///" : document.baseURI;
-  return new URL(`backgrounds/${preset}.webp`, baseUrl).href;
+  return new URL(`backgrounds/${preset}.${preset === "liquid-glass" ? "svg" : "webp"}`, baseUrl).href;
 }
 
 export function effectiveBackgroundUrl(preferences: UiPreferences): string {
@@ -148,6 +152,7 @@ export function applyUiPreferences(preferences: UiPreferences): void {
   const root = document.documentElement;
   const backgroundUrl = effectiveBackgroundUrl(preferences);
   root.lang = preferences.language;
+  root.dataset.ui = preferences.uiVariant;
   root.dataset.accent = preferences.accent;
   root.dataset.fontSize = preferences.fontSize;
   root.dataset.messageWidth = preferences.messageWidth;

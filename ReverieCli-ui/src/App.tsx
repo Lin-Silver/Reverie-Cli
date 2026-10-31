@@ -1,6 +1,7 @@
 import { FloatingMenu } from "./FloatingMenu";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
 import { StarterActions, WelcomeHeader } from "./StartPage";
+import { UiVariantPicker } from "./UiVariantPicker";
 import { desktopCommand, desktopCommandAvailable } from "./desktop-commands";
 import {
   Activity,
@@ -154,6 +155,7 @@ import {
   type FontSizePreference,
   type MessageWidthPreference,
   type UiPreferences,
+  type UiVariant,
 } from "./preferences";
 import {
   INSPECTOR_DEFAULT_WIDTH,
@@ -254,6 +256,7 @@ const BACKGROUND_OPTIONS: Array<{
   icon: typeof Image;
 }> = [
   { id: "none", label: "纯净界面", description: "保留主题原生底色", icon: EyeOff },
+  { id: "liquid-glass", label: "流光", description: "柔和光线与通透曲面", icon: Sparkles },
   { id: "aurora-archive", label: "极光档案", description: "靛蓝、星尘与暮光", icon: Sparkles },
   { id: "moss-library", label: "苔影书库", description: "深青植物与静谧雾光", icon: Image },
   { id: "ember-manuscript", label: "余烬手稿", description: "炭黑纸张与暖铜墨迹", icon: FileText },
@@ -479,9 +482,11 @@ function PaneResizer({
   preview,
   commit,
   overlay = false,
+  gutter = 0,
 }: {
   edge: "left" | "right";
   overlay?: boolean;
+  gutter?: number;
   label: string;
   width: number;
   minimum: number;
@@ -512,21 +517,21 @@ function PaneResizer({
   const resolve = useCallback((clientX: number): number => {
     const bounds = shell.current?.getBoundingClientRect();
     const ceiling = bounds
-      ? Math.max(minimum, overlay ? Math.min(maximum, bounds.width - 48) : paneDragLimit(bounds.width, opposite, maximum))
+      ? Math.max(minimum, overlay ? Math.min(maximum, bounds.width - 48) : paneDragLimit(bounds.width, opposite, maximum, gutter))
       : maximum;
     const raw = bounds
       ? edge === "left" ? clientX - bounds.left : bounds.right - clientX
       : width;
     return clampPaneWidth(raw, minimum, ceiling, fallback);
-  }, [edge, fallback, maximum, minimum, opposite, overlay, shell, width]);
+  }, [edge, fallback, maximum, minimum, opposite, overlay, shell, width, gutter]);
 
   const step = useCallback((delta: number) => {
     const bounds = shell.current?.getBoundingClientRect();
     const ceiling = bounds
-      ? Math.max(minimum, overlay ? Math.min(maximum, bounds.width - 48) : paneDragLimit(bounds.width, opposite, maximum))
+      ? Math.max(minimum, overlay ? Math.min(maximum, bounds.width - 48) : paneDragLimit(bounds.width, opposite, maximum, gutter))
       : maximum;
     commit(clampPaneWidth(width + delta, minimum, ceiling, fallback));
-  }, [commit, fallback, maximum, minimum, opposite, overlay, shell, width]);
+  }, [commit, fallback, maximum, minimum, opposite, overlay, shell, width, gutter]);
 
   return (
     <div
@@ -727,6 +732,7 @@ function Sidebar({
       </div>
 
       <nav className="main-nav" aria-label={t("主导航")}>
+        {preferences.uiVariant === "liquid-glass" && <span className="glass-nav-label">{t("工作空间")}</span>}
         <div className="nav-primary">
         <button type="button" className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
           <MessageSquare size={16} /> {t("对话")}
@@ -739,6 +745,7 @@ function Sidebar({
         </button>
         </div>
         <div className="nav-automation">
+        {preferences.uiVariant === "liquid-glass" && <span className="glass-nav-label">{t("连接与任务")}</span>}
         <button type="button" className={view === "rats" ? "active" : ""} onClick={() => setView("rats")}>
           <Database size={16} /> RATS
         </button>
@@ -747,6 +754,7 @@ function Sidebar({
         </button>
         </div>
         <div className="nav-utilities">
+        {preferences.uiVariant === "liquid-glass" && <span className="glass-nav-label">{t("资源库")}</span>}
         <button type="button" className={view === "skills" ? "active" : ""} onClick={() => setView("skills")}>
           <Sparkles size={16} /> {t("技能")}
         </button>
@@ -1020,6 +1028,8 @@ function Topbar({
   openCommands,
   theme,
   setTheme,
+  uiVariant,
+  setUiVariant,
 }: {
   state: DesktopState;
   view: ViewId;
@@ -1032,6 +1042,8 @@ function Topbar({
   openCommands: () => void;
   theme: ThemePreference;
   setTheme: (theme: ThemePreference) => void;
+  uiVariant: UiVariant;
+  setUiVariant: (variant: UiVariant) => void;
 }) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(false);
@@ -1111,6 +1123,8 @@ function Topbar({
           </IconButton>
           {themeOpen && (
             <FloatingMenu className="small-popover theme-menu" close={() => setThemeOpen(false)} side="bottom">
+              <div className="popover-title">{t("界面版本")}</div>
+              <UiVariantPicker compact value={uiVariant} onChange={variant => { setUiVariant(variant); setThemeOpen(false); }} />
               <div className="popover-title">{t("界面主题")}</div>
               {THEME_OPTIONS.map(({ id, label, description, icon: Icon }) => (
                 <button
@@ -3183,6 +3197,10 @@ function SettingsView({
         {tab === "appearance" && (
           <>
             <PageHeader icon={<Palette size={20} />} title={t("外观")} description={t("调整主题、强调色、阅读尺度与工作区背景；所有设置会立即预览。")} />
+            <section className="preference-section">
+              <div className="preference-heading"><div><h2>{t("界面版本")}</h2><p>{t("随时切换；每套界面分别保留主题、强调色与背景。")}</p></div></div>
+              <UiVariantPicker value={preferences.uiVariant} onChange={uiVariant => updatePreferences({ uiVariant })} />
+            </section>
             <section className="appearance-panel preference-section">
               <div className="appearance-copy">
                 <div><h2>{t("界面主题")}</h2><p>{t("跟随系统会在 Windows 深色与浅色模式之间自动切换。")}</p></div>
@@ -5118,7 +5136,7 @@ export default function App() {
     const previousTheme = theme;
     const requestSequence = ++themeRequestSequence.current;
     setTheme(nextTheme);
-    void window.reverie.setAppearance(nextTheme).then((appearance) => {
+    void window.reverie.setAppearance(nextTheme, uiPreferences.uiVariant).then((appearance) => {
       if (requestSequence !== themeRequestSequence.current) return;
       setTheme(normalizeTheme(appearance.theme));
       setSystemDark(appearance.resolved === "dark");
@@ -5127,12 +5145,17 @@ export default function App() {
       setTheme(previousTheme);
       toast(error instanceof Error ? error.message : String(error), "error");
     });
-  }, [theme, toast]);
+  }, [theme, toast, uiPreferences.uiVariant]);
 
   const updateUiPreferences = useCallback((patch: Partial<UiPreferences>) => {
     const requestSequence = ++uiPreferenceRequestSequence.current;
+    if (patch.uiVariant) ++themeRequestSequence.current;
     setUiPreferences((current) => normalizeUiPreferences({ ...current, ...patch }));
-    void window.reverie.setUiPreferences(patch).then((preferences) => {
+    const changesAppearance = ["accent", "backgroundPreset", "backgroundOpacity", "backgroundBlur", "backgroundDim"].some(key => Object.hasOwn(patch, key));
+    const save = changesAppearance
+      ? window.reverie.setUiPreferences(patch, uiPreferences.uiVariant)
+      : window.reverie.setUiPreferences(patch);
+    void save.then((preferences) => {
       if (requestSequence !== uiPreferenceRequestSequence.current) return;
       setUiPreferences(normalizeUiPreferences(preferences));
     }).catch((error) => {
@@ -5140,15 +5163,16 @@ export default function App() {
       void window.reverie.uiPreferences().then((preferences) => setUiPreferences(normalizeUiPreferences(preferences)));
       toast(error instanceof Error ? error.message : String(error), "error");
     });
-  }, [toast]);
+  }, [toast, uiPreferences.uiVariant]);
 
   const setWorkbenchOpen = useCallback((inspectorOpen: boolean) => updateUiPreferences({ inspectorOpen }), [updateUiPreferences]);
+  const paneGutter = uiPreferences.uiVariant === "liquid-glass" ? 24 : 0;
   const desiredSidebarWidth = paneWidthDraft.sidebar ?? uiPreferences.sidebarWidth;
   const desiredInspectorWidth = paneWidthDraft.inspector ?? uiPreferences.inspectorWidth;
   const sidebarWidth = layoutWidth && !compactViewport
-    ? Math.min(desiredSidebarWidth, Math.max(SIDEBAR_MIN_WIDTH, paneDragLimit(layoutWidth, uiPreferences.inspectorOpen ? INSPECTOR_MIN_WIDTH : 0, SIDEBAR_MAX_WIDTH))) : desiredSidebarWidth;
+    ? Math.min(desiredSidebarWidth, Math.max(SIDEBAR_MIN_WIDTH, paneDragLimit(layoutWidth, uiPreferences.inspectorOpen ? INSPECTOR_MIN_WIDTH : 0, SIDEBAR_MAX_WIDTH, paneGutter))) : desiredSidebarWidth;
   const inspectorWidth = layoutWidth
-    ? Math.min(desiredInspectorWidth, compactViewport ? Math.max(INSPECTOR_MIN_WIDTH, layoutWidth - 48) : Math.max(INSPECTOR_MIN_WIDTH, paneDragLimit(layoutWidth, sidebarCollapsed ? 0 : sidebarWidth, INSPECTOR_MAX_WIDTH))) : desiredInspectorWidth;
+    ? Math.min(desiredInspectorWidth, compactViewport ? Math.max(INSPECTOR_MIN_WIDTH, layoutWidth - 48) : Math.max(INSPECTOR_MIN_WIDTH, paneDragLimit(layoutWidth, sidebarCollapsed ? 0 : sidebarWidth, INSPECTOR_MAX_WIDTH, paneGutter))) : desiredInspectorWidth;
   const commitSidebarWidth = useCallback((width: number) => {
     setPaneWidthDraft((current) => ({ ...current, sidebar: undefined }));
     updateUiPreferences({ sidebarWidth: width });
@@ -5178,13 +5202,13 @@ export default function App() {
 
   const clearBackground = useCallback(async () => {
     try {
-      const preferences = await window.reverie.clearBackground();
+      const preferences = await window.reverie.clearBackground(uiPreferences.uiVariant);
       setUiPreferences(normalizeUiPreferences(preferences));
       toast(t("工作区背景已清除"), "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), "error");
     }
-  }, [t, toast]);
+  }, [t, toast, uiPreferences.uiVariant]);
 
   const initialize = useCallback(async (projectRoot?: string) => {
     const requestSequence = ++initializeSequence.current;
@@ -6744,12 +6768,13 @@ export default function App() {
     }}>
     <div
       ref={shellRef}
+      data-view={view}
       className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${uiPreferences.inspectorOpen ? "with-inspector" : ""} ${paneResizing ? "pane-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
     >
       <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       <main className={`main-area ${gitStatus ? "with-git-status" : ""}`}>
-        <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} />
+        <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} uiVariant={uiPreferences.uiVariant} setUiVariant={uiVariant => updateUiPreferences({ uiVariant })} />
         <div className="content-area">{page}</div>
         {gitStatus && <GitBranchPicker status={gitStatus} busy={running || sessionBusy || gitBusy} refresh={() => void refreshGitStatus()} switchBranch={(name, remote) => void switchBranch(name, remote)} createBranch={(name) => void createBranch(name)} />}
       </main>
@@ -6765,6 +6790,7 @@ export default function App() {
           overflow, so a child handle could not straddle the seam it drags. */}
       <PaneResizer
         edge="left"
+        gutter={paneGutter}
         label={t("调整会话侧栏宽度")}
         width={sidebarWidth}
         minimum={SIDEBAR_MIN_WIDTH}
@@ -6777,6 +6803,7 @@ export default function App() {
       />
       <PaneResizer
         edge="right"
+        gutter={paneGutter}
         label={t("调整工作面板宽度")}
         overlay={compactViewport}
         width={inspectorWidth}

@@ -866,6 +866,27 @@ afterEach(() => {
 });
 
 describe("desktop GUI interactions", () => {
+  it("switches UI variants without remounting the composer or workbench", async () => {
+    const { api } = installDesktopApi();
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "保留草稿 while switching" } });
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
+    const workbench = container.querySelector(".workbench-panel");
+    for (const [label, value] of [["Liquid Glass", "liquid-glass"], ["经典界面", "classic"]]) {
+      await user.click(screen.getByRole("button", { name: "切换主题" }));
+      await user.click(screen.getByRole("button", { name: label, exact: true }));
+      await waitFor(() => expect(document.documentElement.dataset.ui).toBe(value));
+      expect(api.setUiPreferences).toHaveBeenCalledWith({ uiVariant: value });
+      expect(container.querySelector(".composer textarea")).toBe(composer);
+      expect(composer.value).toBe("保留草稿 while switching");
+      expect(container.querySelector(".workbench-panel")).toBe(workbench);
+      expect(workbench?.hasAttribute("inert")).toBe(false);
+      expect(container.querySelector(".app-shell")?.classList.contains("with-inspector")).toBe(true);
+    }
+  });
+
   it("dispatches parameterized desktop settings and retains terminal-only commands", async () => {
     const {request}=installDesktopApi();const user=userEvent.setup();render(<App/>);
     const composer=await screen.findByRole("textbox",{name:/向 Test Model 提问/});

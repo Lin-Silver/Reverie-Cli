@@ -62,8 +62,8 @@ contextBridge.exposeInMainWorld("reverie", {
       theme: "system" | "dark" | "light";
       resolved: "dark" | "light";
     }>,
-  setAppearance: (theme: "system" | "dark" | "light") =>
-    ipcRenderer.invoke("desktop:set-appearance", theme) as Promise<{
+  setAppearance: (theme: "system" | "dark" | "light", owner?: "classic" | "liquid-glass") =>
+    ipcRenderer.invoke("desktop:set-appearance", theme, owner) as Promise<{
       theme: "system" | "dark" | "light";
       resolved: "dark" | "light";
     }>,
@@ -77,12 +77,12 @@ contextBridge.exposeInMainWorld("reverie", {
   },
   uiPreferences: () =>
     ipcRenderer.invoke("desktop:ui-preferences") as Promise<UiPreferencesPayload>,
-  setUiPreferences: (patch: JsonRecord) =>
-    ipcRenderer.invoke("desktop:set-ui-preferences", patch) as Promise<UiPreferencesPayload>,
+  setUiPreferences: (patch: JsonRecord, owner?: "classic" | "liquid-glass") =>
+    ipcRenderer.invoke("desktop:set-ui-preferences", patch, owner) as Promise<UiPreferencesPayload>,
   selectBackground: () =>
     ipcRenderer.invoke("desktop:select-background") as Promise<UiPreferencesPayload | null>,
-  clearBackground: () =>
-    ipcRenderer.invoke("desktop:clear-background") as Promise<UiPreferencesPayload>,
+  clearBackground: (owner?: "classic" | "liquid-glass") =>
+    ipcRenderer.invoke("desktop:clear-background", owner) as Promise<UiPreferencesPayload>,
   reveal: (target: string) => ipcRenderer.invoke("desktop:reveal", target) as Promise<boolean>,
   openExternal: (url: string) =>
     ipcRenderer.invoke("desktop:open-external", url) as Promise<boolean>,

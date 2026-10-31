@@ -1,6 +1,6 @@
 {
   "name": "reverie",
-  "version": "2.5.0",
+  "version": "2.5.3",
   "private": true,
   "description": "Reverie desktop — a native GUI host for the Reverie CLI core",
   "homepage": "https://github.com/Lin-Silver/Reverie-Cli",

@@ -17,6 +17,7 @@ from reverie.config import (
     model_source_display_name,
     normalize_model_provider,
 )
+from reverie.version import CONFIG_VERSION
 from reverie.cli.interface import ReverieInterface
 from reverie.request_identity import REVERIE_CLIENT_HEADER, REVERIE_CLIENT_IDENTITY, apply_reverie_client_identity
 
@@ -61,7 +62,8 @@ def test_old_config_serializes_as_235_with_openai_chat() -> None:
     assert is_config_version_older("2.3.3") is True
     assert is_config_version_older("2.3.4") is True
     assert is_config_version_older("2.3.5") is True
-    assert is_config_version_older("2.5.0") is False
+    assert is_config_version_older("2.5.0") is True
+    assert is_config_version_older(CONFIG_VERSION) is False
 
 
 def test_config_manager_automatically_migrates_pre_235_config(monkeypatch, tmp_path) -> None:
@@ -91,9 +93,9 @@ def test_config_manager_automatically_migrates_pre_235_config(monkeypatch, tmp_p
     config = ConfigManager(tmp_path / "workspace").load()
     saved = json.loads(config_path.read_text(encoding="utf-8"))
 
-    assert config.config_version == "2.5.0"
+    assert config.config_version == CONFIG_VERSION
     assert config.models[0].provider == "openai-chat"
-    assert saved["config_version"] == "2.5.0"
+    assert saved["config_version"] == CONFIG_VERSION
     assert saved["models"][0]["provider"] == "openai-chat"
 
 

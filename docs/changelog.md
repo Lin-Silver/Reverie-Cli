@@ -1,12 +1,19 @@
 # Changelog
 
+## 2.5.3 — 2026-10-31
+
+- Integrate Cloud RIU rich answers and the switchable Liquid Glass desktop.
+- Fix opaque materials in light-theme enhanced contrast / reduced transparency mode.
+- Show user avatars without names in saved and live messages.
+- Preserve formal model evaluation failures and platform acceptance limits; see [verification](verification/2026-10-31-v2.5.3/README.md).
+
 2026-10-30：本地 Liquid Glass 与云端 dev `894fe6e` 已整合，保留经典界面和 RIU 富格式路线。Windows 联合目录包与本轮回归证据见[本地整合记录](verification/2026-10-30-desktop-integration/README.md)。此记录不关闭历史模型质量及跨平台安装验收缺口。
 
 2026-10-27 最新补充：当前源码 Linux x64 v12（版本仍为2.5.0，build `fcce0356b0365178`）的 FUSE AppImage 富格式/P2 **86/86、24/24**，提取程序 P3/P4/隔离 **26/31/36**；同一 v12 包另完成60次合成 P4 循环，31/31通过。Deb 在 rootless Bubblewrap 隔离根中、未强制跳过依赖，完成 v11 安装→v12 升级→卸载；宿主未变化，宿主系统级安装/桌面启动仍未验证。Debian 13 只读 APT 依赖模拟通过；仓库包验证脚本对已核验载荷的新 deb/AppImage 输出均以 exit 0 完成。当前源码本地 Qwen3.5-4B 仅完成一份合成 UI 冒烟，正式模型质量样本 **0**。Windows/macOS、实体输入/辅助技术和长时稳定性仍未验收，整体尚未完成。[当前路线](ROADMAP.md)、[验收清单](RIU_COMPLETION_PLAN.md)、[原生与包证据](verification/2026-10-27-static-rich-routing/README.md)。原 `c059be45303a7a67` 及后续失败记录均保留。
 
 2026-10-24：Linux 当前包 **25dc25402c61887e** 已通过源码核对、Python **2284/24**、Desktop **387/1**、原生 P2/P3/P4 **24/26/31** 与隔离 **36**。原正式轮次及 native8 候选的失败保留，质量门仍未通过；当前执行新的完整双模型开发组。数值、原生按钮、框架等待、主题重绘修正及单次性能条件见[本次通用修正和验收](verification/2026-10-21-riu-completion/generic-batch-native9.md)。
 
-Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，按语义版本倒序排列；同一版本只保留一个顶层入口，原始细节与发布后更新继续保留。当前源码版本仍为 **2.5.0**。
+Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，按语义版本倒序排列；同一版本只保留一个顶层入口，原始细节与发布后更新继续保留。当前源码版本为 **2.5.3**。
 
 - **Unreleased** 表示当前工作树和后续开发记录，不保证已提交、打包或公开发布。
 - **版本条目日期**保留原日志所记日期；**本地标签日期**是 Git 证据，不等于 GitHub Release 的发布时间。未联网核验远端发布资产。

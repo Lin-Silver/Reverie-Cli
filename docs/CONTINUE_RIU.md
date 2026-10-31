@@ -1,5 +1,8 @@
 # RIU GitHub dev 接续说明
 
+2026-10-31: 2.5.3 integrates Cloud RIU and Liquid Glass, fixes light-theme opaque accessibility materials, and shows user avatars without message names. The user authorized main publication. See [2.5.3 verification](verification/2026-10-31-v2.5.3/README.md) for current checks and remaining model/platform acceptance limits.
+
+
 2026-10-28：用户明确授权把当前仓库全部源码、测试和文档改动提交并推送到新的 `dev` 分支。仓库为 `https://github.com/Lin-Silver/Reverie-Cli.git`。本次不升级版本、不发布 Release、不合并到 `main`。此前的“禁止提交/推送”限制对这次快照已由用户最新指令解除；其他限制继续适用。
 
 ## 从 GitHub 恢复工作

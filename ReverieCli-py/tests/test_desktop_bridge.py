@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from reverie.version import VERSION
 from reverie.config import Config, ModelConfig
 from reverie.desktop_catalog import (
     add_standard_model,
@@ -25,7 +26,7 @@ def test_kernel_info_contract(capsys) -> None:
     assert main(["--kernel-info"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema"] == "reverie.kernel.v1"
-    assert payload["version"] == "2.5.0"
+    assert payload["version"] == VERSION
     assert payload["bridge_protocol"] == "sdk-bridge.v1"
     assert payload["platform"]
     assert payload["arch"]

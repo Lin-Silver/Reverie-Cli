@@ -305,12 +305,14 @@
     .starter-actions button:hover, button:active:not(:disabled) { transform: none; }
   }
   @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-    --glass-structure: var(--bg-raised);
-    --glass-canvas: var(--bg);
-    --glass-control: var(--bg-raised);
-    --glass-popover: var(--bg-raised);
-    --panel: var(--bg-raised);
-    --panel-2: var(--bg-raised);
+    &[data-theme] {
+      --glass-structure: var(--bg-raised);
+      --glass-canvas: var(--bg);
+      --glass-control: var(--bg-raised);
+      --glass-popover: var(--bg-raised);
+      --panel: var(--bg-raised);
+      --panel-2: var(--bg-raised);
+    }
     .sidebar, .content-area, .workbench-panel, .topbar-center, .topbar-right, .small-popover, .dialog, .model-dialog, .command-dialog, .confirmation-dialog, .conversation-display-menu, .completion-popover, .modal-backdrop { backdrop-filter: none; }
     .content-area, .sidebar, .workbench-panel { border-color: var(--muted); }
   }

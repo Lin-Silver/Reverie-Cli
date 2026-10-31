@@ -2148,5 +2148,28 @@
     "build": "29257ffc3cefd2ba",
     "report": "docs/verification/2026-10-30-desktop-integration/README.md",
     "scope": "Local integration only; historical acceptance gaps remain"
+  },
+  "local_253_update": {
+    "version": "2.5.3",
+    "status": "windows_validation_passed_with_documented_acceptance_limits",
+    "report": "docs/verification/2026-10-31-v2.5.3/README.md",
+    "changes": [
+      "Liquid Glass light accessibility material precedence",
+      "Avatar-only user message headings",
+      "Cloud RIU and local Desktop integration"
+    ],
+    "formal_model_gate": "unchanged; cohorts closed; no historical rescoring",
+    "publication": "authorized for main; verify remote commit in delivery",
+    "python": {
+      "passed": 2449,
+      "skipped": 180
+    },
+    "frontend": {
+      "passed": 449,
+      "skipped": 1
+    },
+    "glass_checks": 18,
+    "rich_each_variant": 86,
+    "fresh_windows_install_and_uninstall": "passed; installed native 18/18; distinct-version upgrade not verified"
   }
 }

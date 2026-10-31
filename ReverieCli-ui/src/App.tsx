@@ -1341,7 +1341,7 @@ const Message = memo(function Message({ message, preferences, live }: { message:
     <article className={`message ${message.role} ${technicalOnly ? "technical-only" : ""} ${live ? user ? "live-user-message" : "live-message" : ""}`}>
       {!technicalOnly && <div className="message-heading">
         {user ? <UserAvatar name={userName} url={preferences.userAvatarUrl} /> : <div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div>}
-        <strong>{user ? userName : "Reverie"}</strong>
+        {!user && <strong>Reverie</strong>}
         {live && !user && <span className={`live-status ${live.running ? "working" : "success"}`}>{t(live.running ? "正在处理" : "已完成")}</span>}
       </div>}
       <div className="message-body">
@@ -1418,7 +1418,7 @@ const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { 
   return (
     <>
       {!turn.resumed && <article className="message user live-user-message">
-        <div className="message-heading"><UserAvatar name={userName} url={preferences.userAvatarUrl} /><strong>{userName}</strong></div>
+        <div className="message-heading"><UserAvatar name={userName} url={preferences.userAvatarUrl} /></div>
         <div className="message-body"><div className="user-text">{turn.userText}</div>
           {turn.attachments?.map((attachment, index) => <button key={index} type="button" className="message-attachment" aria-label={`${t("打开文件预览")} ${attachment.name}`} onClick={() => window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: { path: attachment.relativePath } }))}>
             <FileText size={18} /><span>{attachment.name}</span><small>{formatFileSize(attachment.size)}</small>

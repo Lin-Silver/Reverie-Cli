@@ -1348,7 +1348,7 @@ describe("desktop GUI interactions", () => {
     expect((composer as HTMLTextAreaElement).value).toContain("revised");
   });
 
-  it("persists a custom user label and renders it on existing messages", async () => {
+  it("persists a custom avatar initial without showing the user name on messages", async () => {
     const { api } = installDesktopApi({ initialSession: { ...baseSession, messages: [{ role: "user", content: "Hello from me" }] } });
     const user = userEvent.setup();
     render(<App />);
@@ -1360,7 +1360,9 @@ describe("desktop GUI interactions", () => {
     await user.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(api.setUiPreferences).toHaveBeenCalledWith({ userDisplayName: "  Lin  " }));
     await user.click(screen.getByRole("button", { name: "设置" }));
-    expect(await screen.findByText("Lin")).toBeTruthy();
+    expect(document.querySelector(".message.user .user-avatar")?.textContent).toBe("L");
+    expect(document.querySelector(".message.user .message-heading strong")).toBeNull();
+    expect(screen.queryByText("Lin")).toBeNull();
   });
 
   it("shows Git branches and switches to a selected branch", async () => {

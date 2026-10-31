@@ -1,5 +1,8 @@
 # RIU 完整实现与验收清单
 
+2026-10-31: 2.5.3 integrates Cloud RIU and Liquid Glass, fixes light-theme opaque accessibility materials, and shows user avatars without message names. The user authorized main publication. See [2.5.3 verification](verification/2026-10-31-v2.5.3/README.md) for current checks and remaining model/platform acceptance limits.
+
+
 2026-10-30：本地 Liquid Glass 与云端 dev `894fe6e` 已整合，保留经典界面和 RIU 富格式路线。Windows 联合目录包与本轮回归证据见[本地整合记录](verification/2026-10-30-desktop-integration/README.md)。此记录不关闭历史模型质量及跨平台安装验收缺口。
 
 2026-10-28 GitHub 接续更新：用户已明确授权将本轮全部仓库改动提交到新的 `dev` 分支；本轮授权覆盖此前禁止提交/推送的限制，不含版本升级或 Release。[接续说明](CONTINUE_RIU.md)与[可克隆 goal/关键证据](verification/2026-10-28-dev-handoff/README.md)已补齐。**最新源码还包含保留 v12 之后的 Linux 安装链接启动器修复；它的回归测试已有覆盖，但包含此修复的新安装包尚未验收，优先完成此项。** 此前 v12 通过记录仅对应原包；整体 RIU 仍未完成。实际提交 SHA 与远端推送结果以交付消息及 GitHub 分支为准。

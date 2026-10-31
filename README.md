@@ -4,7 +4,7 @@ RIU development continues on `dev`; see the [continuation guide](docs/CONTINUE_R
 
 Start with the [documentation index](docs/README.md), [complete version history](docs/changelog.md), and [Intelligent UI implementation and protocol scope](docs/INTELLIGENT_UI_SPEC.md). Reverie Desktop implements offline interactive views with inline, fullscreen and picture-in-picture presentation. Real-model generation quality and platform acceptance remain separately tracked in [feature status](docs/FEATURE_STATUS.md).
 
-Current stable version: **v2.5.0** (released 2026-07-17).
+Current source version: **v2.5.3**. See [release verification](docs/verification/2026-10-31-v2.5.3/README.md) for tested scope and remaining RIU acceptance limits.
 
 Current working-tree behavior and remaining gaps were reviewed on **2026-10-26**. Start with the [documentation index](docs/README.md), [feature status](docs/FEATURE_STATUS.md), [Desktop guide](docs/DESKTOP_GUIDE.md), and [roadmap](docs/ROADMAP.md). The dated audit distinguishes implementation from completed acceptance; local updates are not necessarily published releases.
 

@@ -150,6 +150,11 @@ def main():
         page.locator('.topbar-right').get_by_role('button', name='关闭工作面板', exact=True).click()
         page.emulate_media(reduced_motion='reduce', contrast='more')
         check('High contrast removes glass blur', page.locator('.content-area').evaluate("e=>getComputedStyle(e).backdropFilter") == 'none')
+        for theme_name in ('light', 'dark'):
+            page.evaluate("theme => document.documentElement.dataset.theme = theme", theme_name)
+            styles = page.locator('.content-area').evaluate("e => ({background: getComputedStyle(e).backgroundColor, blur: getComputedStyle(e).backdropFilter})")
+            check(f'High contrast uses opaque material in {theme_name}', styles['background'].startswith('rgb(') and styles['blur'] == 'none', styles)
+        check('User headings show avatar without name', page.locator('.message.user .user-avatar').count() > 0 and page.locator('.message.user .message-heading strong').count() == 0)
         shot('glass-high-contrast')
         page.emulate_media(reduced_motion='no-preference', contrast='no-preference')
         page.evaluate("window.reverie.setUiPreferences({language:'en-US',fontSize:'large'})")

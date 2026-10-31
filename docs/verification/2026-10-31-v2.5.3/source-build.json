@@ -1,0 +1,34 @@
+{
+  "product_sources_match_build": true,
+  "sources": [
+    {
+      "path": "ReverieCli-ui/src/App.tsx",
+      "sha256": "bef27dd491c4b7aae3055f275cfff32b5afaa879138128a94eed805fbd2408b0"
+    },
+    {
+      "path": "ReverieCli-ui/src/liquid-glass.css",
+      "sha256": "fd8a53ce2c2da54fa1c3cb44796c387b1e426b9adadad351254e13ec0d4c4464"
+    },
+    {
+      "path": "ReverieCli-ui/package.json",
+      "sha256": "a5634c1c5f2cbf28e4c7104bfa59a8e54dda39704f7eef25c9766dfa5b616566"
+    },
+    {
+      "path": "ReverieCli-ui/package-lock.json",
+      "sha256": "51eb70e2269bfbb15322c0cfc6098f164b2f5cdda6aced1abe3ef9f2a306e129"
+    },
+    {
+      "path": "ReverieCli-py/reverie/version.py",
+      "sha256": "d4f226b53ead75c83ff1925e5b5e4a5b7d7c8716d520664bd333ed2bfea4699e"
+    }
+  ],
+  "build": {
+    "version": "2.5.3",
+    "id": "9d6cfecd9909846b",
+    "builtAt": "2026-10-31T04:28:57.527Z",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "omitted_preexisting_worktree_deletion": "ReverieCli-py/reverie/builtin_skills/reverse-skill/upstream/skills/pentest-tools/src-hunter/references/playbooks/rce.md",
+  "note": "The local package follows the existing worktree deletion; that unrelated deletion is excluded from the publication commit."
+}

@@ -280,6 +280,17 @@ def test_static_rich_correction_without_antecedent_is_not_self_contained():
     assert not _static_rich_answer_history([feedback])
 
 
+@pytest.mark.parametrize("followup", ["只把项目01的数量改为100，保留其他记录。", "刚才的给定表格还需要修正排版，保留原有全部记录。"])
+def test_repeated_static_rich_corrections_never_replace_the_original_data(followup):
+    from reverie.agent.agent import _static_rich_answer_history
+
+    supplied = {"role": "user", "content": '展示给定表格，列名项目、数量，保留全部记录：[["项目01",0],["项目02",1]]。'}
+    answer = {"role": "assistant", "content": "上一版表格"}
+    first = {"role": "user", "content": "刚才给定表格第1行第1列的值不对。不要进行中英文排版改写，请修正并保留原有数据。"}
+    history = [supplied, answer, first, answer.copy(), {"role": "user", "content": followup}]
+    assert _static_rich_answer_history(history) == history
+
+
 def test_static_rich_tool_suppression_keeps_tools_for_research_or_interaction(tmp_path):
     prompts = (
         "请根据仓库检索当前项目状态，再以表格展示。",

@@ -229,6 +229,10 @@ def _is_self_contained_static_rich_answer_prompt(prompt: Any) -> bool:
     text = _coerce_text_fragments(prompt).strip()
     if len(text) < 32 or len(text) > 12000:
         return False
+    # A correction can mention displaying data while depending on an earlier
+    # request. It must never become a new source when walking correction history.
+    if re.search(r"刚才|刚刚|之前|上文|前文|原有|原先|上一份|上一版|\b(?:previous|earlier|original|above)\b", text, re.I):
+        return False
     requested_actions = _without_declined_rich_actions(text)
     if _STATIC_RICH_RETRIEVAL_OR_ACTION.search(requested_actions):
         return False
@@ -247,11 +251,7 @@ def _static_rich_answer_history(messages: List[Dict]) -> List[Dict]:
     users = [i for i, m in enumerate(history) if m.get("role") == "user"]
     if not users:
         return []
-    latest = _coerce_text_fragments(history[users[-1]].get("content", ""))
-    refers_to_previous = re.search(r"刚才|刚刚|之前|上文|前文|原有|原先|上一份|上一版|\b(?:previous|earlier|original|above)\b", latest, re.I)
-    # Correction wording can itself mention displaying supplied tables. Keep its
-    # antecedent instead of sending the correction as a standalone data source.
-    if not refers_to_previous and _is_self_contained_static_rich_answer_prompt(latest):
+    if _is_self_contained_static_rich_answer_prompt(history[users[-1]].get("content")):
         return [history[users[-1]]]
     for start in reversed(users[:-1]):
         if not _is_self_contained_static_rich_answer_prompt(history[start].get("content")):

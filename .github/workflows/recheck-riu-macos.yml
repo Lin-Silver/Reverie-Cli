@@ -4,13 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       artifact_run:
-        description: Completed native validation run containing the Apple Silicon package
+        description: Completed native validation run containing the macOS package
         type: string
         required: true
+      arch:
+        description: Architecture of the retained package
+        type: choice
+        options: [arm64, x64]
+        default: arm64
       checks:
         description: Checks to run against the unchanged installed package
         type: choice
-        options: [p3, full]
+        options: [p3, p4-profile, full]
         default: p3
 
 permissions:
@@ -19,10 +24,11 @@ permissions:
 
 jobs:
   recheck:
-    runs-on: macos-latest
+    runs-on: ${{ inputs.arch == 'x64' && 'macos-15-intel' || 'macos-latest' }}
     timeout-minutes: 40
     env:
       PYTHONUTF8: "1"
+      RIU_RECHECK_ARCH: ${{ inputs.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,12 +52,12 @@ jobs:
           mkdir -p .runtime/recheck-assets
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN" > .runtime/recheck-assets/source-run.json
           sha=$(python -c "import json; p=json.load(open('.runtime/recheck-assets/source-run.json')); assert p['status']=='completed' and p['path']=='.github/workflows/verify-riu-packages.yml'; print(p['head_sha'])")
-          gh run download "$ARTIFACT_RUN" --repo "$GITHUB_REPOSITORY" --name "riu-validation-macos-arm64-$sha" --dir .runtime/recheck-assets
+          gh run download "$ARTIFACT_RUN" --repo "$GITHUB_REPOSITORY" --name "riu-validation-macos-$RIU_RECHECK_ARCH-$sha" --dir .runtime/recheck-assets
           python - <<'PY'
-          import hashlib, json
+          import hashlib, json, os
           from pathlib import Path
           root = Path('.runtime/recheck-assets')
-          manifest = json.loads((root/'reverie-kernel-macos-arm64.json').read_text())
+          manifest = json.loads((root/f"reverie-kernel-macos-{os.environ['RIU_RECHECK_ARCH']}.json").read_text())
           source = json.loads((root/'source-run.json').read_text())
           assert manifest['commit'] == source['head_sha']
           core = root/manifest['asset_name']
@@ -71,11 +77,11 @@ jobs:
           test "${#bundles[@]}" -eq 1
           ditto "${bundles[0]}" "$install/$(basename "${bundles[0]}")"
           python - <<'PY'
-          import hashlib, json
+          import hashlib, json, os
           from pathlib import Path
           import subprocess
           root = Path('.runtime/recheck-assets')
-          manifest = json.loads((root/'reverie-kernel-macos-arm64.json').read_text())
+          manifest = json.loads((root/f"reverie-kernel-macos-{os.environ['RIU_RECHECK_ARCH']}.json").read_text())
           core, = Path('.runtime/recheck-installed').glob('*.app/Contents/reverie')
           # Desktop has an onedir kernel; the standalone asset is onefile.
           info = json.loads(subprocess.check_output([str(core.resolve()), '--kernel-info'], text=True, timeout=120))
@@ -93,6 +99,9 @@ jobs:
         run: |
           if [[ "$CHECKS" == full ]]; then
             python scripts/verification/riu_package_native.py --package .runtime/recheck-installed --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native
+          elif [[ "$CHECKS" == p4-profile ]]; then
+            executable=$(python -c "import sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path('.runtime/recheck-installed').resolve()))")
+            python scripts/verification/riu_p4_electron.py --exe "$executable" --output .runtime/riu-package-native/p4 --trace-input
           else
             executable=$(python -c "import sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path('.runtime/recheck-installed').resolve()))")
             python scripts/verification/riu_p3_electron.py --exe "$executable" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native/p3

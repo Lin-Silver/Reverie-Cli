@@ -65,6 +65,7 @@ def main():
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=20)
+    parser.add_argument("--trace-input", action="store_true", help="Retain a diagnostic Chromium trace of the unchanged input workload.")
     parser.add_argument("--keep-open", action="store_true", help="Leave only this isolated acceptance window open for native inspection.")
     args = parser.parse_args()
     output = args.output.resolve()
@@ -275,7 +276,22 @@ def main():
             target.locator("#filter").fill("Row")
             expect(target.locator("#error")).to_be_hidden()
             check("upper-bound-data-and-recoverable-error", True)
+            trace = page.context.new_cdp_session(page) if args.trace_input else None
+            trace_complete, trace_events = [], []
+            if trace:
+                trace.on("Tracing.dataCollected", lambda event: trace_events.extend(event["value"]))
+                trace.on("Tracing.tracingComplete", lambda event: trace_complete.append(event))
+                trace.send("Tracing.start", {"traceConfig": {"includedCategories": ["devtools.timeline", "blink.user_timing", "v8", "cc"]}})
             samples = [target.evaluate("value=>window.__p4.measureInput(value)", 1 + index % 99) for index in range(60)]
+            if trace:
+                trace.send("Tracing.end")
+                deadline = time.monotonic() + 30
+                while not trace_complete and time.monotonic() < deadline:
+                    page.wait_for_timeout(50)
+                if not trace_complete:
+                    raise TimeoutError("Input diagnostic trace did not finish")
+                (output / "input-trace.json").write_text(json.dumps({"traceEvents": trace_events, "completion": trace_complete}), encoding="utf-8")
+                trace.detach()
             report["measurements"]["local_input_to_two_animation_frames_1000_rows"] = distribution(samples)
             check("local-input-p95-under-100ms", report["measurements"]["local_input_to_two_animation_frames_1000_rows"]["p95_ms"] <= 100, report["measurements"]["local_input_to_two_animation_frames_1000_rows"], fatal=False)
 

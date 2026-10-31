@@ -14,6 +14,33 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("changed,native_passed", [(False, True), (True, True), (False, False)])
+def test_native_release_gate_rejects_changed_assets_and_failed_runtime(tmp_path, changed, native_passed):
+    import hashlib
+
+    bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
+    if not bash or not Path(bash).is_file():
+        pytest.skip("Bash is required to exercise the release workflow")
+    workflow = yaml.safe_load((ROOT / ".github/workflows/build-core-release.yml").read_text(encoding="utf-8"))
+    step = next(s for s in workflow["jobs"]["build"]["steps"]
+                if s.get("name") == "Verify staged assets were not changed during native checks")
+    assets = tmp_path / "release-assets"
+    assets.mkdir()
+    artifact = assets / "Reverie-Setup-2.5.3-x64.exe"
+    artifact.write_bytes(b"tested release payload")
+    evidence = tmp_path / ".runtime/riu-package-native"
+    evidence.mkdir(parents=True)
+    (evidence / "report.json").write_text(json.dumps({"passed": native_passed}))
+    (evidence.parent / "release-native-provenance.json").write_text(json.dumps({
+        "assets": {artifact.name: hashlib.sha256(artifact.read_bytes()).hexdigest()},
+    }))
+    if changed:
+        artifact.write_bytes(b"replacement after native verification")
+    result = subprocess.run([bash, "-s"], input=step["run"], text=True, capture_output=True,
+                            cwd=tmp_path, env={**os.environ, "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]})
+    assert (result.returncode == 0) == (not changed and native_passed), result.stderr
+
+
 @pytest.mark.parametrize("existing,fail_upload", [(True, False), (False, False), (False, True)])
 def test_stable_notes_and_publication_after_successful_uploads(tmp_path, existing, fail_upload):
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")

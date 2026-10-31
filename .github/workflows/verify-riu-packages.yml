@@ -256,6 +256,9 @@ jobs:
           "$test_python" -m pip install playwright==1.58.0
           command=("$test_python" scripts/verification/riu_package_native.py --package "$package" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native)
           if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
+            # Match the installed sandbox helper ownership without disabling it.
+            sudo chown root:root "$package/chrome-sandbox"
+            sudo chmod 4755 "$package/chrome-sandbox"
             xvfb-run -a "${command[@]}"
           else
             "${command[@]}"

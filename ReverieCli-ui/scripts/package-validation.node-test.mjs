@@ -68,7 +68,8 @@ test('the Debian package declares graphics and audio libraries required by Elect
   assert.ok(manifest.build.deb.depends.includes('libgtk-3-0'));
 });
 
-test('the Linux desktop launcher resolves its real directory when invoked through an installed symlink', { skip: process.platform === 'win32' }, () => {
+// The Linux launcher and executable differ only in case, unlike macOS bundles.
+test('the Linux desktop launcher resolves its real directory when invoked through an installed symlink', { skip: process.platform !== 'linux' }, () => {
   const temporary = mkdtempSync(path.join(tmpdir(), 'riu-launcher-link-'));
   try {
     const app = path.join(temporary, 'opt', 'Reverie');

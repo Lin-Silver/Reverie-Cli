@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
 from desktop_process import launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
+from riu_quality_benchmark import settle_view, start_event_capture
 SECRET = "PRIVATE_META_MUST_NEVER_REACH_MODEL"
 
 
@@ -232,10 +233,16 @@ def main():
             page.get_by_role("button", name="发送追问", exact=True).wait_for()
             before = len(ModelFixture.requests); page.wait_for_timeout(300)
             check("model-context-does-not-trigger-model", len(ModelFixture.requests) == before)
+            event_offset = start_event_capture(page)
             page.get_by_role("button", name="发送追问", exact=True).click()
             for _ in range(600):
                 if len(ModelFixture.requests) > before and page.locator(".live-message").count() == 0: break
                 page.wait_for_timeout(50)
+            page.wait_for_function("""offset=>{
+                const runs=window.__qualityEvents.slice(offset).filter(x=>x.event.type==='executors.changed');
+                return runs.some(x=>x.event.entries.length>0)&&runs.at(-1).event.entries.length===0;
+            }""", arg=event_offset, timeout=30000)
+            page.wait_for_selector(".live-message", state="detached", timeout=30000)
             check("model-context-untrusted-user-data", any("P3_CONTEXT_PUBLIC_SELECTION" in str(item.get("content")) and item.get("role") == "user" for item in ModelFixture.requests[-1]["messages"]))
             check("no-private-meta-or-app-only-descriptor-in-model", SECRET not in json.dumps(ModelFixture.requests) and "APP_ONLY_HIDDEN_DESCRIPTOR" not in json.dumps(ModelFixture.requests))
             observe("negative-boundaries")
@@ -243,6 +250,9 @@ def main():
             # may create a fresh instance when we return; wait for its handshake.
             target = frame("show")
             expect(target.locator("#ready")).to_have_text("Ready", timeout=30000)
+            # Wait for the remounted OOPIF's pointer hit regions after scrolling.
+            actual_frame = page.locator('iframe[title="show"]').element_handle().content_frame()
+            settle_view(page, actual_frame)
             report["teardown_before"] = {
                 "button": target.locator("#teardown").bounding_box(),
                 "window": page.evaluate("({innerWidth,innerHeight,outerWidth,outerHeight,screenWidth:screen.width,screenHeight:screen.height,devicePixelRatio})"),

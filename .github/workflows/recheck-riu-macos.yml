@@ -1,0 +1,96 @@
+name: Recheck an existing macOS RIU package
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run:
+        description: Completed native validation run containing the Apple Silicon package
+        type: string
+        required: true
+      checks:
+        description: Checks to run against the unchanged installed package
+        type: choice
+        options: [p3, full]
+        default: p3
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  recheck:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install verification dependencies
+        run: |
+          python -m pip install -e ./ReverieCli-py
+          mkdir -p .runtime/riu-sdk
+          cp scripts/verification/fixtures/mcp-apps/package*.json .runtime/riu-sdk/
+          npm ci --prefix .runtime/riu-sdk
+      - name: Download the retained native package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run }}
+        run: |
+          [[ "$ARTIFACT_RUN" =~ ^[0-9]+$ ]]
+          mkdir -p .runtime/recheck-assets
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN" > .runtime/recheck-assets/source-run.json
+          sha=$(python -c "import json; p=json.load(open('.runtime/recheck-assets/source-run.json')); assert p['status']=='completed' and p['path']=='.github/workflows/verify-riu-packages.yml'; print(p['head_sha'])")
+          gh run download "$ARTIFACT_RUN" --repo "$GITHUB_REPOSITORY" --name "riu-validation-macos-arm64-$sha" --dir .runtime/recheck-assets
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('.runtime/recheck-assets')
+          manifest = json.loads((root/'reverie-kernel-macos-arm64.json').read_text())
+          core = root/manifest['asset_name']
+          assert core.resolve().parent == root.resolve()
+          assert hashlib.sha256(core.read_bytes()).hexdigest() == manifest['sha256']
+          assert len(list(root.glob('*.dmg'))) == 1
+          PY
+      - name: Install the retained DMG
+        run: |
+          mount="$GITHUB_WORKSPACE/.runtime/recheck-mount"
+          install="$GITHUB_WORKSPACE/.runtime/recheck-installed"
+          mkdir -p "$mount" "$install"
+          images=(.runtime/recheck-assets/*.dmg)
+          hdiutil attach "${images[0]}" -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          bundles=("$mount"/*.app)
+          test "${#bundles[@]}" -eq 1
+          ditto "${bundles[0]}" "$install/$(basename "${bundles[0]}")"
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('.runtime/recheck-assets')
+          manifest = json.loads((root/'reverie-kernel-macos-arm64.json').read_text())
+          core, = Path('.runtime/recheck-installed').glob('*.app/Contents/reverie')
+          assert hashlib.sha256(core.read_bytes()).hexdigest() == manifest['sha256']
+          PY
+      - name: Run current verifiers on the installed package
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: |
+          if [[ "$CHECKS" == full ]]; then
+            python scripts/verification/riu_package_native.py --package .runtime/recheck-installed --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native
+          else
+            executable=$(python -c "import sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path('.runtime/recheck-installed').resolve()))")
+            python scripts/verification/riu_p3_electron.py --exe "$executable" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native/p3
+          fi
+      - name: Retain package provenance and check results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: riu-macos-recheck-${{ github.run_id }}
+          path: |
+            .runtime/riu-package-native/
+            .runtime/recheck-assets/*.json

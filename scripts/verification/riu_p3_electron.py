@@ -161,6 +161,7 @@ def main():
             page.set_viewport_size({"width": 1280, "height": 900})
             context = page.context
             context.add_init_script("window.__p3wire=[];addEventListener('message',e=>{if(window.__p3wire.length<256)window.__p3wire.push(e.data)});")
+            context.add_init_script("window.__p3input=[];for(const type of ['pointerdown','pointerup','click'])addEventListener(type,e=>window.__p3input.push({type,id:e.target.id,x:e.clientX,y:e.clientY,time:performance.now()}),true);")
             page.wait_for_selector(".session-item", timeout=120000)
             page.wait_for_load_state("domcontentloaded")
             page.locator('textarea[aria-autocomplete="list"]').wait_for(state="visible")
@@ -242,12 +243,18 @@ def main():
             # may create a fresh instance when we return; wait for its handshake.
             target = frame("show")
             expect(target.locator("#ready")).to_have_text("Ready", timeout=30000)
+            report["teardown_before"] = {
+                "button": target.locator("#teardown").bounding_box(),
+                "window": page.evaluate("({innerWidth,innerHeight,outerWidth,outerHeight,screenWidth:screen.width,screenHeight:screen.height,devicePixelRatio})"),
+                "frame": target.locator("body").evaluate("()=>({ready:document.querySelector('#ready').textContent,handler:String(document.querySelector('#teardown').onclick),time:performance.now()})"),
+            }
             page.evaluate("window.__p3TeardownSeen=false;addEventListener('message',e=>{if(e.data?.method==='ui/notifications/request-teardown')window.__p3TeardownSeen=true});true")
             target.locator("#teardown").click()
             try:
                 expect(page.locator('iframe[title="show"]')).to_have_count(0)
             except Exception:
                 report["teardown_request_seen"] = page.evaluate("window.__p3TeardownSeen")
+                report["teardown_after"] = target.locator("body").evaluate("()=>({input:window.__p3input,wire:window.__p3wire,time:performance.now()})")
                 observe("teardown-failure")
                 raise
             check("app-requested-teardown", True)

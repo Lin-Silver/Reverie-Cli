@@ -14,6 +14,16 @@ desktop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop)
 
 
+@pytest.mark.parametrize('platform,relative,expected', [
+    ('darwin', 'Reverie.app/Contents/MacOS/ReverieUI', 'Reverie.app/Contents/reverie'),
+    ('win32', 'win-unpacked/ReverieUI.exe', 'win-unpacked/reverie.exe'),
+    ('linux', 'linux-unpacked/ReverieUI', 'linux-unpacked/reverie'),
+])
+def test_kernel_path_matches_native_package_layout(tmp_path, monkeypatch, platform, relative, expected):
+    monkeypatch.setattr(desktop.sys, 'platform', platform)
+    assert desktop.packaged_kernel_path(tmp_path / relative) == (tmp_path / expected).resolve()
+
+
 @pytest.mark.parametrize('owns_group', [True, False])
 def test_unresponsive_owned_process_is_reaped_without_signalling_another_group(monkeypatch, owns_group):
     calls = []

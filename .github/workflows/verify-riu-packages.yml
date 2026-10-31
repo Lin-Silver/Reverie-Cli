@@ -233,7 +233,50 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install --yes xvfb libgtk-3-0 libnss3 libasound2t64 fonts-noto-cjk
 
-      - name: Verify native directory payload
+      - name: Install Windows validation package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = node -p "require('./ReverieCli-ui/package.json').version"
+          $installRoot = Join-Path $env:GITHUB_WORKSPACE '.runtime\riu-installed'
+          if (Test-Path -LiteralPath $installRoot) { throw 'Installation target already exists' }
+          $installer = Join-Path $env:GITHUB_WORKSPACE "ReverieCli-ui\release\validation\Reverie-Setup-$version-x64.exe"
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          $installed = Join-Path $installRoot 'ReverieUI.exe'
+          $original = 'ReverieCli-ui\release\validation\win-unpacked\ReverieUI.exe'
+          if ((Get-FileHash -LiteralPath $installed).Hash -ne (Get-FileHash -LiteralPath $original).Hash) { throw 'Installed Desktop differs from packaged payload' }
+          & (Join-Path $installRoot 'reverie.exe') --kernel-info
+          if ($LASTEXITCODE -ne 0) { throw 'Installed CLI handshake failed' }
+          "RIU_INSTALLED_PACKAGE=$installRoot" >> $env:GITHUB_ENV
+
+      - name: Install Linux validation package
+        if: runner.os == 'Linux'
+        run: |
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          sudo apt-get install --yes "./ReverieCli-ui/release/validation/Reverie-$version-linux-x64.deb"
+          test "$(readlink /usr/bin/reverie)" = /opt/Reverie/reverie
+          test "$(readlink /usr/bin/reverieui)" = /opt/Reverie/reverieui
+          reverie --kernel-info
+          cmp /opt/Reverie/ReverieUI ReverieCli-ui/release/validation/linux-unpacked/ReverieUI
+          echo 'RIU_INSTALLED_PACKAGE=/opt/Reverie' >> "$GITHUB_ENV"
+
+      - name: Install macOS validation package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          mount="$GITHUB_WORKSPACE/.runtime/riu-dmg-mount"
+          install="$GITHUB_WORKSPACE/.runtime/riu-installed"
+          mkdir -p "$mount" "$install"
+          hdiutil attach "ReverieCli-ui/release/validation/Reverie-$version-mac-${{ matrix.arch }}.dmg" -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          bundles=("$mount"/*.app)
+          test "${#bundles[@]}" -eq 1
+          ditto "${bundles[0]}" "$install/$(basename "${bundles[0]}")"
+          echo "RIU_INSTALLED_PACKAGE=$install" >> "$GITHUB_ENV"
+
+      - name: Verify native installed payload
         shell: bash
         env:
           RIU_RUNNER_OS: ${{ runner.os }}
@@ -242,26 +285,75 @@ jobs:
           set -euo pipefail
           if [[ "$RIU_RUNNER_OS" == "Windows" ]]; then
             test_python="ReverieCli-py/venv/Scripts/python.exe"
-            package="ReverieCli-ui/release/validation/win-unpacked"
           else
             test_python="ReverieCli-py/venv/bin/python"
-            if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
-              package="ReverieCli-ui/release/validation/linux-unpacked"
-            elif [[ "$RIU_ARCH" == "arm64" ]]; then
-            package="ReverieCli-ui/release/validation/mac-arm64"
-            else
-            package="ReverieCli-ui/release/validation/mac"
-            fi
           fi
-          command=("$test_python" scripts/verification/riu_package_native.py --package "$package" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native)
+          command=("$test_python" scripts/verification/riu_package_native.py --package "$RIU_INSTALLED_PACKAGE" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native)
           if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
-            # Match the installed sandbox helper ownership without disabling it.
-            sudo chown root:root "$package/chrome-sandbox"
-            sudo chmod 4755 "$package/chrome-sandbox"
+            test "$(stat -c '%u:%g:%a' "$RIU_INSTALLED_PACKAGE/chrome-sandbox")" = '0:0:4755'
             xvfb-run -a "${command[@]}"
           else
             "${command[@]}"
           fi
+
+      - name: Verify Linux installed launcher and AppImage
+        if: runner.os == 'Linux'
+        run: |
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          image=$(realpath "ReverieCli-ui/release/validation/Reverie-$version-linux-x64.AppImage")
+          mkdir .runtime/riu-appimage-payload
+          cd .runtime/riu-appimage-payload
+          "$image" --appimage-extract > extraction.log
+          sudo chown root:root squashfs-root/chrome-sandbox
+          sudo chmod 4755 squashfs-root/chrome-sandbox
+          for target in installed-launcher appimage; do
+            if [[ "$target" == "installed-launcher" ]]; then executable=/usr/bin/reverieui; else executable="$PWD/squashfs-root/AppRun"; fi
+            xvfb-run -a env PORTABLE_EXECUTABLE_DIR="$GITHUB_WORKSPACE/.runtime/$target-home" REVERIE_APP_ROOT="$GITHUB_WORKSPACE/.runtime/$target-core" timeout 180 "$executable" --riu-isolation-probe --riu-probe-report "$GITHUB_WORKSPACE/.runtime/riu-package-native/$target-isolation.json"
+          done
+          cd "$GITHUB_WORKSPACE"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for name in ['installed-launcher', 'appimage']:
+              report = json.loads(Path(f'.runtime/riu-package-native/{name}-isolation.json').read_text())
+              assert report['checks'] and all(c['passed'] for c in report['checks']), name
+          PY
+
+      - name: Verify Windows uninstallation
+        if: always() && runner.os == 'Windows' && env.RIU_INSTALLED_PACKAGE != ''
+        shell: pwsh
+        run: |
+          $uninstallers = @(Get-ChildItem -LiteralPath $env:RIU_INSTALLED_PACKAGE -Filter 'Uninstall*.exe')
+          if ($uninstallers.Count -ne 1) { throw 'Expected one native uninstaller' }
+          $process = Start-Process -FilePath $uninstallers[0].FullName -ArgumentList @('/S', "_?=$env:RIU_INSTALLED_PACKAGE") -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Uninstaller failed: $($process.ExitCode)" }
+          if (Test-Path -LiteralPath (Join-Path $env:RIU_INSTALLED_PACKAGE 'ReverieUI.exe')) { throw 'Desktop survived uninstallation' }
+          Write-Output 'Verified native installation, installed runtime, and uninstallation'
+
+      - name: Verify Linux uninstallation
+        if: always() && runner.os == 'Linux' && env.RIU_INSTALLED_PACKAGE != ''
+        run: |
+          sudo apt-get remove --yes reverie
+          test ! -e /opt/Reverie/ReverieUI
+          test ! -L /usr/bin/reverie
+          test ! -L /usr/bin/reverieui
+
+      - name: Verify macOS uninstallation
+        if: always() && runner.os == 'macOS' && env.RIU_INSTALLED_PACKAGE != ''
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          owned = Path(os.environ['GITHUB_WORKSPACE']).resolve()/'.runtime/riu-installed'
+          package = Path(os.environ['RIU_INSTALLED_PACKAGE']).resolve()
+          assert package == owned
+          bundles = list(package.glob('*.app'))
+          assert len(bundles) == 1 and bundles[0].resolve().parent == owned
+          shutil.rmtree(bundles[0])
+          assert not bundles[0].exists()
+          print('Verified DMG installation, installed runtime, and application removal')
+          PY
 
       - name: Retain native checks including failures
         if: always()
@@ -272,6 +364,7 @@ jobs:
           path: .runtime/riu-package-native/
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: riu-validation-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           if-no-files-found: error

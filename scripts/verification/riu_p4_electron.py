@@ -25,7 +25,7 @@ import uuid
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
-from desktop_process import launch_options, stop_process, wait_for_packaged_page
+from desktop_process import launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
 FIXTURE = REPO / "scripts/verification/fixtures/riu-p4/view.html"
 
 
@@ -160,6 +160,7 @@ def main():
                     sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
                 process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options(visible=args.keep_open))
                 browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
+                page.set_viewport_size({"width": 1280, "height": 800})
                 page.wait_for_selector(".session-item", timeout=120000)
                 page.wait_for_load_state("domcontentloaded")
                 page.locator("textarea[aria-autocomplete=list]").wait_for(state="visible", timeout=60000)
@@ -365,7 +366,7 @@ def main():
             report["source_retrieval"] = {"fixture_source_evidence_request_indices": source_evidence, "full_html_request_indices": full_html_requests, "note": "Initial generation and explicit revisions may retrieve original workspace source snippets through FastContext. This is distinct from reattaching a registered artifact or private runtime state."}
             check("private-ui-state-and-html-not-in-followups", private_sentinel not in captured and "RIU_P4_PRIVATE_HTML" not in followup and not full_html_requests)
             # Exercise the shipped plain-text client, not a renderer mock.
-            cli = subprocess.run([str(args.exe.resolve().parent / ("reverie.exe" if os.name == "nt" else "reverie")), str(workspace), "--no-index", "--prompt", "RIU_P4_GENERATE plain text client", "--report-file", str(output / "plain-client.json")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            cli = subprocess.run([str(packaged_kernel_path(args.exe)), str(workspace), "--no-index", "--prompt", "RIU_P4_GENERATE plain text client", "--report-file", str(output / "plain-client.json")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             (output / "plain-client.txt").write_text(cli.stdout + cli.stderr, encoding="utf-8")
             plain = json.loads((output / "plain-client.json").read_text(encoding="utf-8")) if (output / "plain-client.json").is_file() else {}
             plain_serialized = json.dumps(plain, ensure_ascii=False)

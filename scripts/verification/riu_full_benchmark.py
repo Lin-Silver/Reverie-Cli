@@ -56,11 +56,9 @@ def complete_report(path):
 
 def request_tool_scope_matches(request):
     sys.path.insert(0, str(ROOT/'ReverieCli-py'))
-    from reverie.agent.agent import _is_self_contained_static_rich_answer_prompt
+    from reverie.agent.agent import _static_rich_answer_history
     payload = json.loads(Path(request['request']).read_text(encoding='utf-8'))
-    prompt = next((m.get('content', '') for m in reversed(payload.get('messages', []))
-                   if m.get('role') == 'user'), '')
-    expected = 0 if _is_self_contained_static_rich_answer_prompt(prompt) else 27
+    expected = 0 if _static_rich_answer_history(payload.get('messages', [])) else 27
     return request.get('tools') == expected and len(payload.get('tools', [])) == expected
 
 
@@ -122,7 +120,9 @@ def main():
         for fixture in ['riu-natural-tasks.json', 'riu-rich-answer-tasks.json']:
             shutil.copy2(ROOT/'scripts/verification/fixtures'/fixture, output/'fixtures'/fixture)
         exe = args.exe.resolve() if args.exe else ROOT/'ReverieCli-ui/release/linux-unpacked/ReverieUI'
-        core = exe.parent/('reverie.exe' if os.name == 'nt' else 'reverie')
+        payload = exe.parent.parent if sys.platform == 'darwin' else exe.parent
+        core = payload/('reverie.exe' if os.name == 'nt' else 'reverie')
+        app_archive = payload/('Resources' if sys.platform == 'darwin' else 'resources')/'app.asar'
         manifest = dict(created_at_utc=now(), formal=args.formal, models=args.models, attempts=args.attempts,
                         scope='Automatic model acceptance only; visual/manual reviews and platform installation acceptance remain separate.',
                         tasks=RICH_TASKS if args.rich_development else TASKS, rich_development=args.rich_development,
@@ -132,7 +132,7 @@ def main():
                         verification_settings_sha256=settings_digest(),
                         driver_sha256=digest(__file__), sources=json.loads(args.source_manifest.read_text()),
                         frozen_sha256={name:digest(output/name) for name in ['riu_quality_benchmark.py','riu_rich_answer_benchmark.py','desktop_process.py','fixtures/riu-natural-tasks.json','fixtures/riu-rich-answer-tasks.json']},
-                        binaries={str(p):digest(p) for p in [exe,core,exe.parent/'resources/app.asar']})
+                        binaries={str(p):digest(p) for p in [exe,core,app_archive]})
         manifest['fixed_manual_review_ids'] = [f'model-{index+1}-{task}-1'
             for task in TASKS if task != 'text' for index in range(len(args.models))] if args.formal else []
         manifest['evidence_sha256'] = {str(p.resolve()): digest(p)

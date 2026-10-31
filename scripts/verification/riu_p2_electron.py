@@ -119,6 +119,7 @@ def main():
             port = sock.getsockname()[1]
         process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
         browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
+        page.set_viewport_size({"width": 1280, "height": 900})
         page.wait_for_selector(".session-item", timeout=120000)
         page.wait_for_load_state("domcontentloaded")
         page.locator('textarea[aria-autocomplete="list"]').wait_for(state="visible")

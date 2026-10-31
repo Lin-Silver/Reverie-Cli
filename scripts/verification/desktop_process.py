@@ -1,8 +1,17 @@
 """Own only the isolated Desktop process tree launched by a verifier."""
 import os
+from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
+
+
+def packaged_kernel_path(executable):
+    directory = Path(executable).resolve().parent
+    if sys.platform == 'darwin':
+        directory = directory.parent
+    return directory / ('reverie.exe' if sys.platform == 'win32' else 'reverie')
 
 
 def launch_options(*, visible=False):

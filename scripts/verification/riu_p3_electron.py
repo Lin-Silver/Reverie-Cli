@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
-from desktop_process import launch_options, stop_process, wait_for_packaged_page
+from desktop_process import launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
 SECRET = "PRIVATE_META_MUST_NEVER_REACH_MODEL"
 
 
@@ -146,7 +146,7 @@ def main():
         panel.get_by_role("button", name=decision, exact=True).click()
 
     try:
-        hello = subprocess.run([str(args.exe.resolve().parent / ("reverie.exe" if os.name == "nt" else "reverie")), "--sdk-bridge"],
+        hello = subprocess.run([str(packaged_kernel_path(args.exe)), "--sdk-bridge"],
                                input=json.dumps({"id": "p3-hello", "action": "hello"}) + "\n",
                                text=True, encoding="utf-8", capture_output=True, env=env, cwd=workspace,
                                timeout=60, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -158,6 +158,7 @@ def main():
             with socket.socket() as sock: sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
             process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
             browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
+            page.set_viewport_size({"width": 1280, "height": 900})
             context = page.context
             context.add_init_script("window.__p3wire=[];addEventListener('message',e=>{if(window.__p3wire.length<256)window.__p3wire.push(e.data)});")
             page.wait_for_selector(".session-item", timeout=120000)

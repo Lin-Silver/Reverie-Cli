@@ -163,6 +163,7 @@ print(0)
                                         f'--remote-debugging-port={port}'], env=env, stdout=log,
                                        stderr=subprocess.STDOUT, **launch_options())
             browser, page = wait_for_packaged_page(playwright, process, port)
+            page.set_viewport_size({'width': 1280, 'height': 900})
             page.on('pageerror', lambda error: report['browser_errors'].append(str(error)))
             page.wait_for_selector('textarea[aria-autocomplete=list]', timeout=120000)
             page.locator('.session-item').filter(has_text=session.name).click(timeout=60000)

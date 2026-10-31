@@ -1,9 +1,0 @@
-
-> reverie@2.5.0 typecheck
-> npm run check:i18n && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit
-
-
-> reverie@2.5.0 check:i18n
-> node scripts/check-i18n-keys.mjs
-
-i18n keys resolved (1046 translations, 82 templates).

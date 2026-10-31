@@ -1,5 +1,0 @@
-_imagingtk.cpython-312-x86_64-linux-gnu.so 47000 bytes
-_imagingmath.cpython-312-x86_64-linux-gnu.so 167696 bytes
-_imagingft.cpython-312-x86_64-linux-gnu.so 331169 bytes
-_imagingcms.cpython-312-x86_64-linux-gnu.so 157841 bytes
-_imaging.cpython-312-x86_64-linux-gnu.so 3365761 bytes

@@ -1,9 +1,0 @@
-  • electron-builder  version=26.15.3 os=6.18.55
-  • loaded configuration  file=package.json ("build" field)
-  • skipped dependencies rebuild  reason=npmRebuild is set to false
-  • packaging       platform=linux arch=x64 electron=41.2.1 appOutDir=/dev/shm/riu-clean-package-20261027/.runtime/package-v12-deb/linux-unpacked
-  • downloaded      label=electron progress=100%
-  • downloaded electron zip extracted successfully  output=/dev/shm/riu-clean-package-20261027/.runtime/package-v12-deb/linux-unpacked
-  • searching for node modules  pm=npm searchDir=/dev/shm/riu-clean-package-20261027/ReverieCli-ui
-  • cannot find path for dependency  dependencies=["@rolldown/pluginutils@undefined","node-addon-api@undefined","scheduler@undefined","@types/hast@undefined","@types/mdast@undefined","devlop@undefined","hast-util-to-jsx-runtime@undefined","html-url-attributes@undefined","mdast-util-to-hast@undefined","remark-parse@undefined","remark-rehype@undefined","unified@undefined","unist-util-visit@undefined","vfile@undefined","mdast-util-gfm@undefined","micromark-extension-gfm@undefined","remark-stringify@undefined"]
-  • building        target=deb arch=x64 file=/dev/shm/riu-clean-package-20261027/.runtime/package-v12-deb/Reverie-2.5.0-linux-x64.deb

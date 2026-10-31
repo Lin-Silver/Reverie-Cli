@@ -1,3 +1,0 @@
-  • electron-builder  version=26.15.3 os=6.18.55
-  • loaded configuration  file=package.json ("build" field)
-  • building        target=deb arch=x64 file=/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-launcherfix-20261027/mounted-output-retry6/Reverie-2.5.0-linux-x64.deb

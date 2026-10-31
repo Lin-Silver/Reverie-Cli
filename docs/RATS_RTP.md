@@ -11,7 +11,7 @@ Last reconciled with the local worktree: **2026-10-05**. The built-in production
 registry contains one entry: `reverie.engine` (Reverie Engine). Users can also
 explicitly declare custom providers; these are validated into the effective
 registry and are not additional verified Reverie products. See
-[Feature Status](FEATURE_STATUS.md) for current integration evidence and limits.
+
 The Engine starts its loopback service with the editor, but Reverie CLI does not
 show it until a registered executable-local descriptor passes a live identity
 handshake and does not enable any native tool until the user explicitly turns
@@ -72,7 +72,7 @@ this is not an open local-server catalog. But the layer that ties a descriptor
 to a specific product binary and a specific running process exists only on
 Windows. This is a deliberate degradation rather than a per-platform
 implementation, and it is registered as gap G28 in
-[Feature Status](FEATURE_STATUS.md); the Windows-only regression gating that
+
 hides it from other platforms is G29. Treat non-Windows RATS as unaccepted.
 
 For every parsed RTP response, the Python client requires an exact echoed
@@ -239,8 +239,8 @@ sessions, streamed RTP task events, and remote transports also remain open and
 must not be presented as complete.
 
 Provider-neutral dispatch, custom definitions and persisted permission classes
-are implemented. The [2026-10-05 audit](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05)
+are implemented.
 includes fresh runtime/contract regression results; the unconfigured real Engine
 E2E was skipped, so older live-provider results above are not current acceptance.
-The earlier [provider-generalization handoff](DEVELOPMENT_HISTORY.md#rats-provider-generalization-handoff)
+
 is historical context, not an unstarted cleanup task.

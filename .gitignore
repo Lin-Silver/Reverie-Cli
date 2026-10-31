@@ -81,3 +81,20 @@ Reverie UI/artifacts/
 /ReverieCli-ui/release/
 /.audit/
 /context-engine-benchmark/
+
+# Local agent instructions and private development records.
+/.local-development/
+/design-qa.md
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+[Aa][Gg][Ee][Nn][Tt].[Mm][Dd]
+CLAUDE.md
+GEMINI.md
+/docs/CLOUD_CODEX_RIU_HANDOFF.md
+/docs/CONTINUE_RIU.md
+/docs/DEVELOPMENT_HISTORY.md
+/docs/FEATURE_STATUS.md
+/docs/INTELLIGENT_UI_SPEC.md
+/docs/RIU_COMPLETION_PLAN.md
+/docs/ROADMAP.md
+/docs/VERIFICATION_HISTORY.md
+/docs/verification/

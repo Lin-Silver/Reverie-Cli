@@ -2,7 +2,7 @@
 
 This guide covers the practical local-development workflow for Reverie CLI.
 
-Commands in Local Setup and Tests run from the repository root. Current capability limits are in [Feature Status](FEATURE_STATUS.md), and completion gates are in [Roadmap](ROADMAP.md).
+Commands in Local Setup and Tests run from the repository root.
 
 ## Local Setup
 
@@ -29,7 +29,7 @@ measuring symbol or dependency extraction for those languages. Python, Lua,
 GDScript, configuration, document and script files use this repository's own
 parsers and are unaffected. `.zig` is claimed by the parser but has no grammar
 dependency and no parse path in either mode, so it yields an empty result with
-no error. See G30–G31 in [Feature Status](FEATURE_STATUS.md).
+no error.
 
 If you plan to exercise `/tti`, install its optional dependency set separately:
 
@@ -85,9 +85,9 @@ mypy ReverieCli-py/reverie
 black --check ReverieCli-py/reverie
 ```
 
-Vitest defaults to two workers and a 15-second test timeout so Windows subprocess / Git tests fit their actual execution time. Desktop test TEMP/TMP are kept under `ReverieCli-ui/.runtime/test-temp`; pytest's default base temp is a unique repository `.runtime/pytest-<pid>` directory. Python tests isolate the app root, and Skill discovery fixtures that require a fixed catalog also isolate the home directory. Tests must not replace a live profile or write verification artifacts to Desktop. Record skips, full-suite failures and fixture limitations explicitly; historical [audit failures](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05) and [later repair results](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05) are separate evidence.
+Vitest defaults to two workers and a 15-second test timeout so Windows subprocess / Git tests fit their actual execution time. Desktop test TEMP/TMP are kept under `ReverieCli-ui/.runtime/test-temp`; pytest's default base temp is a unique repository `.runtime/pytest-<pid>` directory. Python tests isolate the app root, and Skill discovery fixtures that require a fixed catalog also isolate the home directory. Tests must not replace a live profile or write verification artifacts to Desktop.
 
-The Python suite's pass/skip totals are host-specific. Eleven `skipif` gates require `os.name == "nt"` or `platform.system() == "Windows"` — RATS provider identity and process-image validation, the real Engine E2E, Blender portable deployment, `taskkill` termination and Windows drive-path normalization — and three more tests branch on the platform inside the test body. A published total such as "1761 passed / 1 skipped" is a Windows figure; always name the host when quoting one, and do not read a non-Windows run's higher skip count as equivalent coverage. See G29 in [Feature Status](FEATURE_STATUS.md).
+The Python suite's pass/skip totals are host-specific. Eleven `skipif` gates require `os.name == "nt"` or `platform.system() == "Windows"` — RATS provider identity and process-image validation, the real Engine E2E, Blender portable deployment, `taskkill` termination and Windows drive-path normalization — and three more tests branch on the platform inside the test body. A published total such as "1761 passed / 1 skipped" is a Windows figure; always name the host when quoting one, and do not read a non-Windows run's higher skip count as equivalent coverage.
 
 Provider cancellation tests use real loopback HTTP sockets, SDK clients and curl, including requests stalled before headers and inside body/stream reads. They assert that both the caller and upstream connection stop; cancelling a future alone is insufficient. Keep SSE keepalive, bounded early-close, retry interruption and preflight compression/auth requests covered when changing transport code. Packaged Electron tests must also exercise renderer CSP, actual file upload/crop, persistence and IPC; jsdom image/canvas mocks cannot verify those paths.
 
@@ -139,9 +139,9 @@ That packaged executable is intended to carry the built-in Reverie-Gamer flows i
 
 ## Documentation Maintenance
 
-The 2026-10-08 consolidation uses [docs/README.md](README.md) as the navigation entry. Current capability, priorities and release notes belong in `FEATURE_STATUS.md`, `ROADMAP.md` and `changelog.md` respectively. New RIU implementation follows [INTELLIGENT_UI_SPEC.md](INTELLIGENT_UI_SPEC.md), including its packaged isolation gate; the document itself is not implementation evidence.
+The 2026-10-08 consolidation uses [docs/README.md](README.md) as the navigation entry. Current capability, priorities and release notes belong in `FEATURE_STATUS.md`, `ROADMAP.md` and `changelog.md` respectively.
 
-Append dated audits and runtime evidence to [VERIFICATION_HISTORY.md](VERIFICATION_HISTORY.md), and obsolete decisions/specifications/handoff prompts to [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md). Keep the date, host, command, test scope, failures, skipped paths and local-artifact limits. Keep original machine-readable JSON evidence in `docs/verification/`; do not replace it with a prose summary. Avoid adding another top-level dated report for each iteration.
+Keep the date, host, command, test scope, failures, skipped paths and local-artifact limits. Keep original machine-readable JSON evidence in `docs/verification/`; do not replace it with a prose summary. Avoid adding another top-level dated report for each iteration.
 
 Before removing a superseded document, migrate its unique content, add a stable destination anchor, update incoming links and run the documentation checker. Do not remove third-party Skill resources, license notices or upstream changelogs as product-document duplicates. New release entries must have one version heading; same-version updates are dated subsections and unverified releases remain Unreleased.
 
@@ -150,12 +150,10 @@ When you change user-facing behavior, update the docs in the same change:
 - `README.md` for the English project overview and onboarding
 - `docs/README.md` for document navigation and evidence classification
 - `docs/README.zh-CN.md` for the Chinese onboarding guide
-- `docs/FEATURE_STATUS.md` for current implementation, gaps, explicit exclusions and evidence limits
 - `docs/DESKTOP_GUIDE.md` and `docs/SKILLS.md` for Desktop dispatch, Skills and persistence boundaries
 - `docs/CONFIGURATION.md` for config and runtime-storage changes
 - `docs/CLI_COMMANDS.md` for command reference
 - `docs/engine/reverie_engine_user_guide.md` for `/engine` behavior
-- `docs/ROADMAP.md` for all planned product work and completion gates
 - `docs/changelog.md` for release-facing summaries when appropriate
 
 If the change affects command wording, also update `ReverieCli-py/reverie/cli/help_catalog.py`. Check actual dispatch in `commands.py` / `__main__.py` and Desktop's `App.tsx` / `sdk_bridge.py`; listing a command in the catalog does not implement it.
@@ -173,4 +171,3 @@ Keep dated reports as dated evidence. Link newly closed gaps to an actual test/b
 - Do not document helper scripts unless they are verified and maintained.
 - If a feature depends on optional credentials or local caches, say that clearly in the docs.
 - Keep the English and Chinese README files aligned on installation, quick-start, and storage behavior.
-- Keep game-development roadmap material out of code comments and feature guides; planned work belongs only in `docs/ROADMAP.md`.

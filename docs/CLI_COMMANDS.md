@@ -128,7 +128,7 @@ Raw stream frames (`[[REVERIE_EVENT]]{...}`) are internal protocol details rende
 | `/tti source <source>` | Select a TTI source; `/tti source pollinations` prompts for its API key when needed |
 | `/tti <prompt>` | Generate an image using the default TTI model |
 
-MCP discovery runs silently in the background. After discovery, dynamic tools and the `list_mcp_resources` / `read_mcp_resource` tools can use healthy servers. `/mcp status` reports how many prompts a server listed, but Reverie currently has no `prompts/get` action to render one into chat; server prompt templates are not model guidance. Catalog pagination and other MCP client features also have documented limits in the [configuration guide](CONFIGURATION.md#mcp-server-connections) and [feature status](FEATURE_STATUS.md). Pending and failed servers remain excluded. `/mcp status` and its refresh UI read the cached health snapshot without blocking the terminal on network checks.
+MCP discovery runs silently in the background. After discovery, dynamic tools and the `list_mcp_resources` / `read_mcp_resource` tools can use healthy servers. `/mcp status` reports how many prompts a server listed, but Reverie currently has no `prompts/get` action to render one into chat; server prompt templates are not model guidance. Pending and failed servers remain excluded. `/mcp status` and its refresh UI read the cached health snapshot without blocking the terminal on network checks.
 
 `/CE` is case-sensitive.
 

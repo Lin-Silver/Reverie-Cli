@@ -35,7 +35,7 @@ Reverie Engine is an alpha runtime. Its capability report deliberately separates
 
 The Python API `reverie.engine.run_project(..., headless=False)` opens the native window when Pyglet and ModernGL can create the host graphics context. Initialization failure is reported explicitly; it does not silently switch to headless execution. The loop pumps events, applies the actual window viewport, presents frames, and releases graphics/audio/window resources on close or errors. Deterministic validation can continue using `headless=True`; `/engine smoke` remains a headless validation command.
 
-The [2026-10-05 repair report](../VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05) records a real Windows sample presentation, key and pointer events, resize and clean close. The visible sample used a placeholder texture and an explicitly scaled sprite; that evidence does not establish production art, advanced rendering, physical-device audio or Cubism character rendering.
+The visible sample used a placeholder texture and an explicitly scaled sprite; that evidence does not establish production art, advanced rendering, physical-device audio or Cubism character rendering.
 
 ## Standard Project Layout
 
@@ -140,5 +140,3 @@ When content changes in a Reverie Engine project, the preferred baseline is:
 6. `/modeling ashfox validate` when using the live Ashfox MCP workflow
 
 That keeps the engine layout, content registry, and active model-authoring workflow in sync.
-
-Planned runtime and Gamer work is maintained in the project [Roadmap](../ROADMAP.md).

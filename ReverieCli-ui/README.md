@@ -2,15 +2,12 @@
 
 Reverie Desktop is the Electron GUI for the existing Reverie CLI. It does not reimplement providers or tools in JavaScript: the desktop process starts the platform-native compiled kernel with `--sdk-bridge` and communicates with it over a versioned JSONL protocol.
 
-Current stable version: `v2.5.0` (released 2026-07-17).
 
-The current user flow is documented in the [Desktop guide](../docs/DESKTOP_GUIDE.md). The [2026-10-05 feature status](../docs/FEATURE_STATUS.md) and [audit](../docs/VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05) supersede outdated completeness claims below; implementation and acceptance remain separate.
+The current user flow is documented in the [Desktop guide](../docs/DESKTOP_GUIDE.md).
 
-The 2026-09-30 desktop workflow has an [S01–S21 implementation and acceptance report](../docs/VERIFICATION_HISTORY.md#reverie-cli-implementation-report-2026-09-30) with packaged evidence and remaining model, authorization and native-IME checks. Dated reports describe their own build/worktree state; current uncommitted changes and published releases must be assessed separately.
 
-The [2026-10-06 Workbench repair](../docs/VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06) combines the inspector and Workbench into one resizable panel, adds a lazy file tree and guarded UTF-8 editor, and exposes persisted display presets directly in the conversation header. Unchanged recovery snapshots reuse Git objects. The report distinguishes local preparation time from provider response time.
 
-The [2026-10-10 memory update](../docs/VERIFICATION_HISTORY.md#desktop-memory-2026-10-10) removes idle-startup worker preparation and postpones automatic indexing until use. One completed worker can be reused for 30 seconds, then is released; up to four active runs remain isolated. Desktop's internal `ui-onedir` kernel is separate from the public one-file CLI/TUI download, which runs without Electron or a companion runtime directory. See the [CLI/TUI/GUI relationship](../README.md#cli-tui-and-desktop-gui).
+One completed worker can be reused for 30 seconds, then is released; up to four active runs remain isolated. Desktop's internal `ui-onedir` kernel is separate from the public one-file CLI/TUI download, which runs without Electron or a companion runtime directory. See the [CLI/TUI/GUI relationship](../README.md#cli-tui-and-desktop-gui).
 
 The composer supports structured attachment drafts, image clipboard input, file references, Queue/Steer/Stop and a goal summary. The Workbench contains full Git scopes, guarded file/hunk operations, whole-index commit, reviewed ordinary push, read-only review, local previews (including locally rendered PDF pages), session-owned real PTYs, explicit project actions, durable run records, notifications and effective capabilities. Managed local worktrees use detached HEAD and recoverable byte-preserving archive/restore. Independent cores coordinate writers with identical project roots; parent/child roots in the same checkout remain a known gap. Saved idle goals are not yet reliably supplied to the next model run. No Local/Cloud selector is added.
 

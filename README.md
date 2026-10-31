@@ -1,14 +1,13 @@
 # Reverie CLI
 
-RIU development continues on `dev`; see the [continuation guide](docs/CONTINUE_RIU.md) for the current goal, retained evidence and open package/platform checks. The latest Linux launcher source fix still needs a verified rebuilt installer.
+Start with the [documentation index](docs/README.md), [Desktop guide](docs/DESKTOP_GUIDE.md), and [version history](docs/changelog.md).
 
-Start with the [documentation index](docs/README.md), [complete version history](docs/changelog.md), and [Intelligent UI implementation and protocol scope](docs/INTELLIGENT_UI_SPEC.md). Reverie Desktop implements offline interactive views with inline, fullscreen and picture-in-picture presentation. Real-model generation quality and platform acceptance remain separately tracked in [feature status](docs/FEATURE_STATUS.md).
 
-Current source version: **v2.5.3**. See [release verification](docs/verification/2026-10-31-v2.5.3/README.md) for tested scope and remaining RIU acceptance limits.
+Reverie Desktop implements offline interactive views with inline, fullscreen and picture-in-picture presentation.
 
-Current working-tree behavior and remaining gaps were reviewed on **2026-10-26**. Start with the [documentation index](docs/README.md), [feature status](docs/FEATURE_STATUS.md), [Desktop guide](docs/DESKTOP_GUIDE.md), and [roadmap](docs/ROADMAP.md). The dated audit distinguishes implementation from completed acceptance; local updates are not necessarily published releases.
+Current source version: **v2.5.3**.
 
-Updated **2026-10-10**: lower desktop startup memory, refreshed Agnes/ModelScope text models, transparent thought blocks, an About repository link, and a standalone Windows CLI EXE. See [the measured results](docs/VERIFICATION_HISTORY.md#desktop-memory-2026-10-10).
+
 
 **Reverie** is an open-source agentic coding assistant with terminal and Electron desktop interfaces for natural language interaction with your local codebase. Both use the Python core's multi-provider LLM access, Context Engine retrieval, sessions and tools; Desktop adds project/chat navigation, structured input, Git review and runtime evidence surfaces. Optional 3D/game, media and browser workflows have the boundaries documented below.
 
@@ -23,12 +22,10 @@ Updated **2026-10-10**: lower desktop startup memory, refreshed Agnes/ModelScope
 - **Inline media**: Attach images and video directly in conversations
 - **Image generation**: Choose local or remote image models in Desktop Settings → Image models. Pollinations generation requires an API key; SenseNova editing chooses its output dimensions automatically unless `size` is specified.
 - **Experimental integrations**: Blender, Blockbench, legacy Godot/O3DE migration, Ashfox MCP, image/video generation, and agent-operated browser automation
-- **Browser automation**: The Python core exposes a Chromium-based browser-control tool. The Desktop app does not include an interactive browser tab panel; see the [recorded scope](docs/FEATURE_STATUS.md).
 - **Subagent delegation**: Parallel investigation and implementation tasks
 - **Harness audit**: Prompt-level reporting, verification tracking, playbook recommendations
 - **Specialist runtime plugins**: Ren'Py and Live2D/Cubism Galgame workflows are delivered through plugin-owned `rc_*` tools, skills, and prompt guidance
 - **Skills**: Progressive `SKILL.md` discovery and `/skill <name>` mandatory prompt guidance, with pin tags in CLI/Desktop. Bundled skills include `photo-to-3d` and all 14 Emil Kowalski design skills, including Apple Design. Desktop ordinary session/restart restoration is implemented; fork/rotation, standalone CLI restoration, and per-turn inspection enforcement have [documented limits](docs/SKILLS.md).
-- **Roadmap**: Planned CLI, Desktop, provider, runtime and Gamer work is maintained in [one roadmap](docs/ROADMAP.md)
 
 ---
 
@@ -59,7 +56,6 @@ Updated **2026-10-10**: lower desktop startup memory, refreshed Agnes/ModelScope
 
 Reverie supports a wide range of LLM providers out of the box. Each provider has its own configuration section in `config.json`:
 
-
 | Provider           | Description                                                                                                     | Key Models                                                                                                                                                                                  |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | DeepSeek V4.1 Flash, GLM 5.3 Flash, Step 5 Preview, Nemotron 3.5 Super VL/Lightning, Muse Glimmer 30B, Nemotron 3 Super/Ultra, GPT-OSS-20B, Laguna XS 2.1 |
@@ -71,7 +67,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
 | **Custom**         | Any endpoint you add with `/provider add` - OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages     | Read live from the provider's own model-list endpoint                                                                                                                                        |
 
-Provider transports support streaming where their model and endpoint implement the required protocol. A listed model, HTTP 200, or availability probe does not prove working content, complete SSE, tool calls or vision. Reasoning/thinking toggles, temperature, top_p, max_tokens, and other parameters are configurable per provider; [current compatibility limits](docs/FEATURE_STATUS.md) and the [JDW sample](docs/VERIFICATION_HISTORY.md#reverie-cli-jdw-compatibility-2026-10-04) are recorded separately.
+Provider transports support streaming where their model and endpoint implement the required protocol. A listed model, HTTP 200, or availability probe does not prove working content, complete SSE, tool calls or vision.
 
 Use `/provider list` to see every source at once with its API-key flag and a parallel availability probe, and `/provider add` to register your own gateway from four fields: name, base URL, API key, and API request format.
 
@@ -103,7 +99,6 @@ Cache keys contain hashes of the model, stable system prefix, and tool schema ra
 ### Operating Modes
 
 Reverie ships with specialized modes that change tooling, system prompt rules, and domain focus:
-
 
 | Mode                  | Display Name        | Description                                                                                                                                                                                                       |
 | --------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -266,7 +261,7 @@ All three use the same Python core for providers, tools, permissions, sessions, 
 
 Download the [standalone CLI EXE](https://github.com/Lin-Silver/Reverie-Cli/releases/download/latest/reverie.exe) for terminal-only use. The one-file executable embeds its Python dependencies and extracts them to a temporary directory while running. It needs no external Python installation; normal configuration, session data, and optional tool resources are still written when used. GUI portable packaging is a separate download and manages its extracted application files under `.reverie/desktop/app-runtime`.
 
-Desktop startup creates one administration kernel and starts chat workers on demand. It postpones automatic indexing until a chat needs it or you explicitly request indexing. At most one completed chat worker stays warm for 30 seconds; active chats remain isolated with up to four concurrent workers. This bounds idle kernel retention; memory during active work still depends on workspace and conversation size. Windows measurements and their scope are recorded in [verification history](docs/VERIFICATION_HISTORY.md#desktop-memory-2026-10-10).
+Desktop startup creates one administration kernel and starts chat workers on demand. It postpones automatic indexing until a chat needs it or you explicitly request indexing. At most one completed chat worker stays warm for 30 seconds; active chats remain isolated with up to four concurrent workers. This bounds idle kernel retention; memory during active work still depends on workspace and conversation size.
 
 ### Install from Source (Python)
 
@@ -443,7 +438,6 @@ Reverie uses the shared or project profile under the selected app root, as descr
 
 ### Configuration Options
 
-
 | Key                       | Type   | Default      | Description                                                                                                                 |
 | ------------------------- | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `aihubmix`, `agnes`, `webgemini`, `opencode`, `custom` |
@@ -511,7 +505,6 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 11 supporte
 
 **Model catalog (hardcoded in `reverie/nvidia.py`):**
 
-
 | Model ID                                         | Display Name                     | Transport  | Vision       | Thinking                            | Context |
 | ------------------------------------------------ | -------------------------------- | ---------- | ------------ | ----------------------------------- | ------- |
 | `meta/muse-glimmer-30b`                          | Muse Glimmer 30B                 | openai-sdk | ✅           | effort (none/min/low/med/high/max)  | 131K    |
@@ -543,7 +536,6 @@ NVIDIA's hosted API at `integrate.api.nvidia.com` provides access to 11 supporte
 
 ModelScope is integrated through its **OpenAI Chat Completions** endpoint at `https://api-inference.modelscope.cn/v1`. The built-in catalog in `reverie/modelscope.py` is the single capability source consumed by both the runtime and desktop GUI:
 
-
 | Model ID                        | Display Name      | Context   | Reasoning choices      | Vision |
 | ------------------------------- | ----------------- | --------- | ---------------------- | ------ |
 | `Tencent-Hunyuan/Hy3`           | Hy3               | 262,144   | no-think, low, high    | ❌     |
@@ -571,7 +563,6 @@ Connects to ChatGPT's backend API. Supports:
 
 [SenseTime SenseNova](https://www.sensenova.cn/) with model-specific OpenAI/Anthropic-compatible transports at `https://token.sensenova.cn`:
 
-
 | Model ID                   | Display Name             | Context   | Thinking    | Vision |
 | -------------------------- | ------------------------ | --------- | ----------- | ------ |
 | `deepseek-v4-flash`        | DeepSeek V4 Flash        | 1,000,000 | ✅ (effort) | ❌     |
@@ -582,7 +573,6 @@ Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
 ### AIHubMix
 
 Third-party API gateway (OpenAI-compatible) at `https://aihubmix.com/v1`:
-
 
 | Model ID            | Display Name      | Reasoning Variant |
 | ------------------- | ----------------- | ----------------- |
@@ -595,7 +585,6 @@ Third-party API gateway (OpenAI-compatible) at `https://aihubmix.com/v1`:
 ### Agnes
 
 Agnes AI OpenAI-compatible API at `https://apihub.agnes-ai.com/v1`. Reverie classifies the provider's live `/models` response into LLM, text-to-image (TTI), and text-to-video (TTV) catalogs, then exposes only media models that have a local execution profile:
-
 
 | Modality | Model ID                | Display Name          | Key capability                   |
 | -------- | ----------------------- | --------------------- | -------------------------------- |
@@ -615,7 +604,6 @@ If live discovery is unavailable, Reverie falls back to this verified built-in c
 ### WebGemini
 
 Anonymous Gemini Web access via `gemini.google.com`. Models are selected by mode and thinking parameters:
-
 
 | Model ID                         | Display Name                   | Mode | Think | Max Output |
 | -------------------------------- | ------------------------------ | ---- | ----- | ---------- |
@@ -660,7 +648,6 @@ Options:
 ```
 
 ### Interactive Commands
-
 
 | Command                | Description                 |
 | ---------------------- | --------------------------- |
@@ -717,7 +704,6 @@ codebase-retrieval(query_type="lsp", query="reverie/agent/agent.py", lsp_action=
 ```
 
 ### Query Types
-
 
 | `query_type`   | Use Case                                      |
 | -------------- | --------------------------------------------- |

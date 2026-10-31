@@ -11,7 +11,7 @@ export const MAX_VIEW_BUNDLE_BYTES = 8 * 1024 * 1024;
 export const MAX_VIEW_PATH_SEGMENTS = 8;
 export const MAX_VIEW_PATH_LENGTH = 512;
 
-/** Offline response policy from docs/INTELLIGENT_UI_SPEC.md 4.3. Inline script runs inside the view, never in the host. */
+/** Offline response policy. Inline script runs inside the view, never in the host. */
 export const VIEW_CONTENT_SECURITY_POLICY = [
   "default-src 'none'", "script-src 'unsafe-inline'", "style-src 'unsafe-inline'",
   "img-src data: blob:", "font-src 'none'", "media-src data: blob:",

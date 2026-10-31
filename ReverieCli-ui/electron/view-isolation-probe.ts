@@ -1,5 +1,5 @@
 /**
- * Pass/fail gate for the packaged isolation probe described in docs/INTELLIGENT_UI_SPEC.md 4.3.
+ * Pass/fail gate for the packaged offline-view isolation probe.
  *
  * Deliberately free of Electron imports: the gate is pure data so the same function
  * judges a report written by the packaged application and one replayed from disk.

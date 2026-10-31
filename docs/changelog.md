@@ -1,56 +1,25 @@
 # Changelog
 
-## 2.5.3 — 2026-10-31
+<a id="v2-5-3"></a>
 
-本次正式版本汇总 **v2.5.0 标签 `9035bc8` 之后**的累计改动，包括历史上仍以 2.5.0 版本号开发的更新。完整的逐项对照、升级说明和验收边界见 [v2.5.3 Release 说明](releases/v2.5.3.md)；[源码比较](https://github.com/Lin-Silver/Reverie-Cli/compare/v2.5.0...v2.5.3)以不可变标签为准。
+## v2.5.3 — Liquid Glass, RIU, and Desktop
 
-### Added
-
-- 可切换的 Liquid Glass 桌面外观，独立保存经典/玻璃偏好，支持浅色、深色、增强对比度、降低透明度和减少动态效果。
-- RIU 富格式回答与交互视图：指标卡、表格、图片推荐、状态徽标、来源和链接；补充 MCP Apps profile、状态恢复、显示模式切换及生命周期隔离。
-- RATS 多提供方发现与能力协商、RTP 任务工作区和任务生命周期；Reverie Engine 是当前实现的外部提供方。
-- `/provider` 自定义提供商管理、按模型保存上下文窗口、思考模式兼容处理；Desktop 图像模型选择与 SenseNova 编辑入口。
-- 内置设计/动画工作流、技能固定和同名覆盖提示，保留上游授权与来源；Python Engine 增加原生窗口、输入、缩放和关闭路径。
-
-### Changed
-
-- 扩展项目/会话导航、Git 审查、运行终端、上下文及活动等工作台界面；优化长对话加载、会话切换、内存/技能发现及闲置内核回收。
-- Context Engine 修正并行索引与检索边界；上下文占用、压缩阈值和实际发送内容使用一致的统计依据。
-- Windows CLI 改进为无需相邻运行时目录或 Python 安装的独立 EXE；保留桌面内置回退内核和受信任外部内核校验。
-- 刷新提供商模型目录、流式与工具执行兼容性、取消和重试处理；可用性仍取决于具体账户、模型和服务端能力。
-
-### Fixed
-
-- 修复侧栏收缩/反向展开动画、右上角图标对齐、经典模式背景过淡、输入框内部焦点边线、模型选择器等弹窗的材质和圆角裁切；更新助手头像，用户消息只保留头像。见 [UI 验证](verification/2026-10-31-ui-polish/README.md)。
-- 修复浅色增强对比度/降低透明度时的材质优先级、主题切换与草稿恢复；见 [2.5.3 验证](verification/2026-10-31-v2.5.3/README.md)。
-- 修复活动会话重载、会话保存、审批和桌面控制反馈；保留执行、授权、会话锁和私有状态边界。
-- 修复 Git 2.56 无效 gitfile 探测、Linux 默认 release 输出目录、导入技能字节校验、macOS Pyglet 后端和 CI Chromium 环境；见 [CI 修复记录](verification/2026-10-31-ui-polish/ci-fixes.md)。
-
-### Compatibility and known limits
-
-- 跨平台安装包、`--kernel-info`、内核哈希/协议校验和浏览器/电脑控制在 v2.5.0 已存在，本版是延续和修复，不重复列作首次新增。
-- 旧安装保留经典界面；新安装默认 Liquid Glass，可在设置切换。升级前请备份用户配置、会话及自定义资源，分别选择 Windows x64、Linux x64、macOS Apple Silicon 或 Intel 的对应安装包。
-- 自动构建、合成 UI 与单元/集成测试通过，不等于 RIU 正式模型质量、所有平台宿主安装/跨版本升级、物理输入/辅助技术及长时稳定性已全部验收；历史失败和开放门禁继续保留。
-
-2026-10-30：本地 Liquid Glass 与云端 dev `894fe6e` 已整合，保留经典界面和 RIU 富格式路线。Windows 联合目录包与本轮回归证据见[本地整合记录](verification/2026-10-30-desktop-integration/README.md)。此记录不关闭历史模型质量及跨平台安装验收缺口。
-
-2026-10-27 最新补充：当前源码 Linux x64 v12（版本仍为2.5.0，build `fcce0356b0365178`）的 FUSE AppImage 富格式/P2 **86/86、24/24**，提取程序 P3/P4/隔离 **26/31/36**；同一 v12 包另完成60次合成 P4 循环，31/31通过。Deb 在 rootless Bubblewrap 隔离根中、未强制跳过依赖，完成 v11 安装→v12 升级→卸载；宿主未变化，宿主系统级安装/桌面启动仍未验证。Debian 13 只读 APT 依赖模拟通过；仓库包验证脚本对已核验载荷的新 deb/AppImage 输出均以 exit 0 完成。当前源码本地 Qwen3.5-4B 仅完成一份合成 UI 冒烟，正式模型质量样本 **0**。Windows/macOS、实体输入/辅助技术和长时稳定性仍未验收，整体尚未完成。[当前路线](ROADMAP.md)、[验收清单](RIU_COMPLETION_PLAN.md)、[原生与包证据](verification/2026-10-27-static-rich-routing/README.md)。原 `c059be45303a7a67` 及后续失败记录均保留。
-
-2026-10-24：Linux 当前包 **25dc25402c61887e** 已通过源码核对、Python **2284/24**、Desktop **387/1**、原生 P2/P3/P4 **24/26/31** 与隔离 **36**。原正式轮次及 native8 候选的失败保留，质量门仍未通过；当前执行新的完整双模型开发组。数值、原生按钮、框架等待、主题重绘修正及单次性能条件见[本次通用修正和验收](verification/2026-10-21-riu-completion/generic-batch-native9.md)。
-
-Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，按语义版本倒序排列；同一版本只保留一个顶层入口，原始细节与发布后更新继续保留。当前源码版本为 **2.5.3**。
-
-- **Unreleased** 表示当前工作树和后续开发记录，不保证已提交、打包或公开发布。
-- **版本条目日期**保留原日志所记日期；**本地标签日期**是 Git 证据，不等于 GitHub Release 的发布时间。v2.5.3 使用正式标签工作流构建和发布，历史条目的资产状态不据此重新认定。
-- 当时的测试数字、模型可用性、权限行为和路线图属于历史陈述；现在的状态请看 [FEATURE_STATUS](FEATURE_STATUS.md)，实测范围看 [VERIFICATION_HISTORY](VERIFICATION_HISTORY.md)，计划看 [ROADMAP](ROADMAP.md)。
-- 本次保留原有全部版本段落；恢复早期标签基线与废弃开发版本记录。历史文案中的宣传性表述不能视为当前验收结论。
+- Added a switchable Liquid Glass desktop theme with independent appearance preferences, adaptive materials, enhanced contrast, and reduced-motion support.
+- Added RIU rich-answer layouts for metric cards, tables, image recommendations, status badges, sources, and links, with responsive rendering and recoverable interactive views.
+- Expanded the desktop workbench with Git review, terminals, context inspection, activity, structured input, and resumable task history.
+- Added RATS provider discovery and capability negotiation, plus RTP task workspaces and lifecycle management for Reverie Engine integration.
+- Added custom provider management through `/provider`, per-model context limits, reasoning compatibility, and refreshed model catalogs.
+- Expanded desktop image-model selection and SenseNova image editing, and bundled attributed design and animation skills.
+- Improved Context Engine indexing and retrieval, conversation loading, session switching and persistence, skill discovery, and idle-kernel cleanup.
+- Refined sidebar transitions, toolbar alignment, wallpaper visibility, composer focus borders, and rounded dialog surfaces; refreshed the assistant avatar and simplified user messages to avatars.
+- Improved native Python Engine window handling, input, resizing, and shutdown, alongside managed tool execution and desktop-control feedback.
+- Strengthened standalone Windows CLI packaging and fixed Linux package paths, Git 2.56 workspace detection, upstream-file checksums, and cross-platform test runtimes.
 
 ## 版本索引
 
 | 版本 | 原记录日期 | 本地语义版本标签 / 日期 | 更新主题 |
 | --- | --- | --- | --- |
-| [v2.5.3](#253--2026-10-31) | 2026-10-31 | `v2.5.3` | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
-| [Unreleased](#unreleased) | 2026-10-27 更新 | 无新版本标签 | 参考图富格式回答、当前源码 Linux 包续验与跨平台/模型质量待验 |
+| [v2.5.3](#v2-5-3) | 2026-10-31 | `v2.5.3` | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
 | [v2.5.0](#v2-5-0) | 2026-07-17 | `v2.5.0` / 2026-07-17 | Trusted Portable Core and Multi-Platform Releases |
 | [v2.4.0](#v2-4-0) | 2026-07-16 | `v2.4.0` / 2026-07-17 | Desktop, Context Engine, and Release Upgrade |
 | [v2.3.4](#v2-3-4) | 2026-07-06 | `v2.3.4` / 2026-07-06 | Writer, Sources, Memory, and Engine Upgrades |
@@ -95,147 +64,6 @@ Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，�
 
 历史例外见 [日期、缺号与证据说明](#history-provenance)，包括未发布的 2.3.5 开发草案；没有为了补齐编号而编造 2.1.22 / 2.1.23 的更新。
 
-## Unreleased
-
-以下保留原始开发过程记录及当时的状态；已收入 v2.5.3 的交付内容和当前限制以本页顶部版本条目及 Release 说明为准。
-
-### 2026-10-28 — GitHub dev 接续与 Linux 启动器后续门禁
-
-- 用户明确授权将当前仓库改动提交推送到新建 `dev` 分支；不改版本、不发布、不合并主分支。
-- 补齐可克隆的根目录 AGENTS、接续指南、新会话提示词、持久化 goal 和关键原始报告/失败日志/截图；完整本地运行树、安装包及模型缓存继续留在原环境。
-- Linux 启动器解析安装链接后的真实目录，回归覆盖项目目录和参数传递；后续 deb 重建没有得到已验收新包，最后执行记录退出137且原因未确立。保留 v12 的通过结果不覆盖这份后续源码修复。
-- 整体仍有平台、设备、宿主安装、长时稳定性和模型质量缺口；两组正式评估上限不变。[接续说明](CONTINUE_RIU.md)与[本轮证据](verification/2026-10-28-dev-handoff/README.md)。
-
-### 2026-10-27 — 参考图富格式回答与当前源码 Linux 包续验
-
-- 自包含统计卡、总览表和推荐卡请求使用静态富格式回答路由，明确保持每个指标标签和值；其他请求继续使用原工具路径。静态路由契约99/99、Python全量2392/24通过。
-- 当前 Linux x64 v12 包修复冻结 Python 运行时缺少 Pillow `_imaging` 的问题。真实 FUSE AppImage 富格式86/86、P2 24/24；P3/P4/隔离26/31/36；追加60次合成 P4 循环31/31；Deb rootless Bubblewrap 隔离依赖满足状态下完成 v11 安装、v12 升级与卸载，宿主未修改；宿主系统级安装仍未执行。
-- 一次本地 Qwen3.5-4B 合成回答精确呈现指标、表格和推荐卡，在深浅主题、宽窄布局下通过；只属探索性 UI 冒烟，正式模型质量样本仍为0。
-- 保留原 package builder exit1、Xvfb/harness/资源失败。未升级版本、未提交/推送/发布；Windows/macOS、物理辅助技术和正式模型质量仍未验收。
-
-
-### 2026-10-21–22 — 独立任务与 Desktop 作者契约续修（执行中）
-
-- 质量样本使用自己的空 Git 根目录，防止父仓库说明混入自然任务；逐阶段保留失败，生成与修改共享两次正常反馈预算。
-- Desktop 回答形式选择与完整宿主集成示例前置；`render_view` 对明显缺少初始化或状态通道提供非阻断提示，保持模型文件字节、原执行器和 TUI 降级输出。
-- 验证器增加真实进程重启后的全部控件、计算结果和路线选择恢复检查，保留静态标题及陈旧结果误判的回归复现。
-- 增加首屏主要结果、零值读取及派生输入的通用指导；按当前 agent 的来源、模型及凭据记住明确的可选缓存拒绝，避免工具续轮重复 400。
-- 校准表单成功页、末尾输入焦点、整卡选择、排序箭头、CSS 柱状图和异步主题的验证器，旧误报与实际页面缺陷分别保留。
-- Python 全量 2214/24、验证器专项 114、六组重点检查 244；Desktop 387/1、类型、文档及 diff 检查通过。Linux 3824bc06ee6c6e24 与源码匹配，P2/P3/隔离通过；P4 两次输入超限及释放闲置旧包缓存后的第三轮通过分别保留，未改门槛或抹去失败。真实双模型质量门仍待完整执行，见[实施记录](verification/2026-10-21-riu-completion/progress.md)。
-- 补充恢复/纯重算与初始化后用户保存的可执行接线示例、按钮与 SVG 标签的宿主配色。恢复旧会话时，摘要不再混入作者建议；原工具输出、模型收到的建议、原始历史与模型 HTML 均保留。
-- 前置且不重复原有推理指导，保持终端与专用模式提示字节不变；补充卡片/输入/状态配色、可见列表共同筛选和成功页再次编辑指导。新反例覆盖柱顶文字真实背景、合法行内错误、单输入框跳出和 CDP 先于窗口就绪，保留原模型 HTML 与原始失败。
-
-### 2026-10-20–21 — Cloud 原生续验
-
-- 拒绝未闭合的工具参数写入；丢弃流末尾无函数名的工具占位，为有效调用保持稳定 ID；旧空 ID 结果保留在原历史，发送给 API 的副本排除这些无归属结果。删除在 HTTP 错误后自动隐藏工具和工具历史的兼容兜底，原始 400/403/503 失败与复现日志保留。
-
-- 匿名 Chat 复用现有 HTTP 客户端，避免 SDK 密钥前置检查，不发送假密钥。
-- 修复 OpenCode 官方 inference 的目录路由：聊天仍用 `/inference/openai/v1`，模型目录用 `/inference/v1/models`；自定义代理保留原路径与查询参数。身份覆盖的说明不再鼓励冒用官方客户端。
-- 根据真实表单点击复现补充离线作者契约：原生表单提交和模态弹窗不可用，使用本地按钮、页内验证与确认；沙箱权限保持原样。
-- 主模型请求的 SDK/直接 HTTP 重试入口保留 Retry-After 秒数/日期与可取消等待；提供冷却时间的 402 按限流处理，普通支付要求仍失败。
-- Windows 输入测试隔离真实修饰键状态，Linux 也执行中文 CRLF 粘贴回归；tokenizer 验证区分依赖导入与编码数据可加载，原始失败保留。
-- RIU 验证器支持 OpenCode、匿名标准 Chat 与原生 Linux，默认每条质量样本使用独立 profile；录制器保留并转发 Retry-After，保存响应模型和 Content-Type。
-- 验证器明确拒绝将未产生新版本的修改或缺少必需可访问控件算成通过；搬移 iframe 后等待父/子绘制完成再测试指针，保留原始定位及点击失败。目录可独立转发，记录实际匿名状态与非敏感客户端身份。
-- 重建 Linux CLI/目录包，核对冻结代码、manifest、UI 和独立 CLI 信任哈希；未完成的模型与 Windows 验收不据此通过。见 [Cloud 续验](VERIFICATION_HISTORY.md#riu-cloud-runtime-2026-10-20)。
-
-- 明确 pytest 核心导入路径，修复文档中的根目录测试命令收集 core scripts 失败；最终 Python 全量 2103 passed / 24 skipped。
-- 最终单模型 15 个生成样本质量通过 0/15，文本对照 3/3，原失败保留；核实 MiniCPM 免费 API 线索并匿名调用官方 MiniCPM5-2B Gradio/SSE，接口未暴露标准工具调用。见[免费接口核对](verification/2026-10-20-riu-cloud/free-api-search.md)。
-
-### 2026-10-20 — 暂停点与 Cloud 续修
-
-- 交互视图指导根据任务主动选择有帮助的形式，普通问答保留文本；增加初始化结果、控件联动与紧凑布局要求，不以注册成功替代业务验收。
-- Desktop 实际检索时再初始化 Context Engine，空 Harness 提前返回；同一目录/命令成功重跑后解除未解决失败，保留原始历史失败统计。
-- 修复原生思考 Markdown 继承 `pre-wrap` 导致列表之间出现大空白；原文、原生空白记录和代码缩进保留。
-- 增加自然语言任务集及 SenseNova 生产请求录制支持，generation-only 结果明确为 registered_unvalidated。Cloud 后续按用户要求优先使用合法 OpenCode 免费网关并排查各 source 的实际错误。
-- 保存[暂停交接](CLOUD_CODEX_RIU_HANDOFF.md)与本轮原始回归日志；最新代码未重新打包，Python 全量一项时序疑点仍未闭环，不作为发布验收完成。
-
-### 2026-10-18–20 — RIU 请求去重与生成质量基准
-
-- 模式 manifest 保留工具选择和安全调用指导，去掉与同次请求原生 schema 重复的参数手册；完整 manifest 诊断保留。修正 `rules.txt` 将默认注释示例作为有效规则注入的问题。
-- 明确限定 create_file/render_view 的视图请求不再因“不要读取文件”等词被后端强制加入仓库检索；代码分析/修改请求保留原策略。流式模型仅返回思考的失败尝试现在保存到会话并可恢复显示，不用空 assistant 消息污染后续 API 请求，不过滤或改写思考正文。
-- 区分工程任务与普通问答/独立交互内容；生成指导强化业务决策、用户语言摘要、窄画中画中的结果与主控件布局，继续保留握手/主题/串行私有状态示例与真实原生思考。
-- 画中画增加可用高度，摘要支持紧凑单行和显式展开，全文与同一 iframe 保留。加入固定计算器、表格、图表、表单、比较页面及文本对照的真实打包模型基准，保留全部请求、SSE、失败、产物和独立计时；不以注册或截图替代质量验收。
-- 移除原生思考的提示词复述过滤及 CLI 按段落猜测删除前缀的逻辑，保留原始文本与空白；中断流保存已收到的思考，不把半截工具参数作为调用。任务账本指导尊重显式工具范围，独立单文件视图无需额外建账本。
-- 真实验证器按所属执行器租约判断完成；录制器增量转发 HTTP 数据并保留中途断流错误，区分服务失败、模型结果、工具修复和验证器错误。
-- 修正 Windows 便携包在深层目录下遗漏内置 Skill 文件的问题：逐文件使用扩展长度路径提取，写入失败时退出，成功后才保存完成标记；启动器改动参与缓存身份。全新实际解压的 1084 个文件与最终目录包逐一匹配，保留原始缺件失败记录。安装器的安装/卸载验收仍缺少干净 Windows 环境。
-
-### 2026-10-17 — RIU 提示词与真实生成质量续修
-
-- 原始模型 ID 与显示名称分开，按实际注册工具构建模式指导；修正 Atlas 缺少任务账本、Writer 收到工程/MCP/插件说明、重复 Context Engine、空 harness 自我评分及模式切换后残留指导。媒体配置区分启用开关、缺少模型/凭据与尚未验证的服务。
-- Desktop 不再注入 CLI 单次运行规则或自动冒充用户批准 Atlas 审阅阶段。生成视图提供实际宿主握手、动态主题与私有状态保存示例；`render_view` 给出不支持的浏览器存储调用提示，保留原权限/审批与产物版本链。
-- 自动 Context Engine 工具选择不再仅凭产物文件名触发，避免注册 HTML 视图时强制加入用户未请求的仓库检索；代码分析/修改仍保留原检索路径。
-- 展示按钮增大，长摘要支持展开/收起并保留同一 iframe；懒加载占位保留视图高度，修正长历史中最新视图被推离屏幕的问题。真实模型的原始思考、业务计算、交互、主题与状态恢复分开验收；保留失败，不用隐藏思考或限制答案长度制造通过。当前构建与结果见 [续验记录](VERIFICATION_HISTORY.md#riu-prompt-quality-2026-10-17)。
-
-### 2026-10-17 — RIU P4 展示与生命周期
-
-- 复用 Workbench 与 ConversationDisplay 提供 `inline/fullscreen/pip`；`card/carousel` 保持为内容布局。移动同一 iframe，保留局部状态与滚动，支持标准展示模式请求。
-- 动态主题/语言/尺寸、减少动效、键盘与焦点返回、窄窗输入框、可恢复错误提示；分页历史按需挂载，关闭/离屏撤销能力并释放资源，恢复已保存的私有 UI 状态和宿主展示偏好。
-- 本轮 Windows 构建 `6198938667318762` 完成 P4、审批、MCP、隔离与实际载荷/便携运行；本地渲染、历史 I/O 和外部模型等待分别计时。Python Writer 断言失败、外部服务错误、完整安装/卸载和其他平台保持未通过或未验证，见 [P4 验证](VERIFICATION_HISTORY.md#riu-p4-delivery-2026-10-17)。版本仍为 `2.5.0`；这是未提交工作树，不是发布。
-
-### 2026-10-16 — RIU P3 固定 MCP Apps profile
-
-- 保留工具 UI metadata/visibility，支持标准 UI 资源和 `openai/outputTemplate` 指针别名；校验 `ui://`、MIME、离线 CSP 与服务器/连接代次/内容哈希身份。
-- 分离模型可见 content/structuredContent 和组件私有 `_meta`；app-only 工具不向模型发现或猜名执行；UI 不可用时保留工具文本。
-- 标准 initialize/initialized、tool-input/tool-result、tools/call、消息建议、model-context 与 bounded teardown 复用隔离宿主、原权限/审批/会话锁和持久收据；恢复 MCP 结果引用的时间线显示。
-- SDK/协议固定 ext-apps 2.0.3 / 2026-01-26；原版官方组件与恶意 fixtures 的 Windows 包验证见 [集中记录](VERIFICATION_HISTORY.md#riu-p3-interop-2026-10-16)。剩余展示体验、外部服务、其他平台和完整宿主扩展不冒充完成；版本仍为 2.5.0，未发布。
-
-### 2026-10-10 — 桌面内存、模型目录与独立 CLI EXE
-
-* 取消 GUI 启动时的第二个预热内核和管理内核的自动索引；聊天工作内核按需启动，最多保留一个空闲内核并在 30 秒后释放，保留四个活动运行的隔离与并发。Windows 当前仓库场景的进程树工作集峰值从 958 MiB 降到 522 MiB；测量边界见 [验证记录](VERIFICATION_HISTORY.md#desktop-memory-2026-10-10)。
-* About 页面新增项目 GitHub 链接；修复桌面样式覆盖透明思考区背景的问题，覆盖浅色 / 深色、工作区背景开关及活动思考状态。
-* Agnes 文本目录采用 3.0 Flash、3.0 Flash Max 和正式版 2.5 Pro；ModelScope 更新 Qwen3.8、GLM5.3 和 DeepSeek 新版目录。按模型提供思考控制，保留已有旧模型 ID、元数据与有效配置；官方目录核验不等于账户实测可用。
-* Windows 公开 CLI 构建恢复默认 `onefile`，发布独立 `reverie.exe`，取消必须附带外置运行目录的 CLI ZIP。桌面包继续使用内部 `ui-onedir` 核心；CI 增加只复制 EXE 到独立目录的握手与 SDK 测试。
-* README 明确核心、终端 TUI、桌面 GUI 的关系、下载和运行方式；版本号仍为 2.5.0，历史发布条目保留原记录。
-
-### 2026-10-10 — GitHub Actions 全新检出与 Linux 测试修复
-
-* 修复 pytest 默认临时目录初始化：全新检出时先创建 `.runtime` 父目录，再由 pytest 创建独立测试目录；保留拒绝复用已有目录与显式 `--basetemp` 的原有行为。此前本地已有 `.runtime` 掩盖了问题，CI 的五组 Python 测试和覆盖率任务均在 fixture 初始化时失败。
-* 新增子进程回归测试，在没有 `.runtime` 的最小检出中加载实际共享 fixtures，验证 `tmp_path` 与隔离应用目录可正常创建。
-* 为 Workbench 提交失败测试的 `pre-commit` hook 设置可执行权限，使 Linux 实际执行并拒绝提交，继续验证暂存内容保持不变。
-* 修复 Provider 取消竞态：用户停止后，关闭套接字有时先产生网络异常，再执行 Future 的取消回调；此时也保留“已停止”的错误语义。增加确定性竞态回归，同时验证未取消时仍传播原网络错误。
-* 稳定后续矩阵测试：RATS 路径断言在 80 / 140 列终端中重组换行后核对完整路径；Agnes 模型选择测试使用固定 Provider 目录，并验证查询前已取得 API key，避免依赖外部模型列表。
-
-### 2026-10-09–10 — 工作树整理与提交前验证
-
-* 按 Python 内核、设计 Skills、原生引擎与 Windows 打包、Desktop、文档五个主题整理已有改动。版本号仍为 2.5.0，未新增语义版本标签；Intelligent UI 规格仍属于后续开发。
-* 修复 14 个设计 Skills 的 Git 字节一致性：为清单中的资源限定换行与空白保留规则，22 个资源的 Git blob 与检出文件均匹配 SHA-256。保留第三方正文、资源和许可证。
-* 更新发布流程回归，检查 Windows CLI ZIP 同时包含 EXE 与运行目录，并提供完整包下载链接。此前测试仍要求旧版单 EXE 说明。
-* 重新运行 Python 全量、Desktop 测试与类型检查，并验证 Windows 编译 CLI 的本地工具流程和打包 GUI 的设置/重启。初跑失败与定向重测分开记录，不把它们累加为一次全量通过；详见 [2026-10-09 验证](VERIFICATION_HISTORY.md#publish-validation-2026-10-09)。
-
-### 2026-10-08 — 文档与 Intelligent UI 调研
-
-* 核实 ChatGPT Visualizations、MCP Apps UI 和 Plugin Extensions 的区别，修订 [Intelligent UI 技术规格与 AI 提示词](INTELLIGENT_UI_SPEC.md)。这是待开发设计，没有将 RIU 标记为已实现。
-* 将 25 份旧规格、交接与验证文档整合到 [开发历史](DEVELOPMENT_HISTORY.md) 和 [验证历史](VERIFICATION_HISTORY.md)，更新入口和链接，保留原日期、测量及未验证限制；结构化证据继续存放在 `docs/verification/`。
-* Changelog 按版本排序，合并 v2.1.3 与 v2.1.21 的重复入口，恢复落在文末的 v2.1.13–v2.1.20 系列，补充版本索引及日期/标签差异。v2.0.4 原写 2025-02-22 的年份按 Git 证据纠正。
-
-### 2026-10-07–08 — 已有工作树改动的补录
-
-以下概述取自对应历史报告，本次只整理文档，未重新执行其中的软件测试。
-
-* 增加默认关闭的广泛 API 兼容实验开关，覆盖非流式文本工具交互；真实服务的 HTTP 403、原生工具未执行及编译后 HTTP 503 仍分别记录，不能宣称全部供应商通过。[API 兼容记录](VERIFICATION_HISTORY.md#reverie-cli-api-compatibility-2026-10-08)
-* 更新 Desktop 起始页、导航与共享视觉样式，保留输入框身份、用户背景偏好、主题与辅助显示设置；打包证据与 provider/RATS 验证边界分开。[UI 更新记录](VERIFICATION_HISTORY.md#reverie-cli-apple-ui-redesign-2026-10-07)
-* 修复连续背景、原生标题栏、关闭到托盘及终端保活；Windows CLI 默认采用 EXE 加运行目录，延迟加载引擎后端，新增终端 ZIP 验证与实际启动计时。[启动与托盘记录](VERIFICATION_HISTORY.md#reverie-cli-background-startup-repairs-2026-10-07)
-
-### 原有未发布记录（完整保留）
-
-
-* Merged the Workbench and Inspector into one resizable pane, added a lazy file tree and UTF-8 editor with conflict checks, named Git status filters, and in-chat display presets. Prepared idle model kernels, overlapped initialization with Git snapshots, reused unchanged snapshot objects, and fixed stale session caches after worker writes. Windows packaged verification, performance samples and limits are in the [2026-10-06 repair report](VERIFICATION_HISTORY.md#reverie-cli-workbench-repairs-2026-10-06).
-
-* Added cancellable, pooled model HTTP transport, interruptible retry/preflight requests and reusable Desktop kernels; streaming output toggles update immediately with persisted-setting rollback. Added cropped avatar upload, local display-name/profile persistence and user-right/model-left chat layout. Fixed MCP catalog pagination and typed image/audio/structured-result relay with explicit provider limits. Packaged upload validation caught and fixed the renderer's missing image blob permission. See the [request / profile repair report](VERIFICATION_HISTORY.md#reverie-cli-request-profile-repairs-2026-10-05) for measured runtime evidence and remaining gaps.
-
-* Repaired the confirmed software findings from the 2026-10-05 audit: Desktop command dispatch, pin persistence/fork/rotation, checkout ownership, saved-goal input, provider probe content validation, full pinned-Skill body loading, streamed diff/preview memory, cached history search, bounded logs/stale responses and validated review records. Real packaged inspection also corrected read-only reviews entering coding follow-ups and stale/empty goal summaries. Added native Engine window presentation with Windows input/resize/close evidence and Desktop build identity. See the [repair report](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05) for measured limits and the [current status](FEATURE_STATUS.md) for remaining acceptance work.
-* First repair batch: Python 1761 passed / 1 skipped; Desktop 254 passed / 1 skipped; typecheck and new Windows CLI/GUI packaging passed. Compiled GUI, real PTY/CLI, loopback requests and GUI restart were exercised in isolated data. Portable first launch was rejected by automatic approval review (`blocked by policy`); first extraction is unverified. The counts below describe the earlier documentation audit baseline.
-
-* A third source pass registered five more limits, all documentation-only: RATS executable and process identity fail open off Windows (the PE `ProductName` and PID-image layer is Windows-exclusive), eleven Windows-only `skipif` gates make a published pass/skip total host-specific, tree-sitter is an optional extra that reaches neither `install_requires`, `.[build]` nor the PyInstaller spec so ten languages silently fall back to regex with no test coverage, `.zig` is claimed by the parser with no grammar dependency and no parse path in either mode (0 symbols, 0 errors), and the LSP bridge defines only six servers. The RATS, development and status documents now state these boundaries; no runtime code changed. See the [cross-platform identity and language coverage addendum](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05).
-
-* A second source pass recorded four additional MCP client limits: prompt/client-request coverage, single-page catalogs, no managed remote OAuth, and flattened image/audio tool results. The configuration guide, feature matrix and roadmap now state these boundaries; no MCP runtime behavior changed in this documentation update. The same pass clarified that browser automation is an agent tool and the Electron Desktop app has no interactive browser tab panel.
-
-* Reconciled the documentation system with the local 2.5.0 worktree on 2026-10-05: added a current [capability/gap matrix](FEATURE_STATUS.md), [Desktop guide](DESKTOP_GUIDE.md), [Skills guide](SKILLS.md) and [audit evidence](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05); corrected launch flags, data ownership, RATS schema/custom-provider guidance and historical handoffs. Recorded 23 gaps/limits, with documentation reconciliation completed and software gaps retained in [ROADMAP](ROADMAP.md).
-* Added an offline relative-link/heading-anchor check and a documentation CI job. Fresh Desktop regression: 235 passed / 1 skipped; full Python regression: 1740 passed / 2 failed / 1 skipped, with both failures reproduced individually. Typecheck, Electron/renderer build and existing compiled CLI bridge smoke passed; this documentation change does not claim the software gaps are fixed or the full regression gate passes.
-
-* Corrected SenseNova image editing to send `size=auto` unless the caller specifies dimensions, aligned Pollinations' image-model credential warning with its key-required runtime, and added a Desktop image-model picker interaction test. Verified one real SenseNova U1.5 Lite generation and one edit on 2026-09-25; the provider chose a 2048×2048 edited output from a 1024×1024 input when given `auto`.
-
-
 
 <a id="v2-5-0"></a>
 
@@ -244,86 +72,6 @@ Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，�
 <a id="reverie-cli-v250---trusted-portable-core-and-multi-platform-releases"></a>
 
 Released 2026-07-17.
-
-### Post-release update (still v2.5.0) — 2026-08-31
-
-* Fixed Computer Controller's keyboard path, which could crash on ordinary text and could not tell a successful keystroke from a lost one. `type_text` passed its payload to `uiautomation` unescaped, so any text containing braces was read as a key name and raised `TypeError` from inside the send loop — `{braces}` was unsendable. Braces are now escaped (`{` → `{{}`, `}` → `{}}`); parentheses, `+`, `^`, `%`, and `~` were already literal, because they only group keys while a modifier is held. The tool also reported `Typed N character(s)` unconditionally, which is indistinguishable from a no-op: it now reads the focused field back, compares it against what was sent, and separates "the field did not change", "some keystrokes were mistyped" (quoting what the field actually holds), and a verified send. `set_value` remains the right tool when the exact string matters, and the tool description says so.
-
-* Made `press_key` diff the focused element's value as well as the window list. A key whose only effect is textual — Notepad's F5 timestamp, for example — previously reported that no change was observed, which reads as failure; it now reports the new value, and still says nothing changed when nothing did (a selection from `ctrl+a` is invisible to both diffs).
-
-* Bound every desktop action to the window the model actually observed. `get_app_state` ranks an app's candidate windows, but each action then re-resolved the app by name, so an app that opened a second window between the screenshot and the click could move the target out from under it. Actions now reuse the window handle recorded in the observation, and fall back to name resolution only when the snapshot carries no handle.
-
-* Stopped the desktop service from corrupting `uiautomation`'s own Win32 calls. `reverie/computer_use/service.py` assigned `argtypes` on `ctypes.windll.user32`, a process-wide cache whose function objects are shared with every other library in the interpreter, so a struct mismatch surfaced as an `ArgumentError` inside unrelated keystrokes. It now uses private `WinDLL` handles with prototypes declared once at import. The legacy single-surface `computer_control` tool was removed rather than repaired: it was never registered, its `INPUT` union was sized for keyboard events only (32 bytes against the 40 the x64 API expects) so its `SendInput` batches could never be accepted, and its import-time `argtypes` assignment poisoned the same shared cache. The tool-result card's friendly title was still keyed to that removed name, so every desktop action rendered as a bare `open_computer_use`; it now reads **Computer Controller** again.
-
-* Verified on 2026-08-31 against a live Notepad window: the action target resolved to the observed handle, `https://www.youtube.com/watch?v=1` and `中文 {braces} (parens) a+b^c%d~e {}` both landed byte-exactly, and F5 was reported by the value it changed.
-
-* Made same-name skill shadowing visible. Two skills may share a name, and a lookup resolves to the first in root precedence order, so a repository skill that reuses a bundled skill's name was listed as available while being permanently unreachable. The scan now records each shadowed skill with the skill that claimed its name: `/skills` ends with a **Shadowed Skills** table, the skills summary counts them, and the desktop skills page badges the record and disables its pin button. Because the name can only resolve to the winner, the shadowed copy is withheld from the model's skill list and from `skill_lookup`'s `list`/`search` — advertising a description whose body can never be loaded is worse than omitting it. The file stays inspectable by its full `SKILL.md` path.
-
-* Removed the `ratsCustomProviders` bridge action. It answered with the custom-provider schema and definitions, both of which every `rats.state` view already carries, and no client called it — the desktop RATS page reads `customProviderSchema` and `customProviders` off the state it fetches anyway. A declared action that no caller reaches and no test covers reads as a supported surface, so it is gone from the core, the renderer protocol map, and the main-process response contract; `ratsStateCached` remains the read that answers without walking the discovery roots.
-
-* Rebuilt `/status`'s token accounting, which was a single `Context Usage` row that could disagree with the rest of the CLI and could crash the command outright. `/status`, the live footer, and `/compact` each resolved the context window their own way, and `/compact`'s resolver asked `Config` for an `active_model` attribute that has never existed — so every readout it fed silently fell back to 128k no matter what window the active model publishes. The percentage was also computed without a zero guard, so a hand-edited `max_context_tokens: 0` raised `ZeroDivisionError` instead of rendering. The agent now answers one `describe_context_usage()` request built from the exact payload the next API call would send, counted by the one counter the compaction thresholds use, and `/status` renders it: usage against the real model window with a fill meter, remaining headroom, the counter's own name and whether it is BPE-exact or a character heuristic, the auto-compact and auto-rotate gates with the distance to each, a per-segment prompt breakdown (system prompt, injected context, user, assistant, tool results, envelope) that reconciles with the total, how many messages were sent this turn against how many are stored, the heaviest single message with a preview, reasoning held in history but kept off the prompt, and cumulative input/output/call ledgers for the session, the workspace, and the model that has spent the most. The two compaction ratios are now named constants shared by the enforcement path and the display, so the gates shown can no longer drift from the gates applied, and the agent's own character-count fallback estimate was deleted in favour of the shared counter.
-
-* Aligned the live footer's context meter with the same authority. It resolved the window from the active model record alone, so any conversation whose window the agent resolves differently was measured against the wrong denominator; it also recoloured at hand-picked 70/80% marks, which meant the bar could still read amber-calm while the agent was already rotating the session. The footer now divides by the window the agent resolves and switches colour exactly at the compaction and rotation ratios, renders `?` rather than a fabricated percentage when the window is unknown, and no longer prints the dead `.0`/`.00` its compact number formatter left on every rounded figure (`200.0K`, `1.00M`).
-
-### Post-release update (still v2.5.0) — 2026-08-30
-
-* Added `/skill <skill-name>`, which pins a skill so every following turn is required to load and follow it instead of leaving the choice to the model. A pinned skill is promoted into a mandatory `### Pinned skills (mandatory)` system-prompt block, marked `[PINNED]` in the metadata list and in `skill_lookup`'s `list`/`inspect` output, and drawn as a coloured tag in the input prompt and the live footer. A pin outranks the skill's own `policy.allow_implicit_invocation: false`, because an explicit pin is a user instruction. Up to 4 pins are allowed at once; `/skill unpin <name>`, `/skill clear`, and `/skill list` manage them. Pins are session state held in memory and are never written to `config.json`, so a restart releases them. A pin whose `SKILL.md` later disappears is reported as stale rather than silently dropped.
-
-* Extended the pin to Reverie Desktop. Typing `/skill <skill-name>` in the composer and pressing Enter no longer sends a turn: the text is consumed and the name reappears as a violet chip above the input, with an × to release it. Bare `/skill` opens a new Skills page listing every discovered skill with its scope, an `Explicit only` badge where implicit invocation is off, per-card pin controls, and a release-all action. Every pin mutation answers with the whole pin set, so the chip, the page metrics, and the per-card badges are derived from one core-supplied object and cannot drift. The bridge gained `listSkills`, `refreshSkills`, `pinSkill`, `unpinSkill`, `clearPinnedSkills`, and `inspectSkill`, and a pin rebuilds the system prompt immediately rather than at the next agent re-init.
-
-* Added the bundled `photo-to-3d` skill, which rebuilds a photographed subject as procedural Three.js code — a TypeScript factory returning a `THREE.Group` built from primitives, lathe/extrude/tube geometry, and shader materials — rather than photogrammetry, a point cloud, or a downloaded mesh. It runs a locked pass order (blockout → structural → form → material → surface → lighting → interaction → optimization) where each pass is rendered through `browser_controler` DevTools, compared against the reference, scored, and only then locked; any unmet criterion, console error, or blank render blocks the lock. References cover the per-pass gates, the render/review loop and its `state.json` ledger, physically-based material starting points with photo colour de-lighting, and a character track (landmarks, camera-pose solve, de-lighting, texture projection, skeleton with geodesic skinning, five-stage hair, chirality gates). The methodology is adapted from [img2threejs](https://github.com/img2threejs/img2threejs) (Apache-2.0) with attribution in the skill's `references/attribution.md`; no upstream code is vendored, and the upstream `python3 forge/` script farm is deliberately not ported because a frozen build has no guaranteed external interpreter.
-
-* Made custom providers ask for reasoning as aggressively as a gateway allows, and default to the deepest depth available. `reasoning_effort` now sits beside `thinking` on each provider record as `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`, defaults to `max`, and is resolved against the effort names the gateway published for the selected model — so `max` becomes `xhigh` where the model lists it and `high` where a catalog says nothing at all. Every request carries all the reasoning dialects at once (`reasoning_effort`, OpenRouter's `reasoning` plus `include_reasoning`, Anthropic's `thinking`, DashScope's `enable_thinking`/`thinking_budget`, Groq's `reasoning_format`, and vLLM/SGLang's `chat_template_kwargs` with GLM's `clear_thinking: false`), with thinking budgets sized to leave at least 1,024 tokens for the visible answer. A gateway that rejects those fields is retried with a narrower payload, shedding one vendor tier at a time until plain `reasoning_effort` remains, and the accepted tier is remembered for the rest of the process instead of being re-probed every turn. Set the depth with `/provider <name> thinking <depth>`; the Desktop model list reports the depths each model publishes and the rung `max` currently resolves to.
-
-* Fixed two ways a custom provider's thinking trace could be discarded after the model had already produced it. The Responses transport recognized only `response.reasoning_summary_text` events, and non-streaming Responses replies ignored `reasoning` output items entirely, so a gateway that streams the raw trace as `response.reasoning_text` rendered nothing; both spellings and both shapes are now read. Providers in `anthropic` format whose base URL ends in `/v1` — which is how these gateways document their URL — sent every request to `/v1/v1/messages` and failed with a 404, because the Anthropic SDK appends its own prefix; the runtime now hands that transport the root URL while the raw HTTP path still builds the full endpoint.
-
-* Verified on 2026-08-30 against a live third-party gateway: `openai-chat`, `openai-responses`, and `anthropic` each carry the trace end-to-end into Reverie's thinking panel. A gateway can still bill reasoning tokens without returning the trace for a particular model — `openai/gpt-5.3-codex-spark` on that gateway returns none on any of the three transports while other models on it return one for an identical request.
-
-### Post-release update (still v2.5.0) — 2026-08-28
-
-* Refreshed the NVIDIA source against the current Build pages: added `moonshotai/kimi-k3` with multimodal input, always-on `low`/`high`/`max` reasoning, and preserved reasoning history; added `deepseek-ai/deepseek-v4-pro-0813` with its dedicated `chat_template_kwargs` reasoning profile; and removed `z-ai/glm-5.2` after NVIDIA marked its free endpoint deprecated.
-
-### Post-release update (still v2.5.0) — 2026-08-22
-
-* Made the RATS native catalog progressively disclosed, so a connected Engine costs a card instead of a schema dump. Enabling a service previously pushed every native tool definition into the request; the Engine now answers `catalog.index`, `catalog.describe`, and `catalog.search` with `definitions_embedded: false`, and the CLI exposes one `rats_catalog` tool with `list` / `search` / `load` actions that fetches full JSON schemas only for the tools a turn actually names. Loaded definitions become directly callable dynamic tools as before. The per-service working set is bounded at 32 definitions and evicted least-recently-used, calling a tool touches it so an in-use definition is never the first eviction candidate, and the preloaded status tools are pinned and never evicted — the eviction path reports what it dropped rather than letting a silently-missing definition surface as an unknown tool. `rats_catalog`'s own description renders a live capability card for whichever services are connected, so the model can see what an Engine offers without loading any of it.
-
-* Consolidated the mode set from eight to five and removed the retired names outright. `reverie`, `reverie-atlas`, `reverie-gamer`, `writer`, and `computer-controller` remain; `reverie-ant`, `spec-driven`, and `spec-vibe` are gone, with their configured spellings migrated on read rather than kept as permanent aliases. Engine control moved into the default `reverie` mode: 3D authoring that ends in a `.glb` the Engine imports is general work, and the previous split forced a mode switch in the middle of it. The game-production libraries (`game_design_orchestrator`, `game_project_scaffolder`, `game_playtest_lab`, `level_design`) stay in `reverie-gamer`, which is what still distinguishes the two. Mode listings truncate their advertised tool list, so each mode's ordering now leads with what separates it from the others instead of the editor and shell tools every mode has.
-
-* Verified on 2026-08-22: the full Python suite at 1279 passed, 0 failed, 0 skipped, and the real-provider RTP end-to-end suite at 11 passed against a discovered Engine binary (`v0.1.dev.custom_build.2a75201b6`). The desktop RTP interaction suite and the TypeScript build were not re-run in this cycle.
-
-### Post-release update (still v2.5.0) — 2026-08-12
-
-* Fixed UTF-8 decoding for OpenCode Zen streaming responses whose `text/event-stream` content type omits a charset, preventing Chinese and other non-ASCII output from appearing as mojibake.
-* Replaced the stale Opencode model picker with a live `/v1/models` refresh. Anonymous use is restricted to the eight current free Chat Completions models; configured API keys also expose supported paid Chat Completions models returned by Zen. Models that require Responses, Anthropic Messages, or Google-specific endpoints stay excluded so every listed entry uses this source's actual transport. The built-in metadata snapshot and reasoning controls were synchronized with current OpenCode documentation and models.dev data, with a safe fallback when live discovery is unavailable.
-* Hardened complete desktop builds against machine-local network configuration. Locked npm installation now retries without the user-level `.npmrc` when its proxy is unavailable, Electron and electron-builder tool archives use checksum-verified mirrors with environment overrides, and Windows automation can pass `--no-pause`.
-
-### Post-release update (still v2.5.0) — 2026-08-01
-
-* Refreshed the NVIDIA source against the live Build catalog: added `meta/muse-glimmer-30b` and `nvidia/nemotron-3.5-lightning-30b-a3b` with model-specific request profiles, removed eight endpoints now marked deprecated by NVIDIA, and removed `nvidia/nemotron-3.5-nano-30b-a3b` plus `moonshotai/kimi-k2.6` after their hosted endpoints returned 404. Muse Glimmer is the new NVIDIA and Computer Controller default so retired configurations migrate to a current multimodal, tool-capable model.
-
-* Hardened RATS as RADE's fixed-provider runtime layer: Reverie CLI now accepts only allowlisted executable-local providers whose live RTP identity matches their descriptor, omits unknown/offline/mismatched services, uses a 350 ms presence probe with separate normal/tool deadlines, and stores bounded token/argument-free diagnostics beside the CLI executable. The desktop RATS page adds provider/handshake metadata and a toggleable RTP discovery log while retaining explicit user enablement before any native tool enters the AI catalog. Only Reverie Engine is currently supported; arbitrary third-party discovery/install is not part of the current model.
-
-### Post-release update (still v2.5.0) — 2026-07-29
-
-* Added the first verified Reverie RATS/RTP client slice: the Python core now owns executable-local Engine discovery, explicit permission sessions, token-safe persisted selection, compact catalogs, progressive native schema loading, and direct dynamic Engine tools. Reverie Desktop adds a dedicated RATS status/permission/catalog page while keeping all RTP credentials out of Electron and the renderer. Additional supported-provider onboarding remained open.
-
-### Post-release update (still v2.5.0) — 2026-07-22
-
-* Made parallel Context Engine indexing correct and deterministic (2026-07-22). Worker threads shared one set of stateful parser instances, so concurrent parses corrupted each other — a full index dropped and misattributed symbols run to run (varying symbol counts with zero reported failures), and the nondeterministic merge order let the top ranking hit jitter in and out of results. Each worker thread now owns its parser pipeline, and the committed symbol table and dependency graph are canonicalized by qualified name. A parallel build now extracts exactly the same symbols as a serial one and is byte-identical across runs. This resolves the ranking-stability item deferred on 2026-07-21. See [historical retrieval results](VERIFICATION_HISTORY.md#context-engine-benchmark).
-
-### Post-release update (still v2.5.0) — 2026-07-21
-
-* Added cache-first prompt input across production text-model transports. OpenAI Chat/Responses/native HTTP/curl calls now use stable privacy-preserving cache keys (plus the local-compatible `cache_prompt` hint where applicable), Anthropic calls enable automatic ephemeral caching, and Context Engine compression/session handoff use the same policy. Gateways that explicitly reject cache fields are retried once without only those hints.
-
-* Re-audited Agnes against the official 2.5 Pro Alpha, 2.5 Flash, and 2.0 Flash documentation plus the live `/v1/models` inventory. New configurations now default to `agnes-2.5-flash`; both Flash models expose 512K context, and all three text models expose documented image input. Live discovery remains authoritative when an Agnes API key is configured.
-
-* Synchronized the NVIDIA source with the live hosted-model endpoint, removing retired `qwen/qwen3.5-122b-a10b` and `z-ai/glm4.7` catalog entries and their unused request profiles.
-
-* Reduced core EXE startup extraction work by packaging Chromium and FFmpeg as lazy first-use archives. The Windows installer and portable desktop remain a single product containing both the GUI and fast unpacked kernel; the default GUI or terminal startup can be selected in Settings and temporarily overridden with `--gui` or `--tui`.
-
-* Filtered corpus-absent Context Engine query expansions: joined prose compounds (`"undefined expression"` → `undefinedexpression`) and reproduction-snippet dotted fragments (`r.limit`, `e.subs`) that name nothing in the index no longer collect the rare-term IDF bonus and displace real query terms. A compound is kept only with non-zero content document frequency or a real symbol/file-name match; a zero-frequency dotted fragment is dropped while its attribute suffix is retained. Held-out profiles improved or held with no regression (e.g. blind Recall@10 0.89 → 1.00, MRR@10 0.62 → 0.77). See [historical retrieval results](VERIFICATION_HISTORY.md#context-engine-benchmark).
-
-
 
 ### Initial release and baseline updates — 2026-07-17
 
@@ -344,7 +92,6 @@ Released 2026-07-17.
 * Reworked Context Engine task recommendations around cached BM25-style metadata, Chinese intent expansion, compound-intent coverage, generated-bundle filtering, and an index-only fast path for the desktop mention picker.
 * Accelerated context compression with bounded role-aware transcripts, lazy deterministic fallback generation, compact checkpoint/cache serialization, and faster gzip settings.
 * Made repository-dependent turns proactively select the native `codebase-retrieval` tool once, strengthened its model-facing routing guidance, and kept cached recommendations visible while the desktop refreshes them in the background.
-
 
 
 <a id="v2-4-0"></a>
@@ -394,7 +141,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-3-4"></a>
 
 ## v2.3.4 — Writer, Sources, Memory, and Engine Upgrades
@@ -442,7 +188,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-3-3"></a>
 
 ## v2.3.3 — Reverie UI SDK Bridge and Plugin Releases
@@ -470,7 +215,6 @@ Released 2026-07-17.
 * Added bridge tests covering settings metadata, remote manifest parsing, session operations, plugin action payloads, source plugin validation, and local automation persistence.
 
 ---
-
 
 
 <a id="v2-3-2"></a>
@@ -532,7 +276,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-3-1"></a>
 
 ## v2.3.1 — Base Reverie Subagents
@@ -560,7 +303,6 @@ Released 2026-07-17.
 * Added a real local OpenAI-compatible Subagent test that delegates a small task, invokes Reverie's actual `create_file` tool, and verifies the produced workspace file.
 
 ---
-
 
 
 <a id="v2-3-0"></a>
@@ -607,7 +349,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-2-0"></a>
 
 ## v2.2.0 — Large-Scale 3D Game Generation Upgrade
@@ -644,7 +385,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-24"></a>
 
 ## v2.1.24 — TUI Stability and Build Flow Cleanup
@@ -666,7 +406,6 @@ Released 2026-07-17.
 * Made `build.bat` pause on both success and failure so the window does not close immediately when launched by double-clicking.
 
 ---
-
 
 
 <a id="v2-1-21"></a>
@@ -741,7 +480,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-20"></a>
 
 ## v2.1.20 — Alert Network Upgrade
@@ -769,7 +507,6 @@ Released 2026-07-17.
 * `python -m pytest tests -q`
 
 ---
-
 
 
 <a id="v2-1-19"></a>
@@ -801,7 +538,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-18"></a>
 
 ## v2.1.18 — Regional Encounter Upgrade
@@ -829,7 +565,6 @@ Released 2026-07-17.
 * `python -m pytest tests -q`
 
 ---
-
 
 
 <a id="v2-1-17"></a>
@@ -860,7 +595,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-16"></a>
 
 ## v2.1.16 — Region Travel Upgrade
@@ -886,7 +620,6 @@ Released 2026-07-17.
 
 * `python -m pytest tests/test_gamer_mode_upgrade.py tests/test_tooling_upgrades.py -q`
 * `python -m pytest tests -q`
-
 
 
 <a id="v2-1-15"></a>
@@ -919,7 +652,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-14"></a>
 
 ## v2.1.14 — Encounter Director Upgrade
@@ -947,7 +679,6 @@ Released 2026-07-17.
 * `python -m pytest tests -q`
 
 ---
-
 
 
 <a id="v2-1-13"></a>
@@ -979,7 +710,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-12"></a>
 
 ## v2.1.12 — Reverie-Gamer Guided Quest Arc and Gateway Priming
@@ -1001,7 +731,6 @@ Released 2026-07-17.
 * Updated generated NPC anchors and region gateways so they now participate in quest and expansion progression rather than acting as passive markers only.
 
 ---
-
 
 
 <a id="v2-1-11"></a>
@@ -1027,7 +756,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-10"></a>
 
 ## v2.1.10 — Reverie-Gamer Region Gateways and NPC Anchors
@@ -1049,7 +777,6 @@ Released 2026-07-17.
 * Expanded Gamer tests to verify new gateway and anchor outputs in both data contracts and generated runtime files.
 
 ---
-
 
 
 <a id="v2-1-9"></a>
@@ -1081,7 +808,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-8"></a>
 
 ## v2.1.8 — Reverie-Gamer Prompt Compiler, Runtime Registry, and 3D Slice Builder
@@ -1110,7 +836,6 @@ Released 2026-07-17.
 * Upgraded `reverie-gamer` from a prompt-only workflow into a real single-prompt pipeline: prompt compilation -> runtime selection -> blueprint -> production plan -> system packets -> task graph -> vertical slice generation -> slice scoring.
 * Expanded the Gamer system prompt and prompt-side tool descriptions so the model now knows about `runtime_registry.json`, `production_plan.json`, `system_specs.json`, `task_graph.json`, `slice_score.json`, request compilation, and direct slice generation.
 * Updated mode metadata and discovery keywords so tool recommendation can rank Gamer compilation and production-flow tools more accurately.
-
 
 
 <a id="v2-1-7"></a>
@@ -1162,7 +887,6 @@ Released 2026-07-17.
 * Relaxed the Atlas confirmation-gate wording so previously user-authorized “draft to implementation” flows can continue without a redundant first confirmation step when no material ambiguity remains.
 
 
-
 <a id="v2-1-6"></a>
 
 ## v2.1.6 — Codex-Style Skills Support, Single-File Gamer Runtime Integration, and Runtime Packaging Cleanup
@@ -1197,7 +921,6 @@ Released 2026-07-17.
 * Removed the tracked `tests/` repository directory from GitHub distribution; local tests can now stay untracked.
 
 
-
 <a id="v2-1-5"></a>
 
 ## v2.1.5 — Reverie-Gamer Modeling Pipeline, Engine Cleanup, and Blockbench/Ashfox Integration
@@ -1223,7 +946,6 @@ Released 2026-07-17.
 ### Removed
 
 * Removed the external-reference modeling bridge approach and the related root-level helper-script workflow.
-
 
 
 <a id="v2-1-4"></a>
@@ -1273,7 +995,6 @@ Released 2026-07-17.
 ### Removed
 
 * Removed all `Iflow` source code, commands, proxy logic, configuration surfaces, and documentation references from Reverie CLI.
-
 
 
 <a id="v2-1-3"></a>
@@ -1328,7 +1049,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-1-2"></a>
 
 ## v2.1.2 — Workspace Sandbox & Command Audit
@@ -1350,7 +1070,6 @@ Released 2026-07-17.
 * Kept higher-risk `.NET` execution flows such as `build`, `test`, `run`, `publish`, `restore`, `tool`, `workload`, and `dev-certs` blocked because they cannot guarantee the same strict workspace boundary.
 
 ---
-
 
 
 <a id="v2-1-1"></a>
@@ -1375,7 +1094,6 @@ Released 2026-07-17.
 * Streaming follow-up input is now a plain prompt line instead of a large live box, and unsent draft text is preserved after normal completion or interruption.
 
 ---
-
 
 
 <a id="v2-1-0"></a>
@@ -1419,7 +1137,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-0-4"></a>
 
 ## v2.0.4 — Provider Relay Fix & Enhancement
@@ -1446,7 +1163,6 @@ Released 2026-07-17.
 * Full compatibility with the CLI v1.x and OAuth 2.0 device flow
 
 ---
-
 
 
 <a id="v2-0-3"></a>
@@ -1502,7 +1218,6 @@ Released 2026-07-17.
 ---
 
 
-
 <a id="v2-0-2"></a>
 
 ## v2.0.2 — Provider Integration
@@ -1523,7 +1238,6 @@ Released 2026-07-17.
 * **Credential Management**: Automatic credential detection and refreshing
 
 ---
-
 
 
 <a id="v2-0-1"></a>
@@ -1558,7 +1272,6 @@ Released 2026-07-17.
 * Added advanced parameter passthrough support (`extra_options`, `extra_args`) for text-to-image generation
 
 ---
-
 
 
 <a id="v2-0-0"></a>
@@ -1598,7 +1311,6 @@ Released 2026-07-17.
 * New `/gdd` and `/assets` commands for gamer workflows
 
 ---
-
 
 
 <a id="v1-4-1"></a>
@@ -1657,7 +1369,6 @@ Released 2026-07-17.
 * Enhanced TUI selector responsiveness
 
 ---
-
 
 
 <a id="v1-4-0"></a>
@@ -1818,7 +1529,6 @@ Verification Phase:
 ---
 
 
-
 <a id="v1-3-1"></a>
 
 ## v1.3.1 — Thinking Display Update
@@ -1848,7 +1558,6 @@ Verification Phase:
 * New `_print_thinking_content()` helper method in interface
 
 ---
-
 
 
 <a id="v1-3-0"></a>
@@ -1892,7 +1601,6 @@ Verification Phase:
 * No new dependencies added
 
 ---
-
 
 
 <a id="early-tag-baseline"></a>

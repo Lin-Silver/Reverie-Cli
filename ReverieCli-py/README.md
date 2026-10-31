@@ -28,8 +28,6 @@ Reverie-Gamer is currently aimed at:
 
 `one prompt -> structured request -> blueprint -> runtime-aware project foundation -> verified playable vertical slice -> iterative expansion`
 
-Current priorities and completion gates live in the project [roadmap](../docs/ROADMAP.md).
-
 ## Installation
 
 Python `3.10` to `3.14` is supported. `3.10` or `3.11` is the safest default for local development.
@@ -177,7 +175,6 @@ The packaged `dist/reverie.exe` includes the unified Reverie Engine, work-in-pro
 - [CLI Command Reference](../docs/CLI_COMMANDS.md)
 - [Context Engine Project Memory](../docs/CONTEXT_ENGINE_MEMORY.md)
 - [Development Guide](../docs/DEVELOPMENT.md)
-- [Roadmap](../docs/ROADMAP.md)
 - [Reverie Engine User Guide](../docs/engine/reverie_engine_user_guide.md)
 - [Reverie-Gamer Modeling Guide](../docs/engine/reverie_gamer_modeling_pipeline.md)
 - [Changelog](../docs/changelog.md)

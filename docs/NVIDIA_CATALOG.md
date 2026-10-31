@@ -46,7 +46,7 @@ Legacy shared `nvidia.temperature`, `top_p`, `top_k`, and penalty fields do not 
 
 As requested, the NVIDIA settings page no longer exposes the ineffective shared temperature/top-p inputs. Other sources retain their existing sampling controls. Legacy saved fields are preserved for compatibility but do not override the dedicated NVIDIA profiles.
 
-The [sampling verification record](verification/2026-10-16-nvidia-sampling.json) records the exact source revisions, effective serialized parameters, and live check results. A successful HTTP response establishes request compatibility, not proof that the hosted backend honors every undocumented extension or that these defaults maximize task quality.
+A successful HTTP response establishes request compatibility, not proof that the hosted backend honors every undocumented extension or that these defaults maximize task quality.
 
 ## Hosted request profiles
 
@@ -80,8 +80,6 @@ Saved configurations containing an unavailable model fall back to the existing M
 
 ## Sampling refinement verification
 
-The [sampling verification record](verification/2026-10-16-nvidia-sampling.json) includes pinned publisher revisions, effective sampling values, sanitized live responses, and current binary hashes.
-
 - Python: 549 tests passed; desktop type checking and production build passed.
 - The rebuilt desktop kernel and standalone CLI each passed 10 local HTTP serialization checks across the nine SDK models, including Super VL text/image temperature switching. Both expose only the four remaining NVIDIA connection/reasoning fields, without shared temperature/top-p inputs. Step's raw adapter is bound to the official API URL and was checked separately through authenticated requests.
 - The latest standalone CLI completed a real Super VL text prompt with output `OK`. Its Step 5 prompt exceeded the 75-second process limit; the cause is not established. Step's source-agent request preparation and authenticated two-turn tool conversation passed with the new sampling values, preserving assistant reasoning and returning `5017`.
@@ -89,11 +87,7 @@ The [sampling verification record](verification/2026-10-16-nvidia-sampling.json)
 - DeepSeek V4.1, GLM 5.3 Flash, Nemotron 3 Ultra, and Lightning timed out in bounded source checks. Laguna returned HTTP 503 with an explicit worker request-limit error. These availability results are recorded separately from sampling configuration correctness; the checks were serial and do not establish a local concurrency fault.
 - A headless production-renderer check with a real source bridge confirms that NVIDIA has no shared temperature/top-p controls while OpenCode retains its temperature control. Native Electron window APIs were stubbed for that UI check; the independent frozen attachment/inference check used the actual desktop kernel. No installed GUI release or installer was replaced.
 
-![NVIDIA connection settings without ineffective shared sampling controls](verification/2026-10-16-nvidia-settings.png)
-
 ## Verification
-
-The [catalog verification record](verification/2026-10-16-nvidia-catalog.json) contains the sanitized live request results, source and packaged bridge checks, and local effective configuration from the initial catalog refresh, before the subsequent sampling refinement documented above.
 
 - Python: 444 tests passed across the NVIDIA, agent, desktop bridge, configuration, transport, batch prompt, cancellation, SubAgent, and adjacent built-in provider tests.
 - Desktop: type checking passed; all 104 application interaction tests passed.
@@ -105,5 +99,3 @@ The [catalog verification record](verification/2026-10-16-nvidia-catalog.json) c
 - The production renderer was checked with a real source SDK bridge in headless Chromium at 1200px and 900px widths. Both notes remain readable without clipping or browser errors. Native Electron window controls were stubbed for that visual check; an installed GUI release/installer was not replaced.
 
 The checked local NVIDIA configuration selects Step 5 Preview, uses the official `/v1/chat/completions` endpoint, has 1,048,576 context tokens and an 8,192-token output budget, and retains the configured API key. The actual timeout is 60 seconds: the stored legacy value of 300 seconds follows the global 60-second setting. The active source remains OpenCode.
-
-![NVIDIA model picker with concurrency notes](verification/2026-10-16-nvidia-model-picker.png)

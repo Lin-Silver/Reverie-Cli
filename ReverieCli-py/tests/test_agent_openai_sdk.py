@@ -228,6 +228,28 @@ def test_desktop_self_contained_static_rich_answer_uses_direct_response_route(tm
     assert [message["role"] for message in request_messages] == ["system", "user"]
     assert request_messages[1]["content"] == supplied_data
 
+    response = {"role": "assistant", "content": '```reverie-ui\n{"type":"metrics","items":[{"label":"计划中","value":"7"}]}\n```'}
+    correction = {"role": "user", "content": "把计划中改为0，其余统计卡和表格内容保持不变。"}
+    agent.messages += [response, correction]
+    assert agent.get_visible_tool_schemas() == []
+    continued = agent._build_messages()
+    assert continued[1:] == [{"role": "user", "content": supplied_data}, response, correction]
+    assert len(agent.messages) == 5  # Request shaping never edits stored history.
+
+
+def test_static_rich_corrections_never_cross_external_actions_or_tool_history():
+    from reverie.agent.agent import _static_rich_answer_history
+
+    supplied = {"role": "user", "content": "展示给定统计卡：计划中7、开发中5，以及表格 Alpha / 开发中 / 核心助手。"}
+    response = {"role": "assistant", "content": "之前的回答"}
+    feedback = {"role": "user", "content": "刚才的回答还有这些问题：缺少来源胶囊。请在对话中修正，保留给定的数据和原有内容；不需要添加可编辑控件。"}
+    assert _static_rich_answer_history([supplied, response, feedback]) == [supplied, response, feedback]
+    for prompt in ["修改文件并保留这些内容。", "搜索最新资料并修正表格。", "改成可以筛选的交互表格。", "先读取工作区，再更新表格。", "你好"]:
+        assert not _static_rich_answer_history([supplied, response, {"role": "user", "content": prompt}])
+    assert not _static_rich_answer_history([supplied, {"role": "tool", "content": "result"}, feedback])
+    assert not _static_rich_answer_history([supplied, {**response, "tool_calls": [{"id": "tool-1"}]}, feedback])
+    assert not _static_rich_answer_history([supplied, {**response, "content": "x" * 12000}, feedback])
+
 
 def test_static_rich_tool_suppression_keeps_tools_for_research_or_interaction(tmp_path):
     prompts = (

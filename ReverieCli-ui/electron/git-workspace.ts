@@ -45,7 +45,8 @@ export async function getGitWorkspaceStatus(projectRoot: string): Promise<GitWor
     };
   } catch (error) {
     const detail = error as NodeJS.ErrnoException & { stderr?: string };
-    if (detail.code === "ENOENT" || detail.stderr?.includes("not a git repository")) return null;
+    if (detail.code === "ENOENT" || detail.stderr?.includes("not a git repository")
+      || detail.stderr?.includes("gitfile does not point to a valid repository")) return null;
     throw error;
   }
 }

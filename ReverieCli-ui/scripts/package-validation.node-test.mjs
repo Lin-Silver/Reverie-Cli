@@ -4,7 +4,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, statSync, symlinkSync, rmSync, r
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { normalizeLinuxPayload, stageLinuxIconFile } from './package-validation.mjs';
+import { isPackagePathLocal, normalizeLinuxPayload, stageLinuxIconFile } from './package-validation.mjs';
+
+test('package paths accept the release directory itself and keep sibling paths outside the boundary', () => {
+  const ui = path.resolve('project', 'ReverieCli-ui');
+  for (const relative of ['release', 'release/validation', '../.runtime', '../.runtime/packages']) {
+    assert.equal(isPackagePathLocal(ui, path.resolve(ui, relative)), true, relative);
+  }
+  for (const relative of ['release-other', '../.runtime-other', 'release/../../outside', '..']) {
+    assert.equal(isPackagePathLocal(ui, path.resolve(ui, relative)), false, relative);
+  }
+});
 
 test('the separately installed Linux icon is readable without changing a private-mode source', { skip: process.platform === 'win32' }, () => {
   const temporary = mkdtempSync(path.join(tmpdir(), 'riu-icon-mode-'));

@@ -6,6 +6,7 @@
 - Fix opaque materials in light-theme enhanced contrast / reduced transparency mode.
 - Show user avatars without names in saved and live messages.
 - Refresh the assistant avatar, add reversible sidebar motion, restore classic wallpaper visibility, and fix toolbar alignment, input focus boundaries and dialog corners; see [UI verification](verification/2026-10-31-ui-polish/README.md).
+- Handle Git 2.56 invalid gitfile discovery errors and accept the default Linux package output directory; add regression checks to desktop CI.
 - Preserve formal model evaluation failures and platform acceptance limits; see [verification](verification/2026-10-31-v2.5.3/README.md).
 
 2026-10-30：本地 Liquid Glass 与云端 dev `894fe6e` 已整合，保留经典界面和 RIU 富格式路线。Windows 联合目录包与本轮回归证据见[本地整合记录](verification/2026-10-30-desktop-integration/README.md)。此记录不关闭历史模型质量及跨平台安装验收缺口。

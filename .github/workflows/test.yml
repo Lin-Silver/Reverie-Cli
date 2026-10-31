@@ -47,6 +47,8 @@ jobs:
         run: npm ci
       - name: Run desktop test suite
         run: npm test
+      - name: Check package validation helpers
+        run: node --test scripts/package-validation.node-test.mjs
       - name: Check desktop types
         run: npm run typecheck
       - name: Build desktop renderer

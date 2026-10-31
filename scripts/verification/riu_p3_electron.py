@@ -238,8 +238,18 @@ def main():
             check("model-context-untrusted-user-data", any("P3_CONTEXT_PUBLIC_SELECTION" in str(item.get("content")) and item.get("role") == "user" for item in ModelFixture.requests[-1]["messages"]))
             check("no-private-meta-or-app-only-descriptor-in-model", SECRET not in json.dumps(ModelFixture.requests) and "APP_ONLY_HIDDEN_DESCRIPTOR" not in json.dumps(ModelFixture.requests))
             observe("negative-boundaries")
+            # The follow-up scrolls this history view offscreen. Lazy mounting
+            # may create a fresh instance when we return; wait for its handshake.
+            target = frame("show")
+            expect(target.locator("#ready")).to_have_text("Ready", timeout=30000)
+            page.evaluate("window.__p3TeardownSeen=false;addEventListener('message',e=>{if(e.data?.method==='ui/notifications/request-teardown')window.__p3TeardownSeen=true});true")
             target.locator("#teardown").click()
-            expect(page.locator('iframe[title="show"]')).to_have_count(0)
+            try:
+                expect(page.locator('iframe[title="show"]')).to_have_count(0)
+            except Exception:
+                report["teardown_request_seen"] = page.evaluate("window.__p3TeardownSeen")
+                observe("teardown-failure")
+                raise
             check("app-requested-teardown", True)
             for name in ("missing", "bad-mime", "wrong-uri", "network", "oversize"):
                 send_tool(name)

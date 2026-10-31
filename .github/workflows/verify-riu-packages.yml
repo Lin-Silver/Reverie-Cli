@@ -2,6 +2,12 @@ name: Verify RIU native validation packages
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Native platforms to verify
+        type: choice
+        options: [all, macos-arm64]
+        default: all
 
 permissions:
   contents: read
@@ -18,23 +24,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - label: Windows x64
-            runner: windows-latest
-            platform: windows
-            arch: x64
-          - label: Linux x64
-            runner: ubuntu-latest
-            platform: linux
-            arch: x64
-          - label: macOS Apple Silicon
-            runner: macos-latest
-            platform: macos
-            arch: arm64
-          - label: macOS Intel
-            runner: macos-15-intel
-            platform: macos
-            arch: x64
+        include: >-
+          ${{ fromJSON(inputs.platform == 'macos-arm64' &&
+          '[{"label":"macOS Apple Silicon","runner":"macos-latest","platform":"macos","arch":"arm64"}]' ||
+          '[{"label":"Windows x64","runner":"windows-latest","platform":"windows","arch":"x64"},
+          {"label":"Linux x64","runner":"ubuntu-latest","platform":"linux","arch":"x64"},
+          {"label":"macOS Apple Silicon","runner":"macos-latest","platform":"macos","arch":"arm64"},
+          {"label":"macOS Intel","runner":"macos-15-intel","platform":"macos","arch":"x64"}]') }}
     env:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"

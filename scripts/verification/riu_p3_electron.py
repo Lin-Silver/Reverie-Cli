@@ -159,13 +159,17 @@ def main():
             with socket.socket() as sock: sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
             process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
             browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
-            page.set_viewport_size({"width": 1280, "height": 900})
+            # Keep the real native viewport: emulation can place a CDP click
+            # outside the smaller macOS window while screenshots still show it.
+            report["native_window"] = page.evaluate("({innerWidth,innerHeight,outerWidth,outerHeight,screenWidth:screen.width,screenHeight:screen.height})")
             context = page.context
             context.add_init_script("window.__p3wire=[];addEventListener('message',e=>{if(window.__p3wire.length<256)window.__p3wire.push(e.data)});")
             context.add_init_script("window.__p3input=[];for(const type of ['pointerdown','pointerup','click'])addEventListener(type,e=>window.__p3input.push({type,id:e.target.id,x:e.clientX,y:e.clientY,time:performance.now()}),true);")
-            page.wait_for_selector(".session-item", timeout=120000)
             page.wait_for_load_state("domcontentloaded")
             page.locator('textarea[aria-autocomplete="list"]').wait_for(state="visible")
+            if "sidebar-collapsed" in page.locator(".app-shell").get_attribute("class"):
+                page.get_by_role("button", name=re.compile(r"^展开左侧栏")).click()
+            page.wait_for_selector(".session-item", timeout=120000)
             page.locator(".session-item").filter(has_text="RIU P3 interoperability").click()
             expect(page.locator(".model-copy strong")).to_have_text("RIU P3 loopback", timeout=30000)
             page.on("console", lambda message: (output / "console.log").open("a", encoding="utf-8").write(message.text + "\n"))
@@ -258,6 +262,12 @@ def main():
                 "window": page.evaluate("({innerWidth,innerHeight,outerWidth,outerHeight,screenWidth:screen.width,screenHeight:screen.height,devicePixelRatio})"),
                 "frame": target.locator("body").evaluate("()=>({ready:document.querySelector('#ready').textContent,handler:String(document.querySelector('#teardown').onclick),time:performance.now()})"),
             }
+            bounds = report["teardown_before"]["button"]
+            window = report["teardown_before"]["window"]
+            check("native-teardown-click-inside-window",
+                  0 <= bounds["x"] + bounds["width"] / 2 < window["innerWidth"] <= window["outerWidth"]
+                  and 0 <= bounds["y"] + bounds["height"] / 2 < window["innerHeight"] <= window["outerHeight"],
+                  {"button": bounds, "window": window})
             page.evaluate("window.__p3TeardownSeen=false;addEventListener('message',e=>{if(e.data?.method==='ui/notifications/request-teardown')window.__p3TeardownSeen=true});true")
             target.locator("#teardown").click()
             try:

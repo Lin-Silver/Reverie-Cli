@@ -1,0 +1,178 @@
+{
+  "scope": "Packaged Windows Electron, isolated local data; no external model requests",
+  "checks": [
+    {
+      "name": "Existing settings keep Classic",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Switch preserves draft and transcript",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Light composer uses only the outer focus boundary",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Dark composer uses only the outer focus boundary",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Model picker shares rounded glass dialog clipping",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Command search uses its rounded container focus boundary",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Rename form shares the glass dialog radius",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Confirmation shares the glass dialog radius",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Both switch entry points work",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "File draft survives both variants and saves to disk",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Workbench fits 1080x700",
+      "passed": true,
+      "detail": {
+        "x": 448,
+        "y": 64,
+        "width": 620,
+        "height": 624
+      }
+    },
+    {
+      "name": "Workbench tabs are uncovered at 1080",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Workbench fits 1500x960",
+      "passed": true,
+      "detail": {
+        "x": 880,
+        "y": 64,
+        "width": 608,
+        "height": 884
+      }
+    },
+    {
+      "name": "Workbench tabs are uncovered at 1500",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Workbench fits 1920x1080",
+      "passed": true,
+      "detail": {
+        "x": 1300,
+        "y": 64,
+        "width": 608,
+        "height": 1004
+      }
+    },
+    {
+      "name": "Workbench tabs are uncovered at 1920",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "High contrast removes glass blur",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "High contrast uses opaque material in light",
+      "passed": true,
+      "detail": {
+        "background": "rgb(220, 228, 240)",
+        "blur": "none"
+      }
+    },
+    {
+      "name": "High contrast uses opaque material in dark",
+      "passed": true,
+      "detail": {
+        "background": "rgb(18, 24, 39)",
+        "blur": "none"
+      }
+    },
+    {
+      "name": "User headings show avatar without name",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Actual IPC isolates delayed appearance writes",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Reload restores variant and per-session draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Process restart restores variant and per-session draft",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "No renderer exceptions",
+      "passed": true,
+      "detail": []
+    }
+  ],
+  "screenshots": [
+    "classic-baseline.png",
+    "glass-light-1500.png",
+    "glass-dark-1500.png",
+    "glass-model-picker.png",
+    "glass-command-palette.png",
+    "glass-rename-form.png",
+    "glass-confirmation.png",
+    "page-工具.png",
+    "page-SubAgents.png",
+    "page-RATS.png",
+    "page-RTP 任务.png",
+    "page-技能.png",
+    "page-插件.png",
+    "page-恢复.png",
+    "glass-settings.png",
+    "glass-file-workbench.png",
+    "glass-workbench-1080.png",
+    "glass-workbench-1500.png",
+    "glass-workbench-1920.png",
+    "glass-high-contrast.png",
+    "glass-english-large.png",
+    "glass-final.png"
+  ],
+  "errors": [],
+  "build": {
+    "version": "2.5.3",
+    "id": "73d194f93fedac2d",
+    "builtAt": "2026-10-31T10:00:39.047Z",
+    "platform": "win32",
+    "arch": "x64"
+  }
+}

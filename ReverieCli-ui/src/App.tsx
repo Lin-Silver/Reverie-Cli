@@ -2,6 +2,7 @@ import { FloatingMenu } from "./FloatingMenu";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
 import { StarterActions, WelcomeHeader } from "./StartPage";
 import { UiVariantPicker } from "./UiVariantPicker";
+import { usePaneMotion } from "./usePaneMotion";
 import { desktopCommand, desktopCommandAvailable } from "./desktop-commands";
 import {
   Activity,
@@ -572,6 +573,7 @@ function Sidebar({
   openSearch,
   preferences,
   toggleSidebar,
+  collapsed,
   renameSession,
   toggleArchive,
   deleteSession,
@@ -591,6 +593,7 @@ function Sidebar({
   openSearch: () => void;
   preferences: UiPreferences;
   toggleSidebar: () => void;
+  collapsed: boolean;
   renameSession: (session: SessionInfo) => void;
   toggleArchive: (session: SessionInfo, archived: boolean) => void;
   deleteSession: (session: SessionInfo) => void;
@@ -687,7 +690,7 @@ function Sidebar({
   );
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-hidden={collapsed || undefined} inert={collapsed || undefined}>
       <div className="sidebar-drag">
         <BrandMark />
         <button type="button" className="sidebar-collapse-button" aria-label={t("收起左侧栏")} aria-keyshortcuts="Control+B Meta+B" title={`${t("收起左侧栏")} (Ctrl+B)`} onClick={toggleSidebar}>
@@ -1340,7 +1343,7 @@ const Message = memo(function Message({ message, preferences, live }: { message:
   return (
     <article className={`message ${message.role} ${technicalOnly ? "technical-only" : ""} ${live ? user ? "live-user-message" : "live-message" : ""}`}>
       {!technicalOnly && <div className="message-heading">
-        {user ? <UserAvatar name={userName} url={preferences.userAvatarUrl} /> : <div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div>}
+        {user ? <UserAvatar name={userName} url={preferences.userAvatarUrl} /> : <div className="message-avatar"><img src={new URL("reverie-avatar.png", document.baseURI).href} alt="" /></div>}
         {!user && <strong>Reverie</strong>}
         {live && !user && <span className={`live-status ${live.running ? "working" : "success"}`}>{t(live.running ? "正在处理" : "已完成")}</span>}
       </div>}
@@ -1426,7 +1429,7 @@ const LiveMessage = memo(function LiveMessage({ turn, running, preferences }: { 
         </div>
       </article>}
       <article className="message assistant live-message">
-        <div className="message-heading"><div className="message-avatar"><Sparkles size={15} strokeWidth={1.7} /></div><strong>Reverie</strong><span className={`live-status ${liveStatusClass}`}>{liveStatus}</span></div>
+        <div className="message-heading"><div className="message-avatar"><img src={new URL("reverie-avatar.png", document.baseURI).href} alt="" /></div><strong>Reverie</strong><span className={`live-status ${liveStatusClass}`}>{liveStatus}</span></div>
         <div className="message-body">
           {(turn.segments ?? []).map((segment, index) => segment.kind === "activity"
             ? preferences.showLiveActivity && <ActivityGroup key={index} events={segment.events} />
@@ -5044,6 +5047,7 @@ export default function App() {
   const [theme, setTheme] = useState<ThemePreference>(() => normalizeTheme(localStorage.getItem(THEME_STORAGE_KEY)));
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(DEFAULT_UI_PREFERENCES);
+  usePaneMotion(shellRef, sidebarCollapsed, layoutReady, uiPreferences.uiVariant, paneResizing);
   const t = useMemo(
     () => (key: string, values?: Record<string, string | number>) => translate(uiPreferences.language, key, values),
     [uiPreferences.language],
@@ -6836,7 +6840,7 @@ export default function App() {
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
     >
       <InputContext.Provider value={inputControls}>
-      <Sidebar state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
+      <Sidebar collapsed={sidebarCollapsed} state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       </InputContext.Provider>
       <main className={`main-area ${gitStatus ? "with-git-status" : ""}`}>
         <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} uiVariant={uiPreferences.uiVariant} setUiVariant={uiVariant => updateUiPreferences({ uiVariant })} />

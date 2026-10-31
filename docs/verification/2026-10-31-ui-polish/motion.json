@@ -1,0 +1,233 @@
+{
+  "checks": [
+    {
+      "name": "liquid-glass dark composer has one outer focus boundary",
+      "passed": true,
+      "detail": {
+        "outline": "none",
+        "containerBorder": "1px",
+        "toolbarBorder": "0px"
+      }
+    },
+    {
+      "name": "liquid-glass light composer has one outer focus boundary",
+      "passed": true,
+      "detail": {
+        "outline": "none",
+        "containerBorder": "1px",
+        "toolbarBorder": "0px"
+      }
+    },
+    {
+      "name": "liquid-glass pointer collapse moves sidebar and canvas",
+      "passed": true,
+      "detail": {
+        ".sidebar": [
+          {
+            "state": "running",
+            "properties": []
+          },
+          {
+            "state": "running",
+            "properties": [
+              "none",
+              "translate(-100%)"
+            ]
+          },
+          {
+            "state": "running",
+            "properties": []
+          }
+        ],
+        ".main-area": [
+          {
+            "state": "running",
+            "properties": [
+              "translateX(262px)",
+              "translateX(0px)"
+            ]
+          }
+        ],
+        ".workbench-panel": []
+      }
+    },
+    {
+      "name": "liquid-glass reversal remains animated",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "liquid-glass restored sidebar is interactive",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "liquid-glass keyboard collapse is instant",
+      "passed": true,
+      "detail": {
+        ".sidebar": [],
+        ".main-area": [],
+        ".workbench-panel": []
+      }
+    },
+    {
+      "name": "liquid-glass workbench opens with motion",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "liquid-glass toolbar icons centered",
+      "passed": true,
+      "detail": [
+        {
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "name": "liquid-glass reduced motion has no spatial animation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "classic dark composer has one outer focus boundary",
+      "passed": true,
+      "detail": {
+        "outline": "none",
+        "containerBorder": "1px",
+        "toolbarBorder": "0px"
+      }
+    },
+    {
+      "name": "classic light composer has one outer focus boundary",
+      "passed": true,
+      "detail": {
+        "outline": "none",
+        "containerBorder": "1px",
+        "toolbarBorder": "0px"
+      }
+    },
+    {
+      "name": "classic pointer collapse moves sidebar and canvas",
+      "passed": true,
+      "detail": {
+        ".sidebar": [
+          {
+            "state": "running",
+            "properties": []
+          },
+          {
+            "state": "running",
+            "properties": [
+              "none",
+              "translate(-100%)"
+            ]
+          },
+          {
+            "state": "running",
+            "properties": []
+          }
+        ],
+        ".main-area": [
+          {
+            "state": "running",
+            "properties": [
+              "translateX(268px)",
+              "translateX(0px)"
+            ]
+          }
+        ],
+        ".workbench-panel": []
+      }
+    },
+    {
+      "name": "classic reversal remains animated",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "classic restored sidebar is interactive",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "classic keyboard collapse is instant",
+      "passed": true,
+      "detail": {
+        ".sidebar": [],
+        ".main-area": [],
+        ".workbench-panel": []
+      }
+    },
+    {
+      "name": "classic workbench opens with motion",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "classic toolbar icons centered",
+      "passed": true,
+      "detail": [
+        {
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "dx": 0,
+          "dy": 0
+        },
+        {
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "name": "classic reduced motion has no spatial animation",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "classic dark wallpaper visible through both regions",
+      "passed": true,
+      "detail": {
+        "sidebar": "color(srgb 0.105882 0.109804 0.137255 / 0.72)",
+        "main": "rgba(0, 0, 0, 0)",
+        "chat": "color(srgb 0.0823529 0.0862745 0.109804 / 0.62)",
+        "image": "url(\"file:///G:/Reverie/Reverie-Cli/.runtime/ui-polish-package-final/ReverieCli-ui/release/win-unpacked/resources/app.asar/dist/backgrounds/aurora-archive.webp\")"
+      }
+    },
+    {
+      "name": "classic light wallpaper visible through both regions",
+      "passed": true,
+      "detail": {
+        "sidebar": "color(srgb 0.941176 0.945098 0.960784 / 0.72)",
+        "main": "rgba(0, 0, 0, 0)",
+        "chat": "color(srgb 0.976471 0.976471 0.988235 / 0.72)",
+        "image": "url(\"file:///G:/Reverie/Reverie-Cli/.runtime/ui-polish-package-final/ReverieCli-ui/release/win-unpacked/resources/app.asar/dist/backgrounds/aurora-archive.webp\")"
+      }
+    },
+    {
+      "name": "classic high contrast keeps solid materials",
+      "passed": true,
+      "detail": null
+    }
+  ]
+}

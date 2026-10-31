@@ -260,7 +260,28 @@ button:disabled { cursor: default; }
 .small-popover, .dialog, .model-dialog, .command-dialog, .confirmation-dialog, .conversation-display-menu { border-color: var(--border); background: var(--panel); box-shadow: var(--shadow); border-radius: 16px; }
 .modal-backdrop { backdrop-filter: blur(5px); background: #10131a66; }
 
-:root[data-theme].has-workspace-background .sidebar { background: var(--sidebar); backdrop-filter: none; }
+/* Style the rendered dialog families, including the model picker and forms. */
+.model-picker, .command-palette, .form-modal, .confirm-modal, .attachment-dialog, .avatar-dialog {
+  background: var(--panel); border-color: var(--border); border-radius: 20px; box-shadow: var(--shadow);
+}
+.model-picker { width: min(850px, calc(100vw - 48px)); height: min(610px, calc(100dvh - 104px)); }
+.model-picker-sources { padding: 12px; background: var(--sidebar); border-color: var(--border-soft); }
+.model-picker-sources button { border-radius: 10px; }
+.model-picker-header { padding: 12px 18px; border-color: var(--border-soft); }
+.model-picker-header > div:first-child { min-width: 0; }
+.model-picker-header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-search { flex-shrink: 1; min-width: 100px; border-radius: 12px; }
+.model-search input { min-width: 0; }
+.model-option-list { padding: 10px; }
+.model-option-list > button { border-radius: 12px; }
+.command-palette { grid-template-rows: 68px minmax(0, 1fr) 34px; }
+.session-search-modal { grid-template-rows: 68px minmax(100px, 1fr); }
+.command-search { margin: 12px; padding: 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--input-bg); }
+.command-search:focus-within, .model-search:focus-within { border-color: var(--accent-2); box-shadow: 0 0 0 2px var(--accent-bg); }
+.command-results { padding: 0 12px 8px; }
+.command-results > button { border-radius: 12px; }
+
+:root[data-theme].has-workspace-background .sidebar { background: color-mix(in srgb, var(--sidebar) 72%, transparent); backdrop-filter: blur(20px); }
 :root[data-theme].has-workspace-background .topbar { background: var(--bg); backdrop-filter: none; }
 :root[data-theme].has-workspace-background .conversation-top,
 :root[data-theme].has-workspace-background .conversation-header { background: transparent; backdrop-filter: none; }
@@ -345,4 +366,60 @@ button:disabled { cursor: default; }
 }
 @media (prefers-reduced-motion: reduce) {
   .starter-actions button:hover, .starter-actions button:active, .send-button:active:not(:disabled), .icon-button:active:not(:disabled), .new-chat-button:active:not(:disabled) { transform: none; }
+}
+
+/* Keep the chosen wallpaper continuous behind structural materials. */
+:root[data-ui="classic"].has-workspace-background .main-area { background: transparent; }
+:root[data-ui="classic"].has-workspace-background { --desktop-canvas: color-mix(in srgb, var(--bg) 62%, transparent); }
+:root[data-ui="classic"][data-theme="light"].has-workspace-background { --desktop-canvas: color-mix(in srgb, var(--bg) 72%, transparent); }
+
+/* A fixed pane surface can slide while its grid track changes just once. */
+.app-shell > .sidebar {
+  width: var(--sidebar-width, 268px);
+  z-index: 2;
+  transition: transform 220ms var(--ease-drawer), opacity 180ms var(--ease-out), visibility 0s;
+}
+.app-shell.sidebar-collapsed > .sidebar {
+  transform: translateX(-100%);
+  transition: transform 220ms var(--ease-drawer), opacity 180ms var(--ease-out), visibility 0s 220ms;
+}
+.app-shell > .workbench-panel { transition: transform 220ms var(--ease-drawer), opacity 180ms var(--ease-out), visibility 0s; }
+.app-shell:not(.with-inspector) > .workbench-panel { transform: translateX(100%); transition: transform 220ms var(--ease-drawer), opacity 180ms var(--ease-out), visibility 0s 220ms; }
+.app-shell.pane-resizing > .sidebar, .app-shell.pane-resizing > .workbench-panel { transition: none; }
+
+/* Icon hit areas must not inherit file/toolbar button padding. */
+.topbar-right > .relative { display: flex; align-items: center; }
+.topbar-right .icon-button, .workbench-header > .icon-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; flex-shrink: 0; line-height: 1;
+}
+.topbar-right .icon-button > svg, .workbench-header > .icon-button > svg { display: block; flex-shrink: 0; }
+.workbench-header > .icon-button { align-self: center; width: 32px; height: 32px; }
+
+/* Brief entrances explain occasional surfaces; reading and typing stay still. */
+.floating-menu, .small-popover, .conversation-display-menu {
+  transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+}
+.small-popover { transform-origin: top right; }
+.modal-backdrop, .popover-backdrop { transition: opacity 200ms var(--ease-out); }
+:is(.modal-backdrop, .popover-backdrop) > [aria-modal="true"] {
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+@starting-style {
+  .floating-menu, .small-popover, .conversation-display-menu { opacity: 0; transform: scale(.97); }
+  .modal-backdrop, .popover-backdrop { opacity: 0; }
+  :is(.modal-backdrop, .popover-backdrop) > [aria-modal="true"] { opacity: 0; transform: scale(.97); }
+}
+:root[data-motion-input="keyboard"] :is(.sidebar, .workbench-panel, .floating-menu, .small-popover, .modal-backdrop, .dialog, .model-dialog, .command-dialog, .confirmation-dialog, .model-picker) { transition: none !important; animation: none !important; }
+:root[data-motion-input="keyboard"] :is(.modal-backdrop, .popover-backdrop),
+:root[data-motion-input="keyboard"] :is(.modal-backdrop, .popover-backdrop) > [aria-modal="true"] { transition: none !important; animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .app-shell > .sidebar, .app-shell > .workbench-panel { transform: none !important; transition: none !important; }
+}
+@media (hover: none), (pointer: coarse) {
+  .starter-actions button:hover, .quick-grid button:hover { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-ui="classic"][data-theme].has-workspace-background { --desktop-canvas: var(--bg); }
+  :root[data-ui="classic"].has-workspace-background .sidebar { background: var(--sidebar); backdrop-filter: none; }
 }

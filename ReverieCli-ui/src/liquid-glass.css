@@ -112,7 +112,7 @@
   .app-shell::before { transform: none; transition: none; }
   &[data-theme="dark"] .app-shell::before { filter: blur(var(--background-blur)) brightness(.5) saturate(.9); }
   .sidebar, .workbench-panel { background: var(--glass-structure); backdrop-filter: blur(28px) saturate(130%); border: 1px solid var(--border); box-shadow: var(--glass-inset), var(--glass-shadow); }
-  .sidebar { margin: 12px 6px 12px 12px; border-radius: 22px; }
+  .sidebar { width: calc(var(--sidebar-width, 268px) - 18px); margin: 12px 6px 12px 12px; border-radius: 22px; }
   .sidebar-drag { height: 52px; padding: 0 16px; }
   .brand { gap: 9px; font-weight: 650; letter-spacing: -.035em; }
   .brand-mark { width: 25px; height: 25px; border-radius: 8px; }
@@ -255,9 +255,21 @@
     background: var(--glass-popover); border: 1px solid var(--glass-edge); border-radius: 18px; box-shadow: var(--glass-inset), var(--shadow); backdrop-filter: blur(24px) saturate(125%);
   }
   .modal-backdrop { background: #17243940; backdrop-filter: blur(6px); }
+  .popover-backdrop { background: #17243940; backdrop-filter: blur(6px); }
+  .model-picker, .command-palette, .form-modal, .confirm-modal, .attachment-dialog, .avatar-dialog {
+    background: var(--glass-popover); border-color: var(--glass-edge); border-radius: 24px;
+    box-shadow: var(--glass-inset), var(--shadow);
+  }
+  .model-picker, .command-palette, .confirm-modal { overflow: hidden; }
+  .model-picker-sources { background: color-mix(in srgb, var(--bg-raised) 62%, transparent); border-color: var(--border-soft); }
+  .model-picker-models, .model-picker-header { background: transparent; }
+  .model-picker .model-search { background: var(--input-bg); border-color: var(--border); }
   .dialog-header, .model-dialog-header { border-bottom-color: var(--border-soft); }
   .toast { background: var(--glass-popover); border-color: var(--glass-edge); border-radius: 14px; box-shadow: var(--shadow); }
   button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
+  /* The composer owns the focus ring; an inner textarea outline crosses its toolbar. */
+  .composer textarea:focus-visible { outline: none; }
+  .command-search input:focus-visible, .model-search input:focus-visible { outline: none; }
   button:active:not(:disabled) { transition-duration: 60ms; }
   .icon-button:hover { background: var(--hover); }
   .pane-resizer { top: 70px; bottom: 20px; }
@@ -313,7 +325,7 @@
       --panel: var(--bg-raised);
       --panel-2: var(--bg-raised);
     }
-    .sidebar, .content-area, .workbench-panel, .topbar-center, .topbar-right, .small-popover, .dialog, .model-dialog, .command-dialog, .confirmation-dialog, .conversation-display-menu, .completion-popover, .modal-backdrop { backdrop-filter: none; }
+    .sidebar, .content-area, .workbench-panel, .topbar-center, .topbar-right, .small-popover, .dialog, .model-dialog, .command-dialog, .confirmation-dialog, .conversation-display-menu, .completion-popover, .modal-backdrop, .popover-backdrop { backdrop-filter: none; }
     .content-area, .sidebar, .workbench-panel { border-color: var(--muted); }
   }
 }

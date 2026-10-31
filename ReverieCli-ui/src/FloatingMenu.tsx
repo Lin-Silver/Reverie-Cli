@@ -27,6 +27,7 @@ export function FloatingMenu({ children, className, close, side = "bottom", labe
       const up = side === "top" ? above >= Math.min(element.scrollHeight, 180) || above > below : below < Math.min(element.scrollHeight, 180) && above > below;
       element.style.maxHeight = `${Math.max(48, up ? above : below)}px`;
       element.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - element.offsetWidth - margin))}px`;
+      element.style.transformOrigin = `${Math.max(0, Math.min(element.offsetWidth, rect.left + rect.width / 2 - parseFloat(element.style.left)))}px ${up ? "bottom" : "top"}`;
       element.style.top = `${up ? Math.max(margin, rect.top - element.offsetHeight - margin) : rect.bottom + margin}px`;
     };
     position();

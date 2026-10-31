@@ -1848,6 +1848,45 @@ def test_both_empty_submit_preserves_unassociated_email_feedback(verifier_browse
 
 
 # Authored primary-result and pressed-button regressions; zero model quality samples.
+@pytest.mark.parametrize('name', ['initial-business-result', 'modified-local-recalculation', 'restored-business-result'])
+def test_missing_primary_result_feedback_does_not_claim_an_observed_wrong_amount(name):
+    missing=benchmark.quality_repair_feedback([{'name':name,'passed':False,
+        'detail':{'primary_result':{'candidates':[]}}}])
+    assert '结果名称和金额' in missing
+    assert '结果不正确' not in missing and '没有正确更新' not in missing
+    wrong=benchmark.quality_repair_feedback([{'name':name,'passed':False,
+        'detail':{'primary_result':{'candidates':[{'value':6336}]}}}])
+    assert '结果名称和金额' not in wrong
+
+
+@pytest.mark.parametrize('label', ['年度合计', '全年总计', '每年总额'])
+@pytest.mark.parametrize('amount,expected', [('3168.00', True), ('6336.00', False)])
+def test_annual_result_labels_identify_the_actual_total_not_reference_amounts(verifier_browser, label, amount, expected):
+    page=verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>{label}</span><strong>{amount}元</strong></section>'
+            '<p>对比参考3168.00元</p><section><span>月度合计</span><b>3168.00元</b></section>')
+        result=benchmark.calculator_primary_result(page,3168,timeout=0)
+        assert result['passed'] is expected
+        assert [item['value'] for item in result['candidates']]==[float(amount)]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize('unit,expected', [('元/年', True), ('元 ／ 年', True), ('元/月', False)])
+@pytest.mark.parametrize('amount', ['3168.00', '6336.00'])
+def test_annual_result_currency_units_preserve_value_and_period_checks(verifier_browser, unit, expected, amount):
+    page=verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>年度费用</span><output>{amount}{unit}</output></section>'
+            '<p>对比参考3168.00元</p>')
+        result=benchmark.calculator_primary_result(page,3168,timeout=0)
+        assert result['passed'] is (expected and amount=='3168.00')
+        assert bool(result['candidates']) is expected
+    finally:
+        page.close()
+
+
 def calculator_html(defect='', *, roundtrip=False, daily_count=1):
     return '''<label>票价<input id="fare" type="number" value="12"></label>
         <label>天数<input id="days" type="number" value="22"></label>

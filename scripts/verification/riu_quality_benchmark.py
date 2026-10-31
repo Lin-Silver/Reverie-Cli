@@ -202,7 +202,10 @@ def quality_repair_feedback(checks):
             continue
         key = check['name'].removeprefix('modified-')
         label = labels.get(check['name'], labels.get(key, '部分业务交互或显示检查没有通过'))
-        if key.startswith('readable-state-'):
+        detail = check.get('detail')
+        if isinstance(detail, dict) and 'primary_result' in detail and not detail['primary_result']['candidates']:
+            label = '年度费用的主要结果无法识别，请把结果名称和金额明确显示在一起'
+        elif key.startswith('readable-state-'):
             label = '错误、空状态或成功确认中有文字与自身背景对比过低，请检查深浅主题及滚动后显示的按钮和提示'
         elif key.startswith('theme-state-'):
             label = '切换深浅主题时，当前输入、选择或表单状态被改变'
@@ -1394,7 +1397,7 @@ LABELLED_PRIMARY_RESULT_SCRIPT = r"""({names, kind}) => {
   };
   const amount = text => {
     const value = normal(text).replace(/，/g, ',');
-    const match = value.match(kind === 'water' ? /^([+-]?(?:\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?)(?:\s*(?:升|公升|L|liters?))?$/i : /^[¥￥$€]?\s*([+-]?(?:\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?)(?:\s*(?:元|人民币|CNY|RMB))?$/i);
+    const match = value.match(kind === 'water' ? /^([+-]?(?:\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?)(?:\s*(?:升|公升|L|liters?))?$/i : /^[¥￥$€]?\s*([+-]?(?:\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?)(?:\s*(?:元|人民币|CNY|RMB)(?:\s*[/／]\s*(?:年|year|yr))?)?$/i);
     return match ? Number(match[1].replace(/[,\s]/g, '')) : null;
   };
   const found = [], used = new Set();
@@ -1448,7 +1451,7 @@ LABELLED_PRIMARY_RESULT_SCRIPT = r"""({names, kind}) => {
   return {candidates: found, distinctValues: [...new Set(found.map(item => item.value))], width: innerWidth, height: innerHeight};
 }"""
 
-CALCULATOR_PRIMARY_NAMES = '(?:(?:年度|全年|每年|年)[\\u4e00-\\u9fff]{0,8}?(?:费用|成本|支出|花费)|年总计|annual\\s+(?:[a-z]+\\s+){0,3}(?:cost|expense|expenses))'
+CALCULATOR_PRIMARY_NAMES = '(?:(?:年度|全年|每年|年)[\\u4e00-\\u9fff]{0,8}?(?:费用|成本|支出|花费|合计|总计|总额)|annual\\s+(?:[a-z]+\\s+){0,3}(?:cost|expense|expenses))'
 CHART_PRIMARY_NAMES = r'(?:(?:总(?:用水量|用水|用量|量)|(?:用水量|用水|用量)(?:总计|合计)|总计|合计|总和|total(?:\s+(?:water|usage|consumption))?)(?:\s*[（(]\s*(?:升|公升|L|liters?)\s*[）)])?)'
 
 

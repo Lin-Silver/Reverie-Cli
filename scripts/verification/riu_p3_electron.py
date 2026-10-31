@@ -161,7 +161,8 @@ def main():
             context = page.context
             context.add_init_script("window.__p3wire=[];addEventListener('message',e=>{if(window.__p3wire.length<256)window.__p3wire.push(e.data)});")
             page.wait_for_selector(".session-item", timeout=120000)
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("domcontentloaded")
+            page.locator('textarea[aria-autocomplete="list"]').wait_for(state="visible")
             page.locator(".session-item").filter(has_text="RIU P3 interoperability").click()
             expect(page.locator(".model-copy strong")).to_have_text("RIU P3 loopback", timeout=30000)
             page.on("console", lambda message: (output / "console.log").open("a", encoding="utf-8").write(message.text + "\n"))

@@ -16,6 +16,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def package_executable(package: Path) -> Path:
     if sys.platform == 'darwin':
+        if package.suffix != '.app':
+            bundles = list(package.glob('*.app'))
+            if len(bundles) != 1:
+                raise ValueError(f'Expected one macOS application bundle in {package}, found {len(bundles)}')
+            package = bundles[0]
         with (package/'Contents/Info.plist').open('rb') as stream:
             name = plistlib.load(stream)['CFBundleExecutable']
         if Path(name).name != name:
@@ -37,8 +42,11 @@ def main():
     if not exe.is_file():
         raise FileNotFoundError(exe)
     output.mkdir(parents=True, exist_ok=False)
+    hasher = hashlib.sha256()
     with exe.open('rb') as stream:
-        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            hasher.update(chunk)
+    digest = hasher.hexdigest()
     report = {'scope': __doc__, 'platform': sys.platform, 'executable': str(exe),
               'executable_sha256': digest, 'model_quality_samples': 0, 'stages': [], 'passed': False}
     env = {**os.environ, 'NO_PROXY': '127.0.0.1,localhost'}

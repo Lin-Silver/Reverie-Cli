@@ -24,7 +24,14 @@ def stop_process(process):
         os.killpg(process.pid, signal.SIGTERM)
     else:
         process.terminate()
-    process.wait(timeout=30)
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        if os.name != 'nt' and os.getpgid(process.pid) == process.pid:
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+        process.wait(timeout=15)
 
 
 def wait_for_packaged_page(playwright, process, port, *, attempts=160):

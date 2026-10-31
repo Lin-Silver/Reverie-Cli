@@ -248,12 +248,11 @@ jobs:
             if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
               package="ReverieCli-ui/release/validation/linux-unpacked"
             elif [[ "$RIU_ARCH" == "arm64" ]]; then
-              package="ReverieCli-ui/release/validation/mac-arm64/Reverie.app"
+            package="ReverieCli-ui/release/validation/mac-arm64"
             else
-              package="ReverieCli-ui/release/validation/mac/Reverie.app"
+            package="ReverieCli-ui/release/validation/mac"
             fi
           fi
-          "$test_python" -m pip install playwright==1.58.0
           command=("$test_python" scripts/verification/riu_package_native.py --package "$package" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native)
           if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
             # Match the installed sandbox helper ownership without disabling it.

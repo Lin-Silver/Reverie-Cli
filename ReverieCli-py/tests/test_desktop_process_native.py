@@ -4,6 +4,7 @@ import importlib.util
 import os
 import socket
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,26 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('desktop_wait_native', ROOT / 'scripts/verification/desktop_process.py')
 desktop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop)
+
+
+@pytest.mark.parametrize('owns_group', [True, False])
+def test_unresponsive_owned_process_is_reaped_without_signalling_another_group(monkeypatch, owns_group):
+    calls = []
+    waits = iter([subprocess.TimeoutExpired('fixture', 30), None])
+
+    def wait(timeout):
+        result = next(waits)
+        if result:
+            raise result
+
+    process = SimpleNamespace(pid=123, poll=lambda: None, wait=wait,
+        terminate=lambda: calls.append('terminate'), kill=lambda: calls.append('kill'))
+    monkeypatch.setattr(desktop, 'os', SimpleNamespace(name='posix',
+        getpgid=lambda pid: pid if owns_group else 999,
+        killpg=lambda pid, sig: calls.append((pid, sig))))
+    monkeypatch.setattr(desktop, 'signal', SimpleNamespace(SIGTERM=15, SIGKILL=9))
+    desktop.stop_process(process)
+    assert calls == ([(123, 15), (123, 9)] if owns_group else ['terminate', 'kill'])
 
 
 @pytest.mark.parametrize('mode', ['delayed', 'exit', 'none'])

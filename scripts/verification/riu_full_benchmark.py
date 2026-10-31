@@ -26,8 +26,11 @@ def settings_digest():
 
 
 def digest(path):
+    hasher = hashlib.sha256()
     with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def write(path, value):
@@ -51,6 +54,16 @@ def complete_report(path):
     return report if len(cases) == 1 and cases[0].get('outcome') else None
 
 
+def request_tool_scope_matches(request):
+    sys.path.insert(0, str(ROOT/'ReverieCli-py'))
+    from reverie.agent.agent import _is_self_contained_static_rich_answer_prompt
+    payload = json.loads(Path(request['request']).read_text(encoding='utf-8'))
+    prompt = next((m.get('content', '') for m in reversed(payload.get('messages', []))
+                   if m.get('role') == 'user'), '')
+    expected = 0 if _is_self_contained_static_rich_answer_prompt(prompt) else 27
+    return request.get('tools') == expected and len(payload.get('tools', [])) == expected
+
+
 def summarize(entry, report):
     case = report['cases'][0]
     requests = case.get('requests', [])
@@ -61,7 +74,7 @@ def summarize(entry, report):
                      and any(c['name'] == 'actual-process-restart-recovery' and c['passed'] for c in checks))
     entry.update(state='complete', finished_at_utc=now(), outcome=case['outcome'],
                  repair_count=case.get('repair_count'), generation_first_pass=case.get('generation_first_pass'),
-                 actual_models=actual, production_tools_preserved=bool(requests) and all(r.get('tools') == 27 for r in requests),
+                 actual_models=actual, production_tools_preserved=bool(requests) and all(request_tool_scope_matches(r) for r in requests),
                  checks=len(checks), report_sha256=digest(Path(entry['path'])/'report.json'),
                  http_statuses=dict(Counter(str(r.get('status', 'incomplete')) for r in requests)))
     entry['qualified'] = (entry['outcome'] in PASS and actual == [entry['model']]
@@ -72,6 +85,7 @@ def summarize(entry, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--exe', type=Path, help='Native packaged Desktop executable on the current host.')
     parser.add_argument('--models', nargs='+')
     parser.add_argument('--attempts', type=int, default=3)
     parser.add_argument('--api-url', default='https://oai.endpoints.kepler.ai.cloud.ovh.net/v1')
@@ -107,7 +121,8 @@ def main():
         (output/'fixtures').mkdir()
         for fixture in ['riu-natural-tasks.json', 'riu-rich-answer-tasks.json']:
             shutil.copy2(ROOT/'scripts/verification/fixtures'/fixture, output/'fixtures'/fixture)
-        exe = ROOT/'ReverieCli-ui/release/linux-unpacked/ReverieUI'
+        exe = args.exe.resolve() if args.exe else ROOT/'ReverieCli-ui/release/linux-unpacked/ReverieUI'
+        core = exe.parent/('reverie.exe' if os.name == 'nt' else 'reverie')
         manifest = dict(created_at_utc=now(), formal=args.formal, models=args.models, attempts=args.attempts,
                         scope='Automatic model acceptance only; visual/manual reviews and platform installation acceptance remain separate.',
                         tasks=RICH_TASKS if args.rich_development else TASKS, rich_development=args.rich_development,
@@ -117,7 +132,7 @@ def main():
                         verification_settings_sha256=settings_digest(),
                         driver_sha256=digest(__file__), sources=json.loads(args.source_manifest.read_text()),
                         frozen_sha256={name:digest(output/name) for name in ['riu_quality_benchmark.py','riu_rich_answer_benchmark.py','desktop_process.py','fixtures/riu-natural-tasks.json','fixtures/riu-rich-answer-tasks.json']},
-                        binaries={str(p):digest(p) for p in [exe,exe.parent/'reverie',exe.parent/'resources/app.asar']})
+                        binaries={str(p):digest(p) for p in [exe,core,exe.parent/'resources/app.asar']})
         manifest['fixed_manual_review_ids'] = [f'model-{index+1}-{task}-1'
             for task in TASKS if task != 'text' for index in range(len(args.models))] if args.formal else []
         manifest['evidence_sha256'] = {str(p.resolve()): digest(p)

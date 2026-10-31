@@ -247,7 +247,11 @@ def _static_rich_answer_history(messages: List[Dict]) -> List[Dict]:
     users = [i for i, m in enumerate(history) if m.get("role") == "user"]
     if not users:
         return []
-    if _is_self_contained_static_rich_answer_prompt(history[users[-1]].get("content")):
+    latest = _coerce_text_fragments(history[users[-1]].get("content", ""))
+    refers_to_previous = re.search(r"刚才|刚刚|之前|上文|前文|原有|原先|上一份|上一版|\b(?:previous|earlier|original|above)\b", latest, re.I)
+    # Correction wording can itself mention displaying supplied tables. Keep its
+    # antecedent instead of sending the correction as a standalone data source.
+    if not refers_to_previous and _is_self_contained_static_rich_answer_prompt(latest):
         return [history[users[-1]]]
     for start in reversed(users[:-1]):
         if not _is_self_contained_static_rich_answer_prompt(history[start].get("content")):

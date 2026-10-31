@@ -4,6 +4,7 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from rich.console import Console
 
 from reverie.agent.agent import ReverieAgent, decode_stream_event
@@ -249,6 +250,34 @@ def test_static_rich_corrections_never_cross_external_actions_or_tool_history():
     assert not _static_rich_answer_history([supplied, {"role": "tool", "content": "result"}, feedback])
     assert not _static_rich_answer_history([supplied, {**response, "tool_calls": [{"id": "tool-1"}]}, feedback])
     assert not _static_rich_answer_history([supplied, {**response, "content": "x" * 12000}, feedback])
+
+
+@pytest.mark.parametrize("feedback", [
+    '刚才的回答还有这些问题：给定表格第1行第1列应为"项目01"，现在是"项目 01"。不要进行中英文排版改写，请修正并保留原有数据。',
+    '请重新展示之前给定的表格，纠正空格，保持原有的全部记录。',
+    '请修正上文的表格排版，保留给定数据和原有内容。',
+])
+def test_static_rich_correction_that_mentions_display_retains_its_original_data(tmp_path, feedback):
+    from reverie.agent.agent import _static_rich_answer_history
+
+    supplied = {"role": "user", "content": '展示给定表格，列名项目、数量，保留全部记录：[["项目01",0],["项目02",1]]。'}
+    response = {"role": "assistant", "content": '```reverie-ui\n{"type":"table","columns":["项目","数量"],"rows":[["项目 01",0],["项目 02",1]]}\n```'}
+    correction = {"role": "user", "content": feedback}
+    history = [supplied, response, correction]
+    assert _static_rich_answer_history(history) == history
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x", model="test-model",
+                         project_root=tmp_path, provider="openai-sdk", config=_standard_config(), runtime_surface="desktop")
+    agent.messages = history.copy()
+    assert agent.get_visible_tool_schemas() == []
+    assert agent._build_messages()[1:] == history
+    assert agent.messages == history
+
+
+def test_static_rich_correction_without_antecedent_is_not_self_contained():
+    from reverie.agent.agent import _static_rich_answer_history
+
+    feedback = {"role": "user", "content": "刚才给定表格第1行第1列的值不对。不要进行中英文排版改写，请修正并保留原有数据。"}
+    assert not _static_rich_answer_history([feedback])
 
 
 def test_static_rich_tool_suppression_keeps_tools_for_research_or_interaction(tmp_path):

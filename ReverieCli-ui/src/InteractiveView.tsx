@@ -1,3 +1,4 @@
+import { version as desktopVersion } from "../package.json";
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertCircle, AppWindow, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
@@ -278,7 +279,7 @@ export const InteractiveViewRuntime = memo(function InteractiveViewRuntime({ seg
       if (verdict.method === "ui/initialize") {
         performance.mark?.(`${metricKey}:frame-initialize`);
         frameWindow.postMessage({ jsonrpc: "2.0", id: verdict.id, result: { protocolVersion: VIEW_PROTOCOL_VERSION, capability: verdict.capabilityIssued,
-          hostInfo: { name: "Reverie", version: "2.5.0" },
+          hostInfo: { name: "Reverie", version: desktopVersion },
           hostCapabilities: { ...(view.mcpApp ? { serverTools: {}, sandbox: { csp: {}, permissions: {} } } : { experimental: { "reverie/generated-tools": {}, "reverie/view-state": {} } }), message: { text: {} }, updateModelContext: { text: {}, structuredContent: {} } },
           hostContext: iframeRef.current ? viewHostContext(iframeRef.current, appearance.current.language, appearance.current.mode) : {},
           reverieViewState: view.state, reverieToolCalls: view.toolCalls || [] } }, "*");

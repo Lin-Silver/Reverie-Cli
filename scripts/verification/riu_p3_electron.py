@@ -180,6 +180,9 @@ def main():
             wire = official_frame.evaluate("window.__p3wire")
             methods = [item.get("method") for item in wire if isinstance(item, dict)]
             check("official-sdk-initialize-and-notifications", methods.index("ui/notifications/tool-input") < methods.index("ui/notifications/tool-result"), methods)
+            host = next(item["result"]["hostInfo"] for item in wire if isinstance(item, dict) and isinstance(item.get("result"), dict) and "hostInfo" in item["result"])
+            version = json.loads((REPO / "ReverieCli-ui/package.json").read_text(encoding="utf-8"))["version"]
+            check("official-sdk-host-version-matches-package", host == {"name": "Reverie", "version": version}, host)
             background = page.locator('iframe[title="get-time"]').evaluate("el=>getComputedStyle(el).backgroundColor")
             foreground = official_frame.evaluate("getComputedStyle(document.getElementById('server-time')).color")
             def luminance(color):

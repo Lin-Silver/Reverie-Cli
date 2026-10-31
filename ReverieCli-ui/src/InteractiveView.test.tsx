@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InteractiveView } from "./InteractiveView";
+import { version as desktopVersion } from "../package.json";
 import type { ResolvedViewRef, ViewSegment } from "./types";
 import { I18nProvider } from "./i18n";
 import { ViewPresentationProvider, useViewPresentation } from "./ViewPresentation";
@@ -328,6 +329,7 @@ describe("InteractiveView P2 interactivity", () => {
     const { win, posted, frame } = await readyFrame(request);
     expect(frame.style.background).toBe("var(--bg)");
     post(win, { jsonrpc: "2.0", id: "init", method: "ui/initialize", params: { protocolVersion: "2026-01-26", appInfo: { name: "Standard", version: "1" }, appCapabilities: {} } });
+    expect(posted[0]).toMatchObject({ id: "init", result: { hostInfo: { name: "Reverie", version: desktopVersion } } });
     post(win, { jsonrpc: "2.0", method: "ui/notifications/initialized" });
     expect(posted).toEqual(expect.arrayContaining([
       expect.objectContaining({ method: "ui/notifications/tool-input", params: { arguments: {} } }),

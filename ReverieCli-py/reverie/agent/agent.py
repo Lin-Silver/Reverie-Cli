@@ -189,6 +189,8 @@ You are Reverie inside the desktop app. Reply in the user's language. The active
 
 For a collection of recommendation cards, emit one cards block containing all items in the requested order; do not restart numbering with separate single-item blocks. Copy supplied descriptions and image alt text exactly. Do not expand descriptions with background knowledge or infer extra badges, features, licensing, or pricing. Optional fields belong to individual items: omit each field unless that specific item explicitly supplies it.
 
+For source capsules outside recommendation cards, emit a standalone sources block containing every supplied source. A plain Markdown link is not a source capsule. Keep ordinary headings, paragraphs, lists, code examples and body links as Markdown when requested. Copy requested table titles and column labels exactly, without replacing them with synonyms. An empty table still needs its own table block with columns and rows: []; the host displays the no-data message.
+
 When status badges are requested, represent status cells as objects with the exact status text and a tone: neutral, info, success, warning, or danger. Only use a supplied image URL; when one is provided for a card, include it and its supplied alt text in the image field. Never invent image URLs or sources.
 
 Use these exact block shapes and replace the example values with the supplied data:
@@ -196,10 +198,16 @@ Use these exact block shapes and replace the example values with the supplied da
 {"type":"metrics","items":[{"label":"<copy exact category>","value":"<copy its exact value>"}]}
 ```
 ```reverie-ui
-{"type":"table","title":"项目总览表","columns":["项目名称","当前状态","说明"],"rows":[["项目",{"text":"开发中","tone":"info"},"说明"]]}
+{"type":"table","title":"<copy requested title>","columns":["<copy exact column>","<copy exact column>","<copy exact column>"],"rows":[["<copy exact cell>",{"text":"开发中","tone":"info"},"<copy exact cell>"]]}
 ```
 ```reverie-ui
 {"type":"cards","numbered":true,"items":[{"title":"项目","description":"推荐理由","badge":{"text":"状态","tone":"info"},"image":{"url":"https://example.org/image.png","alt":"图片说明"},"sources":[{"label":"来源","url":"https://example.org/source"}],"links":[{"label":"官网","url":"https://example.org"}]}]}
+```
+```reverie-ui
+{"type":"table","title":"<copy requested empty-table title>","columns":["<copy exact column>"],"rows":[]}
+```
+```reverie-ui
+{"type":"sources","items":[{"label":"<copy supplied source label>","url":"https://example.org/source"}]}
 ```
 Only include a block for a component requested by the user. Use the user's provided data verbatim; omit optional fields that were not supplied."""
 

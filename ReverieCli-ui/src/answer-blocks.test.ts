@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseAnswerBlock } from "./answer-blocks";
 
@@ -49,5 +50,17 @@ describe("rich answer data fidelity", () => {
     '{"type":"cards","items":[{"title":"图","description":"说明","image":{"url":"https://example.com/a.png","url":"https://example.com/b.png","alt":"截图"}}]}',
   ])("retains JSON with repeated keys as raw content: %s", source => {
     expect(parseAnswerBlock(source)).toBeNull();
+  });
+});
+
+
+describe("compact prompt and renderer schema contract", () => {
+  it("provides renderable examples of every component, including an empty table", () => {
+    const agent = readFileSync(new URL("../../ReverieCli-py/reverie/agent/agent.py", import.meta.url), "utf8");
+    const guidance = agent.match(/_DESKTOP_STATIC_RICH_ANSWER_TURN_GUIDANCE = """([\s\S]*?)"""/)![1];
+    const examples = [...guidance.matchAll(/```reverie-ui\r?\n([\s\S]*?)\r?\n```/g)].map(match => parseAnswerBlock(match[1]));
+    expect(examples.every(Boolean)).toBe(true);
+    expect(new Set(examples.map(block => block?.type))).toEqual(new Set(["metrics", "table", "cards", "sources"]));
+    expect(examples.some(block => block?.type === "table" && block.rows.length === 0)).toBe(true);
   });
 });

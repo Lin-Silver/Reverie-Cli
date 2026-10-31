@@ -155,6 +155,30 @@ def test_explicit_memory_request_keeps_memory_tools_available(tmp_path):
     }
 
 
+def test_static_rich_route_respects_explicitly_negated_actions():
+    from reverie.agent.agent import _is_self_contained_static_rich_answer_prompt
+
+    data = "展示给定统计卡：计划中7、开发中5，以及表格 Alpha / 开发中 / 核心助手。"
+    assert _is_self_contained_static_rich_answer_prompt(
+        "本题不需要可编辑控件。资料已给全，不需调查仓库或查找来源。" + data
+    )
+    assert not _is_self_contained_static_rich_answer_prompt(
+        "不需调查仓库，但请搜索最新项目数据。" + data
+    )
+    assert not _is_self_contained_static_rich_answer_prompt(
+        "不要搜索，但需要可编辑控件。" + data
+    )
+    assert not _is_self_contained_static_rich_answer_prompt(
+        "不要搜索网页并读取仓库数据。" + data
+    )
+    assert not _is_self_contained_static_rich_answer_prompt(
+        "根据仓库内容展示统计卡和表格。" + data
+    )
+    fixture = json.loads((Path(__file__).resolve().parents[2] / "scripts/verification/fixtures/riu-rich-answer-tasks.json").read_text(encoding="utf-8"))
+    for task in fixture["tasks"]:
+        assert _is_self_contained_static_rich_answer_prompt(fixture["common"] + "\n" + task["prompt"]), task["id"]
+
+
 def test_desktop_self_contained_static_rich_answer_uses_direct_response_route(tmp_path):
     agent = ReverieAgent(
         base_url="https://example.test/v1",

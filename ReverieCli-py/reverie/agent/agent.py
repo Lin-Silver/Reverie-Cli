@@ -179,7 +179,8 @@ _STATIC_RICH_RETRIEVAL_OR_ACTION = re.compile(
     r"from the repo|from the workspace|from github|current|latest|today|real[- ]time|"
     r"save to|write to|export to|download|edit the|update the|modify the|interactive|"
     r"filterable|sortable|clickable|controls|form)\b"
-    r"|搜索|检索|查找|读取|从(?:仓库|文件|工作区|github|网页)|仓库|代码库|"
+    r"|搜索|检索|查找|读取|从(?:仓库|代码库|文件|工作区|github|网页)|"
+    r"(?:根据|调查|查看|检查|分析|扫描|遍历)(?:仓库|代码库)|"
     r"最新|实时|当前(?:状态|数据|清单)|保存到|写入|导出|下载|修改|更新|"
     r"交互|筛选|过滤|排序|可编辑|表单|控件"
 )
@@ -206,7 +207,14 @@ def _is_self_contained_static_rich_answer_prompt(prompt: Any) -> bool:
     text = _coerce_text_fragments(prompt).strip()
     if len(text) < 32 or len(text) > 12000:
         return False
-    if _STATIC_RICH_RETRIEVAL_OR_ACTION.search(text):
+    # Explicitly declining research/controls must not trigger those routes.
+    # Stop at a clause boundary or contrast so positive requests remain visible.
+    requested_actions = re.sub(
+        r"(?:不需要|不需|无需|不必|不用|不要)(?:调查|搜索|检索|查找|读取|可编辑|交互|筛选|过滤|排序|表单|控件)"
+        r"(?:(?!但|不过|然后|同时|并|而且|再|之后|接着)[^。；;，,\n])*",
+        "", text,
+    )
+    if _STATIC_RICH_RETRIEVAL_OR_ACTION.search(requested_actions):
         return False
     if not _STATIC_RICH_DISPLAY_INTENT.search(text) or not _STATIC_RICH_COMPONENT_REQUEST.search(text):
         return False

@@ -2,12 +2,35 @@
 
 ## 2.5.3 — 2026-10-31
 
-- Integrate Cloud RIU rich answers and the switchable Liquid Glass desktop.
-- Fix opaque materials in light-theme enhanced contrast / reduced transparency mode.
-- Show user avatars without names in saved and live messages.
-- Refresh the assistant avatar, add reversible sidebar motion, restore classic wallpaper visibility, and fix toolbar alignment, input focus boundaries and dialog corners; see [UI verification](verification/2026-10-31-ui-polish/README.md).
-- Handle Git 2.56 invalid gitfile discovery errors and accept the default Linux package output directory; add regression checks to desktop CI.
-- Preserve formal model evaluation failures and platform acceptance limits; see [verification](verification/2026-10-31-v2.5.3/README.md).
+本次正式版本汇总 **v2.5.0 标签 `9035bc8` 之后**的累计改动，包括历史上仍以 2.5.0 版本号开发的更新。完整的逐项对照、升级说明和验收边界见 [v2.5.3 Release 说明](releases/v2.5.3.md)；[源码比较](https://github.com/Lin-Silver/Reverie-Cli/compare/v2.5.0...v2.5.3)以不可变标签为准。
+
+### Added
+
+- 可切换的 Liquid Glass 桌面外观，独立保存经典/玻璃偏好，支持浅色、深色、增强对比度、降低透明度和减少动态效果。
+- RIU 富格式回答与交互视图：指标卡、表格、图片推荐、状态徽标、来源和链接；补充 MCP Apps profile、状态恢复、显示模式切换及生命周期隔离。
+- RATS 多提供方发现与能力协商、RTP 任务工作区和任务生命周期；Reverie Engine 是当前实现的外部提供方。
+- `/provider` 自定义提供商管理、按模型保存上下文窗口、思考模式兼容处理；Desktop 图像模型选择与 SenseNova 编辑入口。
+- 内置设计/动画工作流、技能固定和同名覆盖提示，保留上游授权与来源；Python Engine 增加原生窗口、输入、缩放和关闭路径。
+
+### Changed
+
+- 扩展项目/会话导航、Git 审查、运行终端、上下文及活动等工作台界面；优化长对话加载、会话切换、内存/技能发现及闲置内核回收。
+- Context Engine 修正并行索引与检索边界；上下文占用、压缩阈值和实际发送内容使用一致的统计依据。
+- Windows CLI 改进为无需相邻运行时目录或 Python 安装的独立 EXE；保留桌面内置回退内核和受信任外部内核校验。
+- 刷新提供商模型目录、流式与工具执行兼容性、取消和重试处理；可用性仍取决于具体账户、模型和服务端能力。
+
+### Fixed
+
+- 修复侧栏收缩/反向展开动画、右上角图标对齐、经典模式背景过淡、输入框内部焦点边线、模型选择器等弹窗的材质和圆角裁切；更新助手头像，用户消息只保留头像。见 [UI 验证](verification/2026-10-31-ui-polish/README.md)。
+- 修复浅色增强对比度/降低透明度时的材质优先级、主题切换与草稿恢复；见 [2.5.3 验证](verification/2026-10-31-v2.5.3/README.md)。
+- 修复活动会话重载、会话保存、审批和桌面控制反馈；保留执行、授权、会话锁和私有状态边界。
+- 修复 Git 2.56 无效 gitfile 探测、Linux 默认 release 输出目录、导入技能字节校验、macOS Pyglet 后端和 CI Chromium 环境；见 [CI 修复记录](verification/2026-10-31-ui-polish/ci-fixes.md)。
+
+### Compatibility and known limits
+
+- 跨平台安装包、`--kernel-info`、内核哈希/协议校验和浏览器/电脑控制在 v2.5.0 已存在，本版是延续和修复，不重复列作首次新增。
+- 旧安装保留经典界面；新安装默认 Liquid Glass，可在设置切换。升级前请备份用户配置、会话及自定义资源，分别选择 Windows x64、Linux x64、macOS Apple Silicon 或 Intel 的对应安装包。
+- 自动构建、合成 UI 与单元/集成测试通过，不等于 RIU 正式模型质量、所有平台宿主安装/跨版本升级、物理输入/辅助技术及长时稳定性已全部验收；历史失败和开放门禁继续保留。
 
 2026-10-30：本地 Liquid Glass 与云端 dev `894fe6e` 已整合，保留经典界面和 RIU 富格式路线。Windows 联合目录包与本轮回归证据见[本地整合记录](verification/2026-10-30-desktop-integration/README.md)。此记录不关闭历史模型质量及跨平台安装验收缺口。
 
@@ -18,7 +41,7 @@
 Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，按语义版本倒序排列；同一版本只保留一个顶层入口，原始细节与发布后更新继续保留。当前源码版本为 **2.5.3**。
 
 - **Unreleased** 表示当前工作树和后续开发记录，不保证已提交、打包或公开发布。
-- **版本条目日期**保留原日志所记日期；**本地标签日期**是 Git 证据，不等于 GitHub Release 的发布时间。未联网核验远端发布资产。
+- **版本条目日期**保留原日志所记日期；**本地标签日期**是 Git 证据，不等于 GitHub Release 的发布时间。v2.5.3 使用正式标签工作流构建和发布，历史条目的资产状态不据此重新认定。
 - 当时的测试数字、模型可用性、权限行为和路线图属于历史陈述；现在的状态请看 [FEATURE_STATUS](FEATURE_STATUS.md)，实测范围看 [VERIFICATION_HISTORY](VERIFICATION_HISTORY.md)，计划看 [ROADMAP](ROADMAP.md)。
 - 本次保留原有全部版本段落；恢复早期标签基线与废弃开发版本记录。历史文案中的宣传性表述不能视为当前验收结论。
 
@@ -26,6 +49,7 @@ Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，�
 
 | 版本 | 原记录日期 | 本地语义版本标签 / 日期 | 更新主题 |
 | --- | --- | --- | --- |
+| [v2.5.3](#253--2026-10-31) | 2026-10-31 | `v2.5.3` | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
 | [Unreleased](#unreleased) | 2026-10-27 更新 | 无新版本标签 | 参考图富格式回答、当前源码 Linux 包续验与跨平台/模型质量待验 |
 | [v2.5.0](#v2-5-0) | 2026-07-17 | `v2.5.0` / 2026-07-17 | Trusted Portable Core and Multi-Platform Releases |
 | [v2.4.0](#v2-4-0) | 2026-07-16 | `v2.4.0` / 2026-07-17 | Desktop, Context Engine, and Release Upgrade |
@@ -72,6 +96,8 @@ Reverie CLI / Desktop 的统一更新日志。2026-10-08 完成历史归并，�
 历史例外见 [日期、缺号与证据说明](#history-provenance)，包括未发布的 2.3.5 开发草案；没有为了补齐编号而编造 2.1.22 / 2.1.23 的更新。
 
 ## Unreleased
+
+以下保留原始开发过程记录及当时的状态；已收入 v2.5.3 的交付内容和当前限制以本页顶部版本条目及 Release 说明为准。
 
 ### 2026-10-28 — GitHub dev 接续与 Linux 启动器后续门禁
 

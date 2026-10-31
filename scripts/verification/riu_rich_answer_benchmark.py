@@ -25,7 +25,7 @@ TASK_FILE = Path(__file__).with_name('fixtures')/'riu-rich-answer-tasks.json'
 RICH_STATE = r'''root=>({
  metrics:[...root.querySelectorAll('.answer-metric')].map(x=>[x.querySelector('dt').innerText.trim(),x.querySelector('dd').innerText.trim()]),
  tables:[...root.querySelectorAll('.answer-table-scroll table')].map(t=>({rows:[...t.querySelectorAll('tbody tr')].map(r=>[...r.querySelectorAll('td')].map(c=>c.innerText.trim())),headers:[...t.querySelectorAll('th')].map(x=>x.innerText.trim())})),
- cards:[...root.querySelectorAll('.answer-card')].map(c=>({title:c.querySelector('h3')?.innerText.replace(/^\d+\.\s*/,'').trim(),images:[...c.querySelectorAll('img')].map(i=>({src:i.getAttribute('src'),alt:i.alt,loaded:i.complete&&i.naturalWidth>0}))})),
+ cards:[...root.querySelectorAll('.answer-card')].map(c=>({title:c.querySelector('h3')?.innerText.replace(/^\d+\.\s*/,'').trim(),number:Number(c.querySelector('h3')?.innerText.match(/^(\d+)\./)?.[1])||null,description:c.querySelector('p')?.innerText.trim()||'',badges:[...c.querySelectorAll('.answer-badge')].map(b=>b.innerText.trim()),images:[...c.querySelectorAll('img')].map(i=>({src:i.getAttribute('src'),alt:i.alt,loaded:i.complete&&i.naturalWidth>0}))})),
  badges:[...root.querySelectorAll('.answer-badge')].map(x=>x.innerText.trim()),
  links:[...root.querySelectorAll('a[href]')].map(x=>x.href),sources:root.querySelectorAll('a.answer-source').length,plainLinks:root.querySelectorAll('a:not(.answer-source)').length,
  headings:[...root.querySelectorAll('h1,h2,h3')].map(x=>x.innerText.trim()),strong:[...root.querySelectorAll('strong')].map(x=>x.innerText.trim()),
@@ -70,10 +70,19 @@ def assess_rich_state(state, expected):
         check('rich-requested-badge', expected['badge_text'] in state['badges'], state['badges'])
     if 'card_titles' in expected:
         check('rich-card-order-and-titles', [c['title'] for c in state['cards']] == expected['card_titles'], state['cards'])
+        numbers = [c.get('number') for c in state['cards']]
+        check('rich-card-numbering', not any(numbers) or numbers == list(range(1, len(numbers)+1)), numbers)
+    if 'card_descriptions' in expected:
+        check('rich-supplied-descriptions', [c.get('description') for c in state['cards']] == expected['card_descriptions'], state['cards'])
+    if 'card_badges' in expected:
+        check('rich-per-item-badges', [c.get('badges') for c in state['cards']] == expected['card_badges'], state['cards'])
     if 'image_urls' in expected:
         images = [i for card in state['cards'] for i in card['images']]
         check('rich-supplied-image-sources', [i['src'] for i in images] == expected['image_urls'], images)
         check('rich-images-loaded-and-described', bool(images) and all(i['loaded'] and i['alt'].strip() for i in images), images)
+    if 'image_alts' in expected:
+        alts = [i['alt'] for card in state['cards'] for i in card['images']]
+        check('rich-supplied-image-descriptions', alts == expected['image_alts'], alts)
     if 'link_urls' in expected:
         check('rich-supplied-source-links', all(url.rstrip('/') in {v.rstrip('/') for v in state['links']}
               for url in expected['link_urls']), state['links'])
@@ -103,8 +112,12 @@ def rich_repair_feedback(checks):
         'rich-status-badges': '表格状态没有显示为带文字的标签',
         'rich-requested-badge': '指定的推荐标签没有正确显示',
         'rich-card-order-and-titles': '图文推荐的名称或顺序不符合要求',
+        'rich-card-numbering': '推荐卡片重复编号，编号应连续或全部省略',
+        'rich-supplied-descriptions': '推荐描述没有照给定资料保留，或添加了未提供的功能、许可等信息',
+        'rich-per-item-badges': '各推荐项的标签没有与各自给定资料一致，或额外添加了标签',
         'rich-supplied-image-sources': '图文推荐没有使用给定的图片',
         'rich-images-loaded-and-described': '图片没有成功显示或缺少说明',
+        'rich-supplied-image-descriptions': '图片说明没有照给定资料保留',
         'rich-supplied-source-links': '给定的官网或源码链接没有完整保留',
         'rich-source-pills': '缺少来源胶囊链接',
         'rich-ordinary-markdown-links': '缺少要求的普通正文链接',

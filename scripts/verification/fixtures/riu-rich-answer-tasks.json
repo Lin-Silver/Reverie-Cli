@@ -1,5 +1,5 @@
 {
-  "version": "rich-answer.v1",
+  "version": "rich-answer.v2",
   "common": "请用中文直接在对话中展示给定资料。使用适合阅读的原生卡片或表格，不要把展示结果放成代码或单独网页；本题不需要可编辑控件。资料已给全，不需调查仓库或查找来源。本次不要调用web_search、web_fetch、browser_controler、text_to_image、text_to_video；其余工具按原权限使用。",
   "forbidden_tools": [
     "web_search",
@@ -104,7 +104,21 @@
           "https://github.com/go-vikunja/vikunja"
         ],
         "min_sources": 2,
-        "badge_text": "项目管理"
+        "badge_text": "项目管理",
+        "card_descriptions": [
+          "项目管理工具",
+          "任务管理工具"
+        ],
+        "card_badges": [
+          [
+            "项目管理"
+          ],
+          []
+        ],
+        "image_alts": [
+          "项目自带看板示意素材",
+          "官方网站仓库看板截图"
+        ]
       },
       "modified_expected": {
         "card_titles": [
@@ -122,7 +136,21 @@
           "https://github.com/go-vikunja/vikunja"
         ],
         "min_sources": 2,
-        "badge_text": "重点关注"
+        "badge_text": "重点关注",
+        "card_descriptions": [
+          "项目管理工具",
+          "任务管理工具"
+        ],
+        "card_badges": [
+          [
+            "重点关注"
+          ],
+          []
+        ],
+        "image_alts": [
+          "项目自带看板示意素材",
+          "官方网站仓库看板截图"
+        ]
       }
     },
     {

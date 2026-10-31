@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
+from desktop_process import launch_options, stop_process, wait_for_packaged_page
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -99,7 +100,7 @@ def main():
     def stop():
         nonlocal process
         if process and process.poll() is None:
-            subprocess.run(["taskkill", "/pid", str(process.pid), "/t", "/f"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            stop_process(process)
             process.wait(timeout=15)
         process = None
 
@@ -116,21 +117,8 @@ def main():
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
-        startup = subprocess.STARTUPINFO()
-        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startup.wShowWindow = 0
-        process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, startupinfo=startup)
-        for _ in range(120):
-            try:
-                browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=1000)
-                break
-            except Exception:
-                if process.poll() is not None:
-                    raise RuntimeError("Electron exited: " + str(process.returncode))
-                time.sleep(.25)
-        else:
-            raise RuntimeError("Electron CDP did not start.")
-        page = browser.contexts[0].pages[0]
+        process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
+        browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
         page.wait_for_selector(".session-item", timeout=120000)
         page.wait_for_load_state("networkidle")
         page.locator(".session-item").filter(has_text="RIU P2 fixture").click()

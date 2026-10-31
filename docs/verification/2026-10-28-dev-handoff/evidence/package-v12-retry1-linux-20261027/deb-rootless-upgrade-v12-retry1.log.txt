@@ -1,0 +1,33 @@
+Selecting previously unselected package reverie.
+(Reading database ... 0 files and directories currently installed.)
+Preparing to unpack .../Reverie-2.5.0-linux-x64.deb ...
+Unpacking reverie (2.5.0) ...
+dpkg: reverie: dependency problems, but configuring anyway as you requested:
+ reverie depends on libgtk-3-0; however:
+  Package libgtk-3-0 is not installed.
+ reverie depends on libnotify4; however:
+  Package libnotify4 is not installed.
+ reverie depends on libnss3; however:
+  Package libnss3 is not installed.
+ reverie depends on libxss1; however:
+  Package libxss1 is not installed.
+ reverie depends on libxtst6; however:
+  Package libxtst6 is not installed.
+ reverie depends on xdg-utils; however:
+  Package xdg-utils is not installed.
+ reverie depends on libatspi2.0-0; however:
+  Package libatspi2.0-0 is not installed.
+ reverie depends on libuuid1; however:
+  Package libuuid1 is not installed.
+ reverie depends on libsecret-1-0; however:
+  Package libsecret-1-0 is not installed.
+
+Setting up reverie (2.5.0) ...
+(Reading database ... 2090 files and directories currently installed.)
+Preparing to unpack .../Reverie-2.5.0-linux-x64.deb ...
+Unpacking reverie (2.5.0) over (2.5.0) ...
+dpkg: error processing archive /workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb/Reverie-2.5.0-linux-x64.deb (--install):
+ cannot copy extracted data for './opt/Reverie/resources/app.asar' to '/dev/shm/riu-v12-retry1-20261027/deb-rootless-upgrade-v12/opt/Reverie/resources/app.asar.dpkg-new': failed to write (No space left on device)
+dpkg-deb: error: paste subprocess was killed by signal (Broken pipe)
+Errors were encountered while processing:
+ /workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb/Reverie-2.5.0-linux-x64.deb

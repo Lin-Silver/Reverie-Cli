@@ -1,5 +1,7 @@
 from collections import deque
 from io import StringIO
+import sys
+from types import SimpleNamespace
 
 import pytest
 from rich.console import Console
@@ -19,6 +21,14 @@ ZH_SECOND = "\u7b2c\u4e8c"
 
 def _handler(width: int = 80) -> InputHandler:
     return InputHandler(Console(file=StringIO(), force_terminal=True, width=width))
+
+
+@pytest.fixture(autouse=True)
+def deterministic_windows_modifiers(monkeypatch):
+    # Key streams below are synthetic. Reading GetAsyncKeyState instead can
+    # turn the final Enter into a newline when the test runner's user holds
+    # Shift/Ctrl, exhausting the stream. Modified Enter is tested explicitly.
+    monkeypatch.setattr(InputHandler, "_enter_should_insert_newline", lambda self: False)
 
 
 def test_prompt_editor_counts_cjk_characters_as_wide_cells() -> None:
@@ -158,13 +168,15 @@ def test_windows_prompt_editor_allows_modified_enter_newline(monkeypatch) -> Non
 
 
 def test_windows_prompt_editor_paste_preserves_single_newline(monkeypatch) -> None:
-    msvcrt = pytest.importorskip("msvcrt")
+    # Exercise the editor on every platform without replacing its input logic.
+    msvcrt = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "msvcrt", msvcrt)
 
     handler = _handler()
     # Simulate pasting "第一行\r\n第二行" (no trailing newline) then user presses Enter
     keys = deque([*list(ZH_FIRST_LINE), "\r", "\n", *list(ZH_SECOND_LINE), "\r"])
-    monkeypatch.setattr(msvcrt, "getwch", lambda: keys.popleft())
-    monkeypatch.setattr(msvcrt, "kbhit", lambda: bool(keys))
+    msvcrt.getwch = lambda: keys.popleft()
+    msvcrt.kbhit = lambda: bool(keys)
 
     result = handler._get_seeded_single_line_input("Reverie> ", "")
     assert result == f"{ZH_FIRST_LINE}\n{ZH_SECOND_LINE}"

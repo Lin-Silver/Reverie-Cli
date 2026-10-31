@@ -137,6 +137,53 @@ def test_explicit_view_tool_scope_is_not_overridden_by_negative_file_instruction
 
 
 @pytest.mark.parametrize("prompt", [
+    "请使用 file_ops 的 read 操作读取当前项目中的 inventory.txt，然后仅报告文件内容。不要运行命令，不要修改任何文件，也不要调用其他工具。",
+    "只使用 file_ops 读取当前项目文件，不要修改文件。",
+    "只允许使用 file_ops 读取项目文件，不要修改文件。",
+    "仅限 file_ops 查看项目文件，不要修改文件。",
+    "Only use file_ops to read the project file; do not modify any files.",
+    "Use file_ops to read the project file. Do not call any other tools.",
+])
+def test_explicit_file_tool_scope_does_not_force_repository_retrieval(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": prompt}]
+    tools = [{"type": "function", "function": {"name": name}} for name in ("codebase-retrieval", "file_ops")]
+    assert agent._native_tool_choice(tools) is None
+
+
+@pytest.mark.parametrize("prompt", [
+    "使用 file_ops 查看仓库文件，再分析并修复代码。",
+    "不要只使用 file_ops，请分析并修复仓库文件。",
+    "Do not only use file_ops; inspect and fix the repository files.",
+])
+def test_unrestricted_repository_request_with_file_ops_still_requires_retrieval(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": prompt}]
+    tools = [{"type": "function", "function": {"name": name}} for name in ("codebase-retrieval", "file_ops")]
+    assert agent._native_tool_choice(tools) == {"type": "function", "function": {"name": "codebase-retrieval"}}
+
+
+def test_explicit_file_ops_is_not_assumed_available(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": "只使用 file_ops 查看项目文件，不要修改文件。"}]
+    tools = [{"type": "function", "function": {"name": "codebase-retrieval"}}]
+    assert agent._native_tool_choice(tools) is None
+
+
+def test_scoped_file_request_keeps_tools_without_forcing_lookup(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.mode = "reverie"
+    agent.messages = [{"role": "user", "content": "请使用 file_ops 读取项目文件，不要修改文件，也不要调用其他工具。"}]
+    tools = [{"type": "function", "function": {"name": name, "parameters": {"type": "object"}}} for name in ("codebase-retrieval", "file_ops")]
+    request = agent._build_openai_chat_completion_kwargs(messages=agent.messages, tools=tools, stream=False)
+    assert request["tools"] == tools
+    assert "tool_choice" not in request
+
+
+@pytest.mark.parametrize("prompt", [
     "修复 reverie/tools/render_view.py 的代码并添加回归测试。",
     "Analyze src/app.ts, then create a diagram with create_file and render_view.",
 ])

@@ -1,6 +1,25 @@
 #!/bin/sh
 set -eu
-launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+launcher_path=$0
+case "$launcher_path" in
+  */*) ;;
+  *) launcher_path=$(command -v "$launcher_path") ;;
+esac
+link_depth=0
+while [ -L "$launcher_path" ]; do
+  link_depth=$((link_depth + 1))
+  if [ "$link_depth" -gt 40 ]; then
+    echo "reverieui: too many launcher symlinks" >&2
+    exit 127
+  fi
+  launcher_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")" && pwd -P)
+  link_target=$(readlink "$launcher_path")
+  case "$link_target" in
+    /*) launcher_path=$link_target ;;
+    *) launcher_path=$launcher_dir/$link_target ;;
+  esac
+done
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")" && pwd -P)
 gui="$launcher_dir/ReverieUI"
 if [ ! -x "$gui" ]; then
   gui="$launcher_dir/MacOS/ReverieUI"

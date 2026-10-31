@@ -18,6 +18,10 @@ from ..security_utils import (
     resolve_workspace_path,
 )
 
+# Parser failures must survive history/relay JSON normalization and fail closed
+# even for tools without required parameters. Never expose this as a schema key.
+INVALID_TOOL_ARGUMENTS = "__reverie_invalid_tool_arguments__"
+
 
 class ToolResultStatus(Enum):
     SUCCESS = "success"

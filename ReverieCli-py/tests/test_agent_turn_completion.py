@@ -204,6 +204,65 @@ def test_exhausted_recovery_budget_still_records_a_closing_assistant_message(mon
     assert "the request is not finished" in _visible_text(chunks)
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_exhausted_reasoning_only_turn_reports_failure_and_preserves_each_trace(monkeypatch, tmp_path, stream):
+    captured = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            if kwargs["stream"]:
+                return iter([_chunk(_delta(reasoning="The actual unfinished reasoning."), "length")])
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None, reasoning_content="The actual unfinished reasoning.", tool_calls=[]), finish_reason="length")], usage=None)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    module = types.ModuleType("openai")
+    module.OpenAI = FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    agent = _agent(tmp_path, mode="reverie")
+    chunks = list(agent.process_message("Answer the question", stream=stream, session_id="failed"))
+
+    assert len(captured) == 4
+    assert "Error processing message:" in _visible_text(chunks)
+    assert "the request is not finished" in _visible_text(chunks)
+    traces = [message["reasoning_content"] for message in agent.messages if message.get("reasoning_content")]
+    assert traces == ["The actual unfinished reasoning."] * 4
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("recovers", [False, True])
+def test_truncated_answer_uses_bounded_continuations_and_requires_completion(monkeypatch, tmp_path, stream, recovers):
+    captured = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.append(kwargs)
+            content = "Complete answer." if recovers and len(captured) > 1 else "Partial answer. "
+            reason = "stop" if recovers and len(captured) > 1 else "length"
+            if kwargs["stream"]:
+                return iter([_chunk(_delta(content=content), reason)])
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content, reasoning_content=None, tool_calls=[]), finish_reason=reason)], usage=None)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    module = types.ModuleType("openai")
+    module.OpenAI = FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    agent = _agent(tmp_path, mode="reverie")
+    chunks = list(agent.process_message("Answer the question", stream=stream, session_id="truncated"))
+
+    assert len(captured) == (2 if recovers else 3)
+    assert ("Error processing message:" in _visible_text(chunks)) is not recovers
+    assert ("continuation limit" in _visible_text(chunks)) is not recovers
+    assert "Partial answer." in _visible_text(chunks)
+    assert [message["content"] for message in agent.messages if message["role"] == "assistant"] == (["Partial answer.", "Complete answer."] if recovers else ["Partial answer."] * 3)
+
+
 def test_recovery_reminder_never_mutates_the_request_already_sent(monkeypatch, tmp_path) -> None:
     """The reminder belongs to the next request, not the one already in flight."""
     turns = [
@@ -297,6 +356,36 @@ def test_buffered_turn_honors_stop_received_while_waiting_for_the_reply(tmp_path
     assert events[-1] == {"type": "run.control", "state": "stopping"}
     assert "Run stopped by user;" in _visible_text(chunks)
     assert "Reply that arrived after Stop." not in _visible_text(chunks)
+
+
+def test_buffered_failure_returns_only_this_turns_saved_partial_answer_and_reasoning(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) > 1:
+                raise RuntimeError("provider disconnected before final answer")
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Saved partial answer.", reasoning_content="This turn's native reasoning.", tool_calls=[]), finish_reason="length")], usage=None)
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    module = types.ModuleType("openai")
+    module.OpenAI = FakeOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    agent = _agent(tmp_path, mode="reverie")
+    agent.messages = [{"role": "user", "content": "Old turn"}, {"role": "assistant", "content": "Old answer", "reasoning_content": "Old reasoning"}]
+    chunks = list(agent.process_message("New turn", stream=False, session_id="buffered-failed"))
+
+    assert len(calls) == 2
+    assert "Saved partial answer." in _visible_text(chunks)
+    assert "Error processing message: provider disconnected before final answer" in _visible_text(chunks)
+    assert "This turn's native reasoning." in chunks
+    assert "This turn's native reasoning." not in _visible_text(chunks)
+    assert "Old answer" not in _visible_text(chunks)
+    assert "Old reasoning" not in chunks
 
 
 def test_buffered_turn_without_stop_publishes_the_complete_reply(tmp_path) -> None:

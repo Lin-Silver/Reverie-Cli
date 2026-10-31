@@ -1,0 +1,20 @@
+ new Debian package, version 2.0.
+ size 344734872 bytes: control archive=33224 bytes.
+     524 bytes,    14 lines      control
+  141401 bytes,  1026 lines      md5sums
+     197 bytes,     6 lines   *  postinst             #!/bin/sh
+     258 bytes,     8 lines   *  postrm               #!/bin/sh
+ Package: reverie
+ Version: 2.5.0
+ License: MIT
+ Vendor: Lin-Silver <linsilver54@gmail.com>
+ Architecture: amd64
+ Maintainer: Lin-Silver <linsilver54@gmail.com>
+ Installed-Size: 716553
+ Depends: libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, libuuid1, libsecret-1-0
+ Recommends: libappindicator3-1
+ Section: devel
+ Priority: optional
+ Homepage: https://github.com/Lin-Silver/Reverie-Cli
+ Description: Reverie context-engine coding assistant
+   Reverie desktop — a native GUI host for the Reverie CLI core

@@ -25,6 +25,7 @@ import uuid
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
+from desktop_process import launch_options, stop_process, wait_for_packaged_page
 FIXTURE = REPO / "scripts/verification/fixtures/riu-p4/view.html"
 
 
@@ -119,7 +120,7 @@ def main():
     settings.write_text(json.dumps({"coreAppRoot": str(app_root), "projectRoot": str(workspace), "ui": {"language": "zh-CN"}}), encoding="utf-8")
     env = {**os.environ, "PORTABLE_EXECUTABLE_DIR": str(desktop_home)}
     env.pop("ELECTRON_RUN_AS_NODE", None)
-    report = {"scope": "Production Windows package; synthetic loopback model; no external provider", "checks": [], "measurements": {}, "fixture": {"html_bytes": FIXTURE.stat().st_size, "max_data_rows": 1000, "sha256": hashlib.sha256(FIXTURE.read_bytes()).hexdigest()}, "hardware": {"platform": platform.platform(), "cpu": platform.processor(), "logical_cpus": os.cpu_count()}, "output": str(output)}
+    report = {"scope": "Production packaged Electron; synthetic loopback model; no external provider", "checks": [], "measurements": {}, "fixture": {"html_bytes": FIXTURE.stat().st_size, "max_data_rows": 1000, "sha256": hashlib.sha256(FIXTURE.read_bytes()).hexdigest()}, "hardware": {"platform": platform.platform(), "cpu": platform.processor(), "logical_cpus": os.cpu_count()}, "output": str(output)}
     process = browser = page = None
     log = (output / "electron.log").open("w", encoding="utf-8")
 
@@ -157,19 +158,8 @@ def main():
                 nonlocal process, browser, page
                 with socket.socket() as sock:
                     sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
-                startup = subprocess.STARTUPINFO(); startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow = 1 if args.keep_open else 0
-                process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, startupinfo=startup)
-                for _ in range(120):
-                    try:
-                        browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=1000)
-                        break
-                    except Exception:
-                        if process.poll() is not None:
-                            raise RuntimeError("Packaged Electron exited.")
-                        time.sleep(.25)
-                if browser is None:
-                    raise RuntimeError("No debugging endpoint.")
-                page = browser.contexts[0].pages[0]
+                process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options(visible=args.keep_open))
+                browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
                 page.wait_for_selector(".session-item", timeout=120000)
                 page.wait_for_load_state("networkidle")
                 page.evaluate("window.__p4events=[];window.reverie.onEvent(e=>window.__p4events.push({...e,host_received_at:Date.now()}));true")
@@ -297,7 +287,7 @@ def main():
             check("refresh-restores-display-and-private-state", target.locator("#filter").input_value() == "Row 1" and target.evaluate("window.__p4.instance") != identity)
             # Actual process restart, not only renderer reload.
             browser.close(); browser = None
-            subprocess.run(["taskkill", "/pid", str(process.pid), "/t", "/f"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            stop_process(process)
             process.wait(timeout=20); process = None
             launch(); target = frame()
             check("process-restart-restores-view-and-private-state", target.locator("#filter").input_value() == "Row 1" and page.locator('.view-pip-slot iframe').count() == 1)
@@ -373,7 +363,7 @@ def main():
             report["source_retrieval"] = {"fixture_source_evidence_request_indices": source_evidence, "full_html_request_indices": full_html_requests, "note": "Initial generation and explicit revisions may retrieve original workspace source snippets through FastContext. This is distinct from reattaching a registered artifact or private runtime state."}
             check("private-ui-state-and-html-not-in-followups", private_sentinel not in captured and "RIU_P4_PRIVATE_HTML" not in followup and not full_html_requests)
             # Exercise the shipped plain-text client, not a renderer mock.
-            cli = subprocess.run([str(args.exe.resolve().parent / "reverie.exe"), str(workspace), "--no-index", "--prompt", "RIU_P4_GENERATE plain text client", "--report-file", str(output / "plain-client.json")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+            cli = subprocess.run([str(args.exe.resolve().parent / ("reverie.exe" if os.name == "nt" else "reverie")), str(workspace), "--no-index", "--prompt", "RIU_P4_GENERATE plain text client", "--report-file", str(output / "plain-client.json")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             (output / "plain-client.txt").write_text(cli.stdout + cli.stderr, encoding="utf-8")
             plain = json.loads((output / "plain-client.json").read_text(encoding="utf-8")) if (output / "plain-client.json").is_file() else {}
             plain_serialized = json.dumps(plain, ensure_ascii=False)
@@ -401,7 +391,7 @@ def main():
                 try: browser.close()
                 except Exception: pass
             if process and process.poll() is None:
-                subprocess.run(["taskkill", "/pid", str(process.pid), "/t", "/f"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                stop_process(process)
         server.shutdown(); log.close()
         playwright.stop()
     if not report.get("passed"):

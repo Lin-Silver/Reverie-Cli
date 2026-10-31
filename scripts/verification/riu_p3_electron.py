@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
+from desktop_process import launch_options, stop_process, wait_for_packaged_page
 SECRET = "PRIVATE_META_MUST_NEVER_REACH_MODEL"
 
 
@@ -105,7 +106,7 @@ def main():
     env = {**os.environ, "PORTABLE_EXECUTABLE_DIR": str(desktop_home)}
     env.pop("ELECTRON_RUN_AS_NODE", None)
     checks, process, page, browser = [], None, None, None
-    report = {"scope": "Windows production packaged Electron + unchanged official stdio MCP example + local negative fixtures; loopback model", "versions": {"ext_apps": "2.0.3", "ui_protocol": "2026-01-26", "mcp_core": "2025-06-18"}, "output": str(output), "official_html_sha256": original_hash, "checks": checks}
+    report = {"scope": "Production packaged Electron + unchanged official stdio MCP example + local negative fixtures; loopback model", "versions": {"ext_apps": "2.0.3", "ui_protocol": "2026-01-26", "mcp_core": "2025-06-18"}, "output": str(output), "official_html_sha256": original_hash, "checks": checks}
     log = (output / "electron.log").open("w", encoding="utf-8")
 
     def check(name, passed, detail=None):
@@ -145,27 +146,20 @@ def main():
         panel.get_by_role("button", name=decision, exact=True).click()
 
     try:
-        hello = subprocess.run([str(args.exe.resolve().parent / "reverie.exe"), "--sdk-bridge"],
+        hello = subprocess.run([str(args.exe.resolve().parent / ("reverie.exe" if os.name == "nt" else "reverie")), "--sdk-bridge"],
                                input=json.dumps({"id": "p3-hello", "action": "hello"}) + "\n",
                                text=True, encoding="utf-8", capture_output=True, env=env, cwd=workspace,
-                               timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+                               timeout=60, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         envelopes = [json.loads(line) for line in hello.stdout.splitlines() if line.startswith("{")]
         profile = next(item for item in envelopes if item.get("id") == "p3-hello")
         report["kernel_hello"] = profile
         check("packaged-hello-profile", profile["capabilities"]["views"]["mcp_apps"] is True)
         with sync_playwright() as playwright:
             with socket.socket() as sock: sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
-            startup = subprocess.STARTUPINFO(); startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow = 0
-            process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, startupinfo=startup)
-            for _ in range(120):
-                try: browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}", timeout=1000); break
-                except Exception:
-                    if process.poll() is not None: raise RuntimeError("Packaged Electron exited.")
-                    time.sleep(.25)
-            if browser is None: raise RuntimeError("Electron did not expose its test debugging port.")
-            context = browser.contexts[0]
+            process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
+            browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
+            context = page.context
             context.add_init_script("window.__p3wire=[];addEventListener('message',e=>{if(window.__p3wire.length<256)window.__p3wire.push(e.data)});")
-            page = context.pages[0]
             page.wait_for_selector(".session-item", timeout=120000)
             page.wait_for_load_state("networkidle")
             page.locator(".session-item").filter(has_text="RIU P3 interoperability").click()
@@ -265,7 +259,7 @@ def main():
         (output / "model-requests.json").write_text(json.dumps(ModelFixture.requests, indent=2, ensure_ascii=False), encoding="utf-8")
         (output / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         if process and process.poll() is None:
-            subprocess.run(["taskkill", "/pid", str(process.pid), "/t", "/f"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            stop_process(process)
             process.wait(timeout=15)
         model.shutdown(); log.close()
     print(str(output / "report.json"), flush=True)

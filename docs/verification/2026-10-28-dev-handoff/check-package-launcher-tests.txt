@@ -1,0 +1,11 @@
+✔ a restrictive build umask does not make installed code unreadable to other users (6.252612ms)
+✔ the Linux distribution command always normalizes payload permissions before packaging (0.730889ms)
+✔ the Linux desktop launcher resolves its real directory when invoked through an installed symlink (77.888004ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2160.783713

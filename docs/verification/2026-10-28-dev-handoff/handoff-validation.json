@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-28",
+  "scope": "Current dev snapshot pre-publication checks; historical package/model evidence is not rerun or rescored.",
+  "checks": [
+    {
+      "name": "renderer-tests",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "--maxWorkers=2"
+      ],
+      "exit_code": 0,
+      "seconds": 49.907,
+      "log": "docs/verification/2026-10-28-dev-handoff/check-renderer-tests.txt"
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "seconds": 6.544,
+      "log": "docs/verification/2026-10-28-dev-handoff/check-typecheck.txt"
+    },
+    {
+      "name": "package-launcher-tests",
+      "command": [
+        "node",
+        "--test",
+        "ReverieCli-ui/scripts/package-validation.node-test.mjs"
+      ],
+      "exit_code": 0,
+      "seconds": 2.308,
+      "log": "docs/verification/2026-10-28-dev-handoff/check-package-launcher-tests.txt"
+    },
+    {
+      "name": "launcher-shell-syntax",
+      "command": [
+        "sh",
+        "-n",
+        "ReverieCli-ui/build/launchers/reverieui"
+      ],
+      "exit_code": 0,
+      "seconds": 0.002,
+      "log": "docs/verification/2026-10-28-dev-handoff/check-launcher-shell-syntax.txt"
+    }
+  ],
+  "python_regression_this_handoff": {
+    "status": "not_rerun",
+    "reason": "Current system Python has no pytest and the old test virtual environment is not present. No Python implementation changes were made during this Git handoff; retain historical 2392 passed / 24 skipped separately.",
+    "historical_result_is_not_a_new_run": true
+  },
+  "credential_pattern_scan": {
+    "candidate_files_before_handoff": 183,
+    "text_members_including_zip_entries": 1866,
+    "known_token_pattern_hits": 0,
+    "scope": "GitHub/provider token forms, AWS access IDs, private-key headers, URL-embedded credentials; not a proof that arbitrary secrets cannot exist."
+  },
+  "existing_evidence_zips_crc": "4/4 passed",
+  "publication_status": "prepared; remote confirmation is required after push",
+  "documentation_check": {
+    "documents": 48,
+    "local_links": 972,
+    "errors": [],
+    "local_artifact_references": 126
+  },
+  "renderer_summary": {
+    "passed": 425,
+    "skipped": 1,
+    "test_files_passed": 53,
+    "test_files_skipped": 1,
+    "warnings": "jsdom canvas getContext unimplemented warning retained in raw log"
+  },
+  "remote_base": {
+    "snapshot_base": "350c5baaed1b41f399ca09e01b912a4f81eaa80e",
+    "main_at_inspection": "80fad92af9f7ce80384768b5897f6c4c99af4747",
+    "main_additional_commits": 4,
+    "main_not_merged_into_this_workspace_snapshot": true
+  },
+  "updated_at_utc": "2026-10-28T10:03:03.693288+00:00",
+  "handoff_evidence_credential_scan": {
+    "text_files": 85,
+    "known_token_pattern_hits": 0
+  },
+  "staged_whitespace_check": {
+    "exit_code": 0,
+    "raw_evidence_exception": "Narrow .gitattributes rules preserve byte-identical raw evidence whitespace; source/docs retain normal checks."
+  },
+  "evidence_byte_identity": {
+    "files_verified": 79,
+    "passed": true
+  },
+  "first_remote_clone": {
+    "commit": "d81b1f1d2452728793771a6e34f809ae0b01fc54",
+    "content_manifest_verified": 275,
+    "evidence_copies_verified": 79,
+    "documentation_errors": 2,
+    "cause": "Two existing linked v6 .log files were excluded by the repository-wide *.log rule.",
+    "correction": "Force-track both original logs without modifying their contents.",
+    "preserved_report": "docs/verification/2026-10-28-dev-handoff/first-remote-clone-check.json",
+    "final_remote_recheck": "Must be performed after this corrective commit; its result is reported in delivery."
+  },
+  "force_tracked_log_credential_scan": {
+    "files": 2,
+    "known_token_pattern_hits": 0
+  }
+}

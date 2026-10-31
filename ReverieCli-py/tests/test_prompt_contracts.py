@@ -46,6 +46,9 @@ def test_view_guidance_keeps_core_controls_and_user_language_in_small_surfaces()
     assert "primary controls together" in views
     assert "user's language" in views
     assert "localStorage/sessionStorage" in views
+    assert "Native form submission" in views
+    assert 'type="button"' in views
+    assert "inline validation and confirmation" in views
     assert "ordinary answer or single-file interactive view" in prompt
 
 
@@ -56,6 +59,89 @@ def test_desktop_selects_useful_views_without_requiring_page_requests():
     assert "Answer simple questions in text" in views
     assert "initial result" in views
     assert "suggest that you could build" in views
+    assert "not a repository edit" in views
+    assert "table of sampled values" in views
+
+
+def test_desktop_response_selection_precedes_the_generic_engineering_workflow():
+    prompt = build_system_prompt(runtime_surface='desktop')
+    assert prompt.index('## Desktop Response Format') < prompt.index('# How you work')
+    assert prompt.index('### Offline host integration example') < prompt.index('# How you work')
+    assert prompt.count('## Interactive Views') == 1
+    assert 'same turn' in prompt.split('## Desktop Response Format', 1)[1].split('\n# ', 1)[0]
+    assert '## Desktop Response Format' not in build_system_prompt(runtime_surface='terminal')
+    assert '## Desktop Response Format' not in build_system_prompt(mode='writer', runtime_surface='desktop')
+
+
+def test_native_rich_answers_are_desktop_content_without_adding_tool_requirements():
+    for mode in ['reverie', 'writer']:
+        desktop = build_system_prompt(mode=mode, runtime_surface='desktop')
+        assert '## Rich Answer Presentation' in desktop
+        assert '`reverie-ui`' in desktop
+        assert 'do not call file-writing or interactive-view tools for a static layout' in desktop
+        assert 'Create or export a file only when the user asks for one' in desktop
+        assert 'static cards alone do not satisfy an interactive request' in desktop
+        assert 'do not invent numbers, project status, screenshots, URLs' in desktop
+        terminal = build_system_prompt(mode=mode, runtime_surface='terminal')
+        assert 'do not call file-writing or interactive-view tools for a static layout' not in terminal
+        assert '## Rich Answer Presentation' not in terminal
+
+
+def test_offline_helper_runs_the_capability_and_revision_protocol():
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is needed to execute the authoring example')
+    example = build_system_prompt(runtime_surface='desktop').split('### Offline host integration example', 1)[1]
+    helper = example.split('```javascript\n', 1)[1].split('\n```', 1)[0]
+    script = r"""
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const helper=JSON.parse(fs.readFileSync(0,'utf8'));
+let receive,restored,revision=4,inflight=0,maxInflight=0;
+const calls=[],root={dataset:{},style:{setProperty(k,v){this[k]=v}}};
+const parent={postMessage(message){
+  calls.push(structuredClone(message));
+  const reply=result=>receive({source:parent,data:{jsonrpc:'2.0',id:message.id,result}});
+  if(message.method==='ui/initialize'){
+    receive({source:{},data:{jsonrpc:'2.0',id:message.id,result:{capability:'forged',reverieViewState:{state:{points:999}}}}});
+    queueMicrotask(()=>reply({capability:'owned-token',reverieViewState:{revision,state:{points:7}},hostContext:{theme:'light',locale:'zh-CN',displayMode:'inline',styles:{variables:{'--color-text-primary':'#111'}}}}));
+  }else{
+    assert.equal(message.capability,'owned-token');
+    if(message.method==='reverie/view-state'){
+      assert.equal(message.params.baseRevision,revision);
+      if(message.params.state.reject){
+        queueMicrotask(()=>receive({source:parent,data:{jsonrpc:'2.0',id:message.id,error:{message:'fixture save refused'}}}));
+        return;
+      }
+      maxInflight=Math.max(maxInflight,++inflight);
+      setTimeout(()=>{inflight--;reply({revision:++revision})},2);
+    }
+  }
+}};
+const context=vm.createContext({parent,document:{documentElement:root},structuredClone,setTimeout,clearTimeout,addEventListener(type,fn){if(type==='message')receive=fn}});
+vm.runInContext(helper+'\nglobalThis.connect=connectView',context);
+(async()=>{
+  const host=await context.connect(value=>restored=value);
+  assert.equal(restored.points,7);
+  assert.equal(calls[1].method,'ui/notifications/initialized');
+  const draft={points:1},first=host.save(draft);draft.points=99;
+  await Promise.all([first,host.save({points:2})]);
+  assert.deepEqual(calls.filter(m=>m.method==='reverie/view-state').map(m=>[m.params.baseRevision,m.params.state.points]),[[4,1],[5,2]]);
+  assert.equal(maxInflight,1);
+  await assert.rejects(host.save({reject:true}),/fixture save refused/);
+  await host.save({points:3});
+  assert.equal(revision,7);
+  receive({source:parent,data:{jsonrpc:'2.0',method:'ui/notifications/host-context-changed',params:{theme:'dark',locale:'zh-CN',displayMode:'pip',styles:{variables:{'--color-text-primary':'#eee'}}}}});
+  assert.equal(root.dataset.theme,'dark');assert.equal(root.dataset.displayMode,'pip');
+  assert.equal(root.style['--color-text-primary'],'#eee');
+})().catch(error=>{console.error(error);process.exitCode=1});
+"""
+    result = subprocess.run([node, '-e', script], input=json.dumps(helper), text=True,
+                            capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
 
 
 def test_task_ledger_guidance_respects_bounded_view_and_explicit_tool_scope():
@@ -277,3 +363,108 @@ def test_mode_switch_refreshes_guidance_after_committing_mode():
 
     assert result.success
     assert refreshed == [("writer", "writer", "writer", "writer")]
+
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("surface", ("terminal", "desktop"))
+def test_reasoning_guidance_is_single_and_precedes_desktop_authoring(mode, surface):
+    prompt = build_system_prompt(mode=mode, runtime_surface=surface)
+    assert prompt.count("## Visible Reasoning") == 1
+    if surface == "desktop" and "render_view" in get_tool_names_for_mode(mode):
+        assert prompt.index("## Visible Reasoning") < prompt.index("### Offline host integration example")
+    assert "Do not manufacture a thinking trace" in prompt
+
+
+def test_host_color_example_covers_the_surfaces_that_contain_text():
+    prompt = build_system_prompt(runtime_surface="desktop")
+    example = prompt.split("### Offline host integration example", 1)[1].split("```javascript", 1)[0]
+    assert "--color-background-secondary" in example
+    assert "input, select, textarea" in example
+    assert "--color-text-primary" in example
+
+
+def test_offline_mount_restores_before_subscribing_without_initial_save():
+    """Exercise the documented composition through actual initialization and user events."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is unavailable')
+    example = build_system_prompt(runtime_surface='desktop').split('### Offline host integration example', 1)[1]
+    helper = example.split('```javascript\n', 1)[1].split('\n```', 1)[0]
+    script = r"""
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const helper=JSON.parse(fs.readFileSync(0,'utf8'));
+async function fixture(refuseInitialization=false){
+  let receive,change,initialized=false,revision=8;
+  let fields={amount:7,enabled:true,label:'default'};
+  const messages=[],renders=[],errors=[];
+  const parent={postMessage(message){
+    messages.push(structuredClone(message));
+    const reply=result=>receive({source:parent,data:{jsonrpc:'2.0',id:message.id,result}});
+    if(message.method==='ui/initialize'){
+      queueMicrotask(()=>{
+        if(refuseInitialization)receive({source:parent,data:{jsonrpc:'2.0',id:message.id,error:{message:'initialization refused'}}});
+        else reply({capability:'owned',reverieViewState:{revision,state:{amount:0,enabled:false,label:''}},hostContext:{theme:'dark',locale:'zh-CN',displayMode:'pip',styles:{variables:{}}}});
+      });
+    }else{
+      assert.equal(message.capability,'owned');
+      if(message.method==='ui/notifications/initialized')initialized=true;
+      else if(message.method==='reverie/view-state'){
+        assert.ok(initialized,'No persistence before initialization');
+        assert.equal(message.params.baseRevision,revision);
+        queueMicrotask(()=>{
+          if(message.params.state.amount===-1)receive({source:parent,data:{jsonrpc:'2.0',id:message.id,error:{message:'save refused'}}});
+          else reply({revision:++revision});
+        });
+      }
+    }
+  }};
+  const root={dataset:{},style:{setProperty(){}}};
+  const context=vm.createContext({parent,document:{documentElement:root},structuredClone,setTimeout,clearTimeout,addEventListener(type,fn){if(type==='message')receive=fn}});
+  vm.runInContext(helper+'\nglobalThis.mount=mountView',context);
+  const mounted=context.mount({
+    restore(state){assert.equal(change,undefined);assert.equal(messages.filter(m=>m.method==='reverie/view-state').length,0);fields=structuredClone(state)},
+    render(){renders.push(structuredClone(fields))},
+    read(){return fields},
+    subscribe(handler){assert.ok(initialized);change=handler},
+    onError(error){errors.push(error.message)}
+  });
+  if(refuseInitialization){
+    await assert.rejects(mounted,/initialization refused/);
+    assert.equal(change,undefined);assert.equal(messages.filter(m=>m.method==='reverie/view-state').length,0);
+    return;
+  }
+  await mounted;
+  assert.deepEqual(fields,{amount:0,enabled:false,label:''});
+  assert.deepEqual(renders.at(-1),fields);
+  assert.equal(root.dataset.theme,'dark');
+  assert.equal(messages.filter(m=>m.method==='reverie/view-state').length,0,'Restoring or initial rendering must not overwrite stored state');
+  fields.amount=3;await change();
+  assert.deepEqual(messages.filter(m=>m.method==='reverie/view-state').map(m=>[m.params.baseRevision,m.params.state]),[[8,{amount:3,enabled:false,label:''}]]);
+  fields.amount=-1;await change();assert.deepEqual(errors,['save refused']);
+  fields.amount=0;await change();
+  assert.equal(revision,10);assert.equal(renders.at(-1).amount,0);
+}
+(async()=>{await fixture();await fixture(true)})().catch(error=>{console.error(error);process.exitCode=1});
+"""
+    result = subprocess.run([node, '-e', script], input=json.dumps(helper), text=True,
+                            capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+def test_native_rich_format_example_is_a_parseable_dedicated_fence():
+    import json
+    import re
+    from reverie.agent.system_prompt import _desktop_rich_answer_guidance
+    guidance = _desktop_rich_answer_guidance()
+    examples = re.findall(r"```reverie-ui\n(.*?)\n```", guidance, re.S)
+    assert examples
+    for example in examples:
+        block = json.loads(example)
+        assert block['type'] == 'metrics'
+        assert block['items'][0]['value'] == 0
+    assert 'preserve it as ordinary code' in guidance

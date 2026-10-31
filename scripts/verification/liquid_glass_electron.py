@@ -6,7 +6,8 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
-import time
+
+from desktop_process import stop_process, wait_for_packaged_page
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'ReverieCli-py'))
@@ -73,17 +74,7 @@ def main():
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = 1 if args.keep_open else 0
         process = subprocess.Popen([str(args.exe.resolve()), '--gui', '--project', str(workspace), f'--remote-debugging-port={port}'], env=env, stdout=log, stderr=log, startupinfo=startup)
-        for _ in range(120):
-            try:
-                browser = pw.chromium.connect_over_cdp(f'http://127.0.0.1:{port}', timeout=1000)
-                break
-            except Exception:
-                if process.poll() is not None:
-                    raise RuntimeError('Electron exited; see electron.log')
-                time.sleep(.25)
-        if browser is None:
-            raise RuntimeError('Electron CDP unavailable')
-        page = browser.contexts[0].pages[0]
+        browser, page = wait_for_packaged_page(pw, process, port)
         page.on('pageerror', lambda error: report['errors'].append(str(error)))
         page.wait_for_selector('.session-item', timeout=120000)
         page.wait_for_load_state('networkidle')
@@ -105,6 +96,7 @@ def main():
 
     try:
         launch()
+        report['build'] = page.evaluate('window.reverie.paths()')['desktopBuild']
         page.set_viewport_size({'width': 1500, 'height': 960})
         check('Existing settings keep Classic', page.locator('html').get_attribute('data-ui') == 'classic')
         shot('classic-baseline')
@@ -152,6 +144,7 @@ def main():
             page.wait_for_timeout(250)
             bounds = page.locator('.workbench-panel').bounding_box()
             check(f'Workbench fits {width}x{height}', bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= width + 1 and bounds['y'] + bounds['height'] <= height + 1, bounds)
+            check(f'Workbench tabs are uncovered at {width}', page.locator('.workbench-panel').evaluate("e=>getComputedStyle(e,'::before').display") == 'none')
             shot(f'glass-workbench-{width}')
         page.set_viewport_size({'width': 1500, 'height': 960})
         page.locator('.topbar-right').get_by_role('button', name='关闭工作面板', exact=True).click()
@@ -159,6 +152,13 @@ def main():
         check('High contrast removes glass blur', page.locator('.content-area').evaluate("e=>getComputedStyle(e).backdropFilter") == 'none')
         shot('glass-high-contrast')
         page.emulate_media(reduced_motion='no-preference', contrast='no-preference')
+        page.evaluate("window.reverie.setUiPreferences({language:'en-US',fontSize:'large'})")
+        page.reload()
+        page.wait_for_selector('.composer textarea', timeout=60000)
+        expect(page.locator('html')).to_have_attribute('lang', 'en-US')
+        expect(page.locator('html')).to_have_attribute('data-font-size', 'large')
+        shot('glass-english-large')
+        page.evaluate("window.reverie.setUiPreferences({language:'zh-CN',fontSize:'comfortable'})")
         # IPC persistence exercises delayed writes using their explicit appearance owner.
         result = page.evaluate("""async()=>{
           await window.reverie.setUiPreferences({accent:'blue',backgroundBlur:7}, 'classic');
@@ -175,6 +175,12 @@ def main():
         expect(page.locator('html')).to_have_attribute('data-ui', 'liquid-glass')
         expect(page.locator('.composer textarea')).to_have_value(draft)
         check('Reload restores variant and per-session draft', True)
+        stop_process(process)
+        browser = page = None
+        launch()
+        expect(page.locator('html')).to_have_attribute('data-ui', 'liquid-glass')
+        expect(page.locator('.composer textarea')).to_have_value(draft)
+        check('Process restart restores variant and per-session draft', True)
         check('No renderer exceptions', not report['errors'], report['errors'])
         theme('浅色', 'light')
         shot('glass-final')
@@ -184,8 +190,7 @@ def main():
             page.screenshot(path=str(output / 'last-page.png'))
         (output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         if not args.keep_open and process:
-            process.terminate()
-            process.wait(timeout=15)
+            stop_process(process)
         pw.stop()
         log.close()
 

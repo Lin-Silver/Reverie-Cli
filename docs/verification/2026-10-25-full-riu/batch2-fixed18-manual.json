@@ -1,0 +1,472 @@
+{
+  "scope": "Fixed18 actual first-attempt profiles accounted for. Visual review processing does not prove all task stages or unavailable native operations.",
+  "snapshot_at_utc": "2026-10-25T13:44:58.686611+00:00",
+  "model_quality_samples_added": 0,
+  "original_raw_reports_unchanged": true,
+  "completed": 17,
+  "passed": 7,
+  "failed": 9,
+  "incomplete": 1,
+  "planned": 18,
+  "accounted_profiles": 18,
+  "fixed_review_processing_complete": true,
+  "full_review_complete": false,
+  "unavailable_profiles": [
+    {
+      "id": "model-2-chart-1",
+      "reason": "Model modification execution killed; no completed final session or substitute artifact.",
+      "diagnosis": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-interruption-20261025/diagnosis.json"
+    }
+  ],
+  "cases": [
+    {
+      "id": "model-1-rich-overview-1",
+      "at_utc": "2026-10-25T07:03:04.969497+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-overview-1/replay.json",
+      "native_operation_report_sha256": "d3fa6a87c73f425e0af58cc50e044de91665678ecfc44135b97aac54a84e547c",
+      "original_report_sha256": "97b5a3613d64baad6886a403841e3e01cd0f27beadb5cc55bc90b73ed975e32e",
+      "passed": true,
+      "reviewed_captures": [
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-overview-1/model-1-rich-overview-1/dark-1280.png",
+          "sha256": "17b4088fae4b5d5dd030da188eb193a813de1f3d3a6f132ca96756d71ff8be9c"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-overview-1/model-1-rich-overview-1/dark-460.png",
+          "sha256": "91ded180a9b6cbe6bf78dd29c8416ba571696f2126733ac64b689b6e5e202b12"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-overview-1/model-1-rich-overview-1/keyboard-focus.png",
+          "sha256": "8fc6fa0f353b02a268f89131ac20635520aeeb0ffac610b178bd567acb36b06e"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-overview-1/model-1-rich-overview-1/light-1280.png",
+          "sha256": "c4be60b02a75d3d058274de9a7b51387f9367957b4d3726ede83a463fd0526ce"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-overview-1/model-1-rich-overview-1/light-460.png",
+          "sha256": "84d6604f51d2c072c1f5f6b0489e27e6c38ba4295bd162089ed14650bd53a7bb"
+        }
+      ],
+      "visual_findings": [
+        {
+          "severity": "P3",
+          "description": "Earlier generation had unrequested badge-color prose; final saved answer consistent."
+        }
+      ],
+      "result": "Dark/light1280/460 readable and contained; data and prose consistent, real Tab cycle returns to table region or link with visible focus; original model evidence unchanged."
+    },
+    {
+      "id": "model-2-rich-overview-1",
+      "at_utc": "2026-10-25T07:03:04.970202+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-overview-1/replay.json",
+      "native_operation_report_sha256": "e9782f65162d50ce2acdf7d565c355df86ef6905081c82926abd2afc6f7dee3f",
+      "original_report_sha256": "cfb09668c96d6517b3a15fc50f6e3c4ec86ae056494390dc855ecaab12114cb3",
+      "passed": true,
+      "reviewed_captures": [
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-overview-1/model-2-rich-overview-1/dark-1280.png",
+          "sha256": "81cf6a8a34a76d9e4a1b52d65766ee7332a91038c02315ff80088f743f97855e"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-overview-1/model-2-rich-overview-1/dark-460.png",
+          "sha256": "e48fb6cc3cdbd9df5c3377712b1978995d750e72434dfbcd075afcb098540da8"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-overview-1/model-2-rich-overview-1/keyboard-focus.png",
+          "sha256": "2fc5760bc7d44063bf9fcb8103cdb6b27a14dde9ef8796ab2c2ca040feca1038"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-overview-1/model-2-rich-overview-1/light-1280.png",
+          "sha256": "b41efb878987d01bb6b55add813233be25f6b305e800535e3bad0123d70e01dd"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-overview-1/model-2-rich-overview-1/light-460.png",
+          "sha256": "e8dea912636f8033bce32650352e049483598af1351e720f4f975705865ef1c4"
+        }
+      ],
+      "visual_findings": [],
+      "result": "Dark/light1280/460 readable and contained; data and prose consistent, real Tab cycle returns to table region or link with visible focus; original model evidence unchanged."
+    },
+    {
+      "id": "model-1-rich-recommendations-1",
+      "at_utc": "2026-10-25T07:03:04.970592+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-recommendations-1/replay.json",
+      "native_operation_report_sha256": "b9ba0fa42dc0c5bd07e6de2e0eb0cabb5c8d0943b2855e2ad57e1448d3036fff",
+      "original_report_sha256": "1b4d35b15e6e5a9ab9324bed9f44177c132b75e27f8fe0ac3930d320ebd27f8b",
+      "passed": true,
+      "reviewed_captures": [
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-recommendations-1/model-1-rich-recommendations-1/dark-1280.png",
+          "sha256": "88ee168a052179fc674eaddfa049e594c757743980e83d5d208d9cc44e53123f"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-recommendations-1/model-1-rich-recommendations-1/dark-460.png",
+          "sha256": "b5adbbc0d9119f4a55fa3fb88184fb77d99080142227f48d6ec9612f3496ea48"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-recommendations-1/model-1-rich-recommendations-1/keyboard-focus.png",
+          "sha256": "df2b6d2ea85ba45b30a7d8d71be6cfa584071d6c52987e884aa891c09ad1cc3a"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-recommendations-1/model-1-rich-recommendations-1/light-1280.png",
+          "sha256": "d16f487f6755875bc6f237ae584a7511f6cf35b2877d84ff86c8d46a4cc35a20"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-recommendations-1/model-1-rich-recommendations-1/light-460.png",
+          "sha256": "26e00061929dca037bb7808e9b4ec8718c2f832ec8905eb3c25d4ba4119ec951"
+        }
+      ],
+      "visual_findings": [
+        {
+          "severity": "P3",
+          "description": "Unrequested native-format preamble persists; final image/card/link contents correct."
+        }
+      ],
+      "result": "Dark/light1280/460 readable and contained; data and prose consistent, real Tab cycle returns to table region or link with visible focus; original model evidence unchanged."
+    },
+    {
+      "id": "model-2-rich-recommendations-1",
+      "at_utc": "2026-10-25T07:04:09.665839+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-recommendations-1/replay.json",
+      "native_operation_report_sha256": "8bb0218dec1948902ec7130c9265deb1f38ec4a08b0601b954760227444cef4c",
+      "original_report_sha256": "617ca783d13302fb436354f7b647d15d57092a9a599f77f22add3c877da275dd",
+      "passed": true,
+      "reviewed_captures": [
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-recommendations-1/model-2-rich-recommendations-1/dark-1280.png",
+          "sha256": "3f3516124bec75da58b8d5b3acc291ddfffbc93166c1e66fe6e8aa3ffd19e166"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-recommendations-1/model-2-rich-recommendations-1/dark-460.png",
+          "sha256": "4709fea3ddd4908a9543080b724d96a2f544cbe9251b902ddd85f63714101c7e"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-recommendations-1/model-2-rich-recommendations-1/keyboard-focus.png",
+          "sha256": "bb535a764d3326c8cc880f500220cfae0e5d2fb149751e8c158a877bf0f5a8a1"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-recommendations-1/model-2-rich-recommendations-1/light-1280.png",
+          "sha256": "fc93c83eac751f557619bc4814fc0c40e919b08ae469a44ab4db434e3e1b199b"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-recommendations-1/model-2-rich-recommendations-1/light-460.png",
+          "sha256": "2a03795edca369a5700bd9c701c1b4efb3cf36ab12676afa282b9eb14e5f4cce"
+        }
+      ],
+      "visual_findings": [
+        {
+          "severity": "P3",
+          "description": "URL duplicated as plain text, source pill and link; narrow URL wraps awkwardly but remains readable and contained."
+        }
+      ],
+      "result": "Actual Plane/Vikunja card images and titles, badge update, links and sources retained; real Tab cycle visible, both themes and widths contained, originals unchanged."
+    },
+    {
+      "id": "model-1-rich-long-table-1",
+      "at_utc": "2026-10-25T07:07:09.708351+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-long-table-1/replay.json",
+      "native_operation_report_sha256": "859a1c79b59a7dd04984664a93a8bbc8ea0ac7ebc25a7cbbc1da91704f0b7be4",
+      "original_report_sha256": "5b1bce8eab931e8a826f8ed6e7b0446eba4334bc8103ccd0d37d00bfdf4c3201",
+      "passed": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "All24 supplied exact identifiers changed by inserted spaces; same actual saved response after native reopen."
+        },
+        {
+          "severity": "P3",
+          "description": "Duplicate table titles and empty-state text; unrequested repair prose."
+        }
+      ],
+      "result": "Native layout and real Tab focus work in both themes/sizes; content fails exact identifiers. Operations completing does not override semantic failure."
+    },
+    {
+      "id": "model-2-rich-long-table-1",
+      "at_utc": "2026-10-25T07:10:16.917936+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-long-table-1/replay.json",
+      "native_operation_report_sha256": "963045a4d8e1ffff6dc5968a2c62e3fa297f57d317be2bb71b33044f75c72178",
+      "original_report_sha256": "6074024fdd14478eb6ca619fd1cf4d91c8a82c7c82a972319774fbd8c34d201d",
+      "passed": true,
+      "visual_findings": [
+        {
+          "severity": "P3",
+          "description": "No-data caption and body prose repeat empty-state information."
+        }
+      ],
+      "result": "Exact24 supplied names/values retained, only项目01 quantity100; prose correctly updated. Both themes/sizes readable and contained, actual keyboard table focus visible; original report unchanged."
+    },
+    {
+      "id": "model-1-rich-mixed-1",
+      "at_utc": "2026-10-25T07:11:16.935023+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-mixed-1/replay.json",
+      "native_operation_report_sha256": "0d96c43c43a653f92f90cca164d1b516a54ae0eb603f0c5d6fc1dd89e6e183ff",
+      "original_report_sha256": "2c72a8c33b447d61e82039e63795ab1254189cc6055c8cb544812bd51336b3d0",
+      "passed": true,
+      "reviewed_captures": [
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-mixed-1/model-1-rich-mixed-1/dark-1280.png",
+          "sha256": "5bebd20a04652d37cdd712e48d748223022ac7847eeff3fca8dedcc6d3aa452a"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-mixed-1/model-1-rich-mixed-1/dark-460.png",
+          "sha256": "9279ba6a56573ec9bf09487e86ea23b00232f4c892f704ef5d9c802a3c45064d"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-mixed-1/model-1-rich-mixed-1/keyboard-focus.png",
+          "sha256": "3100d582880cd0f88f98d974050fdd4cc689d4dba4eec9002fcb6412bfa51843"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-mixed-1/model-1-rich-mixed-1/light-1280.png",
+          "sha256": "9f9a1e65d4181073c03d340f662f6d6b4b0483ecbf39bf9e7364cb137ded343f"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-rich-mixed-1/model-1-rich-mixed-1/light-460.png",
+          "sha256": "a2c12d2a7953f0e90577755f5d81ab47a4ab49025f4ca40a0182ccf7dd9a9e1d"
+        }
+      ],
+      "visual_findings": [
+        {
+          "severity": "P3",
+          "description": "Different source URLs use identical generic pill labels."
+        }
+      ],
+      "result": "Mixed Markdown, list2, print(0), completion0, pending2 and source links retained. No numeric prose contradiction. Dark/light1280/460 readable/contained, real Tab focus visible; original unchanged."
+    },
+    {
+      "id": "model-2-rich-mixed-1",
+      "at_utc": "2026-10-25T07:12:35.346974+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-mixed-1/replay.json",
+      "native_operation_report_sha256": "b6a97d1f2f333f8667b0a35d31418fbe1c0923718f763a1eed96cefd7c24ce8e",
+      "original_report_sha256": "9936670114c7be09966832ccb33f49eb61f982860ed3d0d8953fdb17bc827194",
+      "passed": false,
+      "automatic_quality_invalidated_by_manual_review": true,
+      "reviewed_captures": [
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-mixed-1/model-2-rich-mixed-1/dark-1280.png",
+          "sha256": "3b6bdf807a5e0343a04bd15f1afb79e7fe564991b98071939e7c155e9817118b"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-mixed-1/model-2-rich-mixed-1/dark-460.png",
+          "sha256": "0fe3ddacb2cec5930685b4634e3f3e4d9b92949c790d1513458b50f201ba155b"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-mixed-1/model-2-rich-mixed-1/keyboard-focus.png",
+          "sha256": "dcab24699dd8e79b95dc76a352d262ac21192a77853187fac1bfd6d9851d2884"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-mixed-1/model-2-rich-mixed-1/light-1280.png",
+          "sha256": "2bba010d0b261671529cfd3c4df2f802a8ea6f9cef3f9ab53cd674e802ac88ce"
+        },
+        {
+          "path": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-rich-mixed-1/model-2-rich-mixed-1/light-460.png",
+          "sha256": "5ad5cde46d8a3abad9ba650afdecfc0103a448d17e691eb8079d5d3162bd355a"
+        }
+      ],
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Final pending2 card contradicts unchanged prose三个待办任务; actual copied profile confirms."
+        },
+        {
+          "severity": "P3",
+          "description": "Different source URLs use identical generic pill labels."
+        }
+      ],
+      "result": "Layout/theme/narrow/keyboard/code checks pass but narrative count is inconsistent. Original automatic repaired_success remains immutable; manual verdict fails."
+    },
+    {
+      "id": "model-1-calculator-1",
+      "at_utc": "2026-10-25T07:26:27.253292+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-calculator-1/review.json",
+      "native_operation_report_sha256": "5fe1f19f68f00b55463beb02f92eff7908df68659c132299a87b7e466108d11d",
+      "original_report_sha256": "3841698d4c9a4a78db09aad41fabd041d166beaddb468dbdf2d6b4b3413ca6e0",
+      "passed": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Requested initial singletrip3168, actual default checked往返 produces main6336; remains after original2feedbacks and copied-profile reopening."
+        },
+        {
+          "severity": "P2",
+          "description": "Dark invalid-input message white on pale-red background has poor contrast; PIP top cuts off business controls."
+        },
+        {
+          "severity": "P2",
+          "description": "At zero baseline percentage changes shown as0.0% despite nonzero absolute changes."
+        }
+      ],
+      "result": "All36 PNGs/34 unique hashes inspected. Four viewport sizes1280/1080/720/460, all3modes, both themes, real ArrowUp22→23, zero and independent−1 probes executed; HTML and original report unchanged. Functional operations completion does not override failed numeric/UI quality."
+    },
+    {
+      "id": "model-2-calculator-1",
+      "at_utc": "2026-10-25T07:58:04.254225+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-calculator-1/review.json",
+      "native_operation_report_sha256": "99dc457b2c599c9c44a48958ec758ca7417e848d4edd1b7f701d3f8749b04612",
+      "original_report_sha256": "5a0e6e8eb591a92526c4d321cf1ed5386ae07f145e53a28859c1467c705312e6",
+      "passed": false,
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Final roundtrip switch has role=switch and tabindex=0 but no accessible name: adjacent text is not associated by aria-label/aria-labelledby/label. Production verifier cannot operate it by the user-facing name 往返; the final original semantic_failure is confirmed."
+        }
+      ],
+      "result": "All36 native PNGs/34 unique hashes personally inspected. Four window widths1280/1080/720/460 in inline/workpanel/PiP, both themes, visible primary6336 for requested final roundtrip; real ArrowUp22→23 produces6624, zero produces0, independent−1 shows readable explicit errors, restoring22 produces6336. Native operation completion is true and original HTML/report unchanged; accessibility quality still fails."
+    },
+    {
+      "id": "model-1-table-1",
+      "at_utc": "2026-10-25T08:01:30.100374+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-table-1/review.json",
+      "native_operation_report_sha256": "a46e887dd5616cd07a47fdadde9d5ba6bec6096a0a8e64f044d2560fa890b15a",
+      "original_report_sha256": "36faf14cea6c20b4d32713951a4c527a135b04875adb98df50b3dec1709bae87",
+      "passed": true,
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P3",
+          "description": "Maximum-price control uses compact browser-default number-input styling, inconsistent with the adjacent keyword field."
+        }
+      ],
+      "result": "All36 native PNGs/34 unique hashes personally inspected: 1280/1080/720/460 widths, three modes, both themes. Actual keyboard A filters to empty; long Chinese nonmatch shows clear recoverable empty state; clear returns default max50 and ascending two products; restored stock/descending conditions show water39 then notebook19. Visible focus and accessible controls operate; original HTML/report unchanged. Final automatic repaired_success retained; cosmetic findings remain."
+    },
+    {
+      "id": "model-2-table-1",
+      "at_utc": "2026-10-25T12:08:36.110545+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-final-ref-supplements/model-2-table-1/review.json",
+      "native_operation_report_sha256": "e22ebe9422518dc895d53af77aab66622a6ba1a8c24c505850857392ea31e56a",
+      "original_report_sha256": "0e689d9c79cc4d055d0d24456731b6935f06b7c0e2f472b318ba8bfb9318de96",
+      "passed": false,
+      "quality_verdict": "incomplete_due_to_observer_false_negative",
+      "failure_attribution": "verifier",
+      "model_failure_confirmed": false,
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "attribution": "verifier",
+          "description": "Valid named aria-pressed stock button rejected without a click by frozen observer. Six actual final-profile diagnostic checks confirm Space filters four products to three, stock+keyword台灯 yields empty, and real controls restore."
+        },
+        {
+          "severity": "P3",
+          "description": "Unavailable product is gray/struck through with inventory0 instead of a textual status badge."
+        }
+      ],
+      "result": "All36 corrected-native PNGs/33 unique hashes personally inspected. Four widths1280/1080/720/460, three modes, both themes, actual keyboard A and long Chinese query show recoverable empty state; clear restores full four-row ascending list. Bound to original final manifest v15e31c91a7e25547/1; old lexical-selection review remains retained but is excluded from final-page conclusions. Page generation functions correctly; full sample remains incomplete because the frozen verifier failure prevented modification/restart phases. No fabricated successful quality sample."
+    },
+    {
+      "id": "model-1-chart-1",
+      "at_utc": "2026-10-25T12:23:54.922790+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-chart-1/review.json",
+      "native_operation_report_sha256": "7b598b484cca5270108d55455a0997aaa19eaafb56a8d8cde488db66a995a04b",
+      "original_report_sha256": "16ca3f9292282b0296a2b011a5f540378373081832bd9cab11c53d038296aea2",
+      "passed": false,
+      "automatic_quality_invalidated_by_manual_review": true,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "attribution": "model",
+          "description": "Final fourth-month dataset sums460, but real multiplier0 shows original total360; all four source rows remain120/80/160/100. Native copy confirms the hardcoded zero-branch defect."
+        },
+        {
+          "severity": "P3",
+          "description": "Maximum bar and label protrude above chart card; valid zero uses red error styling."
+        }
+      ],
+      "result": "All36 native PNGs/35 unique hashes inspected. Four widths1280/1080/720/460 across inline/workpanel/PiP and both themes. Actual ArrowUp2→2.1 produces total966; zero empties plot but exposes wrong baseline360; independent−1 shows explicit feedback; restoring2 returns four bars and total920. Original HTML/report unchanged. Final automatic repaired_success remains in raw report; manual verdict fails."
+    },
+    {
+      "id": "model-1-form-1",
+      "at_utc": "2026-10-25T12:46:27.846629+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-available-native/model-1-form-1/review.json",
+      "native_operation_report_sha256": "076be362fd5d21b38da248a342c511af74bdfff2515e6f43d5c970dadf56aaf2",
+      "original_report_sha256": "4ea8d339ba7b5fc64fc44199307010292ed5670836d3bdb87dfe70f3b83cfd6a",
+      "passed": false,
+      "quality_verdict": "failed_available_view_with_incomplete_service_flow",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Dark name/email placeholder text has measured contrast3.4766:1, below4.5:1. The original generation also failed dark required-field and confirmation readability before service empty-stream prevented repair completion."
+        },
+        {
+          "severity": "P3",
+          "description": "At0 invalid people the quote stays at last-valid160 without naming it as the previous quote; restoring empty email retains format-error copy."
+        }
+      ],
+      "result": "All34 available-native PNGs/33 unique hashes inspected. Bound to actual last published ve9647e52a166ac25/1 via production publication order. Four widths and three modes contained; themes, visible keyboard ArrowUp2→3 and price160→240, long Chinese truncation and invalid-email/people feedback operate. Source HTML/report unchanged. Original service_transport_error retained; full modification and restart flow remains unexecuted/unverified, no successful model sample is inferred."
+    },
+    {
+      "id": "model-2-form-1",
+      "at_utc": "2026-10-25T12:54:01.619625+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-available-native/model-2-form-1/review.json",
+      "native_operation_report_sha256": "bc71e7058fcf35519286db91013c32faa9979a4e550ee98efc5e6e23e9abbeda",
+      "original_report_sha256": "e2977c9060c6f2ced3136d9f3a47c2fdd633c00d9d8c0253d130e5423a37eb00",
+      "passed": false,
+      "quality_verdict": "failed_available_view_with_incomplete_service_flow",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "The actual published form remains white with the same rgb(247,247,248) background and rgb(26,26,26) foreground after the host switches to dark. The page displays its own initialization-error message; theme/persistence initialization has not completed."
+        },
+        {
+          "severity": "P2",
+          "description": "Large vertical gaps put the people-count control and submit button below the first PiP viewport, including1280x900 and narrow460x900. Scrolling is possible, but the required primary controls are not initially visible."
+        },
+        {
+          "severity": "P3",
+          "description": "Restoring valid people count2 leaves the stale people-range error. Reset empty email also retains the format error."
+        }
+      ],
+      "result": "All34 available-native PNGs/33 unique hashes personally inspected. Actual last published v91600bfc48047649/1 selected through production publication order, original HTML/report unchanged. Four widths and three modes contain content without horizontal overflow. Visible keyboard ArrowUp2→3 updates price160→240; long Chinese is limited to20 characters and invalid email/people0 display errors. Original service_transport_error remains; full modification/restart and persistence are incomplete, no complete successful model sample is inferred."
+    },
+    {
+      "id": "model-1-comparison-1",
+      "at_utc": "2026-10-25T13:14:56.550647+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-comparison-1/review.json",
+      "native_operation_report_sha256": "6c4efc3340e088e81fb2e487486ad1d04f6bc33a6627c5d6b1f012e6da0341d1",
+      "original_report_sha256": "749df2e0c9089c54b1e2fb1812e71c46eab893d7aa371aa3968dee0eda5297fb",
+      "passed": false,
+      "quality_verdict": "failed_readability_after_repairs",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Dark selected-action white text has measured contrast1.7425:1, choose-action2.5424:1, invalid-budget warning3.6222:1; each below4.5:1. Native copied profile reproduces all three final-generation failures."
+        },
+        {
+          "severity": "P3",
+          "description": "At shorter/narrow PiP sizes, the selected option summary and its action require scrolling. Content remains contained with visible focus."
+        }
+      ],
+      "observer_caveat": "Native keyboard_choice reports false because Enter toggles an already selected route off (before山谷, afterempty). This confirms a keyboard state change, not an unresponsive button. The final formal generation passes route-choice-action and selected-route-state-reload; no additional model failure is inferred from this auxiliary Boolean.",
+      "result": "All38 native PNGs/37 unique hashes personally inspected, selected actual final v204cdae18102c28d/3. Four widths and three modes contain the unchanged page; themes switch; keyboard budget200→210, actual Enter deselection, budget50 empty and−1 feedback operate; original controls/selection restored. Original HTML/report unchanged and semantic_failure retained due real readability failures. Modification did not execute after generation failed."
+    },
+    {
+      "id": "model-2-comparison-1",
+      "at_utc": "2026-10-25T13:43:52.194270+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-comparison-1/review.json",
+      "native_operation_report_sha256": "568ab233af1d2e09a12b202246344ae3191b3696d73cdc44a0293ad7bc91a4cf",
+      "original_report_sha256": "4398a511b7032200c98932e5d4a93c1931d84b605a0499f26b5d2d808b5a7800",
+      "passed": false,
+      "quality_verdict": "failed_visible_scope_and_pip_action_with_incomplete_operation",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "User requested only matching options, but two nonmatching dimmed cards remain in the final default view. These add height and push the confirmation action below the initial PiP and narrow viewport fold."
+        },
+        {
+          "severity": "P3",
+          "description": "Route names were expanded beyond the supplied fixture; unrequested descriptions were added in the earlier generated version."
+        }
+      ],
+      "observer_caveat": "Old record discovery cannot recognize a label with for/id pointing to a sibling radio plus an expanded title; it returns an empty record list. Therefore missing auxiliary keyboard-choice operation is unverified, not proof that radio selection is impossible. Native helper also could not restore controls after radios disappeared in empty state (different control count), so the final restoral screenshot still shows−1. Do not call this a model state-restoration failure without separate evidence.",
+      "observer_assistance_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-comparison2-viewport-assistance/diagnosis.json",
+      "result": "All36 native PNGs/32 unique hashes personally inspected on unchanged final v072a386561247677/1. Four widths and three modes, light/dark, actual keyboard budget200→210, budget50 empty and negative feedback observed. Final horizontal overflow was fixed. Original semantic_failure retained, and the observer-assisted execution and unexecuted modification/restart remain explicit."
+    }
+  ],
+  "source_journal": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-operator-review.json",
+  "source_journal_sha256": "d7258caf96cd1c10c2a961510b247e46478b099a5b54706713823f84c64bf360"
+}

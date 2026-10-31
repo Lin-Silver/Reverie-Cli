@@ -1,0 +1,1401 @@
+{
+  "date": "2026-10-28",
+  "repository": "Lin-Silver/Reverie-Cli",
+  "branch": "dev",
+  "base_commit": "350c5baaed1b41f399ca09e01b912a4f81eaa80e",
+  "status": "pre-commit content manifest; actual final commit and push are confirmed separately",
+  "excluded_self": "docs/verification/2026-10-28-dev-handoff/publication-manifest.json",
+  "changed_paths_including_manifest": 279,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 296,
+      "sha256": "7ec115ab4d39a7bf6c09c843f1f63908ddc07529b871a6bd8849840999bfe017"
+    },
+    {
+      "path": ".github/workflows/verify-riu-packages.yml",
+      "bytes": 11409,
+      "sha256": "1051d11ea35b6bf683edb6cedc3f8c4965d129f34917075faff20de504158b7e"
+    },
+    {
+      "path": "AGENTS.md",
+      "bytes": 2470,
+      "sha256": "f01fa025ef4724f96a01f6961275d1d3d013918199fdfbfd0a222b38dab0ccb6"
+    },
+    {
+      "path": "README.md",
+      "bytes": 57659,
+      "sha256": "f36f3c47c70f962d2fd43ab4c293fbd536798c7da6c99260e26fed7086af6afc"
+    },
+    {
+      "path": "ReverieCli-py/pytest.ini",
+      "bytes": 105,
+      "sha256": "eb4851f9430046858488c024db0e85e6d80dec56f4eb54e94739a5fdf50fa22b"
+    },
+    {
+      "path": "ReverieCli-py/reverie.spec",
+      "bytes": 7468,
+      "sha256": "64e4090530c7f22bcea56c62fb9e5eb812ab7a1cc584f0eb40d5bb41871f7724"
+    },
+    {
+      "path": "ReverieCli-py/reverie/agent/agent.py",
+      "bytes": 356094,
+      "sha256": "c60c26571f5696a2f397e4392d78483ecf23c2ee48bd8f6e767af2571b38fd19"
+    },
+    {
+      "path": "ReverieCli-py/reverie/agent/system_prompt.py",
+      "bytes": 193071,
+      "sha256": "0f0088a3a5dd645248cc0359ff6b3cce83ec0c4bde96918b02243b804462eadd"
+    },
+    {
+      "path": "ReverieCli-py/reverie/agent/tool_executor.py",
+      "bytes": 64388,
+      "sha256": "47cd345590a9e2e0cf6883ea17ec5729106828521b34301c70a01fe09d5cf3d2"
+    },
+    {
+      "path": "ReverieCli-py/reverie/opencode.py",
+      "bytes": 32186,
+      "sha256": "2890733edda3a9934de48fb6cbb8b3ec73b9586d89183183dc1da9f7bdfd4966"
+    },
+    {
+      "path": "ReverieCli-py/reverie/tools/base.py",
+      "bytes": 10745,
+      "sha256": "7f2442d107f92d8401b0dadb124083572368c5d902efe997dcb569473e20ba3d"
+    },
+    {
+      "path": "ReverieCli-py/reverie/tools/render_view.py",
+      "bytes": 15195,
+      "sha256": "f201f0c3c93d51074f1ae76e1869dbf01462ce24d52c776af820aca50966a57c"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_agent_openai_sdk.py",
+      "bytes": 53517,
+      "sha256": "1780b684c06ee10188a9a34be5d77c3758b35ba9b02a7d21c7d976641a1d637e"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_desktop_process_native.py",
+      "bytes": 2822,
+      "sha256": "091757ff07203b5344048e5da5e359ce25fb26b3e23b144d6eaabe8d4cef01d5"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_input_handler.py",
+      "bytes": 13812,
+      "sha256": "5079c2dadfcc2176389f69dcdadb1ca72becdb4930675456ee62bac0df923d72"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_opencode.py",
+      "bytes": 22369,
+      "sha256": "e14496a6ef2a80dbf2d71b1ad2091641100a2c14991669a1f91fd96e1608b529"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_prompt_cache.py",
+      "bytes": 10238,
+      "sha256": "0db270cd316d1c40efd6d7c66a1a00e357db3f6a577a28b38f2fab1e335609ee"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_prompt_contracts.py",
+      "bytes": 24041,
+      "sha256": "6936a14bd5234a3a705fea9aa6931f6b47d6bb3b2e740f6c193a7bfc5163f353"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_provider_retry_after.py",
+      "bytes": 10169,
+      "sha256": "dcf5d6d0a959afbcb08cc895b771435746ef7e9bf367687a85ab6b2557bd8850"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_rats_runtime.py",
+      "bytes": 83663,
+      "sha256": "9cf2e9746e333355aef64fe435ae057b0326e6c7decff8ac92ab1c1a681474db"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_riu_native_calibration.py",
+      "bytes": 27438,
+      "sha256": "47fd6ddb04c8217ecaa88d2d464f67eb38ec4302cd8bf68025e71aaa83edbc46"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_riu_quality_verifier.py",
+      "bytes": 107649,
+      "sha256": "bb600fa340bd5aa9c36bc97395973c69a72a24758894a45102afb434fc89dd09"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_riu_render_view.py",
+      "bytes": 15944,
+      "sha256": "036efea386a0d355a7ef035d1f28eb9d4f7a7d9c2af3ebcab2ffc37edc374c1a"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_runtime_optimizations.py",
+      "bytes": 52926,
+      "sha256": "b02f57ce6ba49bd392238fd51f99a1ca762f9b3e996e607b67b8c24f689031b0"
+    },
+    {
+      "path": "ReverieCli-py/tests/test_status_token_accounting.py",
+      "bytes": 22120,
+      "sha256": "4e007eab7c56d0f4164dd8130b8bba7f1a4d6c0c5b7c8174f4fdee064ba472b9"
+    },
+    {
+      "path": "ReverieCli-ui/build/launchers/reverieui",
+      "bytes": 762,
+      "sha256": "c08841822da0f06502699507bef67c4048f404c67bfda1b92be7992508fb6f88"
+    },
+    {
+      "path": "ReverieCli-ui/build/linux/after-install.sh",
+      "bytes": 197,
+      "sha256": "438c611093892a71325ea0f80ad552885d4a98b2bd52f1a859119664323de774"
+    },
+    {
+      "path": "ReverieCli-ui/index.html",
+      "bytes": 757,
+      "sha256": "24fa5c1171b9b13111fac930e7b1d09e4687a67dc90787156ab1c560f37931c7"
+    },
+    {
+      "path": "ReverieCli-ui/package.json",
+      "bytes": 4792,
+      "sha256": "cd78b804c1acbfb472ca1d6377f8154c4eef5370eb0ffb4277e1423b771c980a"
+    },
+    {
+      "path": "ReverieCli-ui/scripts/package-validation.mjs",
+      "bytes": 3415,
+      "sha256": "a848dc14d19bba4fa7e7eb8eedcb2d2f39463b742b6aa6a7ce5dd46cb8818ad5"
+    },
+    {
+      "path": "ReverieCli-ui/scripts/package-validation.node-test.mjs",
+      "bytes": 3212,
+      "sha256": "28b4eb6988820f421744962975104b379468214d38d97692766de77302e8c73f"
+    },
+    {
+      "path": "ReverieCli-ui/src/AnswerMarkdown.test.tsx",
+      "bytes": 8680,
+      "sha256": "ebdd9c2bd10de7ee8977c56ca338afa0c792b66b74c4b46e2b391988d7ac3ed9"
+    },
+    {
+      "path": "ReverieCli-ui/src/AnswerMarkdown.tsx",
+      "bytes": 2967,
+      "sha256": "6056bfe5c94d3e339ec397d103bcf93ee68a39a05e78c95da37f6a905829ec59"
+    },
+    {
+      "path": "ReverieCli-ui/src/App.tsx",
+      "bytes": 384069,
+      "sha256": "da9d8b91cea3e9ae73e73d39b4c6f92e3f913af41666b60b67a7d72e9c1633fe"
+    },
+    {
+      "path": "ReverieCli-ui/src/RichAnswer.tsx",
+      "bytes": 4793,
+      "sha256": "f5d08988101432f48a9aad8f58fb7987f3a68142ce846f177e0df4d89e81a090"
+    },
+    {
+      "path": "ReverieCli-ui/src/answer-blocks.test.ts",
+      "bytes": 3414,
+      "sha256": "181338b2b31889bc2764ac0a63a48a794c396b713b883545a4e4e82d2130cbed"
+    },
+    {
+      "path": "ReverieCli-ui/src/answer-blocks.ts",
+      "bytes": 8640,
+      "sha256": "2ba50e315ab18ee0d45f7592cf960e220c3a8b78b952c6dbb05b35d7ca0ebf6d"
+    },
+    {
+      "path": "ReverieCli-ui/src/answer-markdown.css",
+      "bytes": 7529,
+      "sha256": "f4e3596f01e26ebc83499fbc51ebf832a1a6994a2587424026e31b55baf94055"
+    },
+    {
+      "path": "ReverieCli-ui/src/i18n.tsx",
+      "bytes": 89361,
+      "sha256": "b8debd9e7d0ebfe5be5c84c502964d675cc4a5cba52ed709097a30786e41d09d"
+    },
+    {
+      "path": "ReverieCli-ui/src/styles.css",
+      "bytes": 219619,
+      "sha256": "103272b260c2be929de4ebf8190a11d59cdff89aa757a7e2cc8b41d83d8ebb46"
+    },
+    {
+      "path": "ReverieCli-ui/src/view-events.test.ts",
+      "bytes": 7577,
+      "sha256": "9c729a9267c0677c546c416f1eb603e5b51077bb7a0c1d739aa087255626aeb7"
+    },
+    {
+      "path": "ReverieCli-ui/src/view-events.ts",
+      "bytes": 6978,
+      "sha256": "9f0ae2727ccc4d57041279853dd5fe3bc29816260504def86944aeaf72837f84"
+    },
+    {
+      "path": "ReverieCli-ui/src/view-pipeline.test.ts",
+      "bytes": 10499,
+      "sha256": "364c03f10bb6b69f9417bf937108beecf08eb1830562609a007a2ea45a5b23f5"
+    },
+    {
+      "path": "design-qa.md",
+      "bytes": 4080,
+      "sha256": "7bf395b0b804d3e13f0acdc0661801d2175ed7e08a226f0643ab6ac88c66c855"
+    },
+    {
+      "path": "docs/CODEX_CLOUD_CONTINUATION_PROMPT.md",
+      "bytes": 4012,
+      "sha256": "ba147ae2cb6b5e478a52c1c2870e5a0d7247a4505d83992c25e905910b8bfd72"
+    },
+    {
+      "path": "docs/CONTINUE_RIU.md",
+      "bytes": 7635,
+      "sha256": "9138ab650ec11fee9cbbd7ca13e2e7285f3fc82ea7aed4331e09f5245c39bb02"
+    },
+    {
+      "path": "docs/DESKTOP_GUIDE.md",
+      "bytes": 16964,
+      "sha256": "3d426108e8089172139cdddb34f473bfd0f48413ffc3f478f5de3cae1ba775b0"
+    },
+    {
+      "path": "docs/FEATURE_STATUS.md",
+      "bytes": 31440,
+      "sha256": "bf3d7731959ba94ebc9ffe2412d47cac21e81e29da7d6f2e71ef8da8069caf95"
+    },
+    {
+      "path": "docs/INTELLIGENT_UI_SPEC.md",
+      "bytes": 53813,
+      "sha256": "a34159095d0270fadda49f471b7344f686f05712131867591ce5b097a817358b"
+    },
+    {
+      "path": "docs/README.md",
+      "bytes": 7514,
+      "sha256": "b812b8911249abab1778cdf999717d2893c4d1e798145e5e9fc503e0ef4fb5a2"
+    },
+    {
+      "path": "docs/RICH_ANSWER_UI.md",
+      "bytes": 7169,
+      "sha256": "ef66b22c064592550f51ab588cac2185b9e2950f28d9bb5cc90f6759814cefdb"
+    },
+    {
+      "path": "docs/RIU_COMPLETION_PLAN.md",
+      "bytes": 12649,
+      "sha256": "6ddc8d129cd17d27f380a6f0ed758f30234323560c7583612de542893c643b18"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "bytes": 27450,
+      "sha256": "f46db564e65a1be268baaa4d42ca18038eb4641c108e51754abf154b406d9a3c"
+    },
+    {
+      "path": "docs/VERIFICATION_HISTORY.md",
+      "bytes": 307315,
+      "sha256": "292563e994e43891bb3cdc58af81652ad4a3ecd14100c9e66a2ff98f079c4305"
+    },
+    {
+      "path": "docs/changelog.md",
+      "bytes": 158422,
+      "sha256": "9a160935e825ee3164dd1342b7adcefe2c0e5d99df58c5446fd8d9c46fad3929"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud.json",
+      "bytes": 128067,
+      "sha256": "ef475790fca717ca26d3a92f359347f0b4e9b24c03ecb2a66c744b82d5a7d3ff"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/docs-check-final.json",
+      "bytes": 16295,
+      "sha256": "b7b172c3f6f2bd4d08cb2af3fefc0c099d25f0fb562c3eb3a456a2c2ee6232ca"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/final-evidence.zip",
+      "bytes": 56160987,
+      "sha256": "1ae43d1f93abe027f6c572317a13ea8c234f24a005b52767d16d0daad54436cd"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/final-manifest.json",
+      "bytes": 345072,
+      "sha256": "0cde5f342b9782b2291b6c733726f764d1b5d3c52a8c4fa04b7252e673542083"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/free-api-search.md",
+      "bytes": 2994,
+      "sha256": "498073f9fc3aecdc0b33d3bb34215013579777aaf7292d48330de22fc0661e90"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/integrity-final.json",
+      "bytes": 484,
+      "sha256": "5dd96c098538bb3e7d880fc76a33eaef0a3420a4b95b82b7b6f607e9c41a8acd"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/pre-matrix-evidence.zip",
+      "bytes": 11099165,
+      "sha256": "20688ebbd42a21e2e1d40f03749b5ff18bc64c62df3bda053673352aa473410f"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/pre-matrix-manifest.json",
+      "bytes": 40571,
+      "sha256": "142800df718ac62c55f125ee67cb66dc15a56f7b6525ff6845a1c685c09c8f83"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/protocol-failure-evidence.zip",
+      "bytes": 2278975,
+      "sha256": "e582150e3aa60e2ae967ae893091769ba3bb46dd24171f805923a71513d4ab7d"
+    },
+    {
+      "path": "docs/verification/2026-10-20-riu-cloud/protocol-failure-manifest.json",
+      "bytes": 18227,
+      "sha256": "366d51fe9b65dfa4192002a23f27a485f236d790c51de1f8482038eb80f52a26"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/free-model-sources.md",
+      "bytes": 6000,
+      "sha256": "2ee9d31ef4633808845821e6c315ca973087e6b5cdc3975aea3f537664214fd0"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/generic-batch-native8.md",
+      "bytes": 4856,
+      "sha256": "544b394f719e55727d195bf781efc04ba9fd99d6b2b5fb8e57ea3440b806c5e5"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/generic-batch-native9.md",
+      "bytes": 8182,
+      "sha256": "bdff740f6071d934fbc116c79a8d0503d27928ae2d789d147fe45ec1c2e9ce45"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/native-build-106bbd324fcf60f7.json",
+      "bytes": 17947,
+      "sha256": "e5bbbdc4b6807e0bae14e9bfd715c529d375860c379c549bfa7276de9e876a53"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/native-build-1e1b5a6b860c079e.json",
+      "bytes": 16721,
+      "sha256": "1ecb7e5235881fe564aed0e8ac9ffb5d28ab592cbb64e68067c23cf4cd1c8901"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/native-build-25dc25402c61887e.json",
+      "bytes": 16534,
+      "sha256": "0deb4eeb8cd68781dbc10517fb83adc0f685d62964e20bf4dbeb798293600796"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/native-build-3824bc06ee6c6e24.json",
+      "bytes": 49723,
+      "sha256": "99ca24cd10be8f34d6a46817c1d62dcbcfd2f2e06d6f5474ca1c2a4d6f8a2445"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/native-build-651cf38f6afdbff1.json",
+      "bytes": 24933,
+      "sha256": "89a8bf797f535da3e6c94b9aabe15642a8fe26d4d5050291828e03284c61de00"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/observer-calibration-native9.md",
+      "bytes": 11839,
+      "sha256": "be795e5525158aaf59c44fa37fbcc04d8fd81bb7e421c391e9e14a5d9cfe088a"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/original-native7-latency.md",
+      "bytes": 2578,
+      "sha256": "88260b1824a331c05b2796ea87dfbbb486de0d3d9eaa174162cb05b5fd4189ef"
+    },
+    {
+      "path": "docs/verification/2026-10-21-riu-completion/progress.md",
+      "bytes": 50261,
+      "sha256": "15f1bb5fd595b8298695374328d55ab58c41a2527712a03ecd199cc1ce565b1e"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/README.md",
+      "bytes": 13598,
+      "sha256": "64dc05b88a35ac99727beb9c5e1de112fff7ab3739985b1f969a7b2678c8de78"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/appimage-rich.json",
+      "bytes": 15956,
+      "sha256": "e45050d2689ef58cf48b4485f95b654d667244e91f908d8c6263973ba798ce07"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-appimage-rich.json",
+      "bytes": 16831,
+      "sha256": "fcad109b2edb264c9f586fa4136e2182da9994855cde5f87b7e5189dee30a0f8"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-archive-index.json",
+      "bytes": 1747,
+      "sha256": "df39fcdf383e0ac18be08f5d4e10aab5bbebe0fd690c8dcff3d383e203568f6e"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-chart-zero-failed.png",
+      "bytes": 28845,
+      "sha256": "98b051f0b24ce7263b0d0a6b256884757f88660ff2be06a69ca6907a3647473d"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-chart-zero-inconsistency.json",
+      "bytes": 1383,
+      "sha256": "9a36916a8b8f3aee5fca3ae6f38730ef0dfccf02bed8a056f205064203708174"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-closed-results.json",
+      "bytes": 4716,
+      "sha256": "81f582bdd460b1f737d32461a1f5377a1f48669733a454b4dd069509232acc56"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-final-capture-review.json",
+      "bytes": 14312,
+      "sha256": "d39310ba7412f4a710286ab816d64cfe1f91bfb3c996a10e3ab0ac3f8b3c24c0"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-final-provenance-audit.json",
+      "bytes": 1534,
+      "sha256": "a138bab45025ce54e25451672746c09d878f01868c47b920e5b746e43d948a81"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-first8-request-audit.json",
+      "bytes": 42590,
+      "sha256": "139bee3d21f75930cfc157670c6f5266e78b61fe70c0402e4723da08e0ffd470"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-first8-schema-audit.json",
+      "bytes": 989,
+      "sha256": "8a208e3fd3539a74435721578681f568f41f90d8a7340065967d1bc29c8cd858"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-fixed-rich-manual.json",
+      "bytes": 23642,
+      "sha256": "584555ba19252e66dbeeebc1d62fc9871ab02a450fa42949940dc28d6697255c"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-fixed18-manual.json",
+      "bytes": 32070,
+      "sha256": "ecf0105e71eb220fa984788868e1492de3df4a50227e521b5e0ec8b8f0040063"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-form-validation-archive-index.json",
+      "bytes": 654,
+      "sha256": "46cdc0fe5e56eb562ca0a32e8f5680754d222cd48da667b5a67c47e87986e915"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-form-validation-followup.json",
+      "bytes": 6179,
+      "sha256": "a51a7e313dcbc89658c4ce4bfdb14e02b592aca51ad41736730f963aa150f2e8"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-interactive-observations.json",
+      "bytes": 9244,
+      "sha256": "e2c9b8e59a05406d3cd3d3bd534e5f14a05637a493f7b702e701d2105cefdb12"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-interruption.json",
+      "bytes": 1563,
+      "sha256": "38a793e8dd36fdc31f97eb202330eb59c6a2f3603685eb550823027923cf268e"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-later-interactive-capture-review.json",
+      "bytes": 9242,
+      "sha256": "0f7ba15d560a869a4247c8f25d3a1d1d702649f3e7b71c97695cda64eddce50b"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-later-table-readability.json",
+      "bytes": 3440,
+      "sha256": "2e4f59b1d75b5267b47fab9d799bbd289dab205484f770f7b14c9b8c40dc8a7d"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-linux-install.json",
+      "bytes": 3002,
+      "sha256": "d726d5a5751a0c38fa516c9b2df824e2a0b16016203f3cd44bb435222c862ac8"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-linux-launchers.json",
+      "bytes": 823,
+      "sha256": "755c8ae8db440cb22375cc1bae42b7665901bc05dd60a3ea2156d52b4784a2d1"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-native-acceptance.json",
+      "bytes": 987,
+      "sha256": "24eb64308cb0ba8688527b30403312ae965b85e384bd5860c1c7883d71034c1e"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-native-form-repair-c059-archive-index.json",
+      "bytes": 2252,
+      "sha256": "f60711f1b545302521080ce9cc64d63a4275594d631df3fd1a0a78df6fa5a0dc"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-native-form-repair-c059.json",
+      "bytes": 16928,
+      "sha256": "110e935aacf1aa79507164a4c47780b27ae863c413083ebebe195d4ed90fff11"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-observer-readability-chart-revision.json",
+      "bytes": 12846,
+      "sha256": "c046b99f8447a3838af95f731374909f8cf9799a0bd986ab483ce81ae5d340dc"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-overview-dark-narrow.png",
+      "bytes": 15341,
+      "sha256": "455821a03c5c4722acf1eb6620f5bb9662d9019d82b93d527bdc72f357266aa9"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-paint-observer-gap.json",
+      "bytes": 1885,
+      "sha256": "13401b84eab9c2165ce8c7f128cb5089117392fea506a5c853240b1f765806a6"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-postclosure-addendum-index.json",
+      "bytes": 1692,
+      "sha256": "e4420222fe007af30542b7b0c4310ea3abe8b83ff1d05afefe4961ff8a485330"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-primary-amount-gap.json",
+      "bytes": 798,
+      "sha256": "733de2d567dee483cc14f384f762bb909696309bc52f7b358a5e58249a74ce3f"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-recommendations-dark-narrow.png",
+      "bytes": 44025,
+      "sha256": "dc3bd4042c9c7b14ecb132abc76d3ecb000fd15890894b22ea00466101fdd183"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-rich-native.json",
+      "bytes": 16831,
+      "sha256": "fcad109b2edb264c9f586fa4136e2182da9994855cde5f87b7e5189dee30a0f8"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-rich24-visual-review.json",
+      "bytes": 21026,
+      "sha256": "4f2e2fddd4fd9fe7e7b8a74b2f4d6a3379ebc7c3ac05c7959bc404d0d7c430d8"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/batch2-stock-button-gap.json",
+      "bytes": 4189,
+      "sha256": "5fd89b437d0ea02ebca5a65ec58f4fd11a32534637d19102d5efa0fff9146adc"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/fixed-rich-manual.json",
+      "bytes": 14903,
+      "sha256": "b3e0485257e69cf1e5ea6e1cd36734964b52017ee7a87ed8c0e01baa2e29adbd"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/formal1-closed10-request-audit.json",
+      "bytes": 110469,
+      "sha256": "97fe41e1da03c194a949d08e88d6716b82f7ab031da10cc248c54b290efe9dd3"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/initial-request-audit.json",
+      "bytes": 848,
+      "sha256": "366a29c461e3db5fe2ca29eefe11b29ed77f5feca4b74f75393b4f38bf54ee7e"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/initial-schema-audit.json",
+      "bytes": 989,
+      "sha256": "b6cedae7928e9c5ffd1292169fae5d54a4ea40f9cf286ec5f6407197879b8cfd"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/linux-install.json",
+      "bytes": 3019,
+      "sha256": "5cf1d92f04b04f12f6fbc8752a5f54d7c173730a5eb90c362a621de2a36bfa04"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/linux-launchers.json",
+      "bytes": 823,
+      "sha256": "755c8ae8db440cb22375cc1bae42b7665901bc05dd60a3ea2156d52b4784a2d1"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/native-acceptance.json",
+      "bytes": 774,
+      "sha256": "dc8d3bb21aa2c2390684193b117aa8689663aec191a7fab191dc65cf8bca3f55"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/observer-revision.json",
+      "bytes": 1840,
+      "sha256": "e2066f0cf4081a4508cf0549284a3b4e9b24e2835d66e776e9d36582cba6c4bf"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/overview-dark-narrow.png",
+      "bytes": 46539,
+      "sha256": "c5d3804d82359a235b575c7ca7354fb350a7f28c8dfc3f95fcecb5d837454dbc"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/progress-build-21b.json",
+      "bytes": 4803,
+      "sha256": "d73bfa6f6e37319a853594b96c7b42d745567c9c628c5066a5573293590e8128"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/progress.json",
+      "bytes": 33927,
+      "sha256": "589b614bb1dc15ad155c4f4bad67950812cbaa03337f036e4da70a980b22978f"
+    },
+    {
+      "path": "docs/verification/2026-10-25-full-riu/recommendations-dark-narrow.png",
+      "bytes": 67090,
+      "sha256": "10e24d550dbe30d10c414457d29441567f86a74c31fc6b09e02ebf4036bcc442"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/README.md",
+      "bytes": 2909,
+      "sha256": "c12f39cec1806740f73cc842d14e1891dd0ea48c76344dffbcece25233c24c91"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/actual-answer-dark-1280.png",
+      "bytes": 95243,
+      "sha256": "e816c45b82e81c2ef11c11bdb4e8e9e3693b894f6fee3c4379397f734242511e"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/actual-answer-dark-460.png",
+      "bytes": 61139,
+      "sha256": "2c243b1f048d579959626b46fa1eeaa6c970e8d7157241933f5cef73b8259bbb"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/actual-answer-light-1280.png",
+      "bytes": 94387,
+      "sha256": "f635cdab1b57a6e34dad50b42235217b4ce09ec528ff823a0cc4faa435b8bb07"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/actual-answer-light-460.png",
+      "bytes": 60452,
+      "sha256": "b56c434cbba11fd9add12fd6774795d23c81421efccefce95a865b3160e09d18"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/archive-integrity.json",
+      "bytes": 11952,
+      "sha256": "3daf9e9ed35cbe46d8a8e382a32a8b150a53d3f275629fd1223c9a08fa1e8e8d"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/rich-answer-ui-evidence.zip",
+      "bytes": 2460107,
+      "sha256": "f04d1d698b3cbda57006e40bc67b794c65256a9ab1d9fed00fccff5354994fab"
+    },
+    {
+      "path": "docs/verification/2026-10-25-rich-answer-ui/verification.json",
+      "bytes": 6068,
+      "sha256": "07e91ca8b9c605327047344e66f431ae0ba63d3d7f60af5a799d3e74592eb259"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/README.md",
+      "bytes": 5203,
+      "sha256": "9085dca1a37cec04f57aaf5f9f831a6e0d098c701584c3fded52945a4687c434"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/in-app-qwen-smoke.json",
+      "bytes": 1974,
+      "sha256": "9092282ac937e725e86202b3eda7e016611d0bca8776d1bd751df4ce32919b62"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/lfm-invalid-json-fallback.json",
+      "bytes": 3771,
+      "sha256": "b5c164c4422bd83d1a4b625a2beaf9b3c9fdcf1926d512cd5343ba688ffc6b54"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/lfm-prose-smoke.json",
+      "bytes": 2673,
+      "sha256": "d360494cdd18f578793e0e2d07b838ce66c5f40ce777871426a70129fae8b759"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/qwen-generated-answer-dark-1280.png",
+      "bytes": 36320,
+      "sha256": "b22c673af0eff5b6e662d207e2ec35750e923023b70bb8bfd1d0826cce7bf46e"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/qwen-generated-answer-light-460.png",
+      "bytes": 32876,
+      "sha256": "6c8b944b8009bdc93b620f831e8b09ead6368565f8f32d544fa2cb6c32bf04e7"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/qwen-rich-render.json",
+      "bytes": 3679,
+      "sha256": "f62924647d1fc1348583bc9f90f424b3391ac372fbf124ef48c2364ca6e20cad"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/qwen-thinking-budget.json",
+      "bytes": 1231,
+      "sha256": "9dac92d0b806f8c2ccfadda4d4c7ebe7368c6e7e9c8df8f3bc249572f69e5f70"
+    },
+    {
+      "path": "docs/verification/2026-10-26-local-model-ui-smoke/summary.json",
+      "bytes": 3325,
+      "sha256": "4174ef82edddc6b130d64204b81a4ff6357079d8a4206637987aabf3aa6f9950"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/README.md",
+      "bytes": 3542,
+      "sha256": "c1e9e79c65fc4969064e6ea74e6416d7b0c335480e731dfe70c72cc9d0cbdd17"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/artifact-coherence.json",
+      "bytes": 9540,
+      "sha256": "6d47aea1a4bdc5ff7526f6e42152edb92f20bb653bbdf0ae18631bae6b3efa37"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/deb-permissions.json",
+      "bytes": 492,
+      "sha256": "2945970b1ae7859212dd60c54f2594cf1db230c3209c61e3424e1584173b78ca"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/linux-install-upgrade-appimage.json",
+      "bytes": 5225,
+      "sha256": "79fe5285b843c97446a5018c2e036910032e48e17ee79c174e958d1fbcdce10e"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/long-values-dark-460.png",
+      "bytes": 38415,
+      "sha256": "2d91b06c10602888ac85655831403c2088b6616a117f0c8b067a74814ab3d86f"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/long-values-light-460.png",
+      "bytes": 38104,
+      "sha256": "42a73fc7e5903645d71bf6ac76327a1d2273a03b56876230fb126333964c427f"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/metric-cards-dark-1280.png",
+      "bytes": 23980,
+      "sha256": "438e233006e3339ebfce8bfb88fcce01a39090b6a5dc2617f1c28e87690bb311"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/metric-cards-light-1280.png",
+      "bytes": 23906,
+      "sha256": "1250a717bd1d0f0f593d57f12f8510ca7febc1b77c2f0e6d340c20c03ca8d20c"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/native-package-suites.json",
+      "bytes": 829,
+      "sha256": "756dc75a7ac6e3b90893b70f387a20e9b308700e5a1a6acbb17b24348e19da9e"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/native-rich-cards.json",
+      "bytes": 96228,
+      "sha256": "f3eab0af5075dddcd12f0e500eee138a777edc2a822d42c40d14e572cf223175"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/native-rich-reference-layout.json",
+      "bytes": 109155,
+      "sha256": "e8731f3ab1ea58eddf2593ac6ebc4b1d2634e395233866c99e21417862ac63e8"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/package-tree-restoration.json",
+      "bytes": 133,
+      "sha256": "7458b6cb95838039380ef16b985e3ee47ab05e91fab450dbbaf2c93ae83a686d"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/recommendations-dark-1280.png",
+      "bytes": 120529,
+      "sha256": "ed5a23e7638e054c5c6ba98f413177e1513b47b4970d08669e019b509b716539"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/recommendations-dark-460.png",
+      "bytes": 70682,
+      "sha256": "43e0c01ff3cd45e11f2bd078ade471021ddfaa5c19c012c294624807fd6026c4"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/recommendations-light-1280.png",
+      "bytes": 122633,
+      "sha256": "f6a86092cb2d6f0783beed63c36802ae2c12d74578c4048c41f98961365c9a93"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/recommendations-light-460.png",
+      "bytes": 71364,
+      "sha256": "9f08bec5c74f84ecad50fd5f52a96da37a781ae23aff129a466d897d08b5e7a6"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/reference-layout-dark-1280.png",
+      "bytes": 48283,
+      "sha256": "a56fbf8c332ed39bd46fe96036fc6fa2675f3ba07c45d7d5ebdb8148eb819634"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/reference-layout-dark-460.png",
+      "bytes": 42621,
+      "sha256": "63faa52b3d94a7073fdabec0ba99d76d887cc98ba5b8f5b27d526069d9b0779f"
+    },
+    {
+      "path": "docs/verification/2026-10-26-rich-answer-ui/reference-layout-light-460.png",
+      "bytes": 42503,
+      "sha256": "fd4f6556e8a4f778d5597d475fb3ffb2a2d286820b263001ac308a2d64cd746b"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/README.md",
+      "bytes": 8804,
+      "sha256": "b8d99165d05610339097e5ac731d774b5245a5ff657a64df0b8eea41bc8efe84"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/evidence-manifest.json",
+      "bytes": 1914,
+      "sha256": "5b53c29226bbf161653defb846c73e428a8145c0a5ef127b104cca872c2fc78f"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/package-rebuilds.json",
+      "bytes": 13048,
+      "sha256": "5f11f67927cfb5faf65715955a70afb9efa349c0de1c53380adc74b3af9b709b"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/screenshots/answer-dark-1280.png",
+      "bytes": 32184,
+      "sha256": "65bf04bc6203972a554988eab5bdae6b20e4f093b0e4a7a58a8ecf1442acdee4"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/screenshots/answer-dark-460.png",
+      "bytes": 29004,
+      "sha256": "d8ccb08e7f624d324885d925795e9d28fd84dee3f546bd0928623bbd0a1717d4"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/screenshots/answer-light-1280.png",
+      "bytes": 32180,
+      "sha256": "498fc08a76877074f2a4e10f504eaeb76024910d0a0be4f7126b9726445ea69f"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/screenshots/answer-light-460.png",
+      "bytes": 28721,
+      "sha256": "ab2dde3338d0aef798eaa3591687033839720c1e31a0befa04b0df386c996218"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/summary.json",
+      "bytes": 4179,
+      "sha256": "44e0749874711c93d75db8456db9830e03d9471f6da8631cd479127934511854"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v10-report.json",
+      "bytes": 6013,
+      "sha256": "5c6fe888cdc1fb2f4a2fda96cd5cde842e79842c944768b343193d516a290c98"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v4-report.json",
+      "bytes": 3101,
+      "sha256": "1b83610064b96e0a8ca1a478d8064832b537d36c196e2f9116be2b1957c0bcc9"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v5-report.json",
+      "bytes": 3989,
+      "sha256": "674dbbad1a0a7edd21b79b8a51adb1904aa94eb171603300efafe0f39668a9f5"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v6-desktop.log",
+      "bytes": 2043,
+      "sha256": "f3c62745aedc6ebffdae60ba70ee433e3dcf43dc395afc7220bbf852feea742f"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v6-llama-server.log",
+      "bytes": 1925,
+      "sha256": "3013e923f067bf67bb3b97b6c15ab4bbb8050cee3ce6a55896399ee8de2771a0"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v7-report.json",
+      "bytes": 1289,
+      "sha256": "7a9ae4f2009e968b660e4ba7a8e980a99020d71cc7773ad69f78cb32cb3a124d"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v8-report.json",
+      "bytes": 5519,
+      "sha256": "ab2fb520e1dcbd4c8fb20008dc90c1cfd48302e001dd9444c397e6e28d55a43a"
+    },
+    {
+      "path": "docs/verification/2026-10-27-static-rich-routing/v9-report.json",
+      "bytes": 5816,
+      "sha256": "9e3044bc9f993b35c3b251b536a7c65726f9e0c0db5ca0e79f65168be82b16b3"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/README.md",
+      "bytes": 2214,
+      "sha256": "6810f4d83fc27d7c4090ffbdb8eff570f45da31d121800c0622e61c285511f6f"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/check-launcher-shell-syntax.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/check-package-launcher-tests.txt",
+      "bytes": 432,
+      "sha256": "1fad99863d10af28a85ca804a358e811cbeb2f202147d39b1edc2321846e8afa"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/check-renderer-tests.txt",
+      "bytes": 2575,
+      "sha256": "fa42f3aad5eb4d486cdaa5d17c9b12ce686c575240c7b3384b3ad49fa94539fd"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/check-typecheck.txt",
+      "bytes": 242,
+      "sha256": "bdc0e1fc77ba144a26d4a5c0fc4ca14f6dd8f6e7bca63a23ac52e809152224cc"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence-manifest.json",
+      "bytes": 29391,
+      "sha256": "2141a952e54c29228ded9ac63513451f726296ec9fa44b16ac15c8397da1a202"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v11-linux-20261027/build-report.json",
+      "bytes": 7708,
+      "sha256": "792eed907c6e5f3133b99a43cf8a3c99c7ad0acae2490f042d6b23d7078575e2"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v11-linux-20261027/native-rich-appimage/report.json",
+      "bytes": 109155,
+      "sha256": "93f845304a463369e8303f3df2c45e1a0a64f4af334d22064637af28fe08491c"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v11-linux-20261027/p2-appimage/report.json",
+      "bytes": 583,
+      "sha256": "1b301f814ce4ca422718c9d1282fcffc430f66929b6d6ddf710a93dcff89306e"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v11-linux-20261027/pyinstaller-warnings.txt",
+      "bytes": 75829,
+      "sha256": "45864561665e43dda32eb7b7e036bbb4ad0b73b56fb68c28c9fdf6e7552e053d"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-launcherfix-20261027/build-deb-20261027.log.txt",
+      "bytes": 1604,
+      "sha256": "069341544b30aed547d52f78f4608a25182e91cb390f6ef6eb4fa559148f75c4"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-launcherfix-20261027/build-deb-retry2-20261027.log.txt",
+      "bytes": 14186,
+      "sha256": "876e84a041a4f903037d7b84b0e70242a46410651f9c1106210aa008d9c48b26"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-launcherfix-20261027/build-deb-retry3-20261027.log.txt",
+      "bytes": 63,
+      "sha256": "d7531bbca7f748f86d6ad30a23d1b65ea74a613b3cf688ed0ac5ff9ad4ff5a19"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-launcherfix-20261027/build-deb-retry4-20261027.log.txt",
+      "bytes": 63,
+      "sha256": "d7531bbca7f748f86d6ad30a23d1b65ea74a613b3cf688ed0ac5ff9ad4ff5a19"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-launcherfix-20261027/build-deb-retry5-20261027.log.txt",
+      "bytes": 46,
+      "sha256": "e593c94d29f7a39fd9e568d2436600616f867c609cfbf476dc4d47ff87e1043d"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-launcherfix-20261027/build-deb-retry6-20261027.log.txt",
+      "bytes": 299,
+      "sha256": "6f11eb883569eb13b39f01944ed6a89baed52dffe138cb51f1936c38d0623f7d"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-linux-20261027/build-report.json",
+      "bytes": 1263,
+      "sha256": "c5c9dd8fdee8b3566a6640295303b3e7cd1412d4c04b77d65c0fe1810d5410fd"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-linux-20261027/deb-build.log.txt",
+      "bytes": 1271,
+      "sha256": "3aa3f34ed294f01391dcb9b4baaa3910edcb840e667e45e406343390543e4b22"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-linux-20261027/pyinstaller-warnings.txt",
+      "bytes": 26243,
+      "sha256": "d3785fd9e02b3abf501e9d328dd20601258daf2f920600fd9d5df21c45f26cc5"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-linux-20261027/vite-build-retry1.log.txt",
+      "bytes": 1612,
+      "sha256": "f3bee356493194a04229b5d677f41581bb0893119e275e11ed0c31f6b0596f4f"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/appimage-build.log.txt",
+      "bytes": 373,
+      "sha256": "b26e5176be4211e7423d54a5c08bcf893c8d5ab0a5c67bc348611ed1c3b7cc14"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/appimage-extract.log.txt",
+      "bytes": 150438,
+      "sha256": "cb3062c6667658eaa561f2f6e85c25420212bf0168df5ae5e89619033653a720"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/appimage-file.txt",
+      "bytes": 278,
+      "sha256": "06e0d1632a16b86d369f3d715f6b771eb9973978a1c8e7ba1e1c1314d00fe9cd"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/appimage-kernel-info.json",
+      "bytes": 155,
+      "sha256": "1a4938eadb2527d481d3d2782c37d617f8cf7be9cbe9cf6195c89559acbe9af9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/build-report.json",
+      "bytes": 14187,
+      "sha256": "a75f0445fcfb15a9f85147aab4cf56d52579d2342847ead6bbca822f432194f9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-apt-simulation-20261027.json",
+      "bytes": 1792,
+      "sha256": "389e9ea70d249c3e279eac0c6d5f3272cff8feac45d36a69bf4f4591638c3c6e"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-build.log.txt",
+      "bytes": 234,
+      "sha256": "93bf5bc6dc8b4986fcd67b6b8182885958b47a89a4aa6db82aec05ca7a300ada"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-builder-diagnostic.log.txt",
+      "bytes": 1842,
+      "sha256": "360ae9b136a7ae44556058b9baf28e902665034bd98e09417aca6d066b32e64f"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-install-upgrade-20261027.log.txt",
+      "bytes": 130,
+      "sha256": "b0341e4efdbb76df39d1f84406c6962d9383ef96125f79c2d3a431da76817d9c"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-install-upgrade-retry2-20261027.log.txt",
+      "bytes": 1575,
+      "sha256": "d5d44001b829a6342f58dab65ecd35f2cb5922a5396bc33bf7be600bc952a8ba"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-install-upgrade-retry3-20261027.log.txt",
+      "bytes": 131,
+      "sha256": "5428cb29fbfdb01f72d6c450c3bf7f53691837078ae3c97da8b5dfab504a5ba2"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-install-upgrade-retry4-20261027.log.txt",
+      "bytes": 1117,
+      "sha256": "9fe6779c0cd286becd5961bc2b7668372f4d27cf5dceffd21e90d52446a7c255"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-install-upgrade-retry5-20261027.log.txt",
+      "bytes": 1109,
+      "sha256": "5503d64a12b5e2428070c0230435834cdd277eea83114731573cd96195957167"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-isolated-lifecycle-20261027.json",
+      "bytes": 3408,
+      "sha256": "d2c79e17da4cf6861d1775936409c96baf06fc9194f8a1f6f0de88e85ce8d3ee"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-kernel-smoke-20261027.log.txt",
+      "bytes": 541,
+      "sha256": "bada5c9ec12cb4a140449ee61f939c57add36d7600837b6cb1f8cc1b457bddde"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-bwrap-kernel-smoke-retry2-20261027.log.txt",
+      "bytes": 1396,
+      "sha256": "557a7e408131370c088032162f464793b246b9ce18605f00ef08a2207510d21f"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-extracted-kernel-info.json",
+      "bytes": 155,
+      "sha256": "1a4938eadb2527d481d3d2782c37d617f8cf7be9cbe9cf6195c89559acbe9af9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-metadata-recheck.txt",
+      "bytes": 834,
+      "sha256": "0ef6af7828c980386c679fd9a1354d44fe862fdb74d664c10d66444bbd89fdc1"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-metadata.txt",
+      "bytes": 834,
+      "sha256": "0ef6af7828c980386c679fd9a1354d44fe862fdb74d664c10d66444bbd89fdc1"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-publish-retry.log.txt",
+      "bytes": 248,
+      "sha256": "3bf3ab1ed8cea08d230251c0abbc0070065c38769cf94d79481a200e089e3857"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-rootless-install-v12-retry2.log.txt",
+      "bytes": 1330,
+      "sha256": "d39b99244acc7e83f37b3e815d53fe163285ebf91ef107b5241ab6359fb4b683"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-rootless-install-v12-retry3.log.txt",
+      "bytes": 1408,
+      "sha256": "0d898eaf0e3f7aab9bee385b2897b4b61fec23789073125ad4b12a10ddf8364f"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-rootless-install-v12-retry4.log.txt",
+      "bytes": 1222,
+      "sha256": "a598c963b4e6f839499a807ed7182b423dfcf36a789e6f7d68c6074eaa15c6f3"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-rootless-upgrade-v12-retry1.log.txt",
+      "bytes": 1805,
+      "sha256": "27afc4f6378f0f5cab5534fefdca75d0116ede84980975e981c11f750891273b"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/deb-rootless-upgrade-v12-retry2.log.txt",
+      "bytes": 2286,
+      "sha256": "7a7700d07800ae5088ea77746e910c7b85782c22adfbde523abb26c1cb914e3e"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/isolation-appimage-extracted-retry1/report.json",
+      "bytes": 7693,
+      "sha256": "fe894ab04062a5ea1367a872c388525a365178f47710acf8adb4ad7186e36ba1"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/kernel-build.log.txt",
+      "bytes": 14712,
+      "sha256": "0471e83ede5cefa83b44f8b8e7e8f9e089e7255774aa3172a378f0f53f26707d"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/kernel-info.json",
+      "bytes": 155,
+      "sha256": "1a4938eadb2527d481d3d2782c37d617f8cf7be9cbe9cf6195c89559acbe9af9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/linux-unpacked-build.log.txt",
+      "bytes": 1331,
+      "sha256": "bd519aeb201e1e727c41ee7d543dc82cea2f273e3f7380a3f90949ac95958093"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/answer-dark-1280.png",
+      "bytes": 32184,
+      "sha256": "65bf04bc6203972a554988eab5bdae6b20e4f093b0e4a7a58a8ecf1442acdee4"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/answer-dark-460.png",
+      "bytes": 29004,
+      "sha256": "d8ccb08e7f624d324885d925795e9d28fd84dee3f546bd0928623bbd0a1717d4"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/answer-light-1280.png",
+      "bytes": 32180,
+      "sha256": "498fc08a76877074f2a4e10f504eaeb76024910d0a0be4f7126b9726445ea69f"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/answer-light-460.png",
+      "bytes": 28721,
+      "sha256": "ab2dde3338d0aef798eaa3591687033839720c1e31a0befa04b0df386c996218"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/assistant-visible.txt",
+      "bytes": 291,
+      "sha256": "dc71e1c550f85ac44c514b2d338bf4a903b2dad20e27e0d54bdd405dc7468978"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/desktop.log.txt",
+      "bytes": 7020,
+      "sha256": "878fbcc872bd8e55a3280b001fc268320e5027eb5bd1555a552f3f588b012a05"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/llama-server.log.txt",
+      "bytes": 3612,
+      "sha256": "1c2b68bc10e55df583d68b1e9a099321ecf52e710dd0be9e7ad5038b24379444"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/report.json",
+      "bytes": 6011,
+      "sha256": "13c1a794378dde55f683e5108743f00547243d95120e17229308a64eeb3d003c"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-fuse-final/report.json",
+      "bytes": 109155,
+      "sha256": "d06078ed66c9d6b75044e7c55638bafa27673b840c0dec051fd0e4580b2cec09"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-fuse-retry1/report.json",
+      "bytes": 479,
+      "sha256": "a651311b066e4d820c336ea0660e9f24699d7da441f4ecfb74d32603b9ed19b3"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-fuse-retry2/report.json",
+      "bytes": 109155,
+      "sha256": "d06078ed66c9d6b75044e7c55638bafa27673b840c0dec051fd0e4580b2cec09"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-retry1.log.txt",
+      "bytes": 232,
+      "sha256": "5d9db6acc64fee1e722086684389b8eaf758fa48177ad87e83f78bd3b272fb53"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-retry1/report.json",
+      "bytes": 582,
+      "sha256": "fa147450cc3fd4614a94b6b5d0d0c7ca91450f387b45a3aa0425eef5343d7b26"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-retry2.log.txt",
+      "bytes": 53,
+      "sha256": "f466dbc89dfde3e2e879743741181b7128478db71278b475766b3e242340ab43"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-rich-appimage-retry2/report.json",
+      "bytes": 109155,
+      "sha256": "d06078ed66c9d6b75044e7c55638bafa27673b840c0dec051fd0e4580b2cec09"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/native-test-env-install.log.txt",
+      "bytes": 26171,
+      "sha256": "0d69c247f8e20b4568088747def4128624daead55715be7d3bf78eb1ddf1cda1"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p2-appimage-fuse-final/report.json",
+      "bytes": 9841,
+      "sha256": "89c670b9a2b7f16589bdae25ae75874876ba2830c3a479a770f043b3c0d90cf9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p2-appimage-retry1.log.txt",
+      "bytes": 2446,
+      "sha256": "47a8765f64c1e3664efc6e58b83e7ec67bce35b815f85c70b224862c9b9862ea"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p2-appimage-retry1/report.json",
+      "bytes": 9805,
+      "sha256": "b824e9f51087104a45301d0ea97baec4130e3154fc9e3f926b28805f8c92950c"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p3-appimage-extracted-retry1.log.txt",
+      "bytes": 2564,
+      "sha256": "307bc6cf1303c91f8aded980e4962e865fd50056a198aea2f8fe791839ff2d71"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p3-appimage-extracted-retry1/report.json",
+      "bytes": 4313,
+      "sha256": "3aafd9f4ff9c4806be40cb7bf6b9228c57b736180cbc9215300251c3280f54e6"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p3-appimage-retry1.log.txt",
+      "bytes": 1308,
+      "sha256": "90985fbd442babe39c5f74f02586b6a0323ed51bc6d0eff8e48ce255dbf12d52"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p3-appimage-retry1/report.json",
+      "bytes": 551,
+      "sha256": "73995f1c64bc7248637b7f4bd334acb615e0d751b4b44cc9004fe50ba6259260"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p4-appimage-extracted-retry2/report.json",
+      "bytes": 19523,
+      "sha256": "719955f6d09e5d0a612e9942be7766afd6ac31696a2d0056210e0a275f2ecc63"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p4-appimage-retry1.log.txt",
+      "bytes": 6120,
+      "sha256": "d45f4474ab620fd611ed1949f0062662e8a4104b5c304bdcabfe9562ee67a166"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p4-appimage-retry1/report.json",
+      "bytes": 18895,
+      "sha256": "91d2fa61c831f8a6033e169098d38ac3157f0f592acb40b4e76aeda75b708b4c"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/p4-stress-v12-60-20261027/report.json",
+      "bytes": 37651,
+      "sha256": "fc2ce3793f1ae11d5d22bedb4ccc19b1c120c677a823eaa6430d1b5f874c6a47"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/package-validation-appimage-retry2.log.txt",
+      "bytes": 544,
+      "sha256": "a07143ce5623c47dac166c1c6c30cbf6b1b1ce499098e1aa9d810c44d8ef2b95"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/package-validation-wrapper-retry2.log.txt",
+      "bytes": 390,
+      "sha256": "f16378e7d24a5523287063e832ce72fbecc8c13fad48fc0e33237e6c91638aec"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/pillow-extensions.txt",
+      "bytes": 281,
+      "sha256": "4ee92c438f402d59061437b6e8c0cdd3b17f67f756a25e5a914bf2754b2d62c9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/pyinstaller-warnings.txt",
+      "bytes": 26245,
+      "sha256": "ec7b16c2516c7bac0dadf4a58e1b666e7c94dd827f3335cfbb567cc6a830ad4a"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/python-env-build.log.txt",
+      "bytes": 26921,
+      "sha256": "e44ea3931833fd6da550fa06ff963c157edb9db8e40bdfda2eadfbc91f2b6caf"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/unpacked-kernel-info.json",
+      "bytes": 155,
+      "sha256": "1a4938eadb2527d481d3d2782c37d617f8cf7be9cbe9cf6195c89559acbe9af9"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/vite-build.log.txt",
+      "bytes": 1425,
+      "sha256": "7ae619f6eb10704aa546c98268dd8a4bf87d5a840dc5ea7868cb1bf0513d9d54"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/xvfb-118.log.txt",
+      "bytes": 64,
+      "sha256": "87e9572cf030493a1f7ba83d385129046b224374ca1414911674b30fc44276d7"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/evidence/package-v12-retry1-linux-20261027/xvfb.log.txt",
+      "bytes": 81,
+      "sha256": "e2861dbf17c9cb74d57668ceaa0ec8111c014cd26d10d2d0dffdf37188dac690"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/first-remote-clone-check.json",
+      "bytes": 29029,
+      "sha256": "c8f1ccf8f018dab0300dff66d2f0666c18d34b9bdd832163c6b0dd922f72845b"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/goal-before-handoff.json",
+      "bytes": 126401,
+      "sha256": "842eef614a1a5797b5f848465bb6390ccf824f2c907b8d14814857a2ae605932"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/goal.json",
+      "bytes": 129423,
+      "sha256": "573f7d449b601df4e171a11b401e46b654af71225e1e15112f8270ffc725173c"
+    },
+    {
+      "path": "docs/verification/2026-10-28-dev-handoff/handoff-validation.json",
+      "bytes": 3785,
+      "sha256": "4d2603ffbaf3c4076698e7f99d95bf396d1f8a84a9131d3068e889968f4d5bd5"
+    },
+    {
+      "path": "scripts/verification/desktop_process.py",
+      "bytes": 3172,
+      "sha256": "b73c39755314cb7e25bb119f626c177d83d57d966a1646c7b710f1d42d14c09e"
+    },
+    {
+      "path": "scripts/verification/fixtures/riu-natural-tasks.json",
+      "bytes": 2801,
+      "sha256": "e7c50cc0a29c8d682214b78a3c86ebe3fd11d56780a3d9ff5ece72714c61638a"
+    },
+    {
+      "path": "scripts/verification/fixtures/riu-rich-answer-tasks.json",
+      "bytes": 11787,
+      "sha256": "d5a2f706b4f0f17e1d0292c6b52bda5716a8596d9800234a0c0bba91d23cc743"
+    },
+    {
+      "path": "scripts/verification/local_lfm_ui_smoke.py",
+      "bytes": 14592,
+      "sha256": "38e84357f6f09646ae7b2205067eb12c0281876b9fec509a2a8e83ba867d5f97"
+    },
+    {
+      "path": "scripts/verification/local_model_in_app_smoke.py",
+      "bytes": 15958,
+      "sha256": "4c14b2966224554a3f48f457b9d56797ad27378bf05916cb0a193803075197d9"
+    },
+    {
+      "path": "scripts/verification/riu_full_benchmark.py",
+      "bytes": 13633,
+      "sha256": "32b01ccdfa50add4b9bf99e9e4b68f698d8181f54cabb42a5e86ebf8204bec83"
+    },
+    {
+      "path": "scripts/verification/riu_linux_install.py",
+      "bytes": 11455,
+      "sha256": "c0395db6ba46b5eaf03c61424f6f4d25c2eafdf0811a609b59069a715f27a591"
+    },
+    {
+      "path": "scripts/verification/riu_p2_electron.py",
+      "bytes": 16834,
+      "sha256": "8b0d775c9dc8a449d9bb47170423347de7b9de71af326a7014e4b07fe65d7d97"
+    },
+    {
+      "path": "scripts/verification/riu_p3_artifacts.py",
+      "bytes": 4277,
+      "sha256": "cf31e81155cd0db23a29cde0e44bc794422989f3762405d6558540acc352c67d"
+    },
+    {
+      "path": "scripts/verification/riu_p3_electron.py",
+      "bytes": 17509,
+      "sha256": "2b69b781913c79350e06afd2a720b712f286cedfb0adff6de07edff2f1d52872"
+    },
+    {
+      "path": "scripts/verification/riu_p4_electron.py",
+      "bytes": 29237,
+      "sha256": "c90f45073b4c4eaf421d2f9e6905488424ece53d740458917c415966cf637d28"
+    },
+    {
+      "path": "scripts/verification/riu_package_native.py",
+      "bytes": 3749,
+      "sha256": "058a122818d60c0a39628589a0e29d1f40daf40f9576e80019094cbf22856501"
+    },
+    {
+      "path": "scripts/verification/riu_quality_benchmark.py",
+      "bytes": 154431,
+      "sha256": "6b92502e256586f090d7454ef1f6a4d57c8b667b895df0c84577d11d1938da9f"
+    },
+    {
+      "path": "scripts/verification/riu_restore_native.py",
+      "bytes": 8690,
+      "sha256": "c8580d340ed17b9266bb224eea0b15250adf1b3a9fc845778210195ba11f715f"
+    },
+    {
+      "path": "scripts/verification/riu_rich_answer_benchmark.py",
+      "bytes": 25245,
+      "sha256": "0d62665d94015ec1ecb7402099b3482d55b0ab04c7f129bcf0bf8527e375bb21"
+    },
+    {
+      "path": "scripts/verification/riu_rich_answer_native.py",
+      "bytes": 19410,
+      "sha256": "ea8e5b83dc88ffe9b3dd91d6dd0ea26047afc2306e75deae0a5886651ca70570"
+    }
+  ]
+}

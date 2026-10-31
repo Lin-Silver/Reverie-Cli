@@ -1,0 +1,1 @@
+/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/appimage/Reverie-2.5.0-linux-x64.AppImage: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 2.6.18, stripped

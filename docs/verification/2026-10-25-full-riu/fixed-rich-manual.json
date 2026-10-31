@@ -1,0 +1,313 @@
+{
+  "scope": "Personal image review plus real UI theme/viewport/Tab operations on all8 fixed rich first-attempt model profiles. No model reruns, no authored replacement outputs, no changes to raw verdicts.",
+  "at_utc": "2026-10-25T05:22:34.602883+00:00",
+  "reviewed": 8,
+  "passed": 6,
+  "failed": 2,
+  "fixed_total": 18,
+  "remaining_interactive_reviews": 10,
+  "whole_manual_acceptance": false,
+  "source_replay_sha256": "2e891857636718951096c71cb51fb536e74f7dfe065156092fd5aec92813de4a",
+  "reviews": [
+    {
+      "id": "model-1-rich-overview-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-overview-1/dark-1280.png",
+          "sha256": "bd90772a1d36ff33bcf0084ba9a4e87c9de1229625d51cce51c9ea7991b5a8a9"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-overview-1/dark-460.png",
+          "sha256": "03d92bed682b555d43472235cf5f8df1154bb421b6bc11cc28e1d90d1db9735e"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-overview-1/light-1280.png",
+          "sha256": "4a7a120dc338377778015e54778c685d0259425b5b1f4e3ebeef325a1222976b"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-overview-1/light-460.png",
+          "sha256": "e8b1e48f142dec8bb9b7238a06d7537440272c1146a32e6faf07d76b5c7b2a3b"
+        }
+      ],
+      "findings": [],
+      "passed": true
+    },
+    {
+      "id": "model-2-rich-overview-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-overview-1/dark-1280.png",
+          "sha256": "9265ab0b1a1995ab2afef7727f1da938e0cc92704aaca3fcf363fb4525443411"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-overview-1/dark-460.png",
+          "sha256": "d5abc20202b3839b45770e00228f05eecc26b8845583ab14b23b6635a6c59b6d"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-overview-1/light-1280.png",
+          "sha256": "2ccf9ff6cce1b9433d862d42d32710b72be35b114ada56ddff62a5a011cda723"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-overview-1/light-460.png",
+          "sha256": "7d775e0fd0c12746b6ad9647e81c7a2d72c4f31ada11629bf0aaed60eccb8296"
+        }
+      ],
+      "findings": [],
+      "passed": true
+    },
+    {
+      "id": "model-1-rich-recommendations-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-recommendations-1/dark-1280.png",
+          "sha256": "0f0c9cf37be897b93716a97dd4def4db9698772cf218a4dc25c9d1e9018b5fc0"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-recommendations-1/dark-460.png",
+          "sha256": "59cb8aacac173fc89865f0ad3c7dd1c767d5c9a202bcf1f9632652b52c09c406"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-recommendations-1/light-1280.png",
+          "sha256": "473bb5628502edcc96b577f154efd99d9f78128aa1146be40a2227720b03f0a1"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-recommendations-1/light-460.png",
+          "sha256": "a8dc3763b0b22b837fc792e5540b578404e1778a1a57a4d82bc6118999805ed2"
+        }
+      ],
+      "findings": [
+        {
+          "severity": "P3",
+          "kind": "generation_polish",
+          "detail": "Unrequested explanation of success color tone after the actual recommendation cards."
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "model-2-rich-recommendations-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-recommendations-1/dark-1280.png",
+          "sha256": "9cca09d47a13732c00b1968aba62125ae1c16f0c6503b9c6fa78e93d5281802c"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-recommendations-1/dark-460.png",
+          "sha256": "7e3869786e4deb8afe592e2b8ea2807c698c2368fe907a5a61ae45b0b1d5b7d6"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-recommendations-1/light-1280.png",
+          "sha256": "69920e23718938ae3da020d44c35571b8080604451fe7d27413aa09b0c2b9852"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-recommendations-1/light-460.png",
+          "sha256": "41f313dfc297da4e9efdc8495efd11e0b3761f94fa7bdf961c99e17a86742277"
+        }
+      ],
+      "findings": [],
+      "passed": true,
+      "unconfirmed_capture_finding": "A horizontal scrollbar appears in the full-page keyboard screenshot; determine whether an earlier message overflows the transcript. Current answer itself is contained. Do not classify the cause without a native DOM reproduction."
+    },
+    {
+      "id": "model-1-rich-long-table-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-long-table-1/dark-1280.png",
+          "sha256": "94ce7a211c4a613697a41e2ffc61012fa7a1272debf22ddb301179f380b61bae"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-long-table-1/dark-460.png",
+          "sha256": "4c46cc5c302daf856fc11b58fa2b0e60081d5a84b8471bb0580fb98c038f1c93"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-long-table-1/light-1280.png",
+          "sha256": "c5e8e6e9793b7329c539d98c6171f29b4abc7bbc8d922c9bf0a3d0d2cd6026db"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-long-table-1/light-460.png",
+          "sha256": "9ae3fdfdcf80e5daf4903b821e9e2e9c749202becd6ffa93457b684103356f80"
+        }
+      ],
+      "findings": [
+        {
+          "severity": "P2",
+          "kind": "model_data_fidelity",
+          "detail": "Supplied identifiers项目01..项目24 became项目 01..项目 24, even after two normal feedback turns. No modification/restart attempted after generation remained failed."
+        },
+        {
+          "severity": "P3",
+          "kind": "generation_polish",
+          "detail": "Repeated external headings and component titles; repeated empty-state text in model2."
+        }
+      ],
+      "passed": false,
+      "replay_capture_scope": "Oversized target screenshots include fixed app chrome and omit first rows; retain them but exclude them from whole-table visual conclusions.",
+      "valid_viewport_evidence": [
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-long-table-1-execution-1/rich-long-table-1/generation-repair-2-dark-460-first-rows.png",
+          "sha256": "e17582814b0b3076a97fe26b13c7515819d9f81e7073ffc1aa69c5e7a1241131",
+          "personally_inspected": true
+        },
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-long-table-1-execution-1/rich-long-table-1/generation-repair-2-dark-460-last-rows.png",
+          "sha256": "3e40865789dd87400ed0c8f485b0a7d6f1946d1fc4ce8209c6e81ca5a10c0b69",
+          "personally_inspected": true
+        },
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-long-table-1-execution-1/rich-long-table-1/generation-repair-2-light-460-first-rows.png",
+          "sha256": "859cca043df5f37eb4dbed36fc31438728e8a6d119a9380b533dd9a0fe77cc7f",
+          "personally_inspected": true
+        },
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-1-rich-long-table-1-execution-1/rich-long-table-1/generation-repair-2-light-460-last-rows.png",
+          "sha256": "5ff85ca5d5e27db11d3d482117f4e5009a4f02b518205faf14365882df05e803",
+          "personally_inspected": true
+        }
+      ]
+    },
+    {
+      "id": "model-2-rich-long-table-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-long-table-1/dark-1280.png",
+          "sha256": "689449f9b0b3a6eb66ef334ab539a1fbfa7c7e74322fe57af63f765a1656278b"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-long-table-1/dark-460.png",
+          "sha256": "b9dead6e5189bd95529779a7bd6c2a48531eb6e1f42a578a45c48592a13518f5"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-long-table-1/light-1280.png",
+          "sha256": "17afd9ba2de330c791685ef4196c18f2730dfba9aa66ee81bb4a66e95e40e5cf"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-long-table-1/light-460.png",
+          "sha256": "af6f444dd0f2396a1c039f03272e4859525a2413576790a5fbc7c8e8be984e83"
+        }
+      ],
+      "findings": [
+        {
+          "severity": "P3",
+          "kind": "generation_polish",
+          "detail": "Repeated external headings and component titles; repeated empty-state text in model2."
+        }
+      ],
+      "passed": true,
+      "replay_capture_scope": "Oversized target screenshots include fixed app chrome and omit first rows; retain them but exclude them from whole-table visual conclusions.",
+      "valid_viewport_evidence": [
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-2-rich-long-table-1-execution-1/rich-long-table-1/modification-dark-460-first-rows.png",
+          "sha256": "b0a953b91b0c22c4b643e7930c8d1923f39df093405b8c0e323a07b910ab7fa7",
+          "personally_inspected": true
+        },
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-2-rich-long-table-1-execution-1/rich-long-table-1/modification-dark-460-last-rows.png",
+          "sha256": "0bb580bc8d5c91d0af0be948f5837a0d5a3e30dc113898f10136b6f6ed929524",
+          "personally_inspected": true
+        },
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-2-rich-long-table-1-execution-1/rich-long-table-1/modification-light-460-first-rows.png",
+          "sha256": "80d01b10b5f11164441bb880bad287de13a653a496dc62e313591bd3d0c9e256",
+          "personally_inspected": true
+        },
+        {
+          "path": ".runtime/riu-full-formal60-20261025-round1/model-2-rich-long-table-1-execution-1/rich-long-table-1/modification-light-460-last-rows.png",
+          "sha256": "7a10346883652124b13dfdc87ff0fcb61744836d7502f4ef2635517d861111fe",
+          "personally_inspected": true
+        }
+      ]
+    },
+    {
+      "id": "model-1-rich-mixed-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-mixed-1/dark-1280.png",
+          "sha256": "bb5dde932dfbb0ceb1fb22146921cb691312584807035393741754b6d82f4a7c"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-mixed-1/dark-460.png",
+          "sha256": "533abb0ac41abddb5d8cf73da3909b774d64a6606843159555fcb61af4fcd2ec"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-mixed-1/light-1280.png",
+          "sha256": "3d2bc01fdfcc8ed1f4845327133ebbace6f6e5f94a1a5782e742eb0be84909e6"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-1-rich-mixed-1/light-460.png",
+          "sha256": "c1a3cf05469149277cbc2a16042b2c217f5497ad125ddaf908fc50897b087c2c"
+        }
+      ],
+      "findings": [],
+      "passed": true
+    },
+    {
+      "id": "model-2-rich-mixed-1",
+      "fixed_first_attempt": true,
+      "operator_replay_complete": true,
+      "original_evidence_unchanged": true,
+      "actual_keyboard_cycle_passed": true,
+      "image_inspection_complete": true,
+      "replay_capture_files": [
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-mixed-1/dark-1280.png",
+          "sha256": "ff5a0aee45b8df21b32773009c2d626c6a739e6bff368a58fe9727262a738150"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-mixed-1/dark-460.png",
+          "sha256": "ef6b37d4a1a9d26db0db0dcdcd97ba0e9b13a4bdf7ad5ccf0a8a32e5bb6b120c"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-mixed-1/light-1280.png",
+          "sha256": "ee75daf55c2d8abf13bd57bbaca3c3e5a9af06ab8146d8a74d78db1971cb97fc"
+        },
+        {
+          "path": ".runtime/riu-completion-20261021/full-riu-fixed-rich-manual/model-2-rich-mixed-1/light-460.png",
+          "sha256": "4a3e0603b9d9a044d5f5f290f88c97098eeec8bee3818dc7eeab46dc965448b8"
+        }
+      ],
+      "findings": [
+        {
+          "severity": "P2",
+          "kind": "model_cross_content_consistency",
+          "detail": "Modified native metric shows待办2; accompanying prose still says后续三项待办. Automatic component-field checks passed; manual reading rejects this contradiction."
+        }
+      ],
+      "passed": false
+    }
+  ]
+}

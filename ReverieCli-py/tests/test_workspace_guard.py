@@ -351,7 +351,7 @@ def test_a_real_add_failure_still_fails_the_checkpoint(tmp_path: Path) -> None:
 def test_checkpoint_repository_survives_a_deep_app_root(tmp_path: Path, monkeypatch) -> None:
     """A deep app root must not push GIT_DIR past the length Git accepts.
 
-    Git dies with `fatal: '$GIT_DIR' too big` above 220 characters, and the
+    Windows Git dies with `fatal: '$GIT_DIR' too big` above 220 characters, and the
     executor turns that into "Workspace checkpoint unavailable", refusing every
     tool call that touches the workspace. So the checkpoint repository may not
     live under a directory whose name spells out the workspace's whole absolute
@@ -365,7 +365,8 @@ def test_checkpoint_repository_survives_a_deep_app_root(tmp_path: Path, monkeypa
 
     executor = ToolExecutor(project_root=workspace)
     guard = executor.context["shadow_git_manager"]
-    assert len(str(guard.git_dir)) <= ShadowGitManager.MAX_WINDOWS_GIT_DIR_CHARS
+    if os.name == "nt":
+        assert len(str(guard.git_dir)) <= ShadowGitManager.MAX_WINDOWS_GIT_DIR_CHARS
 
     result = executor.execute("file_ops", {"operation": "mkdir", "path": "artifacts"}, tool_call_id="deep-mkdir")
     assert result.success, result.error

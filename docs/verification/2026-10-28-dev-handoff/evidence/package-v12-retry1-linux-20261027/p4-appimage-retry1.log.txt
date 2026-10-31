@@ -1,0 +1,44 @@
+{"name": "artifact-registration-to-interactive-p95-under-1s", "passed": true, "detail": {"n": 20, "p50_ms": 247.796, "p95_ms": 494.642, "max_ms": 494.988, "samples_ms": [383.592041015625, 225.87109375, 171.45703125, 247.7958984375, 257.10205078125, 336.700927734375, 494.98828125, 212.927978515625, 362.977294921875, 295.596923828125, 259.01904296875, 213.578125, 222.782958984375, 153.287841796875, 254.905029296875, 216.8818359375, 174.130126953125, 494.64208984375, 366.48193359375, 210.96484375]}}
+{"name": "display-mode-buttons-at-least-32px", "passed": true, "detail": [{"label": "\u8fd4\u56de\u5bf9\u8bdd\u5185", "height": 32}, {"label": "\u5728\u5de5\u4f5c\u9762\u677f\u4e2d\u653e\u5927", "height": 32}, {"label": "\u753b\u4e2d\u753b", "height": 32}]}
+{"name": "same-js-document-fullscreen", "passed": true, "detail": null}
+{"name": "same-js-document-pip", "passed": true, "detail": null}
+{"name": "same-js-document-inline", "passed": true, "detail": null}
+{"name": "card-carousel-is-content-layout", "passed": true, "detail": null}
+{"name": "invalid-display-mode-explicit-error", "passed": true, "detail": {"code": -32602, "message": "Unknown display mode. Card and carousel are content layouts."}}
+{"name": "iframe-escape-returns-host-focus", "passed": true, "detail": null}
+{"name": "tab-enter-escape-host-navigation", "passed": true, "detail": null}
+{"name": "theme-AA-light", "passed": true, "detail": {"bg": "rgb(249, 249, 252)", "fg": "rgb(34, 36, 45)", "contrast": 14.712859554795893}}
+{"name": "theme-AA-dark", "passed": true, "detail": {"bg": "rgb(21, 22, 28)", "fg": "rgb(243, 243, 247)", "contrast": 16.30906414343467}}
+{"name": "live-language-without-reload", "passed": true, "detail": null}
+{"name": "reduced-motion-context-and-css", "passed": true, "detail": null}
+{"name": "1080x700-composer-visible", "passed": true, "detail": null}
+{"name": "1080x700-no-horizontal-overflow", "passed": true, "detail": null}
+{"name": "empty-data-text-equivalent", "passed": true, "detail": null}
+{"name": "upper-bound-data-and-recoverable-error", "passed": true, "detail": null}
+{"name": "local-input-p95-under-100ms", "passed": false, "detail": {"n": 60, "p50_ms": 42.6, "p95_ms": 101, "max_ms": 125.4, "samples_ms": [108.10000000009313, 109.39999999990687, 98.5, 91.69999999995343, 125.39999999990687, 57.0999999998603, 84.80000000004657, 60.5, 70.19999999995343, 38.800000000046566, 61.5999999998603, 38.800000000046566, 47.300000000046566, 53.5, 39.5, 43.200000000186265, 34.5, 44.5999999998603, 35.199999999953434, 42.5999999998603, 45.5, 35.5999999998603, 43.0999999998603, 36.199999999953434, 39.39999999990687, 81.0999999998603, 101, 87.10000000009313, 41.699999999953434, 33.699999999953434, 54.60000000009313, 53.5, 38.4000000001397, 31.699999999953434, 32.10000000009313, 45.60000000009313, 38.60000000009313, 35.699999999953434, 41.300000000046566, 32.5, 42.299999999813735, 39.5, 40.199999999953434, 43.699999999953434, 39.800000000046566, 75, 36, 53.300000000046566, 41.9000000001397, 47.199999999953434, 36.800000000046566, 33.5, 44.300000000046566, 47.5, 38.5, 32.200000000186265, 32.89999999990687, 44.5, 48.200000000186265, 36.799999999813735]}}
+{"name": "refresh-restores-display-and-private-state", "passed": true, "detail": null}
+{"name": "process-restart-restores-view-and-private-state", "passed": true, "detail": null}
+{"name": "followup-produces-traceable-new-revision", "passed": true, "detail": null}
+{"name": "revision-state-isolated", "passed": true, "detail": null}
+{"name": "missing-file-retains-summary-and-retry", "passed": true, "detail": null}
+{"name": "missing-file-retry-recovers", "passed": true, "detail": null}
+{"name": "latest-history-view-stays-visible-after-lazy-load", "passed": true, "detail": null}
+{"name": "100-history-views-lazily-mounted", "passed": true, "detail": {"frame_counts": [2, 2, 2], "total_view_rows": 100}}
+{"name": "long-summary-expands-without-reloading-view", "passed": true, "detail": {"collapsed_height": 107.5625, "expanded_height": 165.125, "text": {"height": 57.5625, "lineHeight": 19.2}, "same_document": true}}
+{"name": "close-releases-frame-and-resource-token", "passed": true, "detail": {"new_frame_url": ""}}
+{"name": "closed-view-does-not-stop-chat", "passed": true, "detail": null}
+{"name": "private-ui-state-and-html-not-in-followups", "passed": true, "detail": null}
+Traceback (most recent call last):
+  File "/workspace/Reverie-Cli/scripts/verification/riu_p4_electron.py", line 402, in <module>
+    main()
+  File "/workspace/Reverie-Cli/scripts/verification/riu_p4_electron.py", line 366, in main
+    cli = subprocess.run([str(args.exe.resolve().parent / ("reverie.exe" if os.name == "nt" else "reverie")), str(workspace), "--no-index", "--prompt", "RIU_P4_GENERATE plain text client", "--report-file", str(output / "plain-client.json")], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 548, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1955, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: '/workspace/Reverie-Cli/.runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/appimage/reverie'

@@ -1,0 +1,39 @@
+{
+  "scope": "Additional installed launcher checks only, synthetic saved fixture, no model requests. Prior install/upgrade/uninstall report retained.",
+  "checks": [
+    {
+      "name": "install-current",
+      "passed": true
+    },
+    {
+      "name": "path-symlinks-correct",
+      "passed": true
+    },
+    {
+      "name": "compiled-kernel-via-path",
+      "passed": true
+    },
+    {
+      "name": "desktop-via-path",
+      "passed": true
+    },
+    {
+      "name": "uninstall",
+      "passed": true
+    },
+    {
+      "name": "path-program-removed",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "kernel_info": {
+    "schema": "reverie.kernel.v1",
+    "version": "2.5.0",
+    "bridge_protocol": "sdk-bridge.v1",
+    "interface_version": "1.0",
+    "platform": "linux",
+    "arch": "x64",
+    "frozen": true
+  }
+}

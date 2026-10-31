@@ -1,0 +1,31 @@
+{
+  "scope": "Observer-only offscreen paint deadlock found during frozen cohort2; original model data, input values and grading thresholds unchanged.",
+  "at_utc": "2026-10-25T13:30:52.539689+00:00",
+  "id": "model-2-comparison-1",
+  "root_cause": "settle_view waited indefinitely for two animation frames in an offscreen Chromium iframe. Main and first child paint promptly, latest offscreen child does not paint within2s.",
+  "read_only_diagnostic": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-comparison2-readonly-liveness.json",
+  "paint_probe": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-comparison2-paint-scheduling.json",
+  "actual_scroll_assistance": {
+    "at_utc": "2026-10-25T13:22:37.509620+00:00",
+    "action": "Actual host anchor scroll_into_view_if_needed; no model requests, form input, theme, state, HTML, score or frozen-source edits.",
+    "quality_scope": "Observer execution required viewport assistance. Original automatic result must retain this caveat; no clean fully automatic execution is claimed.",
+    "before": {
+      "x": 304,
+      "y": 7407.921875,
+      "width": 340,
+      "height": 508.1875
+    },
+    "after": {
+      "x": 304,
+      "y": 149.921875,
+      "width": 340,
+      "height": 508.1875
+    },
+    "html_after_unchanged": true
+  },
+  "result": "The same original process resumed immediately, completed35 checks in generation-repair1 and began ordinary repair2; no replacement sample or regenerated conversation.",
+  "candidate_status": "Passes8 targeted,175 expanded regressions and4 copied-profile native checks. Exact2-file overlay staged; public source unapplied until freeze closes.",
+  "public_source_applied": false,
+  "model_quality_samples_added": 0,
+  "native_diagnostic": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/primary-amount-candidate/native-paint-v4/report.json"
+}

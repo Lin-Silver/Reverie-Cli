@@ -88,17 +88,23 @@ class ProviderSmokeResult:
 
 def _redact(text: Any) -> str:
     value = str(text or "")
-    patterns = [
-        r"(?i)\b(sk-[A-Za-z0-9_\-]{12,})\b",
-        r"(?i)\b(ms-[A-Za-z0-9_\-]{12,})\b",
-        r"(?i)\b(nvapi-[A-Za-z0-9_\-]{12,})\b",
-        r"(?i)\b(ua__[A-Za-z0-9_\-]{12,})\b",
-        r"(?i)\b(gh[pousr]_[A-Za-z0-9_]{16,})\b",
-        r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s,;]{8,}",
+    token_patterns = [
+        r"(?i)\bsk-[A-Za-z0-9_\-]{12,}\b",
+        r"(?i)\bms-[A-Za-z0-9_\-]{12,}\b",
+        r"(?i)\bnvapi-[A-Za-z0-9_\-]{12,}\b",
+        r"(?i)\bua__[A-Za-z0-9_\-]{12,}\b",
+        r"(?i)\bgh[pousr]_[A-Za-z0-9_]{16,}\b",
+    ]
+    for pattern in token_patterns:
+        value = re.sub(pattern, "[REDACTED]", value)
+    # Only these groups contain safe labels; a complete token must never be
+    # interpolated into the replacement, even when no Bearer label is present.
+    labelled_patterns = [
+        r"(?i)(\b(?:api[_-]?key|token|secret|password)\b['\"]?\s*[:=]\s*['\"]?)[^'\"\s,;]{8,}",
         r"(?i)(Bearer\s+)[A-Za-z0-9._\-]{12,}",
     ]
-    for pattern in patterns:
-        value = re.sub(pattern, lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED_SECRET]", value)
+    for pattern in labelled_patterns:
+        value = re.sub(pattern, lambda match: f"{match.group(1)}[REDACTED]", value)
     return " ".join(value.split())[:500]
 
 
@@ -393,8 +399,10 @@ def smoke_agnes(config: Config, timeout_seconds: int = 45, model_id: str = "") -
         )
         for chunk in stream:
             delta = getattr(getattr(chunk, "choices", [None])[0], "delta", None) if getattr(chunk, "choices", None) else None
-            if getattr(delta, "content", None):
+            if str(getattr(delta, "content", None) or "").strip():
                 break
+        else:
+            raise RuntimeError("Agnes returned no text content")
         return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
     except Exception as exc:
         return _result_from_error(provider, model, start, exc)

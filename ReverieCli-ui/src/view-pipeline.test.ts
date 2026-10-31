@@ -168,4 +168,18 @@ describe("render_view handle crosses the renderer pipeline without HTML or a pat
     expect(ref.viewId).toBe(c.viewId);
     expect(ref.title).toBe(c.title);
   });
+  it("restores the original user summary while retaining authoring advice in the transcript", () => {
+    const c = CASES[0];
+    const messages = restoredPair(c.viewId, c.title, c.summary, 1, "call-with-authoring-advice");
+    const advice = "Host initialization is not evident in this artifact. Verify ui/initialize.";
+    messages[1].content = String(messages[1].content) + `\nAuthoring warnings: ${advice}`;
+    const original = JSON.stringify(messages);
+    const rows = groupTranscriptMessages(messages, SESSION_ID);
+    const row = rows.find(row => row.kind === "view");
+    expect(row?.kind === "view" && row.view.summary).toBe(c.summary);
+    expect(JSON.stringify(rows)).not.toContain(advice);
+    expect(JSON.stringify(messages)).toBe(original);
+    expect(messages[1].content).toContain(advice);
+  });
+
 });

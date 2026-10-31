@@ -1,0 +1,52 @@
+  • electron-builder  version=26.15.3 os=6.18.55
+  • loaded configuration  file=package.json ("build" field)
+  • building        target=deb arch=x64 file=/dev/shm/riu-v12-retry1-20261027/package-debug-deb/Reverie-2.5.0-linux-x64.deb
+2026-10-27T13:12:50.920Z electron-builder:publish artifactCreated (isPublish: false): {
+  "file": "/dev/shm/riu-v12-retry1-20261027/package-debug-deb/Reverie-2.5.0-linux-x64.deb",
+  "target": {
+    "name": "deb",
+    "isAsyncSupported": false,
+    "buildQueueManager": {
+      "cancellationToken": "<stripped sensitive data>",
+      "tasks": [],
+      "errors": []
+    },
+    "packager": "<stripped sensitive data>",
+    "helper": {
+      "packager": "<stripped sensitive data>",
+      "iconPromise": {
+        "_value": {},
+        "creator": null
+      },
+      "mimeTypeFilesPromise": {
+        "_value": {},
+        "creator": null
+      },
+      "maxIconPath": "/workspace/Reverie-Cli/ReverieCli-py/reverie.png"
+    },
+    "outDir": "/dev/shm/riu-v12-retry1-20261027/package-debug-deb",
+    "options": {
+      "icon": "../ReverieCli-py/reverie.png",
+      "category": "Development",
+      "synopsis": "Reverie context-engine coding assistant",
+      "executableName": "ReverieUI",
+      "maintainer": "Lin-Silver <linsilver54@gmail.com>",
+      "syncDesktopName": true,
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "Reverie-${version}-linux-x64.deb",
+      "packageCategory": "devel",
+      "priority": "optional",
+      "afterInstall": "build/linux/after-install.sh",
+      "afterRemove": "build/linux/after-remove.sh"
+    },
+    "scriptFiles": {}
+  },
+  "arch": 1,
+  "packager": "<stripped sensitive data>"
+},
+  publishConfigs: null
+TRACE_BUILD_RESOLVED ["/dev/shm/riu-v12-retry1-20261027/package-debug-deb/Reverie-2.5.0-linux-x64.deb"]
+TRACE_PROCESS_EXIT 0

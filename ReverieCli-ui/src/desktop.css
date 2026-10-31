@@ -140,8 +140,19 @@ button:disabled { cursor: default; }
 .conversation-display-button > span { background: transparent; padding: 0; font-size: inherit; }
 .conversation-actions .icon-button { width: 29px; height: 29px; }
 .transcript { background: transparent; }
+/* The grid allocates this viewport independently of its scroll contents. Keep
+   composer resizing from relaying out the entire loaded conversation. The
+   empty welcome layout intentionally sizes its transcript from its contents. */
+.chat-view:not(.is-empty) > .transcript { contain: size layout style; }
 .message-column { padding-top: 30px; padding-bottom: 36px; }
 .message { margin-bottom: 32px; }
+.history-render-chunk { display: flow-root; }
+.history-chunk-content { display: flow-root; }
+/* Preserve exact history heights and every DOM node. Paint containment lets
+   offscreen static chunks be culled together without estimating row sizes.
+   View-bearing chunks keep their normal iframe/portal/focus behavior. */
+.history-render-chunk.is-static { contain: layout style paint; overflow-clip-margin: 8px; }
+.live-message:not(:has(.interactive-view-anchor)) { contain: layout style; }
 .message-heading { gap: 10px; height: 30px; margin-bottom: 8px; }
 .message-heading strong { font-weight: 550; }
 .message-avatar { width: 28px; height: 28px; flex-basis: 28px; border-radius: 9px; border-color: transparent; box-shadow: none; }
@@ -155,7 +166,7 @@ button:disabled { cursor: default; }
 .composer-shell::before { display: none; }
 .composer, .has-workspace-background .composer { background: var(--composer-surface); border: 1px solid var(--border); border-radius: 20px; box-shadow: var(--shadow-soft); backdrop-filter: none; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent-2) 65%, var(--border)); box-shadow: 0 0 0 3px var(--accent-bg), var(--shadow-soft); }
-.composer textarea { padding: 21px 22px 12px; min-height: 66px; line-height: 1.65; }
+.composer textarea { field-sizing: content; max-height: 220px; padding: 21px 22px 12px; min-height: 66px; line-height: 1.65; }
 .composer-toolbar { min-height: 45px; padding: 0 13px 12px; }
 .composer-toolbar .icon-button { width: 31px; height: 31px; }
 .mode-trigger { color: var(--muted); font-size: var(--font-small); }

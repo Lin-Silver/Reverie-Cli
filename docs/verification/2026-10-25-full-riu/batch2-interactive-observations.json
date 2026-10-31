@@ -1,0 +1,123 @@
+{
+  "scope": "Closed first-attempt actual-model interactive evidence; available pages after service failures do not prove full-task completion. No raw reasoning, model HTML edits, retries or changed automatic grades.",
+  "at_utc": "2026-10-25T13:44:58.686611+00:00",
+  "build": "85ab811e5ef12ec9",
+  "model_quality_samples_added": 0,
+  "fixed_manual_snapshot": {
+    "completed": 17,
+    "passed": 7,
+    "failed": 9,
+    "incomplete": 1,
+    "planned": 18,
+    "full_review_complete": false,
+    "accounted_profiles": 18,
+    "fixed_review_processing_complete": true
+  },
+  "cases": [
+    {
+      "id": "model-1-form-1",
+      "at_utc": "2026-10-25T12:46:27.846629+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-available-native/model-1-form-1/review.json",
+      "native_operation_report_sha256": "076be362fd5d21b38da248a342c511af74bdfff2515e6f43d5c970dadf56aaf2",
+      "original_report_sha256": "4ea8d339ba7b5fc64fc44199307010292ed5670836d3bdb87dfe70f3b83cfd6a",
+      "passed": false,
+      "quality_verdict": "failed_available_view_with_incomplete_service_flow",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Dark name/email placeholder text has measured contrast3.4766:1, below4.5:1. The original generation also failed dark required-field and confirmation readability before service empty-stream prevented repair completion."
+        },
+        {
+          "severity": "P3",
+          "description": "At0 invalid people the quote stays at last-valid160 without naming it as the previous quote; restoring empty email retains format-error copy."
+        }
+      ],
+      "result": "All34 available-native PNGs/33 unique hashes inspected. Bound to actual last published ve9647e52a166ac25/1 via production publication order. Four widths and three modes contained; themes, visible keyboard ArrowUp2→3 and price160→240, long Chinese truncation and invalid-email/people feedback operate. Source HTML/report unchanged. Original service_transport_error retained; full modification and restart flow remains unexecuted/unverified, no successful model sample is inferred."
+    },
+    {
+      "id": "model-2-form-1",
+      "at_utc": "2026-10-25T12:54:01.619625+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-available-native/model-2-form-1/review.json",
+      "native_operation_report_sha256": "bc71e7058fcf35519286db91013c32faa9979a4e550ee98efc5e6e23e9abbeda",
+      "original_report_sha256": "e2977c9060c6f2ced3136d9f3a47c2fdd633c00d9d8c0253d130e5423a37eb00",
+      "passed": false,
+      "quality_verdict": "failed_available_view_with_incomplete_service_flow",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "The actual published form remains white with the same rgb(247,247,248) background and rgb(26,26,26) foreground after the host switches to dark. The page displays its own initialization-error message; theme/persistence initialization has not completed."
+        },
+        {
+          "severity": "P2",
+          "description": "Large vertical gaps put the people-count control and submit button below the first PiP viewport, including1280x900 and narrow460x900. Scrolling is possible, but the required primary controls are not initially visible."
+        },
+        {
+          "severity": "P3",
+          "description": "Restoring valid people count2 leaves the stale people-range error. Reset empty email also retains the format error."
+        }
+      ],
+      "result": "All34 available-native PNGs/33 unique hashes personally inspected. Actual last published v91600bfc48047649/1 selected through production publication order, original HTML/report unchanged. Four widths and three modes contain content without horizontal overflow. Visible keyboard ArrowUp2→3 updates price160→240; long Chinese is limited to20 characters and invalid email/people0 display errors. Original service_transport_error remains; full modification/restart and persistence are incomplete, no complete successful model sample is inferred."
+    },
+    {
+      "id": "model-1-comparison-1",
+      "at_utc": "2026-10-25T13:14:56.550647+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-1-comparison-1/review.json",
+      "native_operation_report_sha256": "6c4efc3340e088e81fb2e487486ad1d04f6bc33a6627c5d6b1f012e6da0341d1",
+      "original_report_sha256": "749df2e0c9089c54b1e2fb1812e71c46eab893d7aa371aa3968dee0eda5297fb",
+      "passed": false,
+      "quality_verdict": "failed_readability_after_repairs",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "Dark selected-action white text has measured contrast1.7425:1, choose-action2.5424:1, invalid-budget warning3.6222:1; each below4.5:1. Native copied profile reproduces all three final-generation failures."
+        },
+        {
+          "severity": "P3",
+          "description": "At shorter/narrow PiP sizes, the selected option summary and its action require scrolling. Content remains contained with visible focus."
+        }
+      ],
+      "observer_caveat": "Native keyboard_choice reports false because Enter toggles an already selected route off (before山谷, afterempty). This confirms a keyboard state change, not an unresponsive button. The final formal generation passes route-choice-action and selected-route-state-reload; no additional model failure is inferred from this auxiliary Boolean.",
+      "result": "All38 native PNGs/37 unique hashes personally inspected, selected actual final v204cdae18102c28d/3. Four widths and three modes contain the unchanged page; themes switch; keyboard budget200→210, actual Enter deselection, budget50 empty and−1 feedback operate; original controls/selection restored. Original HTML/report unchanged and semantic_failure retained due real readability failures. Modification did not execute after generation failed."
+    },
+    {
+      "id": "model-2-comparison-1",
+      "at_utc": "2026-10-25T13:43:52.194270+00:00",
+      "native_operation_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-fixed-native/model-2-comparison-1/review.json",
+      "native_operation_report_sha256": "568ab233af1d2e09a12b202246344ae3191b3696d73cdc44a0293ad7bc91a4cf",
+      "original_report_sha256": "4398a511b7032200c98932e5d4a93c1931d84b605a0499f26b5d2d808b5a7800",
+      "passed": false,
+      "quality_verdict": "failed_visible_scope_and_pip_action_with_incomplete_operation",
+      "automatic_quality_invalidated_by_manual_review": false,
+      "visual_findings": [
+        {
+          "severity": "P2",
+          "description": "User requested only matching options, but two nonmatching dimmed cards remain in the final default view. These add height and push the confirmation action below the initial PiP and narrow viewport fold."
+        },
+        {
+          "severity": "P3",
+          "description": "Route names were expanded beyond the supplied fixture; unrequested descriptions were added in the earlier generated version."
+        }
+      ],
+      "observer_caveat": "Old record discovery cannot recognize a label with for/id pointing to a sibling radio plus an expanded title; it returns an empty record list. Therefore missing auxiliary keyboard-choice operation is unverified, not proof that radio selection is impossible. Native helper also could not restore controls after radios disappeared in empty state (different control count), so the final restoral screenshot still shows−1. Do not call this a model state-restoration failure without separate evidence.",
+      "observer_assistance_report": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/formal2-comparison2-viewport-assistance/diagnosis.json",
+      "result": "All36 native PNGs/32 unique hashes personally inspected on unchanged final v072a386561247677/1. Four widths and three modes, light/dark, actual keyboard budget200→210, budget50 empty and negative feedback observed. Final horizontal overflow was fixed. Original semantic_failure retained, and the observer-assisted execution and unexecuted modification/restart remain explicit."
+    }
+  ],
+  "interrupted_chart": {
+    "id": "model-2-chart-1",
+    "generated_pngs_reviewed": 26,
+    "unique_capture_hashes": 20,
+    "quality_execution_complete": false,
+    "retained_outcome": "infrastructure_interruption",
+    "manual_journal": "/workspace/Reverie-Cli/.runtime/riu-completion-20261021/full-riu-round2-operator-review/model-2-chart-1.json"
+  },
+  "limitations": [
+    "Current frozen cohort remains in progress.",
+    "Service failures and an interrupted execution remain distinct from model semantic failures.",
+    "At most59 complete quality executions in60 planned slots.",
+    "Future model-generated content may still fail readability, coherence or state restoration; fixed renderer checks do not establish model reliability."
+  ]
+}

@@ -1,0 +1,277 @@
+name: Verify RIU native validation packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: riu-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            runner: windows-latest
+            platform: windows
+            arch: x64
+          - label: Linux x64
+            runner: ubuntu-latest
+            platform: linux
+            arch: x64
+          - label: macOS Apple Silicon
+            runner: macos-latest
+            platform: macos
+            arch: arm64
+          - label: macOS Intel
+            runner: macos-15-intel
+            platform: macos
+            arch: x64
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # actions/setup-python's post step fails the job when pip's cache directory
+      # is missing, which on Windows happened after every artifact had already
+      # been built and uploaded. A failed build leaves `publish` skipped, so the
+      # rolling `latest` release keeps serving stale binaries. Pin the location
+      # so it is created once, in the workspace, on every runner.
+      PIP_CACHE_DIR: ${{ github.workspace }}/.pip-cache
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create the pip cache directory
+        shell: bash
+        run: mkdir -p "$PIP_CACHE_DIR"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            ReverieCli-py/requirements.txt
+            ReverieCli-py/setup.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ReverieCli-ui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Windows FFmpeg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ffmpeg --version=8.1.2 --yes --no-progress
+
+      - name: Install Linux package dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg libfuse2
+
+      - name: Install macOS FFmpeg
+        if: runner.os == 'macOS'
+        run: command -v ffmpeg >/dev/null || brew install ffmpeg
+
+      - name: Build and verify Windows kernel
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          REVERIE_PYINSTALLER_MODE: onefile
+        run: ReverieCli-py\build.bat --clean --test-exe --skip-plugins --no-pause
+
+      - name: Verify standalone Windows EXE without adjacent runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $standalone = Join-Path $env:RUNNER_TEMP 'reverie-standalone'
+          New-Item -ItemType Directory -Path $standalone -Force | Out-Null
+          Copy-Item -LiteralPath dist\reverie.exe -Destination $standalone
+          $executable = Join-Path $standalone 'reverie.exe'
+          & $executable --kernel-info
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone kernel handshake failed' }
+          python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable $executable --timeout 120
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone SDK bridge failed' }
+
+      - name: Build and verify Unix kernel
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x ReverieCli-py/build.sh
+          ReverieCli-py/build.sh --clean --test-exe
+
+      - name: Smoke-test compiled SDK bridge
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable dist/reverie.exe
+          else
+            python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable dist/reverie
+          fi
+
+      - name: Install desktop dependencies
+        working-directory: ReverieCli-ui
+        run: npm ci
+
+      - name: Verify validation-package filesystem permissions
+        working-directory: ReverieCli-ui
+        run: node --test scripts/package-validation.node-test.mjs
+
+      - name: Make package hooks executable
+        if: runner.os != 'Windows'
+        run: chmod +x ReverieCli-ui/build/launchers/reverieui ReverieCli-ui/build/linux/*.sh
+
+      - name: Build Windows desktop artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:REVERIE_EXTERNAL_KERNEL_PATH = Join-Path $env:GITHUB_WORKSPACE "dist\reverie.exe"
+          $env:REVERIE_PYINSTALLER_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\venv\Scripts\pyinstaller.exe")
+          $env:REVERIE_PYTHON_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\venv\Scripts\python.exe")
+          Push-Location ReverieCli-ui
+          npm run build:kernel
+          if ($LASTEXITCODE -ne 0) { throw "Validation kernel staging failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "Validation desktop compilation failed" }
+          node scripts/package-validation.mjs --output release/validation --arch x64
+          if ($LASTEXITCODE -ne 0) { throw "Validation installer build failed" }
+          Pop-Location
+
+      - name: Build Linux desktop artifacts
+        if: runner.os == 'Linux'
+        run: |
+          export REVERIE_EXTERNAL_KERNEL_PATH="$GITHUB_WORKSPACE/dist/reverie"
+          export REVERIE_PYINSTALLER_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/pyinstaller"
+          export REVERIE_PYTHON_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/python"
+          cd ReverieCli-ui
+          npm run build:kernel
+          npm run build
+          node scripts/package-validation.mjs --output release/validation --arch x64
+
+      - name: Build macOS desktop artifact
+        if: runner.os == 'macOS'
+        run: |
+          export REVERIE_EXTERNAL_KERNEL_PATH="$GITHUB_WORKSPACE/dist/reverie"
+          export REVERIE_PYINSTALLER_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/pyinstaller"
+          export REVERIE_PYTHON_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/python"
+          cd ReverieCli-ui
+          npm run build:kernel
+          npm run build
+          node scripts/package-validation.mjs --output release/validation --arch ${{ matrix.arch }}
+
+      - name: Stage Windows release assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = node -p "require('./ReverieCli-ui/package.json').version"
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item dist\reverie.exe release-assets\reverie.exe
+          Copy-Item "ReverieCli-ui\release\validation\Reverie-Setup-$version-x64.exe" release-assets
+          python ReverieCli-py\scripts\write_kernel_manifest.py --executable dist\reverie.exe --output release-assets\reverie-kernel-windows-x64.json --asset-name reverie.exe
+
+      - name: Stage Unix release assets
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./ReverieCli-ui/package.json').version")
+          mkdir -p release-assets
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            cp dist/reverie release-assets/reverie
+            cp "ReverieCli-ui/release/validation/Reverie-$version-linux-x64.AppImage" release-assets/
+            cp "ReverieCli-ui/release/validation/Reverie-$version-linux-x64.deb" release-assets/
+            python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output release-assets/reverie-kernel-linux-x64.json --asset-name reverie
+          else
+            if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+              mac_variant="Apple-Silicon"
+            else
+              mac_variant="Intel"
+            fi
+            core_asset="Reverie-CLI-macOS-$mac_variant"
+            dmg_asset="Reverie-$version-macOS-$mac_variant.dmg"
+            cp dist/reverie "release-assets/$core_asset"
+            cp "ReverieCli-ui/release/validation/Reverie-$version-mac-${{ matrix.arch }}.dmg" "release-assets/$dmg_asset"
+            python ReverieCli-py/scripts/write_kernel_manifest.py --executable dist/reverie --output "release-assets/reverie-kernel-macos-${{ matrix.arch }}.json" --asset-name "$core_asset"
+          fi
+
+      - name: Verify staged names and contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          assets = list(Path("release-assets").iterdir())
+          if not assets or any(not item.is_file() or item.stat().st_size == 0 for item in assets):
+              raise SystemExit("Release staging contains a missing or empty artifact")
+          for manifest in Path("release-assets").glob("*.json"):
+              payload = json.loads(manifest.read_text(encoding="utf-8"))
+              if payload.get("schema") != "reverie.kernel.release.v1" or len(payload.get("sha256", "")) != 64:
+                  raise SystemExit(f"Invalid kernel manifest: {manifest}")
+          print("Verified:", ", ".join(sorted(item.name for item in assets)))
+          PY
+
+      - name: Install pinned interoperability fixture
+        shell: bash
+        run: |
+          mkdir -p .runtime/riu-sdk
+          cp scripts/verification/fixtures/mcp-apps/package*.json .runtime/riu-sdk/
+          npm ci --prefix .runtime/riu-sdk
+
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get install --yes xvfb libgtk-3-0 libnss3 libasound2t64 fonts-noto-cjk
+
+      - name: Verify native directory payload
+        shell: bash
+        env:
+          RIU_RUNNER_OS: ${{ runner.os }}
+          RIU_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          if [[ "$RIU_RUNNER_OS" == "Windows" ]]; then
+            test_python="ReverieCli-py/venv/Scripts/python.exe"
+            package="ReverieCli-ui/release/validation/win-unpacked"
+          else
+            test_python="ReverieCli-py/venv/bin/python"
+            if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
+              package="ReverieCli-ui/release/validation/linux-unpacked"
+            elif [[ "$RIU_ARCH" == "arm64" ]]; then
+              package="ReverieCli-ui/release/validation/mac-arm64/Reverie.app"
+            else
+              package="ReverieCli-ui/release/validation/mac/Reverie.app"
+            fi
+          fi
+          "$test_python" -m pip install playwright==1.58.0
+          command=("$test_python" scripts/verification/riu_package_native.py --package "$package" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native)
+          if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a "${command[@]}"
+          else
+            "${command[@]}"
+          fi
+
+      - name: Retain native checks including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: riu-native-evidence-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          if-no-files-found: warn
+          path: .runtime/riu-package-native/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: riu-validation-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: release-assets/*

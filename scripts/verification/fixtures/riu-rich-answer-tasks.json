@@ -1,0 +1,433 @@
+{
+  "version": "rich-answer.v1",
+  "common": "请用中文直接在对话中展示给定资料。使用适合阅读的原生卡片或表格，不要把展示结果放成代码或单独网页；本题不需要可编辑控件。资料已给全，不需调查仓库或查找来源。本次不要调用web_search、web_fetch、browser_controler、text_to_image、text_to_video；其余工具按原权限使用。",
+  "forbidden_tools": [
+    "web_search",
+    "web_fetch",
+    "browser_controler",
+    "text_to_image",
+    "text_to_video"
+  ],
+  "image_source_commit_refs": {
+    "makeplane/plane": "d9726d5c9615756135f3d6cd512ece8e2dd42902",
+    "go-vikunja/website": "c243eeff1e83a95ff75de6ec99b13d1442659d81"
+  },
+  "tasks": [
+    {
+      "id": "rich-overview",
+      "prompt": "展示四张统计卡：计划中7、开发中5、已有成果4、半归档1。下方项目总览表三列为项目名称、状态、说明，显示Alpha / 开发中 / 核心助手和Beta / 半归档 / 保留维护。状态使用带文字的标签。这是给定演示数据，表格只列举两个项目。",
+      "modify": "把计划中改为0，其余三张统计卡和表格内容保持不变。",
+      "expected": {
+        "metrics": [
+          [
+            "计划中",
+            "7"
+          ],
+          [
+            "开发中",
+            "5"
+          ],
+          [
+            "已有成果",
+            "4"
+          ],
+          [
+            "半归档",
+            "1"
+          ]
+        ],
+        "table_rows": [
+          [
+            "Alpha",
+            "开发中",
+            "核心助手"
+          ],
+          [
+            "Beta",
+            "半归档",
+            "保留维护"
+          ]
+        ],
+        "min_badges": 2
+      },
+      "modified_expected": {
+        "metrics": [
+          [
+            "计划中",
+            "0"
+          ],
+          [
+            "开发中",
+            "5"
+          ],
+          [
+            "已有成果",
+            "4"
+          ],
+          [
+            "半归档",
+            "1"
+          ]
+        ],
+        "table_rows": [
+          [
+            "Alpha",
+            "开发中",
+            "核心助手"
+          ],
+          [
+            "Beta",
+            "半归档",
+            "保留维护"
+          ]
+        ],
+        "min_badges": 2
+      }
+    },
+    {
+      "id": "rich-recommendations",
+      "prompt": "图文展示两项给定演示内容，顺序Plane、Vikunja。Plane是项目管理工具，标记“项目管理”，图片https://raw.githubusercontent.com/makeplane/plane/d9726d5c9615756135f3d6cd512ece8e2dd42902/apps/web/app/assets/empty-state/cycle-issues/kanban-dark.webp，图片说明为项目自带看板示意素材，来源/官网https://plane.so/，源码https://github.com/makeplane/plane。Vikunja是任务管理工具，图片https://media.githubusercontent.com/media/go-vikunja/website/c243eeff1e83a95ff75de6ec99b13d1442659d81/src/assets/images/vikunja/features/kanban.png，图片说明为官方网站仓库看板截图，来源/官网https://vikunja.io/，源码https://github.com/go-vikunja/vikunja。每项显示来源胶囊和可点击官网、源码。无需推断许可价格。",
+      "modify": "保留两项图文、图片、顺序和链接，把Plane的标签改成“重点关注”。",
+      "expected": {
+        "card_titles": [
+          "Plane",
+          "Vikunja"
+        ],
+        "image_urls": [
+          "https://raw.githubusercontent.com/makeplane/plane/d9726d5c9615756135f3d6cd512ece8e2dd42902/apps/web/app/assets/empty-state/cycle-issues/kanban-dark.webp",
+          "https://media.githubusercontent.com/media/go-vikunja/website/c243eeff1e83a95ff75de6ec99b13d1442659d81/src/assets/images/vikunja/features/kanban.png"
+        ],
+        "link_urls": [
+          "https://plane.so/",
+          "https://github.com/makeplane/plane",
+          "https://vikunja.io/",
+          "https://github.com/go-vikunja/vikunja"
+        ],
+        "min_sources": 2,
+        "badge_text": "项目管理"
+      },
+      "modified_expected": {
+        "card_titles": [
+          "Plane",
+          "Vikunja"
+        ],
+        "image_urls": [
+          "https://raw.githubusercontent.com/makeplane/plane/d9726d5c9615756135f3d6cd512ece8e2dd42902/apps/web/app/assets/empty-state/cycle-issues/kanban-dark.webp",
+          "https://media.githubusercontent.com/media/go-vikunja/website/c243eeff1e83a95ff75de6ec99b13d1442659d81/src/assets/images/vikunja/features/kanban.png"
+        ],
+        "link_urls": [
+          "https://plane.so/",
+          "https://github.com/makeplane/plane",
+          "https://vikunja.io/",
+          "https://github.com/go-vikunja/vikunja"
+        ],
+        "min_sources": 2,
+        "badge_text": "重点关注"
+      }
+    },
+    {
+      "id": "rich-long-table",
+      "prompt": "按给定顺序展示“全部项目”表格，列名项目、数量、已归档。保留零数量，归档状态显示是或否，不遗漏行。数据：[[\"项目01\", 0, \"否\"], [\"项目02\", 1, \"是\"], [\"项目03\", 2, \"否\"], [\"项目04\", 3, \"是\"], [\"项目05\", 4, \"否\"], [\"项目06\", 5, \"是\"], [\"项目07\", 6, \"否\"], [\"项目08\", 7, \"是\"], [\"项目09\", 8, \"否\"], [\"项目10\", 9, \"是\"], [\"项目11\", 10, \"否\"], [\"项目12\", 11, \"是\"], [\"项目13\", 12, \"否\"], [\"项目14\", 13, \"是\"], [\"项目15\", 14, \"否\"], [\"项目16\", 15, \"是\"], [\"项目17\", 16, \"否\"], [\"项目18\", 17, \"是\"], [\"项目19\", 18, \"否\"], [\"项目20\", 19, \"是\"], [\"项目21\", 20, \"否\"], [\"项目22\", 21, \"是\"], [\"项目23\", 22, \"否\"], [\"项目24\", 23, \"是\"]]。再展示“待确认”空表格，明确说明暂无数据。",
+      "modify": "保留全部24行和待确认空表格，把项目01的数量改成100，其余内容不变。",
+      "expected": {
+        "table_rows": [
+          [
+            "项目01",
+            0,
+            "否"
+          ],
+          [
+            "项目02",
+            1,
+            "是"
+          ],
+          [
+            "项目03",
+            2,
+            "否"
+          ],
+          [
+            "项目04",
+            3,
+            "是"
+          ],
+          [
+            "项目05",
+            4,
+            "否"
+          ],
+          [
+            "项目06",
+            5,
+            "是"
+          ],
+          [
+            "项目07",
+            6,
+            "否"
+          ],
+          [
+            "项目08",
+            7,
+            "是"
+          ],
+          [
+            "项目09",
+            8,
+            "否"
+          ],
+          [
+            "项目10",
+            9,
+            "是"
+          ],
+          [
+            "项目11",
+            10,
+            "否"
+          ],
+          [
+            "项目12",
+            11,
+            "是"
+          ],
+          [
+            "项目13",
+            12,
+            "否"
+          ],
+          [
+            "项目14",
+            13,
+            "是"
+          ],
+          [
+            "项目15",
+            14,
+            "否"
+          ],
+          [
+            "项目16",
+            15,
+            "是"
+          ],
+          [
+            "项目17",
+            16,
+            "否"
+          ],
+          [
+            "项目18",
+            17,
+            "是"
+          ],
+          [
+            "项目19",
+            18,
+            "否"
+          ],
+          [
+            "项目20",
+            19,
+            "是"
+          ],
+          [
+            "项目21",
+            20,
+            "否"
+          ],
+          [
+            "项目22",
+            21,
+            "是"
+          ],
+          [
+            "项目23",
+            22,
+            "否"
+          ],
+          [
+            "项目24",
+            23,
+            "是"
+          ]
+        ],
+        "empty_tables": 1
+      },
+      "modified_expected": {
+        "table_rows": [
+          [
+            "项目01",
+            100,
+            "否"
+          ],
+          [
+            "项目02",
+            1,
+            "是"
+          ],
+          [
+            "项目03",
+            2,
+            "否"
+          ],
+          [
+            "项目04",
+            3,
+            "是"
+          ],
+          [
+            "项目05",
+            4,
+            "否"
+          ],
+          [
+            "项目06",
+            5,
+            "是"
+          ],
+          [
+            "项目07",
+            6,
+            "否"
+          ],
+          [
+            "项目08",
+            7,
+            "是"
+          ],
+          [
+            "项目09",
+            8,
+            "否"
+          ],
+          [
+            "项目10",
+            9,
+            "是"
+          ],
+          [
+            "项目11",
+            10,
+            "否"
+          ],
+          [
+            "项目12",
+            11,
+            "是"
+          ],
+          [
+            "项目13",
+            12,
+            "否"
+          ],
+          [
+            "项目14",
+            13,
+            "是"
+          ],
+          [
+            "项目15",
+            14,
+            "否"
+          ],
+          [
+            "项目16",
+            15,
+            "是"
+          ],
+          [
+            "项目17",
+            16,
+            "否"
+          ],
+          [
+            "项目18",
+            17,
+            "是"
+          ],
+          [
+            "项目19",
+            18,
+            "否"
+          ],
+          [
+            "项目20",
+            19,
+            "是"
+          ],
+          [
+            "项目21",
+            20,
+            "否"
+          ],
+          [
+            "项目22",
+            21,
+            "是"
+          ],
+          [
+            "项目23",
+            22,
+            "否"
+          ],
+          [
+            "项目24",
+            23,
+            "是"
+          ]
+        ],
+        "empty_tables": 1
+      }
+    },
+    {
+      "id": "rich-mixed",
+      "prompt": "用Markdown二级标题“本周概览”，一小段中文说明和加粗的“重点”开头；接着展示完成0、待办3两张统计卡，添加一个两项的普通列表，再给出普通Python代码示例print(0)。最后用来源胶囊列出官方项目页https://github.com/makeplane/plane和https://github.com/go-vikunja/vikunja。这些链接由我给定，无需查询。另附一个普通正文链接“项目主页”，地址https://github.com/makeplane/plane。",
+      "modify": "只把待办改成2，保留完成0、标题、重点、普通列表、Python例子和两个来源。也保留普通正文中的项目主页链接。",
+      "expected": {
+        "metrics": [
+          [
+            "完成",
+            "0"
+          ],
+          [
+            "待办",
+            "3"
+          ]
+        ],
+        "heading": "本周概览",
+        "strong": "重点",
+        "min_list_items": 2,
+        "code_pattern": "print\\s*\\(\\s*0\\s*\\)",
+        "link_urls": [
+          "https://github.com/makeplane/plane",
+          "https://github.com/go-vikunja/vikunja"
+        ],
+        "min_sources": 2,
+        "min_plain_links": 1
+      },
+      "modified_expected": {
+        "metrics": [
+          [
+            "完成",
+            "0"
+          ],
+          [
+            "待办",
+            "2"
+          ]
+        ],
+        "heading": "本周概览",
+        "strong": "重点",
+        "min_list_items": 2,
+        "code_pattern": "print\\s*\\(\\s*0\\s*\\)",
+        "link_urls": [
+          "https://github.com/makeplane/plane",
+          "https://github.com/go-vikunja/vikunja"
+        ],
+        "min_sources": 2,
+        "min_plain_links": 1
+      }
+    }
+  ]
+}

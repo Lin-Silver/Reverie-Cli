@@ -1,8 +1,22 @@
 # Reverie CLI Roadmap
 
+2026-10-30：本地 Liquid Glass 与云端 dev `894fe6e` 已整合，保留经典界面和 RIU 富格式路线。Windows 联合目录包与本轮回归证据见[本地整合记录](verification/2026-10-30-desktop-integration/README.md)。此记录不关闭历史模型质量及跨平台安装验收缺口。
+
+2026-10-28 GitHub 接续更新：用户已明确授权将本轮全部仓库改动提交到新的 `dev` 分支；本轮授权覆盖此前禁止提交/推送的限制，不含版本升级或 Release。[接续说明](CONTINUE_RIU.md)与[可克隆 goal/关键证据](verification/2026-10-28-dev-handoff/README.md)已补齐。**最新源码还包含保留 v12 之后的 Linux 安装链接启动器修复；它的回归测试已有覆盖，但包含此修复的新安装包尚未验收，优先完成此项。** 此前 v12 通过记录仅对应原包；整体 RIU 仍未完成。实际提交 SHA 与远端推送结果以交付消息及 GitHub 分支为准。
+
+2026-10-27 最新补充：当前源码 v12 Linux x64 build `fcce0356b0365178` 的 AppImage 在真实 FUSE 挂载下通过富格式86/86、P2 24/24；提取程序 P3/P4/隔离26/31/36通过；P4另以60次合成循环完成31/31，注册交互/输入 P95 为286.16/47ms。当前源码本地 Qwen3.5-4B 合成应用请求精确显示四项指标、两行表格、带徽标/来源/链接的推荐卡，并通过深浅主题×1280/460px布局。Deb 使用 rootless Bubblewrap 隔离根和当前 Debian 13 依赖数据库，未用 `--force-depends` 完成 v11 安装、v12 升级与卸载，宿主机状态未变化；另有只读 APT 依赖模拟通过。仓库打包脚本的干净重试对deb/AppImage均exit0，原始exit1仍留档。正式模型质量样本仍为0，跨平台和设备验收未关闭；隔离生命周期不等于宿主系统安装或桌面启动。见[实施清单](RIU_COMPLETION_PLAN.md)、[结构化包与原生证据](verification/2026-10-27-static-rich-routing/package-rebuilds.json)。
+
+当前完整 RIU 尚未验收达标。最新源码 Linux x64 的确定性 UI、交互生命周期、隔离及本地包检查已有证据；第二正式组60个位置中59份完成评测、1份中断，原始自动31项合格但4项被人工复核否定，其余27项也不等于完整人工验收。模型质量、Windows/macOS实际系统、物理输入与辅助技术、长时稳定性仍未验收。见[实施清单](RIU_COMPLETION_PLAN.md)与[当前原生证据](verification/2026-10-27-static-rich-routing/package-rebuilds.json)。
+
+
+
+上一阶段（2026-10-25）：已按用户参考图实现**回答 UI/UX 与格式样式**：统计卡片、状态表格、图文推荐、来源与链接，支持深浅主题、窄容器、流式输出和会话重开。[格式说明](RICH_ANSWER_UI.md)与[实际原生截图和验证](verification/2026-10-25-rich-answer-ui/README.md)已记录。当时 Linux 包 **c9df6ba5417e0851**；Desktop **407/1**、Python **2314/24**、类型检查通过，最终包原生 P2/P3/隔离 **24/26/36** 通过。真实模型回答及两张远程图片实际显示成功，完整 27 工具和采样设置保留。旧正式矩阵依最新优先级停在 15 项，不宣称完成 36 项或整体模型质量验收。
+
 This is the single source of truth for planned product work. Current behavior belongs in the relevant guide; completed work belongs in the changelog.
 
-Last reconciled with the repaired local worktree: **2026-10-05**. See [Feature Status](FEATURE_STATUS.md) for the current capability matrix and gap IDs, and the [repair report](VERIFICATION_HISTORY.md#reverie-cli-feature-repairs-2026-10-05) for evidence. The [audit](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-2026-10-05) preserves the earlier baseline; the [MCP scope addendum](VERIFICATION_HISTORY.md#reverie-cli-feature-audit-addendum-2026-10-05) and the [cross-platform identity and language coverage addendum](VERIFICATION_HISTORY.md#reverie-cli-platform-language-audit-2026-10-05) record the later source passes. A gap recorded here is not authorization to implement all optional product extensions.
+2026-10-27 RIU status: the screenshot-driven rich-answer UI is implemented and verified in the current-source Linux x64 package candidate, build `fcce0356b0365178`. On the retained AppImage, actual FUSE-mounted rich UI passed **86/86** and P2 **24/24**; the extracted packaged desktop passed P3 **26/26**, P4 **31/31**, and isolation **36/36**. A supplementary 60-cycle synthetic P4 stress run also passed **31/31** (registration P95 286.16ms; local input P95 47ms). The current-source Qwen3.5-4B in-app synthetic smoke matched all four metrics, two table rows, and the numbered recommendation card with badge/source/link; dark/light × 1280/460 containment passed with zero browser errors. The deb passed an isolated Bubblewrap v11→v12 install/upgrade/removal lifecycle against the current Debian 13 dependency inventory, without forced dependency checks or host writes. This does not verify installation into the host package database or launching the installed desktop. The repository package-validation wrapper later returned 0 for fresh deb and AppImage targets using the verified v12 prepackaged payload; initial exit-1 evidence remains preserved. Formal model quality is still 0 accepted samples, and the two-cohort cap bars another formal cohort. Windows/macOS real-host, physical accessibility, and long-duration evidence remain open. See [RIU completion plan](RIU_COMPLETION_PLAN.md), [package and native evidence](verification/2026-10-27-static-rich-routing/package-rebuilds.json), and [goal](../.runtime/riu-completion-20261021/goal.json).
+
+RIU roadmap status last reconciled against the current-source v12 Linux x64 evidence: **2026-10-27**. The broader [Feature Status](FEATURE_STATUS.md) matrix retains its 2026-10-05 audit baseline and separately dated follow-up checks; those dates do not supersede the RIU status above. See the [verification history](VERIFICATION_HISTORY.md) for dated evidence. A gap recorded here is not authorization to implement all optional product extensions.
 
 ## Current Baseline
 
@@ -15,6 +29,10 @@ The CLI's built-in Python Reverie Engine runtime supports deterministic headless
 ## Product Completion Priorities
 
 ### P1: Real model compatibility
+
+2026-10-23 继续执行两模型 **30 个完整生成通过 + 6 个文本对照** 的质量门。Python 全量 **2214/24**、验证器 **114**、六组重点检查 **244**；Desktop **387/1**、类型、文档和 diff 检查通过，源码哈希一致。Linux **3824bc06ee6c6e24** 完成源码核对和消费者检查；P4 两次输入超限、释放闲置旧包缓存后的第三轮通过均保留，不宣称稳定性或根因已解决。GPT-OSS native6 完整开发为生成 **0/5**、文本 **1/1**，实际页面复核失败保留；当前先做同模型构建对照，再冻结两个 Qwen 模型执行完整正式矩阵，见[当前进展](verification/2026-10-21-riu-completion/progress.md)。
+
+2026-10-20–21 Cloud：基于 `350c5ba` 完成匿名 Chat、冷却等待、未完成工具参数/空调用 ID 和 OpenCode 新目录路由修复；Linux 冻结包、P2/P3/P4 及隔离已验证。OpenCode 服务端拒绝 Reverie 的真实匿名身份；Pollinations Classic 实测模型为 GPT-OSS 20B。最终五类自然任务各三次独立 profile 完成，生成质量 0/15，文本对照 3/3；正常修改与重启恢复的质量门仍未通过。官方 MiniCPM5-2B Gradio/SSE 接口已匿名调用成功，但不暴露 tools，未计为第二个工具闭环模型。不同来源、构建与负载的延迟不得合并成改善率。见 [本轮证据](VERIFICATION_HISTORY.md#riu-cloud-runtime-2026-10-20)与[免费接口核对](verification/2026-10-20-riu-cloud/free-api-search.md)。
 
 | Gap | Required completion | Verification gate |
 | --- | --- | --- |

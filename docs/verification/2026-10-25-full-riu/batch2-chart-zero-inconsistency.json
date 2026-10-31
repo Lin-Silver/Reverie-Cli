@@ -1,0 +1,27 @@
+{
+  "case_id": "model-1-chart-1",
+  "original_report_sha256": "16ca3f9292282b0296a2b011a5f540378373081832bd9cab11c53d038296aea2",
+  "original_outcome": "repaired_success",
+  "manual_verdict": "failed",
+  "severity": "P2",
+  "attribution": "model",
+  "finding": "After fourth month100 is added, original data120+80+160+100 sums460. At valid multiplier0 the summary instead displays original360, while all four base rows remain. The final model HTML hardcodes360 in the zero branch.",
+  "native_observation": {
+    "name": "empty-or-zero",
+    "body_text": "每月用水变化\n倍率\n倍率为 0，没有用水数据\n原始总量\n360 升\n调整后总量\n0 升\n平均月用水\n0 升\n暂无数据\n数据明细\n月份\t原始数据 (升)\t调整后 (升)\n一月\t120\t0\n二月\t80\t0\n三月\t160\t0\n四月\t100\t0",
+    "controls": [
+      {
+        "tag": "INPUT",
+        "type": "number",
+        "id": "multiplier",
+        "name": "",
+        "value": "0",
+        "checked": false
+      }
+    ]
+  },
+  "native_report_sha256": "7b598b484cca5270108d55455a0997aaa19eaafb56a8d8cde488db66a995a04b",
+  "original_html_unchanged": true,
+  "automatic_scores_unchanged": true,
+  "limitations": "An additional observed manual invalidation, not a corrected formal score or new model sample. Primary calculator/pressed-button observer fixes do not fix this model chart defect."
+}

@@ -1,0 +1,225 @@
+{
+  "date": "2026-10-27",
+  "scope": "Current-source Linux x64 package validation only; version remains 2.5.0. No release, commit, push, or formal model evaluation.",
+  "acceptance_status": "in_progress",
+  "formal_model_quality_samples": 0,
+  "source_fix": {
+    "file": "ReverieCli-py/reverie.spec",
+    "change": "Explicitly include PIL, PIL.Image, PIL._imaging and collect PIL dynamic libraries.",
+    "reason": "v11 packaged P2 raised cannot import name _imaging from PIL."
+  },
+  "v11": {
+    "build_id": "08d2d4a648096c41",
+    "version": "2.5.0",
+    "packages": {
+      "deb": {
+        "path": ".runtime/riu-completion-20261021/package-v11-linux-20261027/deb-retry1/Reverie-2.5.0-linux-x64.deb",
+        "bytes": 371505712,
+        "sha256": "4468f558b2a995c9c2b48852a3e91fed31c095e1d9d7bf6b716f41dd667f1c84"
+      },
+      "appimage": {
+        "path": ".runtime/riu-completion-20261021/package-v11-linux-20261027/appimage-retry2/Reverie-2.5.0-linux-x64.AppImage",
+        "bytes": 417736058,
+        "sha256": "b80088d5f956b5b17631c6c3ea84c76e3b96d213401cfa7aae9ee96f1f631f55"
+      }
+    },
+    "native_tests": {
+      "rich_answer": {
+        "passed": true,
+        "checks": "86/86",
+        "report": ".runtime/riu-completion-20261021/package-v11-linux-20261027/native-rich-appimage/report.json"
+      },
+      "p2": {
+        "passed": false,
+        "checks_before_failure": "1/24",
+        "failure": "First packaged rich-view request timed out after 120 seconds; electron log reports cannot import name _imaging from PIL.",
+        "report": ".runtime/riu-completion-20261021/package-v11-linux-20261027/p2-appimage/report.json"
+      }
+    },
+    "acceptance": "failed_on_packaged_PIL_extension; preserved"
+  },
+  "v12_attempt_1": {
+    "stage": "/dev/shm/riu-clean-package-20261027",
+    "python_environment": {
+      "python": "3.12.14",
+      "pyinstaller": "6.21.0",
+      "pillow": "12.2.0",
+      "system_site_packages": false
+    },
+    "kernel": {
+      "passed": true,
+      "sha256": "d0d9f110bcd14e1bcb768933af3733f38177847bf9f0fb1ea3265923be63b5e9",
+      "kernel_info_passed": true,
+      "pillow_imaging_extension_present": true
+    },
+    "ui_build": {
+      "first_attempt": "OOM exit 137 while Python venv and PyInstaller work tree remained resident",
+      "retry": "passed with NODE_OPTIONS=--max-old-space-size=768; Vite transformed 2071 modules",
+      "build_id": "79f3ec47f6fb1b81",
+      "log": ".runtime/riu-completion-20261021/package-v12-linux-20261027/vite-build-retry1.log"
+    },
+    "deb_attempt": {
+      "passed": false,
+      "exit_code": 137,
+      "details": "electron-builder entered the deb target stage, then the process was OOM-killed. No v12 package was verified or persisted.",
+      "log": ".runtime/riu-completion-20261021/package-v12-linux-20261027/deb-build.log"
+    },
+    "environment_restart": "The execution environment went offline. Its /dev/shm stage and any partial package output were not retained; persistent reports and logs remain in .runtime.",
+    "acceptance": "kernel_and_ui_passed; installer_not_built; native_suites_not_run"
+  },
+  "next": [
+    "Keep formal model-quality acceptance at zero samples; the two-cohort evaluation is closed.",
+    "Obtain Windows/macOS real-host runtime and physical accessibility evidence when those hosts/devices are available.",
+    "Maintain the current Linux package and all raw failure reports; no release/version bump/commit/push."
+  ],
+  "v12_retry1": {
+    "build_id": "fcce0356b0365178",
+    "version": "2.5.0",
+    "kernel": {
+      "sha256": "d0d9f110bcd14e1bcb768933af3733f38177847bf9f0fb1ea3265923be63b5e9",
+      "kernel_info_passed": true,
+      "pillow_imaging_extension_present": true
+    },
+    "linux_unpacked": {
+      "built": true,
+      "app_asar_sha256": "2be82a97655131f51d51576248807c035b6b56598208fb6143514185e16f929d",
+      "pillow_imaging_extension_present": true
+    },
+    "deb": {
+      "path": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb/Reverie-2.5.0-linux-x64.deb",
+      "bytes": 344734872,
+      "sha256": "48cbae5dd86f2c6535cb557354cb2b0ffdc2076dae1e2c6d0e020e4a7a7e3c29",
+      "metadata_valid": true,
+      "builder_exit_code": 1
+    },
+    "appimage": {
+      "path": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/appimage/Reverie-2.5.0-linux-x64.AppImage",
+      "bytes": 384261798,
+      "sha256": "6cf3d6468b28853cab7ccf90d2f7a368ef3918fc80e0895af473f8ce852bb1a6",
+      "file_type_valid": true,
+      "builder_exit_code": 1,
+      "extracted_app_asar_sha256": "2be82a97655131f51d51576248807c035b6b56598208fb6143514185e16f929d"
+    },
+    "native_tests": {
+      "rich_answer": "86/86 passed",
+      "p2": "24/24 passed",
+      "rich_first_attempt": "0 checks; Xvfb :117 process exited during launch; retained failure"
+    },
+    "builder_exit_status_note": "Electron-builder emitted deb/AppImage artifacts and block map, but the package-validation process returned exit code 1 without an explanatory error line. Treat emitted artifacts as candidates only; investigate and rerun command to obtain clean exit before package acceptance.",
+    "p3_p4_isolation": "P3 26/26; P4 31/31; isolation 36/36",
+    "formal_model_quality_samples": 0,
+    "p2_fuse": "24/24 passed against retained AppImage with actual FUSE mount",
+    "rich_fuse": "86/86 passed against retained AppImage with actual FUSE mount",
+    "p4_report": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-appimage-extracted-retry2/report.json",
+    "isolation_report": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/isolation-appimage-extracted-retry1/report.json",
+    "local_model_smoke": {
+      "model": "unsloth/Qwen3.5-4B-GGUF",
+      "completed_responses": 1,
+      "inference_seconds": 118.47,
+      "passed": true,
+      "formal_model_quality_samples": 0,
+      "report": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/local-model-appimage-v12-retry1/report.json"
+    },
+    "p4_synthetic_stress_60": {
+      "passed": true,
+      "render_interaction_cycles": 60,
+      "checks": "31/31",
+      "registration_to_interactive_ms": {
+        "n": 60,
+        "p50": 176.423,
+        "p95": 286.16,
+        "max": 360.888
+      },
+      "local_1000_row_input_to_two_frames_ms": {
+        "n": 60,
+        "p50": 37.7,
+        "p95": 47.0,
+        "max": 62.9
+      },
+      "report": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-stress-v12-60-20261027/report.json",
+      "scope": "Synthetic local loopback model; 60 repeated artifact creation/render cycles plus the full 31-check P4 lifecycle. Not a long-duration production-provider test and not formal model-quality evidence."
+    }
+  },
+  "status": "v12_retry1_linux_x64_native_and_60_cycle_P4_stress_passed; deb_full_dependency_isolated_lifecycle_passed; clean package-validation retries passed; overall RIU remains in progress",
+  "clean_package_validation_retry": {
+    "status": "passed_exit_0_for_deb_and_AppImage",
+    "method": "Exact repository package-validation.mjs in isolated tmpfs staging, fresh outputs, using verified current-v12 prepackaged payload. Original exit-1 records are retained; root cause was not established.",
+    "deb": {
+      "exit_code": 0,
+      "bytes": 344734888,
+      "sha256": "ad6efd1c7080e02c6a04f5f1248fa864ffde92431e25f8fe6a81367b9f75a54a",
+      "temporary_output": "/dev/shm/riu-v12-retry1-20261027/.runtime/deb-wrapper-retry2/Reverie-2.5.0-linux-x64.deb",
+      "log": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/package-validation-wrapper-retry2.log"
+    },
+    "appimage": {
+      "exit_code": 0,
+      "bytes": 384261806,
+      "sha256": "b267556efa7995d564fe0b14fab52307fb5591154fdcacb30cd5d37566fb0313",
+      "temporary_output": "/dev/shm/riu-v12-retry1-20261027/.runtime/appimage-wrapper-retry2/Reverie-2.5.0-linux-x64.AppImage",
+      "log": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/package-validation-appimage-retry2.log"
+    }
+  },
+  "linux_native_acceptance": {
+    "appimage_p2_fuse": "24/24 passed",
+    "appimage_rich_fuse": "86/86 passed",
+    "appimage_p3_extracted": "26/26 passed",
+    "appimage_p4_extracted": "31/31 passed",
+    "appimage_isolation_extracted": "36/36 passed",
+    "deb_metadata_and_payload": "valid; 1456 paths; runtime-core hashes match AppImage",
+    "deb_rootless_install_replace_remove": "passed; isolated Bubblewrap root used the current Debian 13 dpkg dependency inventory; no --force-depends; host package database and system paths unchanged",
+    "local_current_source_qwen_smoke": "1 exploratory response passed; 0 formal samples",
+    "formal_model_quality_samples": 0,
+    "appimage_p4_stress_60": "31/31 passed; 60 repeated synthetic render/interaction cycles; registration P95 286.16ms, local input P95 47ms",
+    "deb_host_dependency_simulation": "APT simulation exit 0 on Debian 13; all required dependencies resolve from installed host providers; no host install",
+    "deb_rootless_full_dependency_lifecycle": "v11 install -> v12 same-version upgrade -> v12 removal passed; checked kernel hashes, CLI/GUI links, chrome-sandbox mode 4755 and cleanup"
+  },
+  "retained_current_packages": {
+    "deb": {
+      "path": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb/Reverie-2.5.0-linux-x64.deb",
+      "bytes": 344734872,
+      "sha256": "48cbae5dd86f2c6535cb557354cb2b0ffdc2076dae1e2c6d0e020e4a7a7e3c29"
+    },
+    "appimage": {
+      "path": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/appimage/Reverie-2.5.0-linux-x64.AppImage",
+      "bytes": 384261798,
+      "sha256": "6cf3d6468b28853cab7ccf90d2f7a368ef3918fc80e0895af473f8ce852bb1a6"
+    }
+  },
+  "preserved_retry_failures": [
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/native-rich-appimage-retry1: Xvfb :117 exited before launch; retry passed.",
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p3-appimage-retry1: AppImage wrapper has no sibling sidecar; extracted packaged binary passed P3.",
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/p4-appimage-retry1: input p95 101ms and harness sibling-CLI path error; complete extracted-binary run passed P4.",
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/native-rich-appimage-fuse-retry1: container lacked libfuse.so.2; temp official compatibility library enabled actual FUSE P2/rich pass.",
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb-rootless-install-v12-retry2.log and deb-rootless-install-v12-retry3.log: incomplete minimal chroot fixtures; final retry4 passed.",
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb-rootless-upgrade-v12-retry1.log: /dev/shm filled during package replacement; retry on /tmp passed.",
+    ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb-build.log and appimage-build.log: first outputs emitted artifacts but original wrapper returned 1; fresh exact-wrapper retries returned 0."
+  ],
+  "deb_host_dependency_simulation": {
+    "passed": true,
+    "host": "Debian GNU/Linux 13 (trixie)",
+    "required_dependencies_satisfied_by_host": true,
+    "apt_plan": "reverie only (without recommended packages)",
+    "system_install_performed": false,
+    "report": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb-apt-simulation-20261027.json",
+    "limitation": "Read-only dependency resolution plus a separate isolated dpkg lifecycle passed. The host dpkg database was not changed and the installed desktop was not launched."
+  },
+  "deb_rootless_full_dependency_lifecycle": {
+    "passed": true,
+    "method": "Rootless Bubblewrap user/mount namespace with a disposable writable staged root under /tmp and current Debian 13 dependency inventory; dpkg ran without --force-depends.",
+    "sequence": "v11 install -> v12 same-version upgrade -> v12 removal",
+    "host_modified": false,
+    "installed_desktop_launched": false,
+    "report": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb-bwrap-isolated-lifecycle-20261027.json",
+    "log": ".runtime/riu-completion-20261021/package-v12-retry1-linux-20261027/deb-bwrap-install-upgrade-retry5-20261027.log"
+  },
+  "post_v12_launcher_followup_20261028": {
+    "source_fix": "Resolve installed launcher symlinks before finding ReverieUI; preserve project cwd and arguments.",
+    "source_test": "ReverieCli-ui/scripts/package-validation.node-test.mjs",
+    "new_installer_verified": false,
+    "last_rebuild_exit_code_from_prior_execution": 137,
+    "cause": "Not established; retained last log ends at the deb target stage.",
+    "retained_v12_results_do_not_cover_this_later_fix": true,
+    "portable_evidence": "docs/verification/2026-10-28-dev-handoff/README.md",
+    "next": "Rebuild from post-v12-fix source in a fresh independent output directory and verify the installed entrypoint and relevant native suites."
+  }
+}

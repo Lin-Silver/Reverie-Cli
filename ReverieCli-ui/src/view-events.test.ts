@@ -157,4 +157,19 @@ describe("parseRenderViewResult", () => {
     expect(parseRenderViewResult("ready (view_id=vx, revision=0).")).toBeNull();
     expect(parseRenderViewResult("ready (view_id=vx, revision=two).")).toBeNull();
   });
+  it.each(["\n", "\r\n"])("keeps appended model authoring advice out of restored summaries (%j)", (newline) => {
+    const warning = "Host initialization is not evident in this artifact. Verify ui/initialize.";
+    const output = `${OUTPUT}${newline}Authoring warnings: ${warning}`;
+    expect(parseRenderViewResult(output)).toEqual({
+      viewId: "v0123456789abcdef", revision: 1, title: "Sales chart", summary: "A bar chart of Q3 sales.",
+    });
+    expect(output).toContain(warning);
+  });
+
+  it("preserves multiline user summaries and inline mentions of the advice heading", () => {
+    const summary = "第一行\n第二行提到 Authoring warnings: 这个短语。";
+    const output = OUTPUT.replace("A bar chart of Q3 sales.", summary);
+    expect(parseRenderViewResult(output)?.summary).toBe(summary);
+  });
+
 });

@@ -119,13 +119,9 @@ class AudioManager:
     )
 
     def __init__(self, project_root: Path):
-        # The media package initializes graphics/audio backends. Tool discovery
-        # only needs this class; defer that work until an engine uses audio.
-        global Player, load_audio
-        try:
-            from pyglet.media import Player, load as load_audio
-        except ImportError:  # pragma: no cover - optional dependency
-            Player = load_audio = None
+        # Bus configuration and headless scene simulation need no playback
+        # device or graphics context. Pyglet's media import initializes both;
+        # defer it until a real stream/player is requested.
         self.project_root = Path(project_root)
         self.streams: Dict[str, AudioStream] = {}
         self.players: Dict[str, AudioPlayer] = {}
@@ -133,15 +129,29 @@ class AudioManager:
         self.master_volume: float = 1.0
         self.music_volume: float = 1.0
         self.sfx_volume: float = 1.0
-        self._initialized = pyglet is not None and Player is not None and load_audio is not None
+        self._initialized = pyglet is not None
         self._backend_operational = False
         self._last_error = "" if self._initialized else "pyglet media backend is not installed"
         for name, parent, tags in self.DEFAULT_BUSES:
             self.create_bus(name, parent=parent, tags=tags)
 
     def is_available(self) -> bool:
-        """Check whether the audio API and decoder backend are installed."""
+        """Check package presence; backend_status separately records runtime proof."""
         return self._initialized
+
+    def _ensure_backend(self) -> bool:
+        global Player, load_audio
+        if Player is not None and load_audio is not None:
+            return True
+        if not self._initialized:
+            return False
+        try:
+            from pyglet.media import Player, load as load_audio
+        except Exception as exc:
+            self._last_error = str(exc)
+            self._backend_operational = False
+            return False
+        return True
 
     def backend_status(self) -> Dict[str, Any]:
         """Describe installed and proven playback capability separately."""
@@ -223,13 +233,15 @@ class AudioManager:
 
     def load_stream(self, audio_id: str, path: str | Path) -> bool:
         """Load an audio file."""
-        if not self._initialized or not load_audio:
+        if not self._initialized:
             return False
         if audio_id in self.streams:
             return True
         try:
             full_path = self.project_root / path
             if not full_path.exists():
+                return False
+            if not self._ensure_backend():
                 return False
             source = load_audio(str(full_path), streaming=False)
             stream = AudioStream(
@@ -286,6 +298,8 @@ class AudioManager:
             return None
 
         player_obj = None
+        if self._initialized and stream.is_loaded() and not self._ensure_backend():
+            return None
         if self._initialized and Player and stream.is_loaded():
             try:
                 player_obj = Player()

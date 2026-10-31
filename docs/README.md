@@ -1,15 +1,24 @@
 # Reverie CLI 文档导航
 
-2026-10-10 更新。先按问题选入口，避免把历史规格、测试记录和当前能力混为一谈。本次提交前的回归与打包范围见 [最新验证](VERIFICATION_HISTORY.md#publish-validation-2026-10-09)。
+2026-10-28 GitHub 接续更新：用户已明确授权将本轮全部仓库改动提交到新的 `dev` 分支；本轮授权覆盖此前禁止提交/推送的限制，不含版本升级或 Release。[接续说明](CONTINUE_RIU.md)与[可克隆 goal/关键证据](verification/2026-10-28-dev-handoff/README.md)已补齐。**最新源码还包含保留 v12 之后的 Linux 安装链接启动器修复；它的回归测试已有覆盖，但包含此修复的新安装包尚未验收，优先完成此项。** 此前 v12 通过记录仅对应原包；整体 RIU 仍未完成。实际提交 SHA 与远端推送结果以交付消息及 GitHub 分支为准。
+
+当前总体 RIU 仍在实施中，三端安装包与完整模型质量验收尚未完成。已批准的范围、进度及完成标准见[完整实施清单](RIU_COMPLETION_PLAN.md)。[2026-10-25 实施快照](verification/2026-10-25-full-riu/README.md)记录构建 `85ab811e5ef12ec9`、Linux deb实际安装/升级/卸载、AppImage运行验证及已收尾但未达标的第2整组60项矩阵、175项校验器回归和最终请求审计。下方富格式 UI 记录为上一阶段的已验证快照。
+
+
+上一阶段（2026-10-25）：已按用户参考图实现**回答 UI/UX 与格式样式**：统计卡片、状态表格、图文推荐、来源与链接，支持深浅主题、窄容器、流式输出和会话重开。[格式说明](RICH_ANSWER_UI.md)与[实际原生截图和验证](verification/2026-10-25-rich-answer-ui/README.md)已记录。当时 Linux 包 **c9df6ba5417e0851**；Desktop **407/1**、Python **2314/24**、类型检查通过，该阶段包原生 P2/P3/隔离 **24/26/36** 通过。真实模型回答及两张远程图片实际显示成功，完整 27 工具和采样设置保留。旧正式矩阵依最新优先级停在 15 项，不宣称完成 36 项或整体模型质量验收。
+
+2026-10-24 更新。先按问题选入口，避免把历史规格、测试记录和当前能力混为一谈。本轮源码与 Linux 原生打包范围见[最新验证](VERIFICATION_HISTORY.md#riu-completion-2026-10-22)，旧模型质量矩阵作为部分历史记录保留，本轮优先验收回答展示。
 
 | 想了解什么 | 唯一主要入口 |
 | --- | --- |
+| 统计卡片、图文推荐、状态标签与来源格式 | [富格式回答](RICH_ANSWER_UI.md) |
 | 安装、启动、项目概览 | [English README](../README.md) / [中文快速上手](README.zh-CN.md) |
 | 当前能做什么、已知缺口与未验证范围 | [FEATURE_STATUS](FEATURE_STATUS.md) |
 | 下一步做什么、完成条件是什么 | [ROADMAP](ROADMAP.md) |
-| ChatGPT 类交互视图怎么开发、下一步给 AI 什么提示词 | [INTELLIGENT_UI_SPEC](INTELLIGENT_UI_SPEC.md) — 提案，尚未实现 |
+| ChatGPT 类交互视图怎么开发、下一步给 AI 什么提示词 | [INTELLIGENT_UI_SPEC](INTELLIGENT_UI_SPEC.md) — 已实现宿主、协议范围与待通过的模型质量门 |
 | 各版本到底改了什么 | [changelog](changelog.md) — 40 个版本入口、发布后更新、Unreleased 和历史例外 |
 | 过去具体测过什么 | [VERIFICATION_HISTORY](VERIFICATION_HISTORY.md) — 原日期、主机、测量、失败与限制 |
+| 当前 RIU 的目标、完成进度与剩余门槛 | [RIU 完成计划](RIU_COMPLETION_PLAN.md) / [当前源码 Linux 证据](verification/2026-10-27-static-rich-routing/README.md) / [结构化包验收](verification/2026-10-27-static-rich-routing/package-rebuilds.json) |
 | 过去为什么这样设计 | [DEVELOPMENT_HISTORY](DEVELOPMENT_HISTORY.md) — S01–S21、Codex 比较、旧提示词和 RATS 交接 |
 
 ## 使用与配置

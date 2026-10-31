@@ -247,14 +247,61 @@ def test_parse_tool_arguments_preserves_long_malformed_file_content() -> None:
     assert args["overwrite"] is True
 
 
-def test_parse_tool_arguments_salvages_unterminated_long_content() -> None:
+def test_unterminated_tool_content_cannot_write_a_partial_file(tmp_path: Path) -> None:
     body = "# Draft\n" + ("details\n" * 500)
     raw = '{"path":"task.md","content":"' + body
 
     args = parse_tool_arguments(raw)
 
-    assert args["path"] == "task.md"
-    assert args["content"] == body
+    executor = ToolExecutor(project_root=tmp_path)
+    result = executor.execute("create_file", args)
+    assert result.success is False
+    assert "Incomplete tool arguments" in result.error
+    assert not (tmp_path / "task.md").exists()
+
+
+def test_incomplete_arguments_remain_denied_after_history_normalization():
+    from reverie.agent.agent import _sanitize_tool_calls
+
+    calls = [{"id": "partial", "function": {"name": "any_tool", "arguments": '{"optional":"cut off'}}]
+    _sanitize_tool_calls(calls)
+    args = parse_tool_arguments(calls[0]["function"]["arguments"])
+    # No tool lookup, discovery, review or no-argument side effect may run.
+    executor = ToolExecutor.__new__(ToolExecutor)
+    executor._sync_dynamic_tools = lambda: (_ for _ in ()).throw(AssertionError("Tool discovery must not run"))
+    result = executor.execute("any_tool", args)
+    assert not result.success
+    assert "nothing was executed" in result.error
+
+
+def test_stream_finalization_does_not_execute_nameless_filler_or_emit_empty_ids():
+    from reverie.agent.agent import _compact_tool_calls_for_history
+
+    state = _StreamingTurnState()
+    state.add_reasoning("  full native trace\n")
+    state.update_tool_call(0, name="create_file", arguments='{"path":"x","content":"ok"}')
+    state.update_tool_call(1, arguments="")  # Real gateway's extra nameless fragment.
+    state.set_finish_reason("tool_calls")
+    state.flush()
+    assert len(state.tool_calls) == 1
+    assert state.tool_calls[0]['id']
+    assert _compact_tool_calls_for_history(state.tool_calls)[0]['id'] == state.tool_calls[0]['id']
+    assert state.collected_thinking == "  full native trace\n"
+
+
+def test_outbound_recovery_excludes_empty_id_results_but_preserves_original_history():
+    from reverie.agent.agent import _sanitize_messages_for_relay
+
+    messages = [
+        {'role': 'assistant', 'content': '', 'reasoning_content': '  full trace\n',
+         'tool_calls': [{'id': 'owned', 'function': {'name': 'create_file', 'arguments': '{}'}}]},
+        {'role': 'tool', 'tool_call_id': 'owned', 'content': 'Error: incomplete arguments, nothing executed'},
+        {'role': 'tool', 'tool_call_id': '', 'content': 'Error: Unknown tool: '},
+    ]
+    wire = _sanitize_messages_for_relay(messages, preserve_assistant_reasoning=True)
+    assert [m.get('tool_call_id') for m in wire if m['role'] == 'tool'] == ['owned']
+    assert wire[0]['reasoning_content'] == '  full trace\n'
+    assert len(messages) == 3 and messages[-1]['tool_call_id'] == ''
 
 
 def test_command_exec_builds_powershell_for_pipelines_and_cmdlets(tmp_path: Path) -> None:

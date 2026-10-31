@@ -44,8 +44,15 @@ class _BrowserStorageReferences(HTMLParser):
         super().__init__()
         self.apis: set[str] = set()
         self.in_script = False
+        self.has_controls = False
+        self.initializes_host = False
+        self.saves_state = False
+        self.has_capability_reference = False
+        self.has_empty_capability_literal = False
 
     def handle_starttag(self, tag, attrs):
+        if tag in {'input', 'select', 'textarea', 'button'}:
+            self.has_controls = True
         if tag == "script":
             values = dict(attrs)
             script_type = (values.get("type") or "").split(";")[0].strip().lower()
@@ -58,6 +65,10 @@ class _BrowserStorageReferences(HTMLParser):
     def handle_data(self, data):
         if self.in_script:
             self.apis.update(re.findall(r"\b(localStorage|sessionStorage)\s*\.\s*(?:getItem|setItem|removeItem|clear|key)\s*\(", data))
+            self.initializes_host |= 'ui/initialize' in data
+            self.saves_state |= 'reverie/view-state' in data
+            self.has_capability_reference |= bool(re.search(r'\bcapability\b', data))
+            self.has_empty_capability_literal |= bool(re.search(r'''\bcapability\s*:\s*(?:"\s*"|'\s*')''', data))
 
 
 class RenderViewTool(BaseTool):
@@ -75,7 +86,9 @@ class RenderViewTool(BaseTool):
     workspace_checkpoint = False
     description = (
         "Register an HTML artifact you have already written inside the workspace "
-        "as an interactive view shown to the user. Provide the workspace path to "
+        "as an interactive view shown to the user. Complete an interactive answer "
+        "by calling this in the same turn as create_file; a file path alone does "
+        "not display the view in the conversation. Provide the workspace path to "
         "the .html/.htm file, a short title, and a one-line summary. The view's "
         "bytes are stored and displayed by the host; your tool result and the "
         "conversation keep only a short reference, so do NOT paste the HTML into "
@@ -232,6 +245,26 @@ class RenderViewTool(BaseTool):
                 "Registration does not verify runtime behavior."
                 for api in sorted(references.apis)
             ]
+            desktop = getattr(self.context.get('agent'), 'runtime_surface', 'terminal') == 'desktop'
+            if desktop and references.has_controls and not references.initializes_host:
+                warnings.append(
+                    'Host initialization is not evident in this artifact. Verify ui/initialize, '
+                    'host theme updates and the Offline host integration example. Registration does not verify runtime behavior.'
+                )
+            if desktop and references.has_controls and not references.saves_state:
+                warnings.append(
+                    'Private state persistence is not evident in this artifact. Preserve meaningful inputs and selections '
+                    'with reverie/view-state and verify reopening. Correct the artifact through a replacement revision if needed.'
+                )
+            if desktop and references.has_controls and references.initializes_host and (
+                not references.has_capability_reference or references.has_empty_capability_literal
+            ):
+                warnings.append(
+                    'A missing capability reference or empty capability literal was found in inline scripts. '
+                    'Verify that initialized, state and every later host message include the actual capability returned '
+                    'by ui/initialize at the top level. Preserve the complete '
+                    'Offline host integration helper; registration does not verify runtime behavior.'
+                )
         except ViewStoreError as exc:
             self._emit(
                 "view_error",

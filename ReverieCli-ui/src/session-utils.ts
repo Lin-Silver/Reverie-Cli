@@ -1,4 +1,4 @@
-import type { SessionMessage, SessionState, ViewSegment } from "./types";
+import type { LiveTurn, SessionMessage, SessionState, ViewSegment } from "./types";
 import { isThinkTool } from "./thinking-tool";
 import { parseRenderViewResult } from "./view-events";
 
@@ -26,6 +26,41 @@ export function messageReasoningText(message: SessionMessage): string {
 
 export function visibleSessionMessages(messages: SessionMessage[]): SessionMessage[] {
   return messages.filter((message) => message.role !== "system");
+}
+
+export function reuseSessionMessages(previous: SessionMessage[], incoming: SessionMessage[]): SessionMessage[] {
+  // A prompt may insert or replace hidden workspace-memory messages. Align
+  // visible history independently so that this does not invalidate every
+  // memoized row. Incoming system messages and any changed fields stay fresh.
+  const visible = visibleSessionMessages(previous);
+  let index = 0;
+  return incoming.map(message => {
+    if (message.role === "system") return message;
+    const saved = visible[index++];
+    return saved && JSON.stringify(saved) === JSON.stringify(message) ? saved : message;
+  });
+}
+
+export function inlineStaticTurnMessages(turn: LiveTurn | null): SessionMessage[] | null {
+  if (!turn || turn.error || turn.stopped || turn.resumed || turn.attachments?.length || !turn.userText) return null;
+  const modelActivity = (event: Record<string, unknown>) =>
+    ["model_request", "model_response"].includes(String(event.event ?? event.type)) && !event.tool_name;
+  if (!turn.events.every(modelActivity)) return null;
+  let answers = 0, reasonings = 0;
+  for (const segment of turn.segments ?? []) {
+    if (segment.kind === "view") return null;
+    if (segment.kind === "activity" && (answers || reasonings || !segment.events.every(modelActivity))) return null;
+    if (segment.kind === "reasoning" && (answers || ++reasonings > 1)) return null;
+    if (segment.kind === "assistant" && ++answers > 1) return null;
+    if (segment.kind === "assistant" && segment.text !== turn.assistantText) return null;
+    if (segment.kind === "reasoning" && segment.text !== turn.reasoningText) return null;
+  }
+  // A simple text/reasoning turn can use its eventual history slots from the
+  // first delta. Tools, views, errors and interleaved turns retain LiveMessage.
+  return [
+    { role: "user", content: turn.userText },
+    { role: "assistant", content: turn.assistantText, reasoning_content: turn.reasoningText },
+  ];
 }
 
 export type TranscriptRow =

@@ -60,7 +60,22 @@ def assess_rich_state(state, expected):
         check('rich-metric-values-and-labels', state['metrics'] == expected['metrics'], state['metrics'])
     if 'table_rows' in expected:
         rows = [[str(value) for value in row] for row in expected['table_rows']]
-        check('rich-all-supplied-table-rows', any(table['rows'] == rows for table in state['tables']), state['tables'])
+        matched = any(table['rows'] == rows for table in state['tables'])
+        detail = {'tables': state['tables'], 'expected_rows': rows}
+        if not matched:
+            actual = next((table['rows'] for table in state['tables'] if table['rows']), [])
+            for row_index in range(max(len(rows), len(actual))):
+                wanted = rows[row_index] if row_index < len(rows) else []
+                shown = actual[row_index] if row_index < len(actual) else []
+                if wanted == shown:
+                    continue
+                column = next(i for i in range(max(len(wanted), len(shown)))
+                              if (wanted[i] if i < len(wanted) else None) != (shown[i] if i < len(shown) else None))
+                detail['first_difference'] = {'row': row_index + 1, 'column': column + 1,
+                    'expected': wanted[column] if column < len(wanted) else None,
+                    'actual': shown[column] if column < len(shown) else None}
+                break
+        check('rich-all-supplied-table-rows', matched, detail)
     if 'empty_tables' in expected:
         check('rich-explicit-empty-table', sum(not t['rows'] for t in state['tables']) >= expected['empty_tables']
               and bool(re.search('暂无数据|没有数据', state['text'])))
@@ -133,6 +148,13 @@ def rich_repair_feedback(checks):
         name = check['name']
         label = labels.get(name, '部分文字难以阅读' if name.startswith('rich-text-contrast-')
                            else '窄窗口中的回答布局不完整')
+        if name == 'rich-all-supplied-table-rows':
+            difference = (check.get('detail') or {}).get('first_difference')
+            if difference:
+                wanted = json.dumps(difference['expected'], ensure_ascii=False)
+                actual = json.dumps(difference['actual'], ensure_ascii=False)
+                label += (f"：第{difference['row']}行第{difference['column']}列应为{wanted}，现在是{actual}"
+                          '；请逐字保留全部标识符的空格、前导零和标点，不要进行中英文排版改写')
         if label not in problems: problems.append(label)
     return '刚才的回答还有这些问题：'+'；'.join(problems)+'。请在对话中修正，保留给定的数据和原有内容；不需要添加可编辑控件。'
 

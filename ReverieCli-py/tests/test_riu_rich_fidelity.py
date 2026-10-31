@@ -71,3 +71,33 @@ def test_requested_emphasis_allows_a_label_colon_without_rewriting(recommendatio
     expected["strong"] = "重点"
     check = next(c for c in verifier.assess_rich_state(state, expected) if c["name"] == "rich-markdown-emphasis")
     assert check["passed"] is passed
+
+
+@pytest.mark.parametrize("actual,expected", [
+    ("项目 01", "项目01"),
+    ("项目1", "项目01"),
+    ("A-1", "A_1"),
+    ("AB", "A B"),
+])
+def test_table_feedback_identifies_the_exact_changed_cell(recommendations, actual, expected):
+    state, _ = recommendations
+    state["tables"] = [{"headers": ["名称", "数量"], "rows": [[actual, "0"]]}, {"rows": []}]
+    checks = verifier.assess_rich_state(state, {"table_rows": [[expected, 0]]})
+    failure = next(c for c in checks if c["name"] == "rich-all-supplied-table-rows")
+    assert not failure["passed"]
+    feedback = verifier.rich_repair_feedback([failure])
+    assert "第1行第1列" in feedback
+    assert json.dumps(expected, ensure_ascii=False) in feedback
+    assert json.dumps(actual, ensure_ascii=False) in feedback
+    assert "空格" in feedback and "前导零" in feedback
+
+
+def test_missing_row_feedback_preserves_the_failed_fidelity_verdict(recommendations):
+    state, _ = recommendations
+    state["tables"] = [{"rows": [["项目01", "0"]]}]
+    checks = verifier.assess_rich_state(state, {"table_rows": [["项目01", 0], ["项目02", 1]]})
+    failure = next(c for c in checks if c["name"] == "rich-all-supplied-table-rows")
+    assert not failure["passed"]
+    feedback = verifier.rich_repair_feedback([failure])
+    assert "第2行第1列" in feedback
+    assert '"项目02"' in feedback

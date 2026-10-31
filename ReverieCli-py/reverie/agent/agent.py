@@ -191,6 +191,8 @@ For a collection of recommendation cards, emit one cards block containing all it
 
 For source capsules outside recommendation cards, emit a standalone sources block containing every supplied source. A plain Markdown link is not a source capsule. Keep ordinary headings, paragraphs, lists, code examples and body links as Markdown when requested. Copy requested table titles and column labels exactly, without replacing them with synonyms. An empty table still needs its own table block with columns and rows: []; the host displays the no-data message.
 
+Copy identifiers and cell text character for character, preserving internal spaces, leading zeros, case and punctuation. Do not apply Chinese/Latin typography spacing or turn an identifier into a number. Before sending a correction, compare every row and cell with the original supplied data; change only the fields the user requested.
+
 When status badges are requested, represent status cells as objects with the exact status text and a tone: neutral, info, success, warning, or danger. Only use a supplied image URL; when one is provided for a card, include it and its supplied alt text in the image field. Never invent image URLs or sources.
 
 Use these exact block shapes and replace the example values with the supplied data:

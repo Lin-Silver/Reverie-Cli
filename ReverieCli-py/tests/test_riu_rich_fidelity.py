@@ -54,3 +54,20 @@ def test_visible_cards_do_not_hide_changed_data_or_restarted_numbering(recommend
     check = next(c for c in verifier.assess_rich_state(state, expected) if c["name"] == failed_check)
     assert not check["passed"]
     assert verifier.rich_repair_feedback([check])
+
+
+@pytest.mark.parametrize("emphasis,passed", [
+    (["重点"], True),
+    (["重点："], True),
+    (["重点:"], True),
+    ([], False),
+    (["次重点"], False),
+    (["重点事项"], False),
+    (["重点：内容已被改写"], False),
+])
+def test_requested_emphasis_allows_a_label_colon_without_rewriting(recommendations, emphasis, passed):
+    state, expected = recommendations
+    state["strong"] = emphasis
+    expected["strong"] = "重点"
+    check = next(c for c in verifier.assess_rich_state(state, expected) if c["name"] == "rich-markdown-emphasis")
+    assert check["passed"] is passed

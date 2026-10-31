@@ -93,7 +93,8 @@ def assess_rich_state(state, expected):
     if 'heading' in expected:
         check('rich-markdown-heading', expected['heading'] in state['headings'], state['headings'])
     if 'strong' in expected:
-        check('rich-markdown-emphasis', expected['strong'] in state['strong'], state['strong'])
+        label = expected['strong']
+        check('rich-markdown-emphasis', any(text in {label, label + ':', label + '：'} for text in state['strong']), state['strong'])
     if 'min_list_items' in expected:
         check('rich-markdown-list', state['lists'] >= expected['min_list_items'], state['lists'])
     if 'code_pattern' in expected:

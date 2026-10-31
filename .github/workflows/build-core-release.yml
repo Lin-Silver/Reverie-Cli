@@ -301,7 +301,13 @@ jobs:
             git push origin refs/tags/latest --force
           fi
           base_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag"
-          notes=$(cat <<EOF
+          notes_file="$RUNNER_TEMP/reverie-release-notes.md"
+          if [[ "$release_kind" == "stable" ]]; then
+            source_notes="docs/releases/$release_tag.md"
+            test -s "$source_notes" || { echo "Missing versioned release notes: $source_notes"; exit 1; }
+            sed '1{/^# /d;}' "$source_notes" > "$notes_file"
+          else
+          cat > "$notes_file" <<EOF
           Verified Windows x64, Linux x64, macOS Apple Silicon (M-series), and macOS Intel build from \`$GITHUB_SHA\`. The Windows CLI is a standalone \`reverie.exe\`: no adjacent runtime directory or Python installation is required. Desktop packages contain a compiled fallback kernel, the embedded Chromium browser-control runtime, and Open Computer Use desktop controller.
 
           ## Windows x64
@@ -325,22 +331,17 @@ jobs:
           ## Verification metadata
           - [Consolidated kernel manifest]($base_url/reverie-kernels.json) — optional protocol, platform, size, commit, and SHA-256 metadata. GitHub also displays its own digest for every asset.
           EOF
-          )
+          fi
           if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release edit "$release_tag" --title "$release_title" --notes "$notes"
+            gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file"
           else
             if [[ "$release_kind" == "prerelease" ]]; then
-              gh release create "$release_tag" --title "$release_title" --notes "$notes" --prerelease --latest=false
+              gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --prerelease --latest=false
             else
-              gh release create "$release_tag" --title "$release_title" --notes "$notes" --latest
+              gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --draft --latest=false
             fi
           fi
           release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" --jq .id)
-          if [[ "$release_kind" == "prerelease" ]]; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=true -f make_latest=false >/dev/null
-          else
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=false -f make_latest=true >/dev/null
-          fi
           # Upload over the existing assets, then prune whatever is left from an
           # older version. Deleting every asset up front left the rolling release
           # with no downloads for the length of the upload, and permanently empty
@@ -367,3 +368,8 @@ jobs:
               gh release delete-asset "$release_tag" "$old_asset" --yes
             fi
           done
+          if [[ "$release_kind" == "prerelease" ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=true -f make_latest=false >/dev/null
+          else
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+          fi

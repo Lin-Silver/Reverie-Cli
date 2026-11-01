@@ -1950,7 +1950,7 @@ def test_missing_primary_result_feedback_does_not_claim_an_observed_wrong_amount
     assert '结果名称和金额' not in wrong
 
 
-@pytest.mark.parametrize('label', ['年度合计', '全年总计', '每年总额'])
+@pytest.mark.parametrize('label', ['年度合计', '全年总计', '每年总额', '预计年度通勤费用', '预估全年成本', '估算每年支出'])
 @pytest.mark.parametrize('amount,expected', [('3168.00', True), ('6336.00', False)])
 def test_annual_result_labels_identify_the_actual_total_not_reference_amounts(verifier_browser, label, amount, expected):
     page=verifier_browser.new_page()
@@ -1960,6 +1960,17 @@ def test_annual_result_labels_identify_the_actual_total_not_reference_amounts(ve
         result=benchmark.calculator_primary_result(page,3168,timeout=0)
         assert result['passed'] is expected
         assert [item['value'] for item in result['candidates']]==[float(amount)]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize('label', ['预计月度通勤费用', '预估每天支出', '预计年度费用参考'])
+def test_estimated_reference_or_nonannual_labels_are_not_the_primary_annual_result(verifier_browser, label):
+    page=verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>{label}</span><strong>3168.00元</strong></section>')
+        result=benchmark.calculator_primary_result(page,3168,timeout=0)
+        assert not result['passed'] and not result['candidates']
     finally:
         page.close()
 

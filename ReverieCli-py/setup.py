@@ -65,6 +65,7 @@ setup(
         # HTTP and API
         "requests==2.34.2",
         "httpx==0.28.1",
+        "anyio==4.15.1",
         "openai==2.44.0",
         "anthropic==0.112.0",
 

@@ -10,7 +10,8 @@ import pytest
 
 @pytest.mark.parametrize('script', ['riu_quality_benchmark', 'riu_rich_answer_benchmark'])
 @pytest.mark.parametrize('failure', ['setup', 'close'])
-def test_credentials_do_not_survive_setup_or_finalization_failure(tmp_path, monkeypatch, script, failure):
+@pytest.mark.parametrize('source', ['custom', 'sensenova'])
+def test_credentials_do_not_survive_setup_or_finalization_failure(tmp_path, monkeypatch, script, failure, source):
     from reverie.config import ConfigManager
     from reverie.session.manager import SessionManager
     import playwright.sync_api
@@ -29,6 +30,7 @@ def test_credentials_do_not_survive_setup_or_finalization_failure(tmp_path, monk
         'base_url': 'https://provider.invalid/v1', 'api_key': secret,
         'selected_model_id': 'fixture-model', 'models': [{'id': 'fixture-model'}],
     }]}
+    cfg.sensenova.update(api_key=secret, api_url='https://sensenova.invalid/v1')
     original.ensure_dirs()
     original.save(cfg)
     original_bytes = original.global_config_path.read_bytes()
@@ -38,8 +40,10 @@ def test_credentials_do_not_survive_setup_or_finalization_failure(tmp_path, monk
     output = tmp_path / '.runtime/sample'
     output.parent.mkdir()
     argv = ['benchmark', '--output', str(output), '--exe', str(tmp_path / 'unused.exe'),
-            '--source', 'custom', '--provider-id', 'xkiro', '--model', 'fixture-model',
+            '--source', source, '--model', 'sensenova-6.8-flash-lite' if source == 'sensenova' else 'fixture-model',
             '--task-file', str(fixture), '--tasks', task, '--attempts', '1']
+    if source == 'custom':
+        argv += ['--provider-id', 'xkiro']
     monkeypatch.setattr(sys, 'argv', argv)
     recorders = []
     recorder_class = recorder_owner.Recorder

@@ -25,6 +25,10 @@ def settings_digest(source='standard', provider_id=None):
     if source == 'custom':
         settings['provider'] = cfg.custom_providers
         settings['provider_id'] = provider_id
+    elif source == 'sensenova':
+        from reverie.sensenova import resolve_sensenova_api_key
+        settings['provider'] = cfg.sensenova
+        settings['effective_api_key'] = resolve_sensenova_api_key(cfg.sensenova)
     return hashlib.sha256(json.dumps(settings,sort_keys=True,default=str).encode()).hexdigest()
 
 
@@ -89,7 +93,7 @@ def main():
     parser.add_argument('--exe', type=Path, help='Native packaged Desktop executable on the current host.')
     parser.add_argument('--models', nargs='+')
     parser.add_argument('--attempts', type=int, default=3)
-    parser.add_argument('--source', choices=['standard', 'custom'])
+    parser.add_argument('--source', choices=['standard', 'custom', 'sensenova'])
     parser.add_argument('--provider-id', help='Exact saved custom provider ID.')
     parser.add_argument('--api-url', help='Anonymous standard-provider endpoint; configured providers use their saved endpoint.')
     parser.add_argument('--regression', type=Path, required=True)
@@ -115,8 +119,8 @@ def main():
         if args.provider_id and args.provider_id != manifest.get('provider_id'):
             raise RuntimeError('Custom provider changed; create a new round.')
     else:
-        if not args.models or (args.formal and (len(args.models) != 2 or args.attempts != 3)):
-            parser.error('Formal acceptance requires two actual model IDs and three attempts.')
+        if not args.models or (args.formal and (len(args.models) not in (1, 2) or args.attempts != 3)):
+            parser.error('Formal acceptance requires one or two actual model IDs and three attempts.')
         regression = json.loads(args.regression.read_text())
         acceptance = json.loads(args.acceptance.read_text())
         assert regression['source_unchanged'] and regression['stages']

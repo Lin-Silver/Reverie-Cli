@@ -56,8 +56,9 @@ def test_static_correction_scope_depends_on_retained_data_and_no_tool_calls(tmp_
             assert benchmark.request_tool_scope_matches({"request": str(target), "tools": count}) == (count == expected)
 
 
-@pytest.mark.parametrize('source', ['standard', 'custom'])
-def test_frozen_child_preserves_provider_without_sending_saved_keys_to_default_host(tmp_path, monkeypatch, source):
+@pytest.mark.parametrize('source', ['standard', 'custom', 'sensenova'])
+@pytest.mark.parametrize('model_count', [1, 2])
+def test_frozen_child_preserves_provider_without_sending_saved_keys_to_default_host(tmp_path, monkeypatch, source, model_count):
     monkeypatch.setattr(benchmark, 'ROOT', tmp_path)
     (tmp_path / '.runtime').mkdir()
     scripts = tmp_path / 'scripts/verification'
@@ -77,9 +78,9 @@ def test_frozen_child_preserves_provider_without_sending_saved_keys_to_default_h
     for name, value in files.items():
         (tmp_path / name).write_text(json.dumps(value), encoding='utf-8')
     output = tmp_path / '.runtime/frozen'
-    argv = ['benchmark', '--output', str(output), '--exe', str(exe), '--models', 'model-one', 'model-two',
+    argv = ['benchmark', '--output', str(output), '--exe', str(exe), '--models', *['model-one', 'model-two'][:model_count],
             '--regression', str(tmp_path / 'regression.json'), '--acceptance', str(tmp_path / 'acceptance.json'),
-            '--source-manifest', str(tmp_path / 'sources.json'), '--source', source]
+            '--source-manifest', str(tmp_path / 'sources.json'), '--source', source, '--formal', '--attempts', '3']
     if source == 'custom':
         argv += ['--provider-id', 'xkiro']
     monkeypatch.setattr(sys, 'argv', argv)
@@ -95,6 +96,9 @@ def test_frozen_child_preserves_provider_without_sending_saved_keys_to_default_h
         benchmark.main()
     manifest = json.loads((output / 'manifest.json').read_text())
     assert manifest['source'] == source
+    assert len(manifest['models']) == model_count and manifest['attempts'] == 3
+    assert len(manifest['tasks']) == 10
+    assert len(manifest['fixed_manual_review_ids']) == 9 * model_count
     assert manifest['verification_settings_sha256'] == source + '-digest'
     command, = commands
     assert command[command.index('--source') + 1] == source
@@ -102,5 +106,36 @@ def test_frozen_child_preserves_provider_without_sending_saved_keys_to_default_h
         assert manifest['api_url'] is None and '--api-url' not in command
         assert manifest['provider_id'] == 'xkiro'
         assert command[command.index('--provider-id') + 1] == 'xkiro'
-    else:
+    elif source == 'standard':
         assert command[command.index('--api-url') + 1] == 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'
+    else:
+        assert manifest['api_url'] is None and '--api-url' not in command and '--provider-id' not in command
+
+
+def test_sensenova_account_and_endpoint_are_frozen_with_the_round(monkeypatch):
+    from types import SimpleNamespace
+    from reverie.config import ConfigManager
+    cfg = SimpleNamespace(security={}, api_proxy='', api_max_retries=2, api_initial_backoff=1,
+                          sensenova={'api_key': 'fixture-key', 'api_url': 'https://provider.invalid/v1'})
+    monkeypatch.setattr(ConfigManager, 'load', lambda self: cfg)
+    original = benchmark.settings_digest('sensenova')
+    cfg.sensenova['api_key'] = 'fixture-rotated-key'
+    assert benchmark.settings_digest('sensenova') != original
+    rotated = benchmark.settings_digest('sensenova')
+    cfg.sensenova['api_url'] = 'https://other.invalid/v1'
+    assert benchmark.settings_digest('sensenova') != rotated
+
+
+@pytest.mark.parametrize('variable', ['SENSENOVA_API_KEY', 'SENSE_API_KEY'])
+def test_sensenova_environment_account_is_frozen_with_the_round(monkeypatch, variable):
+    from types import SimpleNamespace
+    from reverie.config import ConfigManager
+    cfg = SimpleNamespace(security={}, api_proxy='', api_max_retries=2, api_initial_backoff=1,
+                          sensenova={'api_key': ''})
+    monkeypatch.setattr(ConfigManager, 'load', lambda self: cfg)
+    monkeypatch.delenv('SENSENOVA_API_KEY', raising=False)
+    monkeypatch.delenv('SENSE_API_KEY', raising=False)
+    monkeypatch.setenv(variable, 'fixture-key')
+    original = benchmark.settings_digest('sensenova')
+    monkeypatch.setenv(variable, 'fixture-rotated-key')
+    assert benchmark.settings_digest('sensenova') != original

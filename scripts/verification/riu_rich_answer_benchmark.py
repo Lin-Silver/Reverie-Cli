@@ -170,7 +170,7 @@ def main():
     parser.add_argument('--api-url')
     parser.add_argument('--task-file', type=Path, default=TASK_FILE)
     parser.add_argument('--tasks', nargs=1, required=True)
-    parser.add_argument('--source', choices=['standard', 'custom'], default='standard')
+    parser.add_argument('--source', choices=['standard', 'custom', 'sensenova'], default='standard')
     parser.add_argument('--provider-id', help='Exact saved custom provider ID.')
     parser.add_argument('--attempts', type=int, choices=[1], default=1)
     parser.add_argument('--max-model-repairs', type=int, default=2)

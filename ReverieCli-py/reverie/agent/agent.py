@@ -5782,6 +5782,19 @@ class ReverieAgent:
                 if not include_reasoning and not preserve_nvidia_reasoning:
                     normalized.pop("reasoning_content", None)
                 messages.append(normalized)
+        if self._is_active_model_source("sensenova") and getattr(self, "_incomplete_turn_error", ""):
+            last_reply = next((message for message in reversed(messages) if message.get("role") != "system"), {})
+            if last_reply.get("role") == "assistant" and not last_reply.get("tool_calls"):
+                # A trailing partial assistant answer is treated as a prefill;
+                # keep the continuation request after it, including after empty retries.
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "The previous response was interrupted. Continue the active request after the saved partial "
+                        "assistant response. Preserve completed tool results; do not recreate or repeat completed "
+                        "actions. Finish the missing answer in visible plain text."
+                    ),
+                })
         if (
             self._is_active_model_source("sensenova")
             and self.provider == "openai-chat"

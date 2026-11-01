@@ -873,6 +873,103 @@ def test_sensenova_request_messages_proactively_end_with_user_query(tmp_path):
     assert agent.messages[-1]["role"] == "tool"
 
 
+@pytest.mark.parametrize("finish_reason", ["interrupted", "length", "stop"])
+@pytest.mark.parametrize("source", ["sensenova", "standard"])
+@pytest.mark.parametrize("empty_retry", [False, True])
+@pytest.mark.parametrize("http_fallback", [False, True])
+def test_sensenova_incomplete_answer_requests_explicit_continuation(
+    tmp_path, finish_reason, source, empty_retry, http_fallback,
+):
+    from copy import deepcopy
+
+    config = _standard_config()
+    config.active_model_source = source
+    config.sensenova = {"selected_model_id": "sensenova-6.8-flash-lite"}
+    agent = ReverieAgent(
+        base_url="https://example.test/v1", api_key="x",
+        model="sensenova-6.8-flash-lite", project_root=tmp_path,
+        provider="openai-chat", config=config,
+    )
+    if http_fallback:
+        agent.provider = "request"
+        agent._openai_request_fallback_active = True
+    agent.messages = [{"role": "user", "content": "Create the view."}]
+    state = agent._new_turn_state()
+    state.add_content("The view has been created")
+    state.set_finish_reason(finish_reason)
+    agent._commit_stream_state(
+        state=state, request_messages=agent.messages[:],
+        messages=agent.messages[:], session_id="continuation",
+    )
+    if empty_retry:
+        agent._recover_empty_model_turn(agent.messages[:], attempt=1)
+    history = deepcopy(agent.messages)
+
+    payload = agent._build_openai_chat_completion_kwargs(
+        messages=agent._build_messages(), tools=[], stream=True,
+    )
+
+    if source == "sensenova" and finish_reason != "stop":
+        assert payload["messages"][-1]["role"] == "user"
+        assert "saved partial assistant response" in payload["messages"][-1]["content"]
+        assert "do not recreate or repeat completed actions" in payload["messages"][-1]["content"]
+    else:
+        assert payload["messages"][-1]["role"] == "assistant"
+    assert agent.messages == history
+    assert [m["content"] for m in agent.messages if m["role"] == "user"] == ["Create the view."]
+
+
+@pytest.mark.parametrize("finish_reason", ["interrupted", "length"])
+@pytest.mark.parametrize("empty_retry", [False, True])
+def test_sensenova_http_stream_continues_partial_answer_without_replaying_tools(
+    tmp_path, finish_reason, empty_retry,
+):
+    import requests
+
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.8-flash-lite"}
+    agent = ReverieAgent(
+        base_url="https://example.test/v1", api_key="x",
+        model="sensenova-6.8-flash-lite", project_root=tmp_path,
+        provider="openai-chat", config=config,
+    )
+    agent.messages = [{"role": "user", "content": "Summarize the completed view."}]
+    agent.get_visible_tool_schemas = lambda mode=None: []
+    agent._check_and_compress_context = lambda **kwargs: None
+    captured = []
+
+    def request(payload, **kwargs):
+        captured.append(payload)
+        return SimpleNamespace(index=len(captured), close=lambda: None)
+
+    def events(response, provider_label):
+        if response.index == 1:
+            yield {"type": "content", "text": "The view has been created"}
+            if finish_reason == "interrupted":
+                raise requests.exceptions.ChunkedEncodingError("Response ended prematurely")
+            yield {"type": "finish", "reason": "length"}
+        else:
+            assert captured[-1]["messages"][-1]["role"] == "user"
+            assert "saved partial assistant response" in captured[-1]["messages"][-1]["content"]
+            if empty_retry and response.index == 2:
+                yield {"type": "reasoning", "text": "Still preparing the final answer."}
+            else:
+                yield {"type": "content", "text": ". The total is 360 litres."}
+            yield {"type": "finish", "reason": "stop"}
+
+    agent._make_direct_request = request
+    agent._iter_request_stream_events = events
+
+    chunks = list(agent._process_streaming_openai_http_fallback(session_id="continuation"))
+
+    assert len(captured) == (3 if empty_retry else 2)
+    assert "The view has been created" in chunks
+    assert ". The total is 360 litres." in chunks
+    assert not agent._incomplete_turn_error
+    assert [m["content"] for m in agent.messages if m["role"] == "user"] == ["Summarize the completed view."]
+
+
 def test_sensenova_writer_context_followup_requests_append_only_plain_prose(tmp_path):
     _seed_writer_project(
         tmp_path,

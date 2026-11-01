@@ -1480,7 +1480,7 @@ LABELLED_PRIMARY_RESULT_SCRIPT = r"""({names, kind}) => {
 }"""
 
 CALCULATOR_PRIMARY_NAMES = '(?:(?:预计|预估|估算)?(?:年度|全年|每年|年)[\\u4e00-\\u9fff]{0,8}?(?:费用|成本|支出|花费|合计|总计|总额)|annual\\s+(?:[a-z]+\\s+){0,3}(?:cost|expense|expenses))'
-CHART_PRIMARY_NAMES = r'(?:(?:总(?:用水量|用水|用量|量)|(?:用水量|用水|用量)(?:总计|合计)|总计|合计|总和|total(?:\s+(?:water|usage|consumption))?)(?:\s*[（(]\s*(?:升|公升|L|liters?|按当前倍率)\s*[）)])?)'
+CHART_PRIMARY_NAMES = r'(?:(?:总(?:用水量|用水|用量|量)|(?:用水量|用水|用量)(?:总计|合计)|总计|合计|总和|total(?:\s+(?:water|usage|consumption))?)(?:\s*[（(]\s*(?:升|公升|L|liters?|(?:按)?当前倍率)\s*[）)])?)'
 
 
 def primary_result_script(names, kind):

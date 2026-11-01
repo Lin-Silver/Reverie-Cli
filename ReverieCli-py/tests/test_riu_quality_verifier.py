@@ -1111,6 +1111,7 @@ def test_css_zero_state_does_not_mistake_dashboard_cards_for_bars(verifier_brows
 @pytest.mark.parametrize('markup', [
     '<section><span>总用水量 (升)</span><strong>VALUE L</strong></section>',
     '<section><span>总用水量（按当前倍率）</span><strong>VALUE 升</strong></section>',
+    '<section><span>总用水量（当前倍率）</span><strong>VALUE 升</strong></section>',
     '<section><strong>VALUE</strong><span>总量</span></section>',
     '<table><tr><th>合计</th><td>VALUE 升</td></tr></table>',
     '<table><thead><tr><th>月份</th><th>原始用量</th><th>调整后用量</th></tr></thead>'
@@ -1131,7 +1132,9 @@ def test_chart_pip_requires_its_labelled_total_instead_of_an_axis_tick(verifier_
 
 
 @pytest.mark.parametrize('label', ['总用水量（按当前倍率）', '用水量合计 (按当前倍率)',
-                                   '总量（ 按当前倍率 ）', 'Total water (按当前倍率)'])
+                                   '总量（ 按当前倍率 ）', 'Total water (按当前倍率)',
+                                   '总用水量（当前倍率）', '用水量合计 (当前倍率)',
+                                   '总量（ 当前倍率 ）', 'Total water (当前倍率)'])
 @pytest.mark.parametrize('amount,expected', [(720, True), (360, False)])
 def test_chart_current_multiplier_label_preserves_actual_amount_checks(verifier_browser, label, amount, expected):
     page = verifier_browser.new_page()
@@ -1146,7 +1149,9 @@ def test_chart_current_multiplier_label_preserves_actual_amount_checks(verifier_
 
 
 @pytest.mark.parametrize('label', ['总用水量（原始）', '总用水量（参考值）', '总用水量（上月）',
-                                   '总用水量（计划）', '总用水量（按当前倍率）参考值'])
+                                   '总用水量（计划）', '总用水量（按当前倍率）参考值',
+                                   '总用水量（当前倍率）参考值', '总用水量（当前倍率原始值）',
+                                   '总用水量（参考当前倍率）'])
 def test_chart_reference_qualifiers_are_not_current_totals(verifier_browser, label):
     page = verifier_browser.new_page()
     try:

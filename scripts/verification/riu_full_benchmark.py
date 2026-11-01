@@ -17,11 +17,14 @@ TASKS = RICH_TASKS + ['calculator', 'table', 'chart', 'form', 'comparison', 'tex
 PASS = {'first_pass', 'repaired_success'}
 
 
-def settings_digest():
+def settings_digest(source='standard', provider_id=None):
     sys.path.insert(0, str(ROOT/'ReverieCli-py'))
     from reverie.config import ConfigManager
     cfg = ConfigManager(ROOT).load()
     settings = {name:getattr(cfg,name) for name in ['security','api_proxy','api_max_retries','api_initial_backoff']}
+    if source == 'custom':
+        settings['provider'] = cfg.custom_providers
+        settings['provider_id'] = provider_id
     return hashlib.sha256(json.dumps(settings,sort_keys=True,default=str).encode()).hexdigest()
 
 
@@ -59,7 +62,7 @@ def request_tool_scope_matches(request):
     from reverie.agent.agent import _static_rich_answer_history
     payload = json.loads(Path(request['request']).read_text(encoding='utf-8'))
     expected = 0 if _static_rich_answer_history(payload.get('messages', [])) else 27
-    return request.get('tools') == expected and len(payload.get('tools', [])) == expected
+    return request.get('tools') == expected and len(payload.get('tools') or []) == expected
 
 
 def summarize(entry, report):
@@ -86,7 +89,9 @@ def main():
     parser.add_argument('--exe', type=Path, help='Native packaged Desktop executable on the current host.')
     parser.add_argument('--models', nargs='+')
     parser.add_argument('--attempts', type=int, default=3)
-    parser.add_argument('--api-url', default='https://oai.endpoints.kepler.ai.cloud.ovh.net/v1')
+    parser.add_argument('--source', choices=['standard', 'custom'])
+    parser.add_argument('--provider-id', help='Exact saved custom provider ID.')
+    parser.add_argument('--api-url', help='Anonymous standard-provider endpoint; configured providers use their saved endpoint.')
     parser.add_argument('--regression', type=Path, required=True)
     parser.add_argument('--source-manifest', type=Path, required=True)
     parser.add_argument('--acceptance', type=Path, required=True)
@@ -105,6 +110,10 @@ def main():
             raise RuntimeError('Driver changed; retain the old round and create a new one.')
         if args.models and args.models != manifest['models']:
             raise RuntimeError('Models changed; create a new round.')
+        if args.source and args.source != manifest.get('source', 'standard'):
+            raise RuntimeError('Provider changed; create a new round.')
+        if args.provider_id and args.provider_id != manifest.get('provider_id'):
+            raise RuntimeError('Custom provider changed; create a new round.')
     else:
         if not args.models or (args.formal and (len(args.models) != 2 or args.attempts != 3)):
             parser.error('Formal acceptance requires two actual model IDs and three attempts.')
@@ -113,6 +122,14 @@ def main():
         assert regression['source_unchanged'] and regression['stages']
         assert all(s['exit_code'] == 0 for s in regression['stages']) and acceptance['passed']
         assert not (args.formal and args.rich_development), 'Development samples cannot be formal.'
+        source = args.source or 'standard'
+        if source == 'custom' and not args.provider_id:
+            parser.error('--source custom requires --provider-id')
+        if source != 'custom' and args.provider_id:
+            parser.error('--provider-id requires --source custom')
+        if source != 'standard' and args.api_url:
+            parser.error('Configured providers use their saved endpoint; omit --api-url.')
+        api_url = args.api_url or ('https://oai.endpoints.kepler.ai.cloud.ovh.net/v1' if source == 'standard' else None)
         output.mkdir(parents=True, exist_ok=False)
         for name in ['riu_quality_benchmark.py', 'riu_rich_answer_benchmark.py', 'desktop_process.py']:
             shutil.copy2(ROOT/'scripts/verification'/name, output/name)
@@ -126,10 +143,10 @@ def main():
         manifest = dict(created_at_utc=now(), formal=args.formal, models=args.models, attempts=args.attempts,
                         scope='Automatic model acceptance only; visual/manual reviews and platform installation acceptance remain separate.',
                         tasks=RICH_TASKS if args.rich_development else TASKS, rich_development=args.rich_development,
-                        api_url=args.api_url, max_feedback_repairs=2, turn_timeout_seconds=1800,
+                        source=source, provider_id=args.provider_id, api_url=api_url, max_feedback_repairs=2, turn_timeout_seconds=1800,
                         native_output_cap_added=False, independent_profiles=True, exe=str(exe),
                         build=acceptance['build'], regression=str(args.regression),
-                        verification_settings_sha256=settings_digest(),
+                        verification_settings_sha256=settings_digest(source, args.provider_id),
                         driver_sha256=digest(__file__), sources=json.loads(args.source_manifest.read_text()),
                         frozen_sha256={name:digest(output/name) for name in ['riu_quality_benchmark.py','riu_rich_answer_benchmark.py','desktop_process.py','fixtures/riu-natural-tasks.json','fixtures/riu-rich-answer-tasks.json']},
                         binaries={str(p):digest(p) for p in [exe,core,app_archive]})
@@ -144,7 +161,7 @@ def main():
         write(output/'round.json', state)
 
     def guard():
-        assert settings_digest() == manifest['verification_settings_sha256'], 'Verification settings changed.'
+        assert settings_digest(manifest.get('source', 'standard'), manifest.get('provider_id')) == manifest['verification_settings_sha256'], 'Verification settings changed.'
         for relative, expected in manifest['sources'].items():
             assert digest(ROOT/relative) == expected, 'Source changed: '+relative
         for relative, expected in manifest['frozen_sha256'].items():
@@ -195,9 +212,13 @@ def main():
                 assert not case_path.exists()
                 guard()
                 command = [sys.executable, str(output/('riu_rich_answer_benchmark.py' if task in RICH_TASKS else 'riu_quality_benchmark.py')), '--exe', manifest['exe'],
-                           '--output', str(case_path), '--source', 'standard', '--model', model,
-                           '--api-url', manifest['api_url'], '--tasks', task, '--attempts', '1',
+                           '--output', str(case_path), '--source', manifest.get('source', 'standard'), '--model', model,
+                           '--tasks', task, '--attempts', '1',
                            '--max-model-repairs', '2', '--timeout', '1800']
+                if manifest['api_url']:
+                    command += ['--api-url', manifest['api_url']]
+                if manifest.get('provider_id'):
+                    command += ['--provider-id', manifest['provider_id']]
                 entry.update(path=str(case_path), started_at_utc=now(), command=command)
                 with (output/(identifier+f'-execution-{execution}.txt')).open('x') as log:
                     child = subprocess.Popen(command, cwd=ROOT, env={**os.environ,'DISPLAY':':94'}, stdout=log, stderr=subprocess.STDOUT)

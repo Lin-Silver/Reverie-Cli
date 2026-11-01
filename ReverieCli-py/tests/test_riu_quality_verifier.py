@@ -1,5 +1,6 @@
 """Verifier fixtures only; these are never real-model generation samples."""
 import importlib.util
+import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -213,6 +214,96 @@ def test_registration_without_business_checks_is_not_quality_success():
     assert benchmark.quality_outcome([], [], 0, generation_only=True) == 'registered_unvalidated'
     assert benchmark.quality_outcome([], [], 0) == 'semantic_failure'
     assert benchmark.quality_outcome([{'passed': False}], [], 1) == 'semantic_failure'
+
+
+def test_isolated_credential_cleanup_removes_keys_from_config_backups_only(tmp_path):
+    app = tmp_path / 'isolated-app'
+    app.mkdir()
+    secret = 'fixture-provider-secret'
+    files = [app / 'config.json', app / 'config.invalid.bak', app / 'sessions.json']
+    for path in files:
+        path.write_text(json.dumps({'api_key': secret}), encoding='utf-8')
+    original = tmp_path / 'original-config.json'
+    original.write_text(json.dumps({'api_key': secret}), encoding='utf-8')
+    result = benchmark.cleanup_isolated_credentials(app, secret)
+    assert result['complete'] and set(result['files']) == {str(path) for path in files}
+    assert all(json.loads(path.read_text()) == {'api_key': ''} for path in files)
+    assert json.loads(original.read_text())['api_key'] == secret
+
+
+def test_anonymous_profile_cleanup_keeps_existing_config_bytes(tmp_path):
+    path = tmp_path / 'config.json'
+    original = b'{"api_key":"","retained":"content"}\n'
+    path.write_bytes(original)
+    assert benchmark.cleanup_isolated_credentials(tmp_path, '') == {'complete': True, 'files': []}
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize('ensure_ascii', [True, False])
+def test_credential_cleanup_removes_json_escaped_keys(tmp_path, ensure_ascii):
+    secret = 'fixture"key\\line\n密钥'
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'api_key': secret}, ensure_ascii=ensure_ascii), encoding='utf-8')
+    result = benchmark.cleanup_isolated_credentials(tmp_path, secret)
+    assert result['complete'] and result['files'] == [str(path)]
+    assert json.loads(path.read_text(encoding='utf-8')) == {'api_key': ''}
+
+
+def test_custom_model_recorder_copies_only_the_requested_provider():
+    from reverie.config import Config
+    original, isolated = Config(), Config()
+    original.custom_providers = {'active_provider_id': 'other', 'providers': [
+        {'id': 'xkiro', 'name': 'xkiro', 'base_url': 'https://provider.invalid/v1',
+         'api_key': 'fixture-key', 'format': 'openai-chat', 'enabled': True,
+         'selected_model_id': 'old-model', 'models': [{'id': 'model-one', 'name': 'One'}]},
+        {'id': 'other', 'name': 'Other', 'base_url': 'https://other.invalid/v1', 'api_key': 'other-key'},
+    ]}
+    before = json.dumps(original.custom_providers, sort_keys=True)
+    benchmark.configure_model_source(isolated, original, 'custom', 'model-one', provider_id='xkiro')
+    assert isolated.active_model.model == 'model-one'
+    assert isolated.active_model.base_url == 'https://provider.invalid/v1'
+    benchmark.configure_model_source(isolated, original, 'custom', 'model-one',
+                                     provider_id='xkiro', recorder_url='http://127.0.0.1:12345/v1')
+    assert isolated.active_model.base_url == 'http://127.0.0.1:12345/v1'
+    assert isolated.active_model.api_key == 'fixture-key'
+    assert [p['id'] for p in isolated.custom_providers['providers']] == ['xkiro']
+    assert 'other-key' not in json.dumps(isolated.custom_providers)
+    assert json.dumps(original.custom_providers, sort_keys=True) == before
+
+
+def test_recorder_forwards_nullable_tools_without_changing_native_json(tmp_path, monkeypatch):
+    import hashlib
+    monkeypatch.setenv('NO_PROXY', '127.0.0.1,localhost')
+    received = []
+
+    class Upstream(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            received.append(self.rfile.read(int(self.headers['Content-Length'])))
+            raw = b'{"model":"fixture-model","choices":[{"message":{"role":"assistant","content":"ok"}}]}'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    recorder = benchmark.Recorder(tmp_path, f'http://127.0.0.1:{server.server_port}/v1/chat/completions', '')
+    raw = b'{"model":"fixture-model","messages":[{"role":"user","content":"static answer"}],"tools":null}'
+    try:
+        response = requests.post(f'http://127.0.0.1:{recorder.server.server_port}/v1/chat/completions',
+                                 data=raw, headers={'Content-Type': 'application/json'}, timeout=3)
+        assert response.status_code == 200 and received == [raw]
+        assert len(recorder.records) == 1 and recorder.records[0]['tools'] == 0
+        assert recorder.records[0]['request_sha256'] == hashlib.sha256(raw).hexdigest()
+        assert json.loads((tmp_path / 'request-0000.json').read_text())['tools'] is None
+    finally:
+        recorder.close()
+        server.shutdown()
+        server.server_close()
     assert benchmark.quality_outcome([{'passed': True}], [], 1) == 'repaired_success'
 
 

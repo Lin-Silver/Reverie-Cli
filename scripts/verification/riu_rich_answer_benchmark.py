@@ -167,15 +167,18 @@ def main():
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--model', required=True)
-    parser.add_argument('--api-url', required=True)
+    parser.add_argument('--api-url')
     parser.add_argument('--task-file', type=Path, default=TASK_FILE)
     parser.add_argument('--tasks', nargs=1, required=True)
-    parser.add_argument('--source', choices=['standard'], default='standard')
+    parser.add_argument('--source', choices=['standard', 'custom'], default='standard')
+    parser.add_argument('--provider-id', help='Exact saved custom provider ID.')
     parser.add_argument('--attempts', type=int, choices=[1], default=1)
     parser.add_argument('--max-model-repairs', type=int, default=2)
     parser.add_argument('--timeout', type=int, default=1800)
     args = parser.parse_args()
     assert 0 <= args.max_model_repairs <= 2
+    if args.source == 'standard' and not args.api_url:
+        parser.error('--source standard requires --api-url')
     output = args.output.resolve()
     assert output.is_relative_to(ROOT/'.runtime')
     output.mkdir(exist_ok=False)
@@ -203,16 +206,23 @@ def main():
     os.environ['NO_PROXY'] = '127.0.0.1,localhost'
     config = ConfigManager(workspace)
     cfg = config.load()
-    recorder = q.Recorder(output, args.api_url.rstrip('/')+'/chat/completions', '', request_timeout=args.timeout)
-    q.configure_model_source(cfg, original, 'standard', args.model,
-        recorder_url=f'http://127.0.0.1:{recorder.server.server_port}/v1')
+    q.configure_model_source(cfg, original, args.source, args.model, api_url=args.api_url, provider_id=args.provider_id)
+    active = cfg.active_model
+    if not active or active.model != args.model or active.provider not in {'openai-chat', 'openai-sdk'}:
+        raise ValueError('Configured Chat Completions model not resolved exactly')
+    upstream = active.base_url.rstrip('/')
+    if not upstream.endswith('/chat/completions'):
+        upstream += '/chat/completions'
+    recorder = q.Recorder(output, upstream, active.api_key, request_timeout=args.timeout)
+    q.configure_model_source(cfg, original, args.source, args.model,
+        recorder_url=f'http://127.0.0.1:{recorder.server.server_port}/v1', provider_id=args.provider_id)
     cfg.security = copy.deepcopy(original.security)
     cfg.api_proxy = original.api_proxy
     cfg.api_max_retries = original.api_max_retries
     cfg.api_initial_backoff = original.api_initial_backoff
     cfg.api_timeout = args.timeout
     cfg.stream_responses = True
-    config.ensure_dirs(); config.save(cfg)
+    config.ensure_dirs()
     manager = SessionManager(config.project_data_dir, project_root=workspace)
     case_id = task['id']+'-1'
     session = manager.create_session('RIU quality '+case_id)
@@ -221,7 +231,8 @@ def main():
     q.dump(settings, {'coreAppRoot': str(app_root), 'projectRoot': str(workspace),
                      'ui': {'language': 'zh-CN', 'showReasoning': False, 'showToolCalls': False, 'showToolResults': False}})
     report = {'scope': 'Actual native model response, no authored model output or HTML repair.',
-        'model': args.model, 'source': 'standard', 'task_version': fixture['version'],
+        'model': args.model, 'source': args.source, 'task_version': fixture['version'],
+        'authentication': 'configured-key' if active.api_key else 'anonymous',
         'task_sha256': hashlib.sha256(args.task_file.read_bytes()).hexdigest(), 'cases': [],
         'attempts_per_task': 1, 'max_model_repairs': args.max_model_repairs,
         'workspace_isolation': isolation, 'credential_cleanup': False, 'report_schema': 'riu-rich-quality.v1',
@@ -236,6 +247,7 @@ def main():
     process = browser = page = None
     log = (output/'electron.log').open('x')
     try:
+        config.save(cfg)
         with sync_playwright() as playwright:
             def launch():
                 nonlocal process, browser, page
@@ -245,7 +257,7 @@ def main():
                 process = subprocess.Popen([str(args.exe.resolve()), '--gui', '--project', str(workspace),
                     f'--remote-debugging-port={port}'], env=env, stdout=log, stderr=log, **q.launch_options())
                 browser, page = q.wait_for_packaged_page(playwright, process, port)
-                page.on('pageerror', lambda error: report['browser_errors'].append(str(error)))
+                page.on('pageerror', lambda error: report['browser_errors'].append(str(error).replace(active.api_key, '[redacted]') if active.api_key else str(error)))
                 page.set_viewport_size({'width': 1280, 'height': 1500})
                 page.wait_for_selector('textarea[aria-autocomplete=list]', timeout=120000)
                 page.locator('.session-item').filter(has_text='RIU quality '+case_id).click(timeout=60000)
@@ -371,19 +383,21 @@ def main():
                 except Exception as capture_error: case['capture_error'] = str(capture_error)
         else: report['startup_error'] = type(error).__name__+': '+str(error)
     finally:
-        q.stop_process(process); recorder.close(); log.close()
-        if report['cases']:
-            saved = manager.load_session(session.id)
-            names = [call.get('function', {}).get('name') for message in saved.messages
-                     for call in message.get('tool_calls', [])]
-            case['requests'] = recorder.records; case['all_tool_names'] = names
-            case['violations'] = [name for name in names if name in fixture['forbidden_tools']]
-            if case['violations']:
-                case['outcome'] = 'model_violation'
-            case['final_phase'] = case.get('phase'); q.record_service_incidents(case)
-            q.dump(case_out/'final-session.json', saved.to_dict())
-        report['credential_cleanup'] = {'complete': True, 'files': []}  # Isolated standard model has no credential.
-        report['finished_at_utc'] = datetime.now(timezone.utc).isoformat(); save()
+        try:
+            q.stop_process(process); recorder.close(); log.close()
+            if report['cases']:
+                saved = manager.load_session(session.id)
+                names = [call.get('function', {}).get('name') for message in saved.messages
+                         for call in message.get('tool_calls', [])]
+                case['requests'] = recorder.records; case['all_tool_names'] = names
+                case['violations'] = [name for name in names if name in fixture['forbidden_tools']]
+                if case['violations']:
+                    case['outcome'] = 'model_violation'
+                case['final_phase'] = case.get('phase'); q.record_service_incidents(case)
+                q.dump(case_out/'final-session.json', saved.to_dict())
+        finally:
+            report['credential_cleanup'] = q.cleanup_isolated_credentials(app_root, active.api_key)
+            report['finished_at_utc'] = datetime.now(timezone.utc).isoformat(); save()
     print(json.dumps({'task':task['id'],'outcome':case.get('outcome'),'checks':len(case['checks']),'error':case.get('error'),'startup_error':report.get('startup_error')},ensure_ascii=False),flush=True)
     return 0 if case.get('outcome') in {'first_pass','repaired_success'} else 2
 

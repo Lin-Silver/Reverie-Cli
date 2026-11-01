@@ -1,7 +1,11 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import sys
+
+import pytest
 
 
 path = Path(__file__).resolve().parents[2] / "scripts/verification/riu_full_benchmark.py"
@@ -31,6 +35,14 @@ def test_tools_are_suppressed_only_for_self_contained_static_requests(tmp_path):
             assert not benchmark.request_tool_scope_matches({"request": str(target), "tools": 99})
 
 
+def test_native_null_tools_is_absent_only_for_self_contained_static_answers(tmp_path):
+    target = tmp_path / 'nullable-tools.json'
+    for prompt, expected in [('展示给定统计卡：计划中7，以及表格 Alpha / 开发中 / 核心助手。', True),
+                             ('创建一个可以编辑、筛选和排序的表格。', False)]:
+        target.write_text(json.dumps({'messages': [{'role': 'user', 'content': prompt}], 'tools': None}), encoding='utf-8')
+        assert benchmark.request_tool_scope_matches({'request': str(target), 'tools': 0}) is expected
+
+
 def test_static_correction_scope_depends_on_retained_data_and_no_tool_calls(tmp_path):
     target = tmp_path / "correction.json"
     supplied = {"role": "user", "content": "展示给定统计卡：计划中7、开发中5，以及表格 Alpha / 开发中 / 核心助手。"}
@@ -42,3 +54,53 @@ def test_static_correction_scope_depends_on_retained_data_and_no_tool_calls(tmp_
         for count in [0, 27]:
             target.write_text(json.dumps({"messages": messages, "tools": [{}] * count}, ensure_ascii=False), encoding="utf-8")
             assert benchmark.request_tool_scope_matches({"request": str(target), "tools": count}) == (count == expected)
+
+
+@pytest.mark.parametrize('source', ['standard', 'custom'])
+def test_frozen_child_preserves_provider_without_sending_saved_keys_to_default_host(tmp_path, monkeypatch, source):
+    monkeypatch.setattr(benchmark, 'ROOT', tmp_path)
+    (tmp_path / '.runtime').mkdir()
+    scripts = tmp_path / 'scripts/verification'
+    (scripts / 'fixtures').mkdir(parents=True)
+    for name in ['riu_quality_benchmark.py', 'riu_rich_answer_benchmark.py', 'desktop_process.py',
+                 'fixtures/riu-natural-tasks.json', 'fixtures/riu-rich-answer-tasks.json']:
+        (scripts / name).write_text('{}', encoding='utf-8')
+    package = tmp_path / 'package'
+    exe = package / ('MacOS/ReverieUI' if sys.platform == 'darwin' else 'ReverieUI.exe')
+    core = package / ('reverie.exe' if os.name == 'nt' else 'reverie')
+    archive = package / ('Resources' if sys.platform == 'darwin' else 'resources') / 'app.asar'
+    for path in [exe, core, archive]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'fixture')
+    files = {'regression.json': {'source_unchanged': True, 'stages': [{'exit_code': 0}]},
+             'acceptance.json': {'passed': True, 'build': {'id': 'fixture'}}, 'sources.json': {}}
+    for name, value in files.items():
+        (tmp_path / name).write_text(json.dumps(value), encoding='utf-8')
+    output = tmp_path / '.runtime/frozen'
+    argv = ['benchmark', '--output', str(output), '--exe', str(exe), '--models', 'model-one', 'model-two',
+            '--regression', str(tmp_path / 'regression.json'), '--acceptance', str(tmp_path / 'acceptance.json'),
+            '--source-manifest', str(tmp_path / 'sources.json'), '--source', source]
+    if source == 'custom':
+        argv += ['--provider-id', 'xkiro']
+    monkeypatch.setattr(sys, 'argv', argv)
+    monkeypatch.setattr(benchmark, 'settings_digest', lambda provider='standard', provider_id=None: provider + '-digest')
+    commands = []
+
+    def stop_before_model(command, **kwargs):
+        commands.append(command)
+        raise RuntimeError('stop-before-model-launch')
+
+    monkeypatch.setattr(benchmark.subprocess, 'Popen', stop_before_model)
+    with pytest.raises(RuntimeError, match='stop-before-model-launch'):
+        benchmark.main()
+    manifest = json.loads((output / 'manifest.json').read_text())
+    assert manifest['source'] == source
+    assert manifest['verification_settings_sha256'] == source + '-digest'
+    command, = commands
+    assert command[command.index('--source') + 1] == source
+    if source == 'custom':
+        assert manifest['api_url'] is None and '--api-url' not in command
+        assert manifest['provider_id'] == 'xkiro'
+        assert command[command.index('--provider-id') + 1] == 'xkiro'
+    else:
+        assert command[command.index('--api-url') + 1] == 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'

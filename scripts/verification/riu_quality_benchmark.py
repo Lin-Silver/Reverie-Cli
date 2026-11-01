@@ -51,12 +51,24 @@ def prepare_isolated_workspace(workspace):
     return {'vcs_root': profile.vcs_root, 'instruction_layers': [], 'fresh_repository': True}
 
 
-def configure_model_source(cfg, original, source, model, *, recorder_url=None, api_url=None):
+def configure_model_source(cfg, original, source, model, *, recorder_url=None, api_url=None, provider_id=None):
     cfg.active_model_source = source
     if source == 'standard':
         from reverie.config import ModelConfig
         cfg.models = [ModelConfig(model, model, recorder_url or api_url, '')]
         cfg.active_model_index = 0
+        return
+    if source == 'custom':
+        if not provider_id or api_url:
+            raise ValueError('Custom providers require an exact provider ID and their saved endpoint')
+        provider = next((p for p in original.custom_providers['providers'] if p['id'] == provider_id), None)
+        if provider is None:
+            raise ValueError('Configured custom provider not found: ' + provider_id)
+        provider = copy.deepcopy(provider)
+        provider['selected_model_id'] = model
+        if recorder_url:
+            provider['base_url'] = recorder_url
+        cfg.custom_providers = {'active_provider_id': provider_id, 'providers': [provider]}
         return
     provider = copy.deepcopy(getattr(original, source))
     provider['selected_model_id'] = model
@@ -66,6 +78,22 @@ def configure_model_source(cfg, original, source, model, *, recorder_url=None, a
         provider['api_url'] = recorder_url
         provider['endpoint'] = '/chat/completions'
     setattr(cfg, source, provider)
+
+
+def cleanup_isolated_credentials(app_root, api_key):
+    cleaned = []
+    variants = sorted({api_key, json.dumps(api_key, ensure_ascii=True)[1:-1],
+                       json.dumps(api_key, ensure_ascii=False)[1:-1]} - {''}, key=len, reverse=True) if api_key else []
+    for path in Path(app_root).rglob('*'):
+        if path.is_file() and ('config' in path.name.lower() or path.suffix in {'.json', '.bak'}):
+            data = path.read_text(encoding='utf-8', errors='replace')
+            scrubbed = data
+            for variant in variants:
+                scrubbed = scrubbed.replace(variant, '')
+            if scrubbed != data:
+                path.write_text(scrubbed, encoding='utf-8')
+                cleaned.append(str(path))
+    return {'complete': True, 'files': cleaned}
 
 
 def tool_scope_violations(names, fixture, task):
@@ -652,7 +680,7 @@ class Recorder:
                 public = raw.decode("utf-8").replace(recorder.secret, "[redacted]") if recorder.secret else raw.decode("utf-8")
                 target.with_suffix(".json").write_text(public, encoding="utf-8")
                 system = [m for m in payload.get("messages", []) if m.get("role") == "system"]
-                record = {"case": recorder.case, "request": str(target.with_suffix('.json')), "model": payload.get("model"), "body_bytes": len(raw), "body_characters": len(raw.decode('utf-8')), "system_characters": sum(len(str(m.get('content', ''))) for m in system), "system_messages": len(system), "schema_characters": len(json.dumps(payload.get('tools', []), ensure_ascii=False)), "tools": len(payload.get('tools', [])), "started_monotonic": started}
+                record = {"case": recorder.case, "request": str(target.with_suffix('.json')), "model": payload.get("model"), "body_bytes": len(raw), "body_characters": len(raw.decode('utf-8')), "system_characters": sum(len(str(m.get('content', ''))) for m in system), "system_messages": len(system), "schema_characters": len(json.dumps(payload.get('tools', []), ensure_ascii=False)), "tools": len(payload.get('tools') or []), "started_monotonic": started}
                 record['client_identity'] = {name: self.headers[name] for name in ['User-Agent', 'x-opencode-client']
                                              if self.headers.get(name)}
                 record['system_sha256'] = hashlib.sha256(json.dumps(system, ensure_ascii=False).encode()).hexdigest()
@@ -1975,6 +2003,8 @@ def independent_matrix(args):
                        '--timeout', str(args.timeout), '--max-model-repairs', str(args.max_model_repairs), '--shared-profile']
             if args.api_url:
                 command += ['--api-url', args.api_url]
+            if args.provider_id:
+                command += ['--provider-id', args.provider_id]
             if args.generation_only:
                 command += ['--generation-only']
             with (output / f'{name}.txt').open('w', encoding='utf-8') as log:
@@ -1996,7 +2026,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--source', choices=['sensenova', 'nvidia', 'opencode', 'standard'], default='sensenova')
+    parser.add_argument('--source', choices=['sensenova', 'nvidia', 'opencode', 'custom', 'standard'], default='sensenova')
+    parser.add_argument('--provider-id', help='Exact configured custom provider ID; its endpoint and credentials stay in the isolated profile.')
     parser.add_argument('--api-url', help='Provider Chat API base URL; used only inside the isolated profile.')
     parser.add_argument('--model', default='sensenova-6.8-flash-lite')
     parser.add_argument('--task-file', type=Path, default=TASK_FILE)
@@ -2035,7 +2066,7 @@ def main():
     cfg = ConfigManager(workspace).load()
     if args.source == 'standard' and not args.api_url:
         parser.error('--source standard requires --api-url')
-    configure_model_source(cfg, original, args.source, args.model, api_url=args.api_url)
+    configure_model_source(cfg, original, args.source, args.model, api_url=args.api_url, provider_id=args.provider_id)
     active = cfg.active_model
     if not active or active.model != args.model:
         raise ValueError('Configured model not resolved exactly')
@@ -2049,7 +2080,7 @@ def main():
         from reverie.opencode import _opencode_models_url
         models_url = _opencode_models_url(cfg.opencode['api_url'])
     recorder = Recorder(output, upstream, active.api_key, models_url=models_url, request_timeout=args.timeout)
-    configure_model_source(cfg, original, args.source, args.model, recorder_url=f'http://127.0.0.1:{recorder.server.server_port}/v1')
+    configure_model_source(cfg, original, args.source, args.model, recorder_url=f'http://127.0.0.1:{recorder.server.server_port}/v1', provider_id=args.provider_id)
     cfg.security = copy.deepcopy(original.security)
     cfg.api_proxy = original.api_proxy
     cfg.api_timeout = args.timeout
@@ -2058,7 +2089,6 @@ def main():
     cfg.stream_responses = True
     config = ConfigManager(workspace)
     config.ensure_dirs()
-    config.save(cfg)
     manager = SessionManager(config.project_data_dir, project_root=workspace)
     task_file = args.task_file.resolve()
     if not task_file.is_relative_to(ROOT):
@@ -2100,6 +2130,7 @@ def main():
         return browser, page
 
     try:
+        config.save(cfg)
         with sync_playwright() as p:
             started = time.perf_counter()
             browser, page = launch(p)
@@ -2511,19 +2542,14 @@ def main():
             browser.close()
 
     finally:
-        if process and process.poll() is None:
-            stop_process(process)
-        recorder.close()
-        log.close()
-        cleaned = []
-        for f in app_root.rglob('*'):
-            if f.is_file() and ('config' in f.name.lower() or f.suffix in {'.json', '.bak'}):
-                data = f.read_text(encoding='utf-8', errors='replace')
-                if active.api_key and active.api_key in data:
-                    f.write_text(data.replace(active.api_key, ''), encoding='utf-8')
-                    cleaned.append(str(f))
-        report['credential_cleanup'] = {'complete': True, 'files': cleaned}
-        save()
+        try:
+            if process and process.poll() is None:
+                stop_process(process)
+            recorder.close()
+            log.close()
+        finally:
+            report['credential_cleanup'] = cleanup_isolated_credentials(app_root, active.api_key)
+            save()
 
 
 if __name__ == '__main__':

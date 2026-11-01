@@ -97,10 +97,10 @@
   --accent-2: #6247b9;
   --accent-bg: rgba(105, 77, 190, .09);
   --accent-soft: rgba(105, 77, 190, .14);
-  --blue: #3978c4;
-  --green: #21845a;
-  --amber: #9d671e;
-  --red: #bd454b;
+  --blue: #285f9d;
+  --green: #176a46;
+  --amber: #815318;
+  --red: #a5343a;
   --shadow: 0 24px 70px rgba(41, 48, 59, .18);
   --shadow-soft: 0 10px 30px rgba(41, 48, 59, .11);
   --overlay: rgba(54, 61, 72, .28);

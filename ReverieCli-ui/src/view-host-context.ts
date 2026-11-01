@@ -5,6 +5,8 @@ const variables: Record<string, string> = {
   "--color-text-primary": "--text", "--color-text-secondary": "--text-2",
   "--color-text-tertiary": "--muted", "--color-border-primary": "--border",
   "--color-border-secondary": "--border-soft", "--color-text-danger": "--red",
+  "--color-text-success": "--green", "--color-text-warning": "--amber",
+  "--color-text-info": "--blue",
   "--font-mono": "--font-mono",
 };
 

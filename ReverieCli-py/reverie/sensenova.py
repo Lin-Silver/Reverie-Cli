@@ -22,7 +22,6 @@ SENSENOVA_DEFAULT_TEMPERATURE = 0.6
 SENSENOVA_DEFAULT_TOP_P = 0.95
 SENSENOVA_DEFAULT_REASONING_EFFORT = "medium"
 SENSENOVA_REASONING_EFFORTS = ("none", "low", "medium", "high", "max")
-SENSENOVA_FLASH_LITE_DEFAULT_MAX_TOKENS = 6_144
 SENSENOVA_FLASH_LITE_DEFAULT_TEMPERATURE = 0.7
 SENSENOVA_FLASH_LITE_DEFAULT_TOP_P = 0.8
 SENSENOVA_FLASH_LITE_DEFAULT_TOP_K = 20
@@ -466,8 +465,6 @@ def build_sensenova_openai_options(sensenova_config: Any, model_id: Optional[str
         "deepseek-v4-flash",
         "sensenova-6.8-flash-lite",
     }
-    if is_flash_lite and requested_max_tokens == SENSENOVA_DEFAULT_MAX_TOKENS:
-        requested_max_tokens = SENSENOVA_FLASH_LITE_DEFAULT_MAX_TOKENS
     temperature = float(cfg.get("temperature", SENSENOVA_DEFAULT_TEMPERATURE))
     top_p = float(cfg.get("top_p", SENSENOVA_DEFAULT_TOP_P))
     if is_flash_lite and temperature == SENSENOVA_DEFAULT_TEMPERATURE:

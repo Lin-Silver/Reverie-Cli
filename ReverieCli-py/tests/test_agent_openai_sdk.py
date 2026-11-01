@@ -752,7 +752,7 @@ def test_sensenova_non_streaming_sdk_preserves_reasoning_effort_and_sampling_opt
     assert captured["temperature"] == 0.7
     assert captured["top_p"] == 0.8
     assert captured["presence_penalty"] == 1.5
-    assert captured["max_tokens"] == 6144
+    assert captured["max_tokens"] == 65536
 
 
 def test_sensenova_openai_chat_prefers_http_fallback_only_in_writer_direct_prose(tmp_path):
@@ -838,7 +838,7 @@ def test_sensenova_http_fallback_streaming_preserves_openai_payload_options(tmp_
     assert captured["payload"]["temperature"] == 0.7
     assert captured["payload"]["top_p"] == 0.8
     assert captured["payload"]["presence_penalty"] == 1.5
-    assert captured["payload"]["max_tokens"] == 6144
+    assert captured["payload"]["max_tokens"] == 65536
     assert captured["payload"]["reasoning_effort"] == "none"
     assert captured["payload"]["top_k"] == 20
     assert captured["payload"]["min_p"] == 0.0

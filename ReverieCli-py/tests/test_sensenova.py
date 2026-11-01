@@ -2,6 +2,7 @@ import base64
 import sys
 from types import SimpleNamespace
 
+import pytest
 from rich.console import Console
 
 from reverie import sensenova as sensenova_module
@@ -248,7 +249,7 @@ def test_sensenova_config_and_runtime_model_data():
     }
 
 
-def test_sensenova_flash_lite_uses_bounded_default_output_budget():
+def test_sensenova_flash_lite_preserves_configured_default_output_budget():
     options = build_sensenova_openai_options(
         {
             **default_sensenova_config(),
@@ -256,9 +257,17 @@ def test_sensenova_flash_lite_uses_bounded_default_output_budget():
         }
     )
 
-    assert options["max_tokens"] == 6144
+    assert options["max_tokens"] == 65536
     assert options["extra_body"]["reasoning_effort"] == "medium"
     assert "output_config" not in options["extra_body"]
+
+
+@pytest.mark.parametrize("budget,expected", [(2048, 2048), (6144, 6144), (16384, 16384), (65536, 65536), (131072, 65536)])
+def test_sensenova_flash_lite_output_budget_respects_explicit_choice_and_model_limit(budget, expected):
+    options = build_sensenova_openai_options(
+        {**default_sensenova_config(), "selected_model_id": "sensenova-6.8-flash-lite", "max_tokens": budget}
+    )
+    assert options["max_tokens"] == expected
 
 
 def test_config_accepts_sensenova_active_source():

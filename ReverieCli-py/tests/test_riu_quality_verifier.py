@@ -1110,6 +1110,7 @@ def test_css_zero_state_does_not_mistake_dashboard_cards_for_bars(verifier_brows
 @pytest.mark.parametrize('total,top,expected', [(720, 20, True), (720, 900, False), (360, 20, False)])
 @pytest.mark.parametrize('markup', [
     '<section><span>总用水量 (升)</span><strong>VALUE L</strong></section>',
+    '<section><span>总用水量（按当前倍率）</span><strong>VALUE 升</strong></section>',
     '<section><strong>VALUE</strong><span>总量</span></section>',
     '<table><tr><th>合计</th><td>VALUE 升</td></tr></table>',
     '<table><thead><tr><th>月份</th><th>原始用量</th><th>调整后用量</th></tr></thead>'
@@ -1125,6 +1126,33 @@ def test_chart_pip_requires_its_labelled_total_instead_of_an_axis_tick(verifier_
                          f'<div style="margin-top:{top}px">'+markup.replace('VALUE', str(total))+'</div>')
         result = benchmark.primary_result_in_viewport(page, 720, task={'id': 'chart'})
         assert result['passed'] is expected
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize('label', ['总用水量（按当前倍率）', '用水量合计 (按当前倍率)',
+                                   '总量（ 按当前倍率 ）', 'Total water (按当前倍率)'])
+@pytest.mark.parametrize('amount,expected', [(720, True), (360, False)])
+def test_chart_current_multiplier_label_preserves_actual_amount_checks(verifier_browser, label, amount, expected):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>{label}</span><strong>{amount} 升</strong></section>'
+                         '<p>参考 720 升</p><svg><text>720</text></svg>')
+        result = benchmark.chart_primary_result(page, 720, timeout=0)
+        assert result['passed'] is expected
+        assert [item['value'] for item in result['candidates']] == [amount]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize('label', ['总用水量（原始）', '总用水量（参考值）', '总用水量（上月）',
+                                   '总用水量（计划）', '总用水量（按当前倍率）参考值'])
+def test_chart_reference_qualifiers_are_not_current_totals(verifier_browser, label):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>{label}</span><strong>720 升</strong></section>')
+        result = benchmark.chart_primary_result(page, 720, timeout=0)
+        assert not result['passed'] and not result['candidates']
     finally:
         page.close()
 

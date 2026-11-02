@@ -34,6 +34,62 @@ def test_supplied_recommendations_pass_without_inferred_content(recommendations)
     assert all(c["passed"] for c in verifier.assess_rich_state(state, expected))
 
 
+@pytest.mark.parametrize("description,passed", [
+    ("项目管理工具", True),
+    ("Plane是项目管理工具", True),
+    (" Plane 是 项目管理工具。 ", True),
+    ("项目管理工具。", True),
+    ("Plane是项目管理工具.", True),
+    ("", False),
+    ("项目管理", False),
+    ("任务管理工具", False),
+    ("Vikunja是项目管理工具", False),
+    ("Plane不是项目管理工具", False),
+    ("Plane是开源项目管理工具", False),
+    ("Plane是项目管理工具，支持自动化", False),
+    ("Plane是项目管理工具。开源免费", False),
+    ("Plane是项目管理工具?", False),
+])
+def test_card_description_preserves_facts_with_a_neutral_subject(recommendations, description, passed):
+    state, expected = recommendations
+    state["cards"][0]["description"] = description
+    check = next(c for c in verifier.assess_rich_state(state, expected)
+                 if c["name"] == "rich-supplied-descriptions")
+    assert check["passed"] is passed
+
+
+def test_neutral_subject_does_not_allow_an_inferred_badge(recommendations):
+    state, expected = recommendations
+    for card in state["cards"]:
+        card["description"] = card["title"] + "是" + card["description"]
+    state["cards"][1]["badges"] = ["任务管理"]
+    checks = {c["name"]: c["passed"] for c in verifier.assess_rich_state(state, expected)}
+    assert checks["rich-supplied-descriptions"]
+    assert not checks["rich-per-item-badges"]
+
+
+@pytest.mark.parametrize("description,passed", [("A+B是项目管理工具", True), ("AB是项目管理工具", False)])
+def test_description_subject_is_a_literal_card_title(recommendations, description, passed):
+    state, expected = recommendations
+    state["cards"][0].update(title="A+B", description=description)
+    expected["card_titles"][0] = "A+B"
+    check = next(c for c in verifier.assess_rich_state(state, expected)
+                 if c["name"] == "rich-supplied-descriptions")
+    assert check["passed"] is passed
+
+
+@pytest.mark.parametrize("extra", [False, True])
+def test_description_comparison_requires_every_supplied_card(recommendations, extra):
+    state, expected = recommendations
+    if extra:
+        state["cards"].append(copy.deepcopy(state["cards"][0]))
+    else:
+        state["cards"].pop()
+    check = next(c for c in verifier.assess_rich_state(state, expected)
+                 if c["name"] == "rich-supplied-descriptions")
+    assert not check["passed"]
+
+
 @pytest.mark.parametrize("mutation,failed_check", [
     ("description", "rich-supplied-descriptions"),
     ("badge", "rich-per-item-badges"),

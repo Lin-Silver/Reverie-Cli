@@ -88,7 +88,11 @@ def assess_rich_state(state, expected):
         numbers = [c.get('number') for c in state['cards']]
         check('rich-card-numbering', not any(numbers) or numbers == list(range(1, len(numbers)+1)), numbers)
     if 'card_descriptions' in expected:
-        check('rich-supplied-descriptions', [c.get('description') for c in state['cards']] == expected['card_descriptions'], state['cards'])
+        descriptions_match = len(state['cards']) == len(expected['card_descriptions']) and all(
+            re.fullmatch(rf"(?:{re.escape(card['title'])}\s*是\s*)?{re.escape(description)}[。.]?",
+                         card.get('description', '').strip())
+            for card, description in zip(state['cards'], expected['card_descriptions']))
+        check('rich-supplied-descriptions', descriptions_match, state['cards'])
     if 'card_badges' in expected:
         check('rich-per-item-badges', [c.get('badges') for c in state['cards']] == expected['card_badges'], state['cards'])
     if 'image_urls' in expected:

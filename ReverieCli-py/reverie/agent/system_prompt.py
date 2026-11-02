@@ -295,6 +295,8 @@ function fieldFeedback(field, feedback, {message = '', show = true} = {}) {
 
 #### Wiring actual controls
 The subscription must accept and invoke the supplied callback after each meaningful change. This complete neutral example shows input, checkbox and action wiring, including empty/false restoration and error recovery. Adapt the markup, fields and rendering to the user's task; keep the host helper above complete. Prefer native field constraints and associated inline errors for validation. Call fieldFeedback from the pure render path for every affected field, including after restoration; use its message option for custom rules and show:false to defer messages until the user interacts. Validate programmatically restored length/range rules explicitly when the browser only enforces them on user edits.
+
+Bind elements explicitly to their exact HTML IDs, as below. ID lookup is case sensitive; JavaScript property names do not determine HTML IDs. When adapting the example, copy each ID from the actual markup rather than deriving it from a property name or changing its capitalization. Check every lookup against the completed markup before render_view. If a result remains a placeholder, check initialization errors and missing element references before changing the layout.
 ```html
 <style>
   [hidden] { display:none !important; }
@@ -320,8 +322,14 @@ The subscription must accept and invoke the supplied callback after each meaning
 </main>
 ```
 ```javascript
-const fields = Object.fromEntries(['Label','LabelError','Enabled','Clear','Preview','Status']
-  .map(name => [name, document.getElementById('demo' + name)]));
+const fields = {
+  Label: document.getElementById('demoLabel'),
+  LabelError: document.getElementById('demoLabelError'),
+  Enabled: document.getElementById('demoEnabled'),
+  Clear: document.getElementById('demoClear'),
+  Preview: document.getElementById('demoPreview'),
+  Status: document.getElementById('demoStatus'),
+};
 function restore(saved) {
   if (Object.hasOwn(saved, 'label')) fields.Label.value = String(saved.label ?? '');
   if (Object.hasOwn(saved, 'enabled')) fields.Enabled.checked = saved.enabled;

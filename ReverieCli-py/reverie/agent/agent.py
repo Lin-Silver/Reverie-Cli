@@ -4742,6 +4742,7 @@ class ReverieAgent:
 
     def _iter_openai_sdk_stream_events(self, response: Any) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI SDK streaming chunks into normalized events."""
+        observed_delta = finished = False
         for chunk in response:
             if getattr(chunk, "usage", None) is not None:
                 yield {"type": "usage", "usage": chunk.usage}
@@ -4750,6 +4751,7 @@ class ReverieAgent:
                 continue
 
             if choice.finish_reason:
+                finished = True
                 yield {"type": "finish", "reason": choice.finish_reason}
 
             delta = choice.delta
@@ -4763,16 +4765,19 @@ class ReverieAgent:
                 "reasoning",
             )
             if reasoning_content:
+                observed_delta = True
                 yield {"type": "reasoning", "text": reasoning_content}
 
             content_piece = _extract_text_from_candidates(delta, "content")
             if content_piece:
+                observed_delta = True
                 yield {"type": "content", "text": content_piece}
 
             if not delta.tool_calls:
                 continue
 
             for tool_call in delta.tool_calls:
+                observed_delta = True
                 function = getattr(tool_call, "function", None)
                 yield {
                     "type": "tool_call_delta",
@@ -4782,6 +4787,8 @@ class ReverieAgent:
                     "arguments": getattr(function, "arguments", None) if function else None,
                     "append_arguments": True,
                 }
+        if observed_delta and not finished:
+            raise RuntimeError("Response ended prematurely: chat stream has no terminal finish reason")
 
     def _iter_request_stream_events(
         self,
@@ -4790,6 +4797,7 @@ class ReverieAgent:
     ) -> Generator[Dict[str, Any], None, None]:
         """Translate OpenAI-compatible SSE chunks into normalized events."""
         observed_response = False
+        observed_delta = finished = False
         for data_str in self._iter_sse_data_strings(response):
             try:
                 chunk_data = json.loads(data_str)
@@ -4810,6 +4818,7 @@ class ReverieAgent:
             choice = choices[0]
             finish_reason = choice.get("finish_reason")
             if finish_reason:
+                finished = True
                 yield {"type": "finish", "reason": finish_reason}
 
             delta = choice.get("delta") or {}
@@ -4837,6 +4846,7 @@ class ReverieAgent:
                     "reasoning",
                 )
             if reasoning_content:
+                observed_delta = True
                 yield {"type": "reasoning", "text": reasoning_content}
 
             content = _extract_text_from_candidates(delta, "content")
@@ -4846,6 +4856,7 @@ class ReverieAgent:
                     "content",
                 )
             if content:
+                observed_delta = True
                 yield {"type": "content", "text": content}
 
             tool_calls_delta = delta.get("tool_calls", [])
@@ -4853,6 +4864,7 @@ class ReverieAgent:
                 continue
 
             for tool_call_delta in tool_calls_delta:
+                observed_delta = True
                 function_delta = tool_call_delta.get("function", {})
                 yield {
                     "type": "tool_call_delta",
@@ -4863,6 +4875,8 @@ class ReverieAgent:
                     "append_arguments": "arguments" in function_delta,
                 }
 
+        if observed_delta and not finished:
+            raise RuntimeError("Response ended prematurely: chat stream has no terminal finish reason")
         if not observed_response:
             raise EmptyProviderStreamError(
                 "[empty-provider-stream] HTTP stream ended without any model response events"

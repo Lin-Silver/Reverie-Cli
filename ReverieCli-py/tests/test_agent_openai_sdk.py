@@ -1004,6 +1004,70 @@ def test_sensenova_http_stream_continues_partial_answer_without_replaying_tools(
     assert [m["content"] for m in agent.messages if m["role"] == "user"] == ["Summarize the completed view."]
 
 
+@pytest.mark.parametrize("transport", ["sdk", "request"])
+@pytest.mark.parametrize("finish_reason", [None, "stop", "length", "tool_calls"])
+@pytest.mark.parametrize("kind", ["content", "reasoning_content", "tool_calls"])
+def test_chat_stream_requires_terminal_finish_for_observed_deltas(transport, finish_reason, kind):
+    agent = ReverieAgent.__new__(ReverieAgent)
+    delta = {kind: ([{"index": 0, "id": "call_1", "function": {"name": "read_file", "arguments": '{"path":"'}}]
+                    if kind == "tool_calls" else 'partial response')}
+    chunks = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]}]
+    if finish_reason:
+        chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]})
+    if transport == "request":
+        agent._iter_sse_data_strings = lambda response: iter(map(json.dumps, chunks))
+        stream = agent._iter_request_stream_events(None, "test")
+    else:
+        from openai.types.chat import ChatCompletionChunk
+        stream = agent._iter_openai_sdk_stream_events([ChatCompletionChunk.model_validate({
+            "id": "test", "object": "chat.completion.chunk", "created": 0, "model": "test", **chunk,
+        }) for chunk in chunks])
+    if finish_reason is None:
+        with pytest.raises(RuntimeError, match="Response ended prematurely"):
+            list(stream)
+    else:
+        events = list(stream)
+        assert [event["reason"] for event in events if event["type"] == "finish"] == [finish_reason]
+
+
+@pytest.mark.parametrize("transport", ["sdk", "request"])
+def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_path, transport):
+    from openai.types.chat import ChatCompletionChunk
+
+    config = _standard_config()
+    config.active_model_source = "sensenova"
+    config.sensenova = {"selected_model_id": "sensenova-6.8-flash-lite"}
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x",
+        model="sensenova-6.8-flash-lite", project_root=tmp_path, provider="openai-chat", config=config)
+    agent.messages = [{"role": "user", "content": "Summarize the given data."}]
+    agent.get_visible_tool_schemas = lambda mode=None: []
+    agent._check_and_compress_context = lambda **kwargs: None
+    captured = []
+    partial, tail = '```reverie-ui\n{"type":"table","rows":[["Par', 'tial",7]]}\n```'
+
+    def request(payload=None, **kwargs):
+        captured.append(payload or kwargs)
+        index = len(captured)
+        pieces = [{"choices": [{"index": 0, "delta": {"content": partial if index == 1 else tail}, "finish_reason": None}]}]
+        if index > 1:
+            assert "saved partial assistant response" in captured[-1]["messages"][-1]["content"]
+            pieces.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+        if transport == "request":
+            return SimpleNamespace(pieces=pieces, close=lambda: None)
+        return [ChatCompletionChunk.model_validate({"id": "test", "object": "chat.completion.chunk",
+            "created": 0, "model": agent.model, **piece}) for piece in pieces]
+
+    agent._make_direct_request = request
+    agent._create_openai_chat_completion = request
+    agent._iter_sse_data_strings = lambda response: iter(map(json.dumps, response.pieces))
+    method = agent._process_streaming_openai_http_fallback if transport == "request" else agent._process_streaming_openai_sdk
+    chunks = list(method(session_id="eof-recovery"))
+    assert len(captured) == 2
+    assert partial in chunks and tail in chunks
+    assert not agent._incomplete_turn_error
+    assert [m["content"] for m in agent.messages if m["role"] == "assistant"] == [partial, tail]
+
+
 def test_sensenova_writer_context_followup_requests_append_only_plain_prose(tmp_path):
     _seed_writer_project(
         tmp_path,
@@ -1578,6 +1642,8 @@ def test_nvidia_step_5_request_payload_uses_fixed_thinking_and_stream_reasoning(
             yield 'data: {"choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}'
             yield ""
             yield 'data: {"choices":[{"delta":{"content":"answer"},"finish_reason":null}]}'
+            yield ""
+            yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}'
             yield ""
             yield "data: [DONE]"
 

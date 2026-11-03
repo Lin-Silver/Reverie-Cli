@@ -1132,6 +1132,7 @@ def test_css_zero_state_does_not_mistake_dashboard_cards_for_bars(verifier_brows
 @pytest.mark.parametrize('total,top,expected', [(720, 20, True), (720, 900, False), (360, 20, False)])
 @pytest.mark.parametrize('markup', [
     '<section><span>总用水量 (升)</span><strong>VALUE L</strong></section>',
+    '<section><div><span>当前总用水量</span><strong>VALUE L</strong></div><span>倍率：2×</span></section>',
     '<section><span>总用水量（按当前倍率）</span><strong>VALUE 升</strong></section>',
     '<section><span>总用水量（当前倍率）</span><strong>VALUE 升</strong></section>',
     '<section><strong>VALUE</strong><span>总量</span></section>',
@@ -1170,10 +1171,24 @@ def test_chart_current_multiplier_label_preserves_actual_amount_checks(verifier_
         page.close()
 
 
+@pytest.mark.parametrize('current_total,expected', [(720, True), (360, False)])
+def test_chart_current_summary_and_table_total_must_both_match(verifier_browser, current_total, expected):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>当前总用水量</span><strong>{current_total} L</strong></section>'
+                         '<table><tr><th>合计</th><td>720 L</td></tr></table>')
+        result = benchmark.chart_primary_result(page, 720, timeout=0)
+        assert result['passed'] is expected
+        assert sorted(item['value'] for item in result['candidates']) == sorted([current_total, 720])
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize('label', ['总用水量（原始）', '总用水量（参考值）', '总用水量（上月）',
                                    '总用水量（计划）', '总用水量（按当前倍率）参考值',
                                    '总用水量（当前倍率）参考值', '总用水量（当前倍率原始值）',
-                                   '总用水量（参考当前倍率）'])
+                                   '总用水量（参考当前倍率）', '当前总用水量（原始）',
+                                   '当前总用水量（参考值）', '当前总用水量（上月）'])
 def test_chart_reference_qualifiers_are_not_current_totals(verifier_browser, label):
     page = verifier_browser.new_page()
     try:

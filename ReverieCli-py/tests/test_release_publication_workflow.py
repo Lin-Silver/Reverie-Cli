@@ -41,8 +41,11 @@ def test_native_release_gate_rejects_changed_assets_and_failed_runtime(tmp_path,
     assert (result.returncode == 0) == (not changed and native_passed), result.stderr
 
 
-@pytest.mark.parametrize("existing,fail_upload", [(True, False), (False, False), (False, True)])
-def test_stable_notes_and_publication_after_successful_uploads(tmp_path, existing, fail_upload):
+@pytest.mark.parametrize("existing,fail_upload,release_ids", [
+    (True, False, "42"), (False, False, "42"), (False, True, "42"),
+    (True, False, ""), (True, False, "42\n43"),
+])
+def test_stable_notes_and_publication_after_successful_uploads(tmp_path, existing, fail_upload, release_ids):
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
     if not bash or not Path(bash).is_file():
         pytest.skip("Bash is required to exercise the release workflow")
@@ -70,7 +73,12 @@ elif args[:2] == ["release", "upload"]:
     if os.environ["FAIL_UPLOAD"] == "1" and "linux-x64.AppImage" in args[3]:
         sys.exit(17)
 elif args[0] == "api" and "--method" not in args:
-    print("42")
+    if "/releases/tags/" in args[1]:
+        sys.exit(22)
+    assert args[1] == "repos/example/reverie/releases?per_page=100"
+    assert "--paginate" in args
+    assert args[args.index("--jq")+1] == '.[] | select(.tag_name == "v2.5.3") | .id'
+    print(os.environ["RELEASE_IDS"])
 ''', encoding="utf-8")
     interpreter = shlex.quote(Path(sys.executable).as_posix())
     stub_arg = shlex.quote(stub.as_posix())
@@ -79,14 +87,19 @@ elif args[0] == "api" and "--method" not in args:
         env={**os.environ, "RUNNER_TEMP": tmp_path.as_posix(), "GITHUB_REF_TYPE": "tag",
              "GITHUB_REF_NAME": "v2.5.3", "GITHUB_SHA": "a" * 40,
              "GITHUB_REPOSITORY": "example/reverie", "PUBLICATION_LOG": log.as_posix(),
-             "EXISTING_RELEASE": str(int(existing)), "FAIL_UPLOAD": str(int(fail_upload))})
+             "EXISTING_RELEASE": str(int(existing)), "FAIL_UPLOAD": str(int(fail_upload)),
+             "RELEASE_IDS": release_ids})
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     note_call = next(c for c in calls if "--notes-file" in c["args"])
     assert note_call["notes"].strip() == "- A concise verified change."
     if not existing:
         assert "--draft" in note_call["args"]
     public = [i for i, c in enumerate(calls) if "draft=false" in c["args"]]
-    if fail_upload:
+    if release_ids != "42":
+        assert result.returncode != 0
+        assert not public
+        assert not any(c["args"][:2] == ["release", "upload"] for c in calls)
+    elif fail_upload:
         assert result.returncode == 17, result.stderr
         assert not public
     else:

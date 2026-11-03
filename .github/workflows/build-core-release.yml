@@ -537,7 +537,8 @@ jobs:
               gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --draft --latest=false
             fi
           fi
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" --jq .id)
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq ".[] | select(.tag_name == \"$release_tag\") | .id")
+          [[ "$release_id" =~ ^[0-9]+$ ]] || { echo "Expected exactly one release ID for $release_tag"; exit 1; }
           # Upload over the existing assets, then prune whatever is left from an
           # older version. Deleting every asset up front left the rolling release
           # with no downloads for the length of the upload, and permanently empty

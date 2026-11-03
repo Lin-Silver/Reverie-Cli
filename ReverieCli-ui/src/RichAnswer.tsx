@@ -51,7 +51,7 @@ export const RichAnswer = memo(function RichAnswer({ block }: { block: AnswerBlo
   if (block.type === "table") return <section className="answer-table-section">
     {block.title && <h3 id={titleId}>{block.title}</h3>}
     <div className="answer-table-scroll" role="region" aria-label={block.title ? undefined : t("表格")} aria-labelledby={block.title ? titleId : undefined} tabIndex={0}>
-      <table className="answer-table">{block.caption && <caption>{block.caption}</caption>}<thead><tr>{block.columns.map((column, index) => <th scope="col" key={index}>{column}</th>)}</tr></thead>
+      <table className="answer-table">{block.caption && <caption>{block.caption}</caption>}{block.columns.length > 0 && <thead><tr>{block.columns.map((column, index) => <th scope="col" key={index}>{column}</th>)}</tr></thead>}
         <tbody>{block.rows.map((row, index) => <tr key={index}>{row.map((value, column) => <td key={column}><Cell value={value} /></td>)}</tr>)}</tbody>
       </table>
       {!block.rows.length && <p className="answer-table-empty">{t("暂无数据")}</p>}

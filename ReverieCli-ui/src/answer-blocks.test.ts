@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import { parseAnswerBlock } from "./answer-blocks";
 
 describe("rich answer data fidelity", () => {
+  it("accepts an explicitly empty table with no supplied columns", () => {
+    const value = { type: "table", title: "待确认", columns: [], rows: [], caption: "尚无记录" };
+    expect(parseAnswerBlock(JSON.stringify(value))).toEqual(value);
+  });
+
+  it.each([{ rows: [[]] }, { rows: [["unlabelled data"]] }])("retains raw data when rows have no supplied columns: %j", ({ rows }) => {
+    expect(parseAnswerBlock(JSON.stringify({ type: "table", columns: [], rows }))).toBeNull();
+  });
+
   it("preserves numeric display text before JavaScript can round it", () => {
     const source = '{"type":"metrics","items":[{"label":"记录编号","value":9007199254740993},{"label":"精确小数","value":0.1234567890123456789},{"label":"负零","value":-0},{"label":"金额","value":1.2300}]}';
     const block = parseAnswerBlock(source);

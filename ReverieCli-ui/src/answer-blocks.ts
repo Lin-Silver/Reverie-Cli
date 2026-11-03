@@ -117,8 +117,8 @@ export function parseAnswerBlock(source: string): AnswerBlock | null {
     return { ...block, items: block.items.map(item => ({ ...item, value: displayNumber(item, "value", item.value) })) };
   }
   if (value.type === "table" && fields(value, ["type", "title", "columns", "rows", "caption"]) && optional(value.title, text) && optional(value.caption, text) &&
-    Array.isArray(value.columns) && value.columns.length > 0 && value.columns.every(text) &&
-    Array.isArray(value.rows) && value.rows.every(row => Array.isArray(row) && row.length === (value.columns as string[]).length && row.every(cell))) {
+    Array.isArray(value.columns) && value.columns.every(text) &&
+    Array.isArray(value.rows) && (value.columns.length > 0 || value.rows.length === 0) && value.rows.every(row => Array.isArray(row) && row.length === (value.columns as string[]).length && row.every(cell))) {
     const block = value as Extract<AnswerBlock, { type: "table" }>;
     return { ...block, rows: block.rows.map(row => row.map((item, index) => {
       const source = typeof item === "number" ? numberSources.get(row)?.get(String(index)) : undefined;

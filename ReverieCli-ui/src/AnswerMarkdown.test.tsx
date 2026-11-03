@@ -36,6 +36,17 @@ describe("rich answer content", () => {
     expect(screen.getAllByRole("row")).toHaveLength(1);
   });
 
+  it("shows a titled columnless empty table without inventing headers or losing its caption", () => {
+    render(<AnswerMarkdown>{fence({ type: "table", title: "待确认", columns: [], rows: [], caption: "尚无记录" })}</AnswerMarkdown>);
+    expect(screen.getByRole("heading", { name: "待确认" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "待确认" }).tabIndex).toBe(0);
+    expect(screen.getByText("暂无数据")).toBeTruthy();
+    expect(screen.getByText("尚无记录").tagName).toBe("CAPTION");
+    expect(screen.queryAllByRole("columnheader")).toHaveLength(0);
+    expect(screen.queryAllByRole("row")).toHaveLength(0);
+    expect(document.querySelector("pre")).toBeNull();
+  });
+
   it("renders image-and-text recommendations, sources and working native external links", () => {
     render(<AnswerMarkdown>{fence({ type: "cards", numbered: true, items: [{ title: "Plane", description: "项目管理界面", badge: { text: "综合首选", tone: "success" }, image: { url: "https://example.com/plane.png", alt: "Plane 看板截图" }, details: ["支持看板和工作项。"], sources: [{ label: "Plane", url: "https://plane.so/" }], links: [{ label: "GitHub 源码", url: "https://github.com/makeplane/plane" }] }] })}</AnswerMarkdown>);
     expect(screen.getByRole("heading", { name: "1. Plane" })).toBeTruthy();

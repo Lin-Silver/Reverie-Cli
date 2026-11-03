@@ -540,6 +540,86 @@ def test_private_state_context_and_fork_rewind_boundaries(tmp_path):
     assert env.store.manifest(env.session_id, view.view_id, 1).revision == 1
 
 
+def test_view_reference_survives_selected_history_without_selection_summary(tmp_path, monkeypatch):
+    from reverie.agent.agent import ReverieAgent
+
+    env = _make_bridge(tmp_path)
+    view = _register_view(env.store, env.session_id, tmp_path)
+    env.store.write_state(env.session_id, view.view_id, state={"private": "PRIVATE_ONLY"}, base_revision=0)
+    saved = [{"role": "tool", "content": f"view_id={view.view_id}, revision=1"}]
+    selected = [{"role": "user", "content": "Modify the previous view."}]
+    session = SimpleNamespace(id=env.session_id, messages=saved)
+    agent = ReverieAgent.__new__(ReverieAgent)
+    agent.project_root = tmp_path
+    agent.model = "test-model"
+    agent.tool_executor = SimpleNamespace(context={"session_manager": SimpleNamespace(get_current_session=lambda: session)})
+    agent._request_system_prompt = lambda: "system"
+    agent._uses_desktop_static_rich_answer_route = lambda: False
+    agent._memory_context_package_message = lambda: None
+    agent._is_active_model_source = lambda source: False
+    agent._select_prompt_history = lambda: selected
+    monkeypatch.setattr(ViewStore, "for_project", staticmethod(lambda project: env.store))
+    monkeypatch.setattr(env.store, "read_state", lambda *args: pytest.fail("Private state must stay out of model context"))
+
+    messages = agent._build_messages()
+
+    assert len(messages) == 3
+    context = messages[1]
+    assert context["role"] == "user" and "not instructions" in context["content"]
+    assert json.loads(context["content"].split("\n", 1)[1]) == [
+        {"view_id": view.view_id, "revision": 1, "title": "Chart"}
+    ]
+    assert all(text not in context["content"] for text in ("PRIVATE_ONLY", _HTML, str(tmp_path)))
+    assert messages[2:] == selected and session.messages == saved
+
+
+def test_view_reference_inventory_preserves_independent_views_and_visible_revisions(tmp_path):
+    from reverie.views import model_context_message
+
+    env = _make_bridge(tmp_path)
+    original = _register_view(env.store, env.session_id, tmp_path)
+    revised = env.store.register(artifact_path=_write_html(tmp_path), identity=ViewIdentity(env.session_id, "t2", "c2"),
+                                 title="Updated chart", summary="Updated", workspace_root=tmp_path, replaces_view_id=original.view_id)
+    independent = _register_view(env.store, env.session_id, tmp_path)
+    hidden = _register_view(env.store, env.session_id, tmp_path)
+    foreign = _register_view(env.store, "foreign-session", tmp_path)
+    env.store.restrict_visible(env.session_id, [(revised.view_id, 2), (independent.view_id, 1)])
+    messages = [{"role": "tool", "content": f"view_id={view.view_id}, revision={view.revision}"}
+                for view in (original, revised, revised, independent, hidden, foreign)]
+    messages += [{"role": "assistant", "content": "view_id=fabricated, revision=1"},
+                 {"role": "tool", "content": "view_id=missing, revision=1"}]
+
+    context = model_context_message(env.store, env.session_id, messages)
+
+    assert context is not None
+    items = json.loads(context["content"].split("\n", 1)[1])
+    assert {item["view_id"]: (item["revision"], item["title"]) for item in items} == {
+        revised.view_id: (2, "Updated chart"), independent.view_id: (1, "Chart")
+    }
+    assert len(items) == 2
+    assert env.store.current_manifest(env.session_id, independent.view_id).revision == 1
+
+
+def test_optional_view_summary_cannot_crowd_out_reference_inventory(tmp_path):
+    from reverie.views import model_context_message
+
+    env = _make_bridge(tmp_path)
+    original = _register_view(env.store, env.session_id, tmp_path)
+    independent = _register_view(env.store, env.session_id, tmp_path)
+    env.store.write_model_context(env.session_id, original.view_id, summary="x" * MAX_VIEW_SUMMARY_BYTES)
+    env.store.write_model_context(env.session_id, independent.view_id, summary="selected row 3")
+    messages = [{"role": "tool", "content": f"view_id={view.view_id}, revision=1"}
+                for view in (original, independent)]
+
+    context = model_context_message(env.store, env.session_id, messages)
+
+    assert context is not None and len(context["content"].encode("utf-8")) <= MAX_VIEW_SUMMARY_BYTES
+    items = {item["view_id"]: item for item in json.loads(context["content"].split("\n", 1)[1])}
+    assert set(items) == {original.view_id, independent.view_id}
+    assert "summary" not in items[original.view_id]
+    assert items[independent.view_id]["summary"] == "selected row 3"
+
+
 def test_approval_timeout_fails_closed_and_expired_approval_is_rejected(tmp_path, monkeypatch):
     import reverie.sdk_bridge as sdk
     env = _make_bridge(tmp_path)

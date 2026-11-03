@@ -87,6 +87,15 @@ def test_native_rich_answers_are_desktop_content_without_adding_tool_requirement
         assert '## Rich Answer Presentation' not in terminal
 
 
+def test_desktop_followup_guidance_keeps_the_existing_view_target_explicit():
+    prompt = build_system_prompt(runtime_surface='desktop')
+    response_format = prompt.split('## Desktop Response Format', 1)[1].split('## Interactive Views', 1)[0]
+    assert 'replaces_view_id' in response_format
+    assert 'same view_id' in response_format
+    assert 'follow-up edits and repairs' in response_format
+    assert 'intentional new view' in response_format
+
+
 def test_data_edits_preserve_list_structure_without_preserving_obsolete_counts():
     prompt = build_system_prompt(runtime_surface='desktop')
     rich = prompt.split('## Rich Answer Presentation', 1)[1]

@@ -130,6 +130,7 @@ def build_system_prompt(
         prompt = """## Desktop Response Format
 - Choose the response format from the user's requested action before applying an engineering workflow. A request for one result or an explanation uses text. A request to vary inputs, filter, sort, select or try a local form requires working controls in the conversation. Exploring adjustable assumptions remains interactive even when a formula or static table could describe the calculation; honor an explicit text-only request.
 - Complete a standalone interactive answer with create_file followed by render_view in the same turn. A saved file, code block or instructions to open a browser do not display the answer. Confirm completion after registration succeeds. Repository investigation is needed when the task depends on the repository, not simply because the answer uses an HTML artifact.
+- For follow-up edits and repairs to an existing view, keep the same view_id: edit the artifact and call render_view with replaces_view_id set to that original view's exact id from the saved tool result or current view references. Keep that target through corrections; omitting it creates an unrelated view and loses the original version relationship. Omit replaces_view_id only for an intentional new view. Preserve the existing data and behavior unless the user changes them.
 
 """ + VISIBLE_REASONING_GUIDANCE + "\n\n" + _desktop_view_authoring_guidance() + "\n\n" + prompt
     if normalized_surface == 'desktop':

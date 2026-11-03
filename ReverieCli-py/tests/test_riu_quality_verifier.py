@@ -1734,6 +1734,14 @@ def test_browser_geometry_numbers_are_not_http_failures():
     assert benchmark.classify_quality_error(RuntimeError('HTTP status 503'), 'model-generation') == 'service_unavailable'
 
 
+def test_model_error_reports_requests_style_http_status_without_misclassifying_ui_errors():
+    error = RuntimeError('400 Client Error: None for url: http://127.0.0.1:52040/v1/chat/completions | Provider said: safety check failed')
+    assert benchmark.classify_quality_error(error, 'model-generation') == 'service_unavailable'
+    assert benchmark.classify_quality_error(RuntimeError('503 Server Error: unavailable'), 'model-generation') == 'service_unavailable'
+    assert benchmark.classify_quality_error(error, 'browser-generation') == 'validator_or_product_error'
+    assert benchmark.classify_quality_error(RuntimeError('400 rows displayed'), 'model-generation') == 'validator_or_product_error'
+
+
 def test_generation_scope_is_explicit_without_removing_tools():
     import json
     fixture = json.loads(benchmark.TASK_FILE.read_text(encoding="utf-8"))

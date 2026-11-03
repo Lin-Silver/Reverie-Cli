@@ -150,6 +150,8 @@ def classify_quality_error(error, phase):
         return 'service_unavailable'
     if re.search(r'\bHTTP(?:/\d(?:\.\d)?)?(?:\s+(?:error|status(?:\s+code)?))?\s*[:=]?\s*(?:4\d\d|5\d\d)\b', str(error), re.I):
         return 'service_unavailable'
+    if re.search(r'\b(?:4\d\d\s+Client|5\d\d\s+Server)\s+Error\b', str(error), re.I):
+        return 'service_unavailable'
     return 'validator_or_product_error'
 
 

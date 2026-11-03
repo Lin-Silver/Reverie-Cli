@@ -1043,7 +1043,7 @@ def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_
     agent.get_visible_tool_schemas = lambda mode=None: []
     agent._check_and_compress_context = lambda **kwargs: None
     captured = []
-    partial, tail = '```reverie-ui\n{"type":"table","rows":[["Par', 'tial",7]]}\n```'
+    partial, tail = '```reverie-ui\n{"type":"table","rows":[["Par ', ' tial",7]]}\n```'
 
     def request(payload=None, **kwargs):
         captured.append(payload or kwargs)
@@ -1065,7 +1065,29 @@ def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_
     assert len(captured) == 2
     assert partial in chunks and tail in chunks
     assert not agent._incomplete_turn_error
-    assert [m["content"] for m in agent.messages if m["role"] == "assistant"] == [partial, tail]
+    assert [m["content"] for m in agent.messages if m["role"] == "assistant"] == [partial + tail]
+
+
+def test_stream_continuation_keeps_one_answer_across_empty_recovery(tmp_path):
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x",
+        model="test", project_root=tmp_path, provider="openai-chat", config=_standard_config())
+    agent.messages = [{"role": "user", "content": "Create a table."}]
+    for content, reasoning, finish in [('```reverie-ui\n{"type":', 'Initial thought', 'interrupted'),
+                                       ('', 'Recovery thought', 'stop'),
+                                       ('"table","rows":[]}\n```', 'Final thought', 'stop')]:
+        state = agent._new_turn_state()
+        state.add_content(content)
+        state.add_reasoning(reasoning)
+        state.set_finish_reason(finish)
+        agent._commit_stream_state(state=state, request_messages=agent.messages[:], messages=agent.messages[:], session_id="continuation")
+        if not content:
+            agent._recover_empty_model_turn(agent.messages[:], attempt=1)
+    answers = [m for m in agent.messages if m['role'] == 'assistant' and m.get('content')]
+    assert len(answers) == 1
+    assert answers[0]['content'] == '```reverie-ui\n{"type":"table","rows":[]}\n```'
+    assert 'Initial thought' in answers[0]['reasoning_content']
+    assert 'Final thought' in answers[0]['reasoning_content']
+    assert any(m.get('reasoning_content') == 'Recovery thought' for m in agent.messages)
 
 
 def test_sensenova_writer_context_followup_requests_append_only_plain_prose(tmp_path):

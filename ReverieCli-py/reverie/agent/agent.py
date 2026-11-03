@@ -4966,13 +4966,31 @@ class ReverieAgent:
             return "tool_calls", history_content
 
         if clean_content:
+            continuation = None
+            if getattr(self, "_incomplete_turn_error", ""):
+                for previous in reversed(self.messages):
+                    if previous.get("role") == "system":
+                        continue
+                    if previous.get("role") != "assistant" or previous.get("tool_calls"):
+                        break
+                    if isinstance(previous.get("content"), str) and previous["content"]:
+                        continuation = previous
+                        break
             self._incomplete_turn_error = "" if self._should_end_generation(clean_content, state.finish_reason) else self._unfinished_generation_error(state.finish_reason)
-            self.messages.append(
-                _build_assistant_history_message(
-                    clean_content,
-                    reasoning_content=state.collected_thinking,
+            history_content = state.collected_content.replace(state.token_to_hide, "") if continuation is not None or self._incomplete_turn_error else clean_content
+            if continuation is not None:
+                continuation["content"] += history_content
+                if state.collected_thinking:
+                    continuation["reasoning_content"] = "\n\n".join(filter(None, [
+                        continuation.get("reasoning_content", ""), state.collected_thinking,
+                    ]))
+            else:
+                self.messages.append(
+                    _build_assistant_history_message(
+                        history_content,
+                        reasoning_content=state.collected_thinking,
+                    )
                 )
-            )
             return "content", clean_content
 
         if state.collected_thinking:

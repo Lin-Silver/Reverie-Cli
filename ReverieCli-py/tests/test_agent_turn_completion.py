@@ -260,7 +260,8 @@ def test_truncated_answer_uses_bounded_continuations_and_requires_completion(mon
     assert ("Error processing message:" in _visible_text(chunks)) is not recovers
     assert ("continuation limit" in _visible_text(chunks)) is not recovers
     assert "Partial answer." in _visible_text(chunks)
-    assert [message["content"] for message in agent.messages if message["role"] == "assistant"] == (["Partial answer.", "Complete answer."] if recovers else ["Partial answer."] * 3)
+    expected = (["Partial answer. Complete answer."] if recovers else ["Partial answer. " * 3]) if stream else (["Partial answer.", "Complete answer."] if recovers else ["Partial answer."] * 3)
+    assert [message["content"] for message in agent.messages if message["role"] == "assistant"] == expected
 
 
 def test_recovery_reminder_never_mutates_the_request_already_sent(monkeypatch, tmp_path) -> None:

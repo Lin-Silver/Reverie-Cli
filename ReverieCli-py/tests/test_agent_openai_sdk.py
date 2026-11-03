@@ -222,7 +222,7 @@ def test_desktop_self_contained_static_rich_answer_uses_direct_response_route(tm
     assert '"type":"table"' in prompt
     assert '"type":"cards"' in prompt
     assert '"text":"开发中","tone":"info"' in prompt
-    assert '"image":{"url":"https://example.org/image.png","alt":"图片说明"}' in prompt
+    assert '"image":{"url":"https://example.org/image.png","alt":"<copy supplied image caption>"}' in prompt
     assert "Only use a supplied image URL" in prompt
     assert agent.system_prompt not in prompt
     request_messages = agent._build_messages()
@@ -1759,6 +1759,29 @@ def test_static_rich_requests_keep_current_prose_counts_consistent(tmp_path, mon
     assert "paragraphs, lists and detail text" in prompt
     assert "preserve its structure, not an obsolete value" in prompt
     assert "Preserve code examples and explicitly historical values" in prompt
+    assert agent.get_visible_tool_schemas() == []
+    assert request[1:] == agent.messages
+
+
+@pytest.mark.parametrize("correction", [False, True])
+def test_static_card_requests_keep_item_descriptions_separate_from_image_captions(tmp_path, monkeypatch, correction):
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "profile"))
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x", model="test-model",
+        project_root=tmp_path, provider="openai-sdk", config=_standard_config(), runtime_surface="desktop")
+    agent.messages = [{"role": "user", "content": "在对话中用推荐卡片展示给定资料：Orion是排程工具，标记试用，图片https://example.test/orion.png，图片说明是日历截图；Delta是记录工具，图片https://example.test/delta.png，图片说明是笔记截图。无需搜索或交互控件。"}]
+    if correction:
+        agent.messages += [
+            {"role": "assistant", "content": "已显示两项给定图文资料。"},
+            {"role": "user", "content": "把Orion的标签改成关注，保留两项的其他给定内容。"},
+        ]
+    request = agent._build_messages()
+    prompt = request[0]["content"]
+    assert "## This Turn: Static Rich Answer" in prompt
+    assert "Keep description separate from image.alt" in prompt
+    assert "preserve the supplied item description" in prompt
+    assert "leave badge absent" in prompt
+    assert "even when another item has a badge" in prompt
+    assert '"description":"<copy supplied item description>"' in prompt
     assert agent.get_visible_tool_schemas() == []
     assert request[1:] == agent.messages
 

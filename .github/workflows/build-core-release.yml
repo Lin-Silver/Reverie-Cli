@@ -295,6 +295,7 @@ jobs:
           echo "RIU_INSTALLED_PACKAGE=$install" >> "$GITHUB_ENV"
 
       - name: Verify the exact installed release payload
+        id: installed_native
         shell: bash
         env:
           RIU_RUNNER_OS: ${{ runner.os }}
@@ -313,6 +314,29 @@ jobs:
           else
             "${command[@]}"
           fi
+
+      - name: Profile failed Intel input latency without changing the verdict
+        if: failure() && runner.os == 'macOS' && matrix.arch == 'x64' && steps.installed_native.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: |
+          test -f .runtime/riu-package-native/p4/report.json || exit 0
+          ReverieCli-py/venv/bin/python -c "import json,sys; p=json.load(open('.runtime/riu-package-native/p4/report.json')); sys.exit(0 if any(c['name']=='local-input-p95-under-100ms' and not c['passed'] for c in p['checks']) else 1)" || exit 0
+          executable=$(ReverieCli-py/venv/bin/python -c "import os,sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path(os.environ['RIU_INSTALLED_PACKAGE'])))")
+          # Diagnostic replay only: the original failed report and release gate stay unchanged.
+          ReverieCli-py/venv/bin/python scripts/verification/riu_p4_electron.py --exe "$executable" --output .runtime/riu-input-diagnostic --trace-input
+
+      - name: Retain the exact failed Intel package for diagnosis
+        if: failure() && runner.os == 'macOS' && matrix.arch == 'x64' && steps.installed_native.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-native-package-macos-x64-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            release-assets/*.dmg
+            release-assets/*.json
+            .runtime/release-native-provenance.json
 
       - name: Verify the exact Windows portable release
         if: runner.os == 'Windows'
@@ -420,6 +444,7 @@ jobs:
           if-no-files-found: warn
           path: |
             .runtime/riu-package-native/
+            .runtime/riu-input-diagnostic/
             .runtime/release-native-provenance.json
 
       - uses: actions/upload-artifact@v4

@@ -47,6 +47,12 @@ RICH_CONTRAST = r'''root=>{
 }'''
 
 
+def wait_for_answer_images(target):
+    for card in target.locator('.answer-card-with-image').all():
+        card.scroll_into_view_if_needed()
+        card.evaluate('card=>{const e=card.querySelector("img");return !e||e.complete?null:new Promise(resolve=>{e.addEventListener("load",resolve,{once:true});e.addEventListener("error",resolve,{once:true});setTimeout(resolve,10000)})}')
+
+
 def assess_rich_state(state, expected):
     """Compare independently supplied task data with the actual rendered answer."""
     checks = []
@@ -334,10 +340,7 @@ def main():
             def inspect(saved, stage, record, expected):
                 target = page.locator('.message.assistant .answer-markdown').last
                 target.wait_for(timeout=10000)
-                for image in target.locator('.answer-card img').all():
-                    image.scroll_into_view_if_needed()
-                    try: image.evaluate('e=>e.complete?null:new Promise(resolve=>{e.addEventListener("load",resolve,{once:true});e.addEventListener("error",resolve,{once:true});setTimeout(resolve,10000)})')
-                    except Exception: pass
+                wait_for_answer_images(target)
                 state = target.evaluate(RICH_STATE)
                 for check in assess_rich_state(state, expected): record(check)
                 q.dump(case_out/(stage+'-dom.json'), state)
@@ -389,9 +392,7 @@ def main():
                 browser.close(); q.stop_process(process); process = None
                 launch()
                 target = page.locator('.message.assistant .answer-markdown').last; target.wait_for(timeout=30000)
-                for image in target.locator('.answer-card img').all():
-                    image.scroll_into_view_if_needed()
-                    image.evaluate('e=>e.complete?null:new Promise(resolve=>{e.addEventListener("load",resolve,{once:true});e.addEventListener("error",resolve,{once:true});setTimeout(resolve,10000)})')
+                wait_for_answer_images(target)
                 restored = assess_rich_state(target.evaluate(RICH_STATE), task['modified_expected'])
                 case['checks'].append({'name': 'actual-process-restart-recovery', 'passed': bool(restored) and all(x['passed'] for x in restored), 'detail': restored})
                 page.screenshot(path=str(case_out/'actual-process-restart.png'), full_page=True)

@@ -25,6 +25,44 @@ def browser():
         instance.close()
 
 
+def test_failed_recommendation_image_does_not_shift_later_image_checks(browser, monkeypatch):
+    from playwright.sync_api import Locator
+
+    spec = importlib.util.spec_from_file_location('rich_image_calibration', ROOT/'scripts/verification/riu_rich_answer_benchmark.py')
+    rich = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rich)
+    page = browser.new_page()
+    try:
+        page.set_default_timeout(500)
+        image = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'/%3E"
+        page.set_content(f'''<main><article class="answer-card answer-card-with-image" id=first>
+          <h3>Plane</h3><p>项目管理工具</p><img src="{image}" alt="first"></article>
+          <article class="answer-card answer-card-with-image"><h3>Vikunja</h3>
+          <p>任务管理工具</p><img src="{image}" alt="second"></article></main>''')
+        page.wait_for_function('()=>[...document.images].every(i=>i.complete&&i.naturalWidth>0)')
+        scroll = Locator.scroll_into_view_if_needed
+        removed = False
+
+        def remove_failed_image_after_actual_scroll(locator, **kwargs):
+            nonlocal removed
+            result = scroll(locator, **kwargs)
+            if not removed:
+                page.evaluate('''()=>{document.querySelector('#first img').remove();
+                  document.querySelector('#first').insertAdjacentHTML('beforeend','<span role="img">first unavailable</span>');}''')
+                removed = True
+            return result
+
+        monkeypatch.setattr(Locator, 'scroll_into_view_if_needed', remove_failed_image_after_actual_scroll)
+        rich.wait_for_answer_images(page.locator('main'))
+        state = page.locator('main').evaluate(rich.RICH_STATE)
+        assert len(state['cards']) == 2 and not state['cards'][0]['images']
+        assert state['cards'][1]['images'][0]['loaded']
+        checks = rich.assess_rich_state(state, {'image_urls': ['https://example.test/unavailable.png', image]})
+        assert not next(c['passed'] for c in checks if c['name'] == 'rich-supplied-image-sources')
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize('separator', ['', ',', '，', ' ', '\u00a0', '\u202f', '\u2009'])
 def test_correct_numeric_answers_accept_standard_grouping_without_rewriting(separator):
     answer = '答案：\u202f3' + separator + '168.00 元'

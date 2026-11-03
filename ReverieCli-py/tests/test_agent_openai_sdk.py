@@ -1727,3 +1727,24 @@ def test_static_rich_requests_keep_current_prose_counts_consistent(tmp_path, mon
     assert "Preserve code examples and explicitly historical values" in prompt
     assert agent.get_visible_tool_schemas() == []
     assert request[1:] == agent.messages
+
+
+@pytest.mark.parametrize("followup", [False, True])
+def test_interactive_requests_keep_named_primary_result_visible_after_edits(tmp_path, monkeypatch, followup):
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "profile"))
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x", model="test-model",
+        project_root=tmp_path, provider="openai-sdk", config=_standard_config(), runtime_surface="desktop")
+    agent.messages = [{"role": "user", "content": "用给定数据制作可调节倍率的交互图表，并显示总量。"}]
+    if followup:
+        agent.messages += [
+            {"role": "assistant", "content": "已创建含图表与明细表的交互视图。"},
+            {"role": "user", "content": "新增一项数据，保留原有控件并更新总量。"},
+        ]
+    request = agent._build_messages()
+    prompt = request[0]["content"]
+    assert "## Interactive Views" in prompt
+    assert "Pair the primary result with a visible semantic label in the same compact region" in prompt
+    assert "a unit or an unlabeled large number does not identify the result" in prompt
+    assert "do not rely on a table footer as the only labelled total" in prompt
+    assert "After adding data or controls, recheck that the labelled result and primary inputs still fit" in prompt
+    assert request[-len(agent.messages):] == agent.messages

@@ -238,6 +238,40 @@ def test_desktop_self_contained_static_rich_answer_uses_direct_response_route(tm
     assert len(agent.messages) == 5  # Request shaping never edits stored history.
 
 
+@pytest.mark.parametrize("attempt", [1, 3])
+def test_static_rich_correction_after_empty_turn_recovery_keeps_its_route(tmp_path, attempt):
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x", model="test-model",
+                         project_root=tmp_path, provider="openai-sdk", config=_standard_config(), runtime_surface="desktop")
+    supplied = {"role": "user", "content": "展示给定统计卡：计划中7、开发中5，以及表格 Alpha / 开发中 / 核心助手。"}
+    answer = {"role": "assistant", "content": "统计卡和表格"}
+    correction = {"role": "user", "content": "把计划中改为0，其余统计卡和表格内容保持不变。"}
+    agent.tool_executor.get_tool_schemas = lambda mode="reverie": [_tool_schema("read_file")]
+    agent.messages = [supplied, {"role": "assistant", "content": None, "reasoning_content": "Interrupted reasoning"}]
+    assert agent._recover_empty_model_turn(agent._build_messages(), attempt=attempt)
+    agent.messages.extend([answer, correction])
+    original = [dict(message) for message in agent.messages]
+
+    assert agent.get_visible_tool_schemas() == []
+    assert agent._build_messages()[1:] == [supplied, answer, correction]
+    assert agent.messages == original
+
+    agent.messages.append({"role": "user", "content": "搜索最新资料并修改表格。"})
+    assert [schema["function"]["name"] for schema in agent.get_visible_tool_schemas()] == ["read_file"]
+
+
+@pytest.mark.parametrize("notice", ["Other internal instructions", "Recovery notice 1/3: unrelated instructions"])
+def test_static_rich_correction_does_not_ignore_other_system_messages(notice):
+    from reverie.agent.agent import _static_rich_answer_history
+
+    history = [
+        {"role": "user", "content": "展示给定统计卡：计划中7、开发中5，以及表格 Alpha / 开发中 / 核心助手。"},
+        {"role": "system", "content": notice},
+        {"role": "assistant", "content": "统计卡和表格"},
+        {"role": "user", "content": "把计划中改为0，其余统计卡和表格内容保持不变。"},
+    ]
+    assert not _static_rich_answer_history(history)
+
+
 def test_static_rich_corrections_never_cross_external_actions_or_tool_history():
     from reverie.agent.agent import _static_rich_answer_history
 

@@ -259,7 +259,12 @@ def _static_rich_answer_history(messages: List[Dict]) -> List[Dict]:
     for start in reversed(users[:-1]):
         if not _is_self_contained_static_rich_answer_prompt(history[start].get("content")):
             continue
-        retained = history[start:]
+        retained = [message for message in history[start:] if not (
+            message.get("role") == "system" and re.match(
+                r"Recovery notice \d+/\d+: your previous turn returned no tool call and no visible text, ",
+                _coerce_text_fragments(message.get("content", "")),
+            )
+        )]
         if sum(len(_coerce_text_fragments(m.get("content", ""))) for m in retained) > 12000:
             return []
         for message in retained:

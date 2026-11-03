@@ -1706,3 +1706,24 @@ def test_webgemini_help_matches_supported_commands():
     assert "/webgemini model <model-id>" in subcommand_usages
     assert "/webgemini proxy <url|clear>" in subcommand_usages
     assert "/wgemini" in subcommand_usages
+
+
+@pytest.mark.parametrize("correction", [False, True])
+def test_static_rich_requests_keep_current_prose_counts_consistent(tmp_path, monkeypatch, correction):
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "profile"))
+    agent = ReverieAgent(base_url="https://example.test/v1", api_key="x", model="test-model",
+        project_root=tmp_path, provider="openai-sdk", config=_standard_config(), runtime_surface="desktop")
+    agent.messages = [{"role": "user", "content": "请用中文直接在对话中展示下面的给定资料：统计卡为完成0、待办3；普通正文与两项列表也要保留。"}]
+    if correction:
+        agent.messages += [
+            {"role": "assistant", "content": '本周共有3项待办任务。\n```reverie-ui\n{"type":"metrics","items":[{"label":"完成","value":0},{"label":"待办","value":3}]}\n```'},
+            {"role": "user", "content": "只把待办改成2，保留完成0、普通列表和Python例子print(0)。"},
+        ]
+    request = agent._build_messages()
+    prompt = request[0]["content"]
+    assert "## This Turn: Static Rich Answer" in prompt
+    assert "paragraphs, lists and detail text" in prompt
+    assert "preserve its structure, not an obsolete value" in prompt
+    assert "Preserve code examples and explicitly historical values" in prompt
+    assert agent.get_visible_tool_schemas() == []
+    assert request[1:] == agent.messages

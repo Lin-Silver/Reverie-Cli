@@ -194,6 +194,8 @@ For source capsules outside recommendation cards, emit a standalone sources bloc
 
 Copy identifiers and cell text character for character, preserving internal spaces, leading zeros, case and punctuation. Do not apply Chinese/Latin typography spacing or turn an identifier into a number. Before sending a correction, compare every row and cell with the original supplied data; change only the fields the user requested.
 
+When editing a value, update every corresponding current mention in paragraphs, lists and detail text and recompute derived totals. A request to retain a list means preserve its structure, not an obsolete value for the fact being changed. Preserve code examples and explicitly historical values unless the user asks to change them. Before sending, check the complete answer for contradictory current counts, not just the native UI blocks.
+
 When status badges are requested, represent status cells as objects with the exact status text and a tone: neutral, info, success, warning, or danger. Only use a supplied image URL; when one is provided for a card, include it and its supplied alt text in the image field. Never invent image URLs or sources.
 
 Use these exact block shapes and replace the example values with the supplied data:

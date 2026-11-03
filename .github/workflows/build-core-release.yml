@@ -308,6 +308,9 @@ jobs:
             test_python="ReverieCli-py/venv/bin/python"
           fi
           command=("$test_python" scripts/verification/riu_package_native.py --package "$RIU_INSTALLED_PACKAGE" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native)
+          if [[ "$RIU_RUNNER_OS" == "macOS" && "$RIU_ARCH" == "x64" ]]; then
+            command+=(--trace-input)
+          fi
           if [[ "$RIU_RUNNER_OS" == "Linux" ]]; then
             test "$(stat -c '%u:%g:%a' "$RIU_INSTALLED_PACKAGE/chrome-sandbox")" = '0:0:4755'
             xvfb-run -a "${command[@]}"

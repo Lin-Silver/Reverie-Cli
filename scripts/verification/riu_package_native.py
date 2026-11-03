@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--sdk-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--trace-input', action='store_true', help='Retain a trace of the original P4 input samples; thresholds and verdicts stay unchanged.')
     args = parser.parse_args()
     output = args.output.resolve()
     if not output.is_relative_to(ROOT/'.runtime'):
@@ -57,6 +58,8 @@ def main():
                        '--output', str(output/name)]
             if name == 'p3':
                 command += ['--sdk-root', str(args.sdk_root.resolve())]
+            if name == 'p4' and args.trace_input:
+                command += ['--trace-input']
             start = time.monotonic()
             with (output/(name+'.txt')).open('x', encoding='utf-8') as log:
                 result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)

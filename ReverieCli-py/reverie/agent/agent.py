@@ -256,9 +256,7 @@ def _static_rich_answer_history(messages: List[Dict]) -> List[Dict]:
     users = [i for i, m in enumerate(history) if m.get("role") == "user"]
     if not users:
         return []
-    if _is_self_contained_static_rich_answer_prompt(history[users[-1]].get("content")):
-        return [history[users[-1]]]
-    for start in reversed(users[:-1]):
+    for start in reversed(users):
         if not _is_self_contained_static_rich_answer_prompt(history[start].get("content")):
             continue
         retained = [message for message in history[start:] if not (
@@ -267,7 +265,7 @@ def _static_rich_answer_history(messages: List[Dict]) -> List[Dict]:
                 _coerce_text_fragments(message.get("content", "")),
             )
         )]
-        if sum(len(_coerce_text_fragments(m.get("content", ""))) for m in retained) > 12000:
+        if start != users[-1] and sum(len(_coerce_text_fragments(m.get("content", ""))) for m in retained) > 12000:
             return []
         for message in retained:
             if message.get("role") not in {"user", "assistant"} or message.get("tool_calls"):
@@ -5797,6 +5795,13 @@ class ReverieAgent:
                 if not include_reasoning and not preserve_nvidia_reasoning:
                     normalized.pop("reasoning_content", None)
                 messages.append(normalized)
+            last_user = max(i for i, message in enumerate(self.messages) if message.get("role") == "user")
+            for message in self.messages[last_user + 1:]:
+                if message.get("role") == "system" and re.match(
+                    r"Recovery notice \d+/\d+: your previous turn returned no tool call and no visible text, ",
+                    _coerce_text_fragments(message.get("content", "")),
+                ):
+                    messages.append(dict(message))
         else:
             memory_context = self._memory_context_package_message()
             if memory_context:

@@ -1031,15 +1031,21 @@ def test_chat_stream_requires_terminal_finish_for_observed_deltas(transport, fin
 
 
 @pytest.mark.parametrize("transport", ["sdk", "request"])
-def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_path, transport):
+@pytest.mark.parametrize("desktop", [False, True])
+@pytest.mark.parametrize("empty_retry", [False, True])
+def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_path, monkeypatch, transport, desktop, empty_retry):
     from openai.types.chat import ChatCompletionChunk
 
+    monkeypatch.setenv("REVERIE_APP_ROOT", str(tmp_path / "profile"))
     config = _standard_config()
     config.active_model_source = "sensenova"
     config.sensenova = {"selected_model_id": "sensenova-6.8-flash-lite"}
     agent = ReverieAgent(base_url="https://example.test/v1", api_key="x",
-        model="sensenova-6.8-flash-lite", project_root=tmp_path, provider="openai-chat", config=config)
-    agent.messages = [{"role": "user", "content": "Summarize the given data."}]
+        model="sensenova-6.8-flash-lite", project_root=tmp_path, provider="openai-chat", config=config,
+        runtime_surface="desktop" if desktop else "terminal")
+    agent.messages = [{"role": "user", "content": "展示给定表格：项目1至项目24，数量等于编号，偶数项目完成。使用原生表格，资料已给全，不需要搜索或交互控件。" if desktop else "Summarize the given data."}]
+    if desktop:
+        assert agent._uses_desktop_static_rich_answer_route()
     agent.get_visible_tool_schemas = lambda mode=None: []
     agent._check_and_compress_context = lambda **kwargs: None
     captured = []
@@ -1048,9 +1054,11 @@ def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_
     def request(payload=None, **kwargs):
         captured.append(payload or kwargs)
         index = len(captured)
-        pieces = [{"choices": [{"index": 0, "delta": {"content": partial if index == 1 else tail}, "finish_reason": None}]}]
+        delta = {"reasoning_content": "Still preparing the answer."} if empty_retry and index == 2 else {"content": partial if index == 1 else tail}
+        pieces = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]}]
         if index > 1:
             assert "saved partial assistant response" in captured[-1]["messages"][-1]["content"]
+            assert any(m.get("role") == "assistant" and m.get("content") == partial for m in captured[-1]["messages"])
             pieces.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
         if transport == "request":
             return SimpleNamespace(pieces=pieces, close=lambda: None)
@@ -1062,10 +1070,12 @@ def test_sensenova_clean_eof_continues_partial_answer_through_actual_parser(tmp_
     agent._iter_sse_data_strings = lambda response: iter(map(json.dumps, response.pieces))
     method = agent._process_streaming_openai_http_fallback if transport == "request" else agent._process_streaming_openai_sdk
     chunks = list(method(session_id="eof-recovery"))
-    assert len(captured) == 2
+    assert len(captured) == (3 if empty_retry else 2)
     assert partial in chunks and tail in chunks
     assert not agent._incomplete_turn_error
-    assert [m["content"] for m in agent.messages if m["role"] == "assistant"] == [partial + tail]
+    assert [m["content"] for m in agent.messages if m["role"] == "assistant" and m.get("content")] == [partial + tail]
+    if empty_retry:
+        assert any(m.get("role") == "system" and "Recovery notice" in m.get("content", "") for m in captured[-1]["messages"])
 
 
 def test_stream_continuation_keeps_one_answer_across_empty_recovery(tmp_path):

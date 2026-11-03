@@ -19,7 +19,7 @@
 
 | 版本 | 日期 | 更新主题 |
 | --- | --- | --- |
-| [v2.5.3](#v2-5-3) | 2026-10-31 | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
+| [v2.5.3](#v2-5-3) | 2026-11-03 | Liquid Glass、RIU、工作台、RATS/RTP、提供商及跨平台可靠性累计更新 |
 | [v2.5.0](#v2-5-0) | 2026-07-17 | Trusted Portable Core and Multi-Platform Releases |
 | [v2.4.0](#v2-4-0) | 2026-07-16 | Desktop, Context Engine, and Release Upgrade |
 | [v2.3.4](#v2-3-4) | 2026-07-06 | Writer, Sources, Memory, and Engine Upgrades |

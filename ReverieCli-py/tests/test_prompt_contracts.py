@@ -103,6 +103,17 @@ def test_data_edits_preserve_list_structure_without_preserving_obsolete_counts()
     assert 'preserve its structure, not an obsolete value' in rich
 
 
+@pytest.mark.parametrize('mode', ['reverie', 'writer'])
+def test_normal_desktop_card_guidance_preserves_individual_field_roles(mode):
+    prompt = build_system_prompt(mode=mode, runtime_surface='desktop')
+    rich = prompt.split('## Rich Answer Presentation', 1)[1].split('\n## ', 1)[0]
+    assert 'Keep description separate from image.alt' in rich
+    assert 'preserve the supplied item description' in rich
+    assert 'leave badge absent' in rich
+    assert 'even when another item has a badge' in rich
+    assert 'do not turn a descriptive category into a badge' in rich
+
+
 def test_offline_repairs_keep_tool_limits_and_theme_selected_table_cells():
     prompt = build_system_prompt(runtime_surface='desktop')
     views = prompt.split('## Interactive Views', 1)[1]

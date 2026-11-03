@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import argparse
 import copy
@@ -30,6 +31,7 @@ RICH_STATE = r'''root=>({
  links:[...root.querySelectorAll('a[href]')].map(x=>x.href),sources:root.querySelectorAll('a.answer-source').length,plainLinks:root.querySelectorAll('a:not(.answer-source)').length,
  headings:[...root.querySelectorAll('h1,h2,h3')].map(x=>x.innerText.trim()),strong:[...root.querySelectorAll('strong')].map(x=>x.innerText.trim()),
  lists:root.querySelectorAll('li').length,code:[...root.querySelectorAll('pre code')].map(x=>x.innerText),
+ prose:[...root.querySelectorAll(':scope>p,:scope>ul li,:scope>ol li')].map(e=>{const c=e.cloneNode(true);c.querySelectorAll('code,ul,ol').forEach(x=>x.remove());return c.textContent.trim();}).filter(Boolean),
  unfinished:root.querySelectorAll('.answer-block-pending').length,invalid:root.querySelectorAll('.answer-block-fallback,pre code.language-reverie-ui').length,
  rawRichFormat:[...root.querySelectorAll('pre code')].filter(c=>{try{return ['metrics','table','cards','sources'].includes(JSON.parse(c.innerText).type);}catch{return false;}}).length,
  transcript:(()=>{const t=root.closest('.transcript');return t?{width:t.clientWidth,scrollWidth:t.scrollWidth}:null;})(),
@@ -58,6 +60,26 @@ def assess_rich_state(state, expected):
           transcript.get('scrollWidth', 1) <= transcript.get('width', 0) + 1, transcript)
     if 'metrics' in expected:
         check('rich-metric-values-and-labels', state['metrics'] == expected['metrics'], state['metrics'])
+        conflicts = []
+        number = r'[-+]?\d+(?:\.\d+)?'
+        for label, value in expected['metrics']:
+            try:
+                wanted = Decimal(str(value))
+            except InvalidOperation:
+                continue
+            subject = re.escape(label) + r'(?:任务|事项|项目|记录)?'
+            patterns = [rf'{subject}\s*(?:[：:]|共有|共|有|为)?\s*(?P<value>{number})(?:\s*[项个件条]|(?=\s*(?:$|[，。；,;])))',
+                        rf'(?<![\d.])(?P<value>{number})\s*[项个件条]\s*{subject}']
+            for prose in state.get('prose', []):
+                for clause in re.split(r'[，。；,;]', prose):
+                    for pattern in patterns:
+                        for match in re.finditer(pattern, clause):
+                            context = re.findall(r'上周|上月|去年|此前|之前|原先|原有|原来|历史|曾经|过去|现在|当前|目前|本周|本月|今年|更新后|现有', clause[:match.start()])
+                            if context and context[-1] in {'上周', '上月', '去年', '此前', '之前', '原先', '原有', '原来', '历史', '曾经', '过去'}:
+                                continue
+                            if Decimal(match['value']) != wanted:
+                                conflicts.append({'label': label, 'expected': str(value), 'actual': match['value'], 'prose': prose})
+        check('rich-consistent-prose-counts', not conflicts, conflicts)
     if 'table_rows' in expected:
         rows = [[str(value) for value in row] for row in expected['table_rows']]
         matched = any(table['rows'] == rows for table in state['tables'])
@@ -127,6 +149,7 @@ def rich_repair_feedback(checks):
         'rich-contained-layout': '回答内容超出了正文宽度',
         'rich-chat-contained-layout': '对话内容超出了窗口宽度',
         'rich-metric-values-and-labels': '统计卡片的标签或数值与给定资料不一致',
+        'rich-consistent-prose-counts': '正文段落或列表的当前数量与给定统计不一致；保留结构并同步更新对应数值',
         'rich-all-supplied-table-rows': '表格遗漏或改变了给定记录、字段或顺序',
         'rich-explicit-empty-table': '缺少要求的空表格或明确的无数据提示',
         'rich-status-badges': '表格状态没有显示为带文字的标签',
@@ -152,6 +175,9 @@ def rich_repair_feedback(checks):
         name = check['name']
         label = labels.get(name, '部分文字难以阅读' if name.startswith('rich-text-contrast-')
                            else '窄窗口中的回答布局不完整')
+        if name == 'rich-consistent-prose-counts':
+            for conflict in check.get('detail') or []:
+                label += f"；{conflict['label']}应为{conflict['expected']}，正文仍为{conflict['actual']}"
         if name == 'rich-all-supplied-table-rows':
             difference = (check.get('detail') or {}).get('first_difference')
             if difference:

@@ -34,6 +34,46 @@ def test_supplied_recommendations_pass_without_inferred_content(recommendations)
     assert all(c["passed"] for c in verifier.assess_rich_state(state, expected))
 
 
+@pytest.mark.parametrize("prose,passed", [
+    (["本周共有3项待办任务。", "待办任务：3项"], False),
+    (["本周共有2项待办任务。", "待办任务：3项"], False),
+    (["待办：12项"], False),
+    (["待办任务：2项", "本周共有2项待办任务。"], True),
+    (["待办：2", "另有12个项目"], True),
+    (["待办任务3号已分配", "请先处理重点事项"], True),
+    (["上周待办3项，本周待办2项"], True),
+    (["上周待办3项，本周待办4项"], False),
+    (["待办：-2项"], False),
+    (["待办：2.5项"], False),
+    ([], True),
+])
+def test_current_metric_counts_agree_with_every_prose_and_list_mention(recommendations, prose, passed):
+    state, _ = recommendations
+    state.update(metrics=[["待办", "2"]], prose=prose)
+    checks = verifier.assess_rich_state(state, {"metrics": [["待办", "2"]]})
+    assert all(c["passed"] for c in checks) is passed
+    if not passed:
+        failed = [c for c in checks if not c["passed"]]
+        assert "正文" in verifier.rich_repair_feedback(failed)
+        assert "待办" in verifier.rich_repair_feedback(failed)
+
+
+@pytest.mark.parametrize("value", ["0", "3", "9007199254740993"])
+def test_prose_count_comparison_preserves_zero_initial_and_large_integer_values(recommendations, value):
+    state, _ = recommendations
+    state.update(metrics=[["待办", value]], prose=[f"待办任务：{value}项"])
+    assert all(c["passed"] for c in verifier.assess_rich_state(state, {"metrics": [["待办", value]]}))
+
+
+def test_metric_names_are_literal_in_prose_comparison(recommendations):
+    state, _ = recommendations
+    state.update(metrics=[["A+B", "2"]], prose=["AB：3项", "A+B：2项"])
+    expected = {"metrics": [["A+B", "2"]]}
+    assert all(c["passed"] for c in verifier.assess_rich_state(state, expected))
+    state["prose"].append("A+B：3项")
+    assert not all(c["passed"] for c in verifier.assess_rich_state(state, expected))
+
+
 @pytest.mark.parametrize("description,passed", [
     ("项目管理工具", True),
     ("Plane是项目管理工具", True),

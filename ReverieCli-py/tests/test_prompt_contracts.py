@@ -87,6 +87,20 @@ def test_native_rich_answers_are_desktop_content_without_adding_tool_requirement
         assert '## Rich Answer Presentation' not in terminal
 
 
+def test_data_edits_preserve_list_structure_without_preserving_obsolete_counts():
+    prompt = build_system_prompt(runtime_surface='desktop')
+    rich = prompt.split('## Rich Answer Presentation', 1)[1]
+    assert 'paragraphs, lists and detail text' in rich
+    assert 'preserve its structure, not an obsolete value' in rich
+
+
+def test_offline_repairs_keep_tool_limits_and_theme_selected_table_cells():
+    prompt = build_system_prompt(runtime_surface='desktop')
+    views = prompt.split('## Interactive Views', 1)[1]
+    assert 'Recheck the user\'s tool limits before each repair' in views
+    assert 'selected rows and cells' in views
+
+
 def test_offline_helper_runs_the_capability_and_revision_protocol():
     import json
     import shutil

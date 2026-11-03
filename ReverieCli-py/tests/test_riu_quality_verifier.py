@@ -32,6 +32,28 @@ def verifier_browser():
         browser.close()
 
 
+def test_rich_prose_observer_includes_lists_without_code_quotes_or_native_data(verifier_browser):
+    spec = importlib.util.spec_from_file_location("rich_prose_verifier", ROOT / "scripts/verification/riu_rich_answer_benchmark.py")
+    rich = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rich)
+    page = verifier_browser.new_page()
+    try:
+        page.set_content('''<article><p>本周共有<strong>2项</strong>待办任务。</p>
+            <ul><li>待办任务：2项<ul><li>下一个步骤</li></ul></li></ul>
+            <p>示例<code>待办：99项</code></p><pre><code>print(0)</code></pre>
+            <blockquote><p>待办：8项</p></blockquote>
+            <dl class=answer-metric><dt>待办</dt><dd>2</dd></dl>
+            <div class=answer-card><h3>产品</h3><p>待办：7项</p></div>
+            <div class=answer-table-scroll><table><tbody><tr><td>待办：6项</td></tr></tbody></table></div>
+            </article>''')
+        state = page.locator('article').evaluate(rich.RICH_STATE)
+        assert state['prose'] == ['本周共有2项待办任务。', '待办任务：2项', '下一个步骤', '示例']
+        assert page.locator('p code').inner_text() == '待办：99项'
+        assert state['code'] == ['print(0)']
+    finally:
+        page.close()
+
+
 def test_registered_frame_can_appear_in_restored_pip_after_its_inline_anchor(verifier_browser):
     page = verifier_browser.new_page()
     try:

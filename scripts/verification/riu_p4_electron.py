@@ -137,6 +137,7 @@ def main():
         (output / (name + ".txt")).write_text(page.locator("body").inner_text(), encoding="utf-8")
 
     def frame(title="RIU P4 参数与比较"):
+        page.locator(f'iframe[title="{title}"]').scroll_into_view_if_needed(timeout=30000)
         handle = page.locator(f'iframe[title="{title}"]').element_handle(timeout=30000)
         result = handle.content_frame()
         result.wait_for_function("()=>window.__p4?.ready", timeout=30000)

@@ -2178,3 +2178,46 @@ def test_pressed_stock_control_below_pip_fold_does_not_pass_input_visibility(ver
         assert not benchmark.business_controls_in_viewport(page)['passed']
     finally:
         page.close()
+
+
+@pytest.mark.parametrize('label', [
+    '年度费用（元）', '年度费用 ( 元 )', '全年成本(CNY)', '每年支出（人民币）',
+    'annual cost (RMB)', '年度合计（元/年）', '年度总额（元 ／ 年）',
+])
+@pytest.mark.parametrize('amount,expected', [('3,168.00', True), ('6,336.00', False), ('0.00', False)])
+def test_annual_result_label_currency_units_keep_the_correct_primary_amount(verifier_browser, label, amount, expected):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>{label}</span><strong>{amount}</strong></section>'
+            '<p>对比参考3168.00元</p><section><span>月度合计（元）</span><b>3168.00</b></section>')
+        result = benchmark.calculator_primary_result(page, 3168, timeout=0)
+        assert result['passed'] is expected
+        assert [item['value'] for item in result['candidates']] == [float(amount.replace(',', ''))]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize('label', [
+    '年度费用（元/月）', '年度费用（元/天）', '月度费用（元）', '年度费用参考（元）',
+    '年度费用（参考元）', 'annual cost reference (RMB)', '年度费用（元）参考',
+])
+def test_currency_label_units_do_not_turn_monthly_or_reference_figures_into_annual_results(verifier_browser, label):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content(f'<section><span>{label}</span><strong>3168.00</strong></section>')
+        result = benchmark.calculator_primary_result(page, 3168, timeout=0)
+        assert not result['passed'] and not result['candidates']
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize('amount', ['0.00', '3,168.00'])
+def test_annual_currency_unit_label_keeps_zero_and_grouped_result_values(verifier_browser, amount):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content(f'<output aria-label="年度费用（元）">{amount}</output>')
+        result = benchmark.calculator_primary_result(page, float(amount.replace(',', '')), timeout=0)
+        assert result['passed']
+        assert len(result['candidates']) == 1
+    finally:
+        page.close()

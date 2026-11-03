@@ -1479,7 +1479,7 @@ LABELLED_PRIMARY_RESULT_SCRIPT = r"""({names, kind}) => {
   return {candidates: found, distinctValues: [...new Set(found.map(item => item.value))], width: innerWidth, height: innerHeight};
 }"""
 
-CALCULATOR_PRIMARY_NAMES = '(?:(?:预计|预估|估算)?(?:年度|全年|每年|年)[\\u4e00-\\u9fff]{0,8}?(?:费用|成本|支出|花费|合计|总计|总额)|annual\\s+(?:[a-z]+\\s+){0,3}(?:cost|expense|expenses))'
+CALCULATOR_PRIMARY_NAMES = r'(?:(?:预计|预估|估算)?(?:年度|全年|每年|年)[\u4e00-\u9fff]{0,8}?(?:费用|成本|支出|花费|合计|总计|总额)|annual\s+(?:[a-z]+\s+){0,3}(?:cost|expense|expenses))(?:\s*[（(]\s*(?:元|人民币|CNY|RMB)(?:\s*[/／]\s*(?:年|year|yr))?\s*[）)])?'
 CHART_PRIMARY_NAMES = r'(?:(?:总(?:用水量|用水|用量|量)|(?:用水量|用水|用量)(?:总计|合计)|总计|合计|总和|total(?:\s+(?:water|usage|consumption))?)(?:\s*[（(]\s*(?:升|公升|L|liters?|(?:按)?当前倍率)\s*[）)])?)'
 
 

@@ -371,7 +371,7 @@ def wait_for_registered_view_frame(page, view_ref, *, process=None, timeout_ms=3
             # appeared. Discover that actual surface throughout the bounded wait.
             if not pending.count() and matching.count():
                 inline = matching.last.locator('..').locator('[data-view-mode="inline"]')
-                if inline.count() and inline.is_visible() and inline.is_enabled():
+                if inline.count() and inline.is_visible() and inline.is_enabled(timeout=remaining):
                     inline.click(timeout=min(1000, max(1, int((deadline-time.monotonic())*1000))))
             handle = pending.element_handle(timeout=min(500, max(1, int((deadline-time.monotonic())*1000))))
             inside = handle.content_frame() if handle is not None else None

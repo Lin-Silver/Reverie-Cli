@@ -485,3 +485,38 @@ def test_role_and_label_alone_do_not_make_an_inert_switch_pass(browser, value):
         assert field.get_attribute('aria-checked') == value
     finally:
         page.close()
+
+
+def test_frame_wait_recovers_when_inline_target_changes_after_visibility_probe(browser, monkeypatch):
+    import time
+    page = browser.new_page()
+    try:
+        page.set_content('''<div class=interactive-view-anchor data-view-key="scope:session:vexpected:1">
+            <section><button id=old-inline data-view-mode=inline>Inline</button>
+            <iframe data-view-id=vexpected src="about:blank#older" srcdoc="wrong-older-revision"></iframe></section></div>
+          <div class=interactive-view-anchor data-view-key="scope:session:vexpected:2" style="min-height:40px"></div>
+          <script>window.visibilityRaceTriggered=false;</script>''')
+        locator_type = type(page.locator('button'))
+        actual_is_visible = locator_type.is_visible
+
+        def move_after_actual_visibility(locator, *args, **kwargs):
+            visible = actual_is_visible(locator, *args, **kwargs)
+            if visible and not page.evaluate('visibilityRaceTriggered'):
+                page.evaluate('''() => {
+                    window.visibilityRaceTriggered=true;
+                    const iframe=document.createElement('iframe');iframe.dataset.viewId='vexpected';
+                    iframe.sandbox='allow-scripts';iframe.src='about:blank#revision-two';
+                    iframe.srcdoc='<body>actual-revision-two</body>';
+                    document.querySelector('[data-view-key$=":2"]').appendChild(iframe);
+                }''')
+            return visible
+
+        monkeypatch.setattr(locator_type, 'is_visible', move_after_actual_visibility)
+        started = time.monotonic()
+        iframe, inside = benchmark.wait_for_registered_view_frame(page, ('vexpected', 2), timeout_ms=5000)
+        assert inside.locator('body').inner_text() == 'actual-revision-two'
+        assert page.evaluate('visibilityRaceTriggered')
+        assert page.locator('iframe').count() == 2, 'No surrogate target was created'
+        assert time.monotonic() - started < 5
+    finally:
+        page.close()

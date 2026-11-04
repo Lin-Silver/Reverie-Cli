@@ -12,12 +12,14 @@ goto parse_args
 
 for %%I in ("%~dp0.") do set "REPO_ROOT=%%~fI"
 set "UI_ROOT=%REPO_ROOT%\ReverieCli-ui"
+set "BUILD_EXIT_CODE=1"
 
-where node >nul 2>&1 || (echo [ERROR] Node.js is required. & exit /b 1)
-where npm >nul 2>&1 || (echo [ERROR] npm is required. & exit /b 1)
+where node >nul 2>&1 || (echo [ERROR] Node.js is required. & goto finish)
+where npm >nul 2>&1 || (echo [ERROR] npm is required. & goto finish)
 
+set "REVERIE_PYINSTALLER_MODE=onefile"
 call "%REPO_ROOT%\ReverieCli-py\build.bat" --reuse-venv --test-exe --skip-plugins --no-pause
-if not "%ERRORLEVEL%"=="0" exit /b 1
+if errorlevel 1 goto finish
 
 cd /d "%UI_ROOT%"
 call npm ci --fetch-retries=0 --fetch-timeout=15000
@@ -25,25 +27,27 @@ if not "%ERRORLEVEL%"=="0" (
   echo [WARN] npm ci failed with the current user npm configuration.
   echo [WARN] Retrying without the user-level .npmrc in case a local proxy is unavailable.
   call npm ci --userconfig=NUL
-  if errorlevel 1 exit /b 1
+  if errorlevel 1 goto finish
 )
 
 set "REVERIE_EXTERNAL_KERNEL_PATH=%REPO_ROOT%\dist\reverie.exe"
 if not defined ELECTRON_MIRROR set "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
 if not defined ELECTRON_BUILDER_BINARIES_MIRROR set "ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/"
 call npm run dist:win
-if not "%ERRORLEVEL%"=="0" exit /b 1
+if errorlevel 1 goto finish
 
 for /f "delims=" %%V in ('node -p "require('./package.json').version"') do set "VERSION=%%V"
 if not exist "%UI_ROOT%\release\Reverie-Setup-%VERSION%-x64.exe" (
   echo [ERROR] Windows installer was not produced.
-  exit /b 1
+  goto finish
 )
 if not exist "%REPO_ROOT%\dist\Reverie-Portable-%VERSION%-x64.exe" (
   echo [ERROR] Windows portable executable was not produced.
-  exit /b 1
+  goto finish
 )
 
 echo [OK] Reverie %VERSION% Windows CLI, installer, and portable GUI are ready.
+set "BUILD_EXIT_CODE=0"
+:finish
 if "%NO_PAUSE%"=="0" pause
-exit /b 0
+exit /b %BUILD_EXIT_CODE%

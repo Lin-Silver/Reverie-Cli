@@ -2120,6 +2120,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 .source-line.selected { background: var(--accent-bg); }
 .source-line mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); }
 .review-panel { overflow: auto; flex: 1; padding-bottom: 12px; }
+.review-panel .workbench-toolbar select { min-width: 0; max-width: 100%; }
 .review-panel > p { padding: 6px 12px; color: var(--muted); font-size: var(--font-small); }
 .review-record { border: 1px solid var(--border); border-radius: 8px; margin: 12px; padding: 12px; }
 .review-record header { display: flex; gap: 8px; flex-wrap: wrap; font-size: var(--font-small); }

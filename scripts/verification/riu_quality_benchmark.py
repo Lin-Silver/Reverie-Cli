@@ -1928,9 +1928,9 @@ def snapshot_controls(frame):
 def restore_controls_through_inputs(frame, expected):
     """Undo verifier input actions before feedback, using actual controls only."""
     controls = frame.locator(VALUE_CONTROL_SELECTOR)
-    if controls.count() != len(expected):
-        return False
     for index, state in enumerate(expected):
+        if index >= controls.count():
+            return False
         field = controls.nth(index)
         if not field.is_visible() or not field.is_enabled():
             continue
@@ -1946,7 +1946,7 @@ def restore_controls_through_inputs(frame, expected):
                 # scroll the component offscreen and legitimately unmount it.
                 # Use a real reverse Tab for cleanup inside this same view.
                 change(field, state['value'], tab_key='Shift+Tab' if index else 'Tab')
-    return True
+    return controls.count() == len(expected)
 
 
 def restore_table_order_through_button(frame, expected_names):

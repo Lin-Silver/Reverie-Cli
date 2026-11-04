@@ -2244,3 +2244,27 @@ def test_annual_currency_unit_label_keeps_zero_and_grouped_result_values(verifie
         assert len(result['candidates']) == 1
     finally:
         page.close()
+
+
+def test_restore_inputs_recreates_filtered_choice_controls_before_restoring_selection(verifier_browser):
+    page = verifier_browser.new_page()
+    try:
+        page.set_content('''<input id="budget" value="200"><div id="routes"></div>
+            <script>
+            const budget=document.querySelector('#budget'), routes=document.querySelector('#routes');
+            function render(){routes.innerHTML=Number(budget.value)>0
+                ? '<button aria-pressed="false">山谷 120元 2公里</button>' : ''}
+            budget.addEventListener('input',render); render();
+            routes.addEventListener('click',e=>{if(e.target.matches('button'))
+                e.target.setAttribute('aria-pressed',String(e.target.getAttribute('aria-pressed')!=='true'))});
+            </script>''')
+        page.locator('button').click()
+        expected = benchmark.snapshot_controls(page)
+        page.locator('#budget').fill('0')
+        assert page.locator('button').count() == 0
+        assert benchmark.restore_controls_through_inputs(page, expected)
+        assert page.locator('#budget').input_value() == '200'
+        assert page.locator('button').count() == 1
+        assert page.locator('button').get_attribute('aria-pressed') == 'true'
+    finally:
+        page.close()

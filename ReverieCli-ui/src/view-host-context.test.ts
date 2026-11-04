@@ -20,6 +20,7 @@ describe("semantic colors received by an embedded view", () => {
       "--color-text-success": values["--green"],
       "--color-text-warning": values["--amber"],
       "--color-text-info": values["--blue"],
+      "--color-accent-primary": values["--blue"],
     });
   });
 });

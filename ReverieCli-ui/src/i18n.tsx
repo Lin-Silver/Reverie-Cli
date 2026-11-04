@@ -747,7 +747,7 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "模型调用": "Model call",
   "你": "You",
   "用户显示名称": "User display name",
-  "只改变对话中用户消息的显示名称；留空时显示默认名称。": "Changes only how your messages are labeled in the conversation. Leave blank for the default.",
+  "对话中只显示头像；未上传头像时使用名称的首字，留空则使用默认名称。": "Only your avatar appears in chat. Without an uploaded image, its initial comes from this name; leave it blank to use the default.",
   "Git 分支": "Git branches",
   "搜索分支": "Search branches",
   "本地分支": "Local branches",

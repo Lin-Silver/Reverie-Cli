@@ -3358,7 +3358,7 @@ function SettingsView({
           <>
             <PageHeader icon={<MessageSquare size={20} />} title={t("对话显示")} description={t("决定思考记录、模型调用、工具结果和实时活动在对话中如何呈现。")} />
             <section className="preference-section display-name-section">
-              <div className="preference-heading"><div><h2>{t("用户显示名称")}</h2><p>{t("只改变对话中用户消息的显示名称；留空时显示默认名称。")}</p></div></div>
+              <div className="preference-heading"><div><h2>{t("用户显示名称")}</h2><p>{t("对话中只显示头像；未上传头像时使用名称的首字，留空则使用默认名称。")}</p></div></div>
               <form onSubmit={(event) => { event.preventDefault(); updatePreferences({ userDisplayName: displayNameDraft }); }}>
                 <label htmlFor="user-display-name">{t("显示名称")}</label>
                 <input id="user-display-name" value={displayNameDraft} maxLength={32} onChange={(event) => setDisplayNameDraft(event.target.value)} placeholder={t("你")} />

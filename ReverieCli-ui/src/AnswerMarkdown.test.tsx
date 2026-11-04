@@ -61,6 +61,17 @@ describe("rich answer content", () => {
     expect(document.querySelector("img")).toBeNull();
   });
 
+  it("preserves recommendation descriptions independently of badges and image captions", () => {
+    render(<AnswerMarkdown>{fence({ type: "cards", items: [
+      { title: "Plane", description: "项目管理工具", badge: { text: "项目管理", tone: "info" }, image: { url: "https://example.com/plane.png", alt: "项目自带看板示意素材" } },
+      { title: "Vikunja", description: "任务管理工具" },
+    ] })}</AnswerMarkdown>);
+    expect(screen.getByText("项目管理工具")).toBeTruthy();
+    expect(screen.getByText("任务管理工具")).toBeTruthy();
+    expect(screen.getByText("项目管理")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "项目自带看板示意素材" })).toBeTruthy();
+  });
+
   it("handles actual streaming fragments, then renders the completed block", () => {
     const { rerender } = render(<AnswerMarkdown streaming>{"```reverie-ui\n{\"type\":\"metrics\",\"items\":["}</AnswerMarkdown>);
     expect(screen.getByRole("status").textContent).toBe("正在整理内容…");

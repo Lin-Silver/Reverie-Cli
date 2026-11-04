@@ -225,7 +225,7 @@ export const InteractiveViewRuntime = memo(function InteractiveViewRuntime({ seg
     let contextFrame = 0;
     const sendContext = () => {
       if (!channel.ready || !iframeRef.current) return;
-      const context = viewHostContext(iframeRef.current, appearance.current.language, appearance.current.mode);
+      const context = viewHostContext(iframeRef.current, appearance.current.language, appearance.current.mode, !!view.mcpApp);
       const encoded = JSON.stringify(context);
       if (encoded !== lastContext) { lastContext = encoded; post({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: context }); }
     };
@@ -281,7 +281,7 @@ export const InteractiveViewRuntime = memo(function InteractiveViewRuntime({ seg
         frameWindow.postMessage({ jsonrpc: "2.0", id: verdict.id, result: { protocolVersion: VIEW_PROTOCOL_VERSION, capability: verdict.capabilityIssued,
           hostInfo: { name: "Reverie", version: desktopVersion },
           hostCapabilities: { ...(view.mcpApp ? { serverTools: {}, sandbox: { csp: {}, permissions: {} } } : { experimental: { "reverie/generated-tools": {}, "reverie/view-state": {} } }), message: { text: {} }, updateModelContext: { text: {}, structuredContent: {} } },
-          hostContext: iframeRef.current ? viewHostContext(iframeRef.current, appearance.current.language, appearance.current.mode) : {},
+          hostContext: iframeRef.current ? viewHostContext(iframeRef.current, appearance.current.language, appearance.current.mode, !!view.mcpApp) : {},
           reverieViewState: view.state, reverieToolCalls: view.toolCalls || [] } }, "*");
         settle();
         return;

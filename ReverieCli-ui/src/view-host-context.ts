@@ -6,19 +6,19 @@ const variables: Record<string, string> = {
   "--color-text-tertiary": "--muted", "--color-border-primary": "--border",
   "--color-border-secondary": "--border-soft", "--color-text-danger": "--red",
   "--color-text-success": "--green", "--color-text-warning": "--amber",
-  "--color-text-info": "--blue", "--color-accent-primary": "--blue",
+  "--color-text-info": "--blue",
   "--font-mono": "--font-mono",
 };
 
 /** Public appearance only. Private view state and host credentials never enter context. */
-export function viewHostContext(frame: HTMLIFrameElement, locale: string, mode: ViewDisplayMode) {
+export function viewHostContext(frame: HTMLIFrameElement, locale: string, mode: ViewDisplayMode, standard = false) {
   const style = getComputedStyle(document.documentElement);
   const rect = frame.getBoundingClientRect();
   return {
     theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
     locale, displayMode: mode, availableDisplayModes: [...VIEW_DISPLAY_MODES], platform: "desktop",
     containerDimensions: { width: Math.round(rect.width), height: Math.round(rect.height) },
-    styles: { variables: { ...Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, style.getPropertyValue(value).trim()]).filter(([, value]) => value)), "--font-sans": style.fontFamily } },
+    styles: { variables: { ...Object.fromEntries(Object.entries(standard ? variables : { ...variables, "--color-accent-primary": "--blue" }).map(([key, value]) => [key, style.getPropertyValue(value).trim()]).filter(([, value]) => value)), "--font-sans": style.fontFamily } },
     // ext-apps 2.0.3 permits namespaced host-context extensions; it defines no reduced-motion field.
     reverie: { reducedMotion: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false },
   };

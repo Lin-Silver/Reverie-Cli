@@ -22,6 +22,9 @@ describe("semantic colors received by an embedded view", () => {
       "--color-text-info": values["--blue"],
       "--color-accent-primary": values["--blue"],
     });
+    const standard = viewHostContext(document.createElement("iframe"), "zh-CN", "inline", true);
+    expect(standard.styles.variables).not.toHaveProperty("--color-accent-primary");
+    expect(standard.styles.variables["--color-text-info"]).toBe(values["--blue"]);
   });
 });
 

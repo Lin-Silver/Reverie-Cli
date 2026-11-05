@@ -38,6 +38,8 @@ from .agnes import (
     normalize_agnes_config,
 )
 from .sensenova import (
+    build_sensenova_anthropic_options,
+    stream_sensenova_messages,
     build_sensenova_runtime_model_data,
     normalize_sensenova_config,
 )
@@ -421,49 +423,29 @@ def smoke_sensenova(config: Config, timeout_seconds: int = 45, model_id: str = "
 
     start = time.perf_counter()
     try:
-        if str(runtime.get("provider") or "").strip().lower() == "openai-chat":
-            from openai import OpenAI
-
-            client = OpenAI(
-                base_url=runtime["base_url"],
-                api_key=runtime["api_key"],
-                timeout=timeout_seconds,
-                max_retries=0,
-                default_headers=apply_reverie_client_identity(),
-            )
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "Reply only with OK."}],
-                max_tokens=1024,
-                stream=False,
-            )
-            text = str(response.choices[0].message.content or "") if response.choices else ""
-            if not text.strip():
-                raise RuntimeError("SenseNova returned no text content")
-            return ProviderSmokeResult(
-                provider=provider,
-                model=model,
-                status="ok",
-                latency_ms=int((time.perf_counter() - start) * 1000),
-            )
-
         from anthropic import Anthropic
 
-        client = Anthropic(
+        with Anthropic(
             base_url=runtime["base_url"],
             auth_token=runtime["api_key"],
             timeout=timeout_seconds,
             max_retries=0,
             default_headers=apply_reverie_client_identity(),
-        )
-        with client.messages.stream(
-            model=model,
-            messages=[{"role": "user", "content": "Reply with OK."}],
-            max_tokens=16,
-        ) as stream:
-            for text in stream.text_stream:
-                if str(text or "").strip():
-                    break
+        ) as client:
+            options = build_sensenova_anthropic_options({**cfg, "reasoning_effort": "none"}, model)
+            text_received = False
+            with stream_sensenova_messages(client,
+                model=model,
+                messages=[{"role": "user", "content": "Reply with OK."}],
+                max_tokens=64,
+                **options,
+            ) as stream:
+                for text in stream.text_stream:
+                    if str(text or "").strip():
+                        text_received = True
+                        break
+            if not text_received:
+                raise RuntimeError("SenseNova returned no text content")
         return ProviderSmokeResult(
             provider=provider,
             model=model,

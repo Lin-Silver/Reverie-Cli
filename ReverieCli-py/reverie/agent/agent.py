@@ -4373,8 +4373,11 @@ class ReverieAgent:
                 return max_tokens
         if self._is_active_model_source("sensenova"):
             try:
-                cfg = getattr(self.config, "sensenova", {})
-                candidate = int(cfg.get("max_tokens", max_tokens)) if isinstance(cfg, dict) else max_tokens
+                from ..sensenova import normalize_sensenova_config, resolve_sensenova_selected_model
+
+                cfg = normalize_sensenova_config(getattr(self.config, "sensenova", {}))
+                selected = resolve_sensenova_selected_model(cfg, self.model) or {}
+                candidate = min(int(cfg["max_tokens"]), int(selected.get("max_output_tokens") or cfg["max_tokens"]))
                 if candidate > 0:
                     return candidate
             except Exception:
@@ -4399,12 +4402,12 @@ class ReverieAgent:
         cfg = getattr(self.config, "sensenova", {})
         if not isinstance(cfg, dict):
             return kwargs
-        prepared = dict(kwargs)
-        prepared["temperature"] = float(cfg.get("temperature", 0.6))
-        prepared["top_p"] = float(cfg.get("top_p", 0.95))
-        effort = str(cfg.get("reasoning_effort", self.thinking_mode or "high") or "high").strip().lower()
-        if effort in {"low", "medium", "high", "max"}:
-            prepared["extra_body"] = {"output_config": {"effort": effort}}
+        from ..sensenova import build_sensenova_anthropic_options
+
+        options = build_sensenova_anthropic_options(cfg, self.model)
+        prepared = {**kwargs, **options}
+        if "extra_body" in options:
+            prepared["extra_body"] = {**kwargs.get("extra_body", {}), **options["extra_body"]}
         return prepared
 
     def _apply_custom_provider_anthropic_options(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -6651,8 +6654,13 @@ class ReverieAgent:
             
             # Make request
             client = self._ensure_client()
+            create_stream = client.messages.stream
+            if self._is_active_model_source("sensenova"):
+                from ..sensenova import stream_sensenova_messages
+
+                create_stream = lambda **payload: stream_sensenova_messages(client, **payload)
             with self._provider_stream_context(lambda: anthropic_stream_with_prompt_cache_fallback(
-                client.messages.stream, kwargs, log=logger,
+                create_stream, kwargs, log=logger,
             )) as stream:
                 state = self._new_turn_state()
 

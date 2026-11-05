@@ -1,4 +1,11 @@
 from rich.console import Console
+import pytest
+from reverie import opencode as opencode_module
+
+
+@pytest.fixture(autouse=True)
+def isolate_live_inventory(monkeypatch):
+    monkeypatch.setattr(opencode_module, "_OPENCODE_MODEL_CACHE", {"key": "", "expires_at": 0.0, "models": []})
 
 from reverie.agent.agent import ReverieAgent
 from reverie.cli.commands import CommandHandler
@@ -117,7 +124,7 @@ def test_opencode_builtin_catalog_switch_uses_only_the_dedicated_list(monkeypatc
     config = normalize_opencode_config({"use_builtin_model_catalog": True, "api_key": "zen-test"})
 
     assert config["use_builtin_model_catalog"] is True
-    catalog = get_opencode_model_catalog(config, fetch_live=True, force_refresh=True)
+    catalog = get_opencode_model_catalog(config)
     assert {item["id"] for item in catalog} == {
         item["id"] for item in opencode_module._OPENCODE_MODEL_CATALOG
     }

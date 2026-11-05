@@ -236,8 +236,8 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "sensenova": {
         "command": "/sensenova",
         "section": "Providers",
-        "summary": "Configure the SenseNova OpenAI-compatible source and DeepSeek V4 Flash reasoning depth.",
-        "detail": "Use this to save a SenseNova API key, activate the source, pick supported models, set the OpenAI-compatible base URL, and choose `reasoning_effort` for DeepSeek V4 Flash. Reverie also reads `SENSENOVA_API_KEY` or `SENSE_API_KEY` automatically when present.",
+        "summary": "Configure the SenseNova Anthropic-compatible source and DeepSeek V4 Flash reasoning depth.",
+        "detail": "Use this to save a SenseNova API key, activate the source, pick API-discovered models, set the Anthropic-compatible API root, and choose reasoning depth for DeepSeek V4 Flash. Reverie also reads `SENSENOVA_API_KEY` or `SENSE_API_KEY` automatically when present.",
         "overview": "status, key, activate, model [id], thinking [none|low|medium|high], endpoint [value]",
         "aliases": ["/sense"],
         "subcommands": [

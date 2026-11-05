@@ -1158,6 +1158,7 @@ const CHINESE_TRANSLATIONS: Record<string, string> = {
   "Retry attempts": "重试次数",
   "Load live model list": "加载实时模型列表",
   "Use built-in model catalog": "使用内置模型列表",
+  "Use built-in before first refresh": "首次刷新前使用内置模型列表",
   "Client name override": "客户端名称覆盖",
   "User-Agent override": "User-Agent 覆盖",
   "Provider": "提供商",

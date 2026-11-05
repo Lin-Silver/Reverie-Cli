@@ -244,11 +244,9 @@ def main():
     cfg = config.load()
     q.configure_model_source(cfg, original, args.source, args.model, api_url=args.api_url, provider_id=args.provider_id)
     active = cfg.active_model
-    if not active or active.model != args.model or active.provider not in {'openai-chat', 'openai-sdk'}:
-        raise ValueError('Configured Chat Completions model not resolved exactly')
-    upstream = active.base_url.rstrip('/')
-    if not upstream.endswith('/chat/completions'):
-        upstream += '/chat/completions'
+    if not active or active.model != args.model:
+        raise ValueError('Configured model not resolved exactly')
+    upstream = q.recorder_upstream(active)
     recorder = q.Recorder(output, upstream, active.api_key, request_timeout=args.timeout)
     q.configure_model_source(cfg, original, args.source, args.model,
         recorder_url=f'http://127.0.0.1:{recorder.server.server_port}/v1', provider_id=args.provider_id)

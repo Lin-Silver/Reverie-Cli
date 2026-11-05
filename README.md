@@ -61,7 +61,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **NVIDIA**         | NVIDIA-hosted catalog via`integrate.api.nvidia.com`                                                             | DeepSeek V4.1 Flash, GLM 5.3 Flash, Step 5 Preview, Nemotron 3.5 Super VL/Lightning, Muse Glimmer 30B, Nemotron 3 Super/Ultra, GPT-OSS-20B, Laguna XS 2.1 |
 | **ModelScope**     | OpenAI Chat Completions API on `api-inference.modelscope.cn` with core-published model capabilities             | Qwen3.8-27B (default), GLM-5.3/Flash, DeepSeek V4.1 Flash, DeepSeek V4 Pro 0813, Step 3.7 Flash |
 | **Codex**          | ChatGPT backend or Responses-compatible reverse proxy                                                           | GPT-5.6, GPT-5.5, and other models discovered from the live Codex CLI cache                                                                                                                 |
-| **SenseNova**      | SenseTime SenseNova API with live model discovery and OpenAI-compatible transport                              | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.2, and SenseNova 6.8 Flash Lite                                                                                            |
+| **SenseNova**      | SenseTime SenseNova API with live model discovery and Anthropic Messages transport                             | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.3, and SenseNova 6.8 Flash / Flash Lite                                                                                       |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
 | **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 3.0 Flash (default), 3.0 Flash Max, stable 2.5 Pro; separate image/video profiles |
 | **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
@@ -211,7 +211,7 @@ Reverie-Cli/
 │   │   ├── nvidia.py          ← NVIDIA provider integration (10 models)
 │   │   ├── codex.py           ← Codex/ChatGPT provider integration
 │   │   ├── modelscope.py      ← ModelScope OpenAI Chat provider and capability catalog
-│   │   ├── sensenova.py       ← SenseNova OpenAI-compatible provider
+│   │   ├── sensenova.py       ← SenseNova Anthropic-compatible provider
 │   │   ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
 │   │   ├── agnes.py           ← Agnes AI provider (text/image/video)
 │   │   ├── prompt_cache.py    ← prompt-prefix cache hints and compatibility fallback
@@ -387,8 +387,8 @@ Reverie uses the shared or project profile under the selected app root, as descr
     "api_key": "",
     "selected_model_id": "deepseek-v4-flash",
     "selected_model_display_name": "DeepSeek V4 Flash",
-    "api_url": "https://token.sensenova.cn/v1",
-    "max_context_tokens": 1000000,
+    "api_url": "https://token.sensenova.cn",
+    "max_context_tokens": 1048576,
     "timeout": 60,
     "max_tokens": 65536,
     "temperature": 0.6,
@@ -561,14 +561,21 @@ Connects to ChatGPT's backend API. Supports:
 
 ### SenseNova
 
-[SenseTime SenseNova](https://www.sensenova.cn/) with model-specific OpenAI/Anthropic-compatible transports at `https://token.sensenova.cn`:
+[SenseTime SenseNova](https://www.sensenova.cn/) uses Anthropic-compatible `POST /v1/messages` at `https://token.sensenova.cn` for every chat model. Discovery continues to use `GET /v1/models`:
 
 | Model ID                   | Display Name             | Context   | Thinking    | Vision |
 | -------------------------- | ------------------------ | --------- | ----------- | ------ |
-| `deepseek-v4-flash`        | DeepSeek V4 Flash        | 1,000,000 | ✅ (effort) | ❌     |
-| `sensenova-6.8-flash-lite` | SenseNova 6.8 Flash Lite | 262,144   | ❌          | ✅     |
+| `deepseek-v4-flash`        | DeepSeek V4 Flash        | 1,048,576 | ✅ (effort) | ❌     |
+| `deepseek-flash`           | DeepSeek Flash           | 1,048,576 | ✅          | ❌     |
+| `glm-5.2`                 | GLM-5.2                  | 1,048,576 | ✅          | ❌     |
+| `glm-5.3`                 | GLM-5.3                  | 1,048,576 | ✅          | ❌     |
+| `kimi-k3`                 | Kimi K3                  | 1,048,576 | ✅          | ❌     |
+| `sensenova-6.8-flash-lite` | SenseNova 6.8 Flash Lite | 262,144   | ✅          | ✅     |
+| `sensenova-6.8-flash`      | SenseNova 6.8 Flash      | 262,144   | ✅          | ✅     |
 
-Reasoning effort is selectable: `none`, `low`, `medium`, `high`.
+DeepSeek V4 Flash exposes selectable reasoning effort. Kimi K3 requires temperature `1`; GLM-5.3 retains provider thinking defaults because its Messages endpoint rejects disabling thinking.
+
+For all API sources, successful model inventories replace older inventories and survive restarts. Empty successful lists remain empty; failed refreshes retain the last successful list. Built-in entries only provide a fallback before a successful inventory exists for that connection. See [Provider model catalogs](docs/PROVIDER_CATALOG.md) for details.
 
 ### AIHubMix
 

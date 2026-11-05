@@ -629,12 +629,21 @@ def field_validation_feedback(frame, locator, message, before_text, *, observati
 
 
 
+def recorder_upstream(active):
+    base = active.base_url.rstrip('/')
+    if active.provider == 'anthropic':
+        return base + '/v1/messages'
+    if active.provider in {'openai-chat', 'openai-sdk'}:
+        return base if base.endswith('/chat/completions') else base + '/chat/completions'
+    raise ValueError('Recorder supports Chat Completions and Anthropic Messages only.')
+
+
 class Recorder:
     def __init__(self, output, upstream, secret, *, models_url=None, request_timeout=900):
         self.output, self.upstream, self.secret = output, upstream, secret
         self.request_timeout = request_timeout
         parts = urlsplit(upstream)
-        catalog_path = parts.path.removesuffix('/chat/completions').rstrip('/') + '/models'
+        catalog_path = parts.path.removesuffix('/chat/completions').removesuffix('/messages').rstrip('/') + '/models'
         self.models_url = models_url or urlunsplit((parts.scheme, parts.netloc, catalog_path, parts.query, ''))
         self.records, self.case = [], "startup"
         self.catalog_records = []
@@ -682,6 +691,8 @@ class Recorder:
                 public = raw.decode("utf-8").replace(recorder.secret, "[redacted]") if recorder.secret else raw.decode("utf-8")
                 target.with_suffix(".json").write_text(public, encoding="utf-8")
                 system = [m for m in payload.get("messages", []) if m.get("role") == "system"]
+                if payload.get('system'):
+                    system.append({'role': 'system', 'content': payload['system']})
                 record = {"case": recorder.case, "request": str(target.with_suffix('.json')), "model": payload.get("model"), "body_bytes": len(raw), "body_characters": len(raw.decode('utf-8')), "system_characters": sum(len(str(m.get('content', ''))) for m in system), "system_messages": len(system), "schema_characters": len(json.dumps(payload.get('tools', []), ensure_ascii=False)), "tools": len(payload.get('tools') or []), "started_monotonic": started}
                 record['client_identity'] = {name: self.headers[name] for name in ['User-Agent', 'x-opencode-client']
                                              if self.headers.get(name)}
@@ -753,11 +764,41 @@ class Recorder:
                                     if event.get('error'):
                                         record['upstream_stream_error'] = event['error']
                                     if event.get('usage'):
-                                        record['usage'] = event['usage']
+                                        record['usage'] = {**record.get('usage', {}), **event['usage']}
                                     if event.get('model'):
                                         record['response_model'] = event['model']
                                     if event.get('nvext'):
                                         record['provider_metrics'] = event['nvext']
+                                    event_type = event.get('type')
+                                    if event_type == 'message_start':
+                                        message = event.get('message') or {}
+                                        record['response_model'] = message.get('model')
+                                        record['usage'] = message.get('usage') or {}
+                                    elif event_type == 'message_stop':
+                                        record['sse_done'] = True
+                                    elif event_type == 'message_delta':
+                                        record['usage'] = {**record.get('usage', {}), **event.get('usage', {})}
+                                        if (event.get('delta') or {}).get('stop_reason'):
+                                            record.setdefault('finish_reasons', []).append(event['delta']['stop_reason'])
+                                    elif event_type == 'content_block_start':
+                                        block = event.get('content_block') or {}
+                                        if block.get('type') == 'tool_use':
+                                            record.setdefault('first_tool_fragment_ms', elapsed)
+                                            record.setdefault('response_tool_names', []).append(block.get('name'))
+                                    elif event_type == 'content_block_delta':
+                                        delta = event.get('delta') or {}
+                                        if delta.get('text'):
+                                            record.setdefault('first_content_ms', elapsed)
+                                        if delta.get('thinking'):
+                                            record.setdefault('first_reasoning_ms', elapsed)
+                                        if delta.get('type') == 'input_json_delta':
+                                            key = event.get('index', 0)
+                                            tool_arguments[key] = tool_arguments.get(key, '') + delta.get('partial_json', '')
+                                            try:
+                                                if isinstance(json.loads(tool_arguments[key]), dict):
+                                                    record.setdefault('first_parseable_tool_arguments_ms', elapsed)
+                                            except ValueError:
+                                                pass
                                     for choice in event.get('choices') or []:
                                         if choice.get('finish_reason'):
                                             record.setdefault('finish_reasons', []).append(choice['finish_reason'])
@@ -2072,11 +2113,7 @@ def main():
     active = cfg.active_model
     if not active or active.model != args.model:
         raise ValueError('Configured model not resolved exactly')
-    if active.provider not in {'openai-chat', 'openai-sdk'}:
-        raise ValueError('This recorder verifies Chat Completions only; Responses/Messages must use their own protocol.')
-    upstream = active.base_url.rstrip('/')
-    if not upstream.endswith('/chat/completions'):
-        upstream += '/chat/completions'
+    upstream = recorder_upstream(active)
     models_url = None
     if args.source == 'opencode':
         from reverie.opencode import _opencode_models_url

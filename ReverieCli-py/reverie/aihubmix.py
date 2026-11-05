@@ -98,9 +98,12 @@ def default_aihubmix_config() -> Dict[str, Any]:
     }
 
 
-def get_aihubmix_model_catalog() -> List[Dict[str, Any]]:
+def get_aihubmix_model_catalog(aihubmix_config: Any = None, *, fetch_live: bool = False) -> List[Dict[str, Any]]:
     """Return the supported AIhubMix model catalog."""
-    return [dict(item) for item in _AIHUBMIX_MODEL_CATALOG]
+    from .model_catalog_cache import openai_source_catalog
+
+    cfg = aihubmix_config if isinstance(aihubmix_config, dict) else {}
+    return openai_source_catalog(cfg, resolve_aihubmix_sdk_base_url(cfg.get("api_url")), resolve_aihubmix_api_key(cfg), _AIHUBMIX_MODEL_CATALOG, fetch_live=fetch_live)
 
 
 def get_aihubmix_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
@@ -119,10 +122,8 @@ def resolve_aihubmix_selected_model(aihubmix_config: Any, model_id: Optional[str
         cfg.update(aihubmix_config)
 
     wanted = str(model_id or cfg.get("selected_model_id", AIHUBMIX_DEFAULT_MODEL_ID) or "").strip().lower()
-    matched = get_aihubmix_model_metadata(wanted)
-    if matched:
-        return matched
-    return get_aihubmix_model_catalog()[0]
+    catalog = get_aihubmix_model_catalog(cfg)
+    return next((item for item in catalog if item["id"].lower() == wanted), catalog[0] if catalog else None)
 
 
 def resolve_aihubmix_sdk_base_url(api_url: Any) -> str:

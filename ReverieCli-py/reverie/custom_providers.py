@@ -18,13 +18,15 @@ from __future__ import annotations
 import os
 import re
 import time
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
 from .diagnostics import report_suppressed_exception
+from .model_catalog_cache import model_catalog_key, remember_model_catalog, remembered_model_catalog
 from .request_identity import apply_reverie_client_identity
 
 
@@ -693,7 +695,7 @@ def normalize_custom_provider_model(raw_model: Any) -> Optional[Dict[str, Any]]:
         minimum=1,
     )
     max_output_tokens = _normalize_int(
-        raw_model.get("max_output_tokens") or raw_model.get("max_tokens") or 0,
+        raw_model.get("max_output_tokens") or raw_model.get("max_output_length") or raw_model.get("max_tokens") or 0,
         0,
         minimum=1,
     )
@@ -701,6 +703,12 @@ def normalize_custom_provider_model(raw_model: Any) -> Optional[Dict[str, Any]]:
     declared_reasoning = _declares_reasoning(raw_model, reasoning_levels)
     vision = _capability_flag(raw_model, "vision", "image", "images")
     tool_calling = _capability_flag(raw_model, "tools", "tool_calling", "function_calling")
+    if isinstance(raw_model.get("supported_features"), list):
+        features = raw_model["supported_features"]
+        tool_calling = any(feature in features for feature in ("tools", "tool_calling", "function_calling"))
+        declared_reasoning = any(feature in features for feature in ("reasoning", "thinking"))
+    if isinstance(raw_model.get("input_modalities"), list):
+        vision = "image" in raw_model["input_modalities"]
     return {
         "id": model_id,
         "display_name": display_name,
@@ -792,6 +800,19 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
         seen_ids.add(key)
         models.append(model)
     cfg["models"] = models
+    if isinstance(raw_provider.get("model_catalog"), dict):
+        cfg["model_catalog"] = deepcopy(raw_provider["model_catalog"])
+    models_url = f"{cfg['base_url']}{_FORMAT_SPECS[cfg['format']]['models_path']}"
+    catalog_key = model_catalog_key(models_url, resolve_custom_provider_api_key(cfg), cfg["format"])
+    cached = _MODEL_CACHE.get(catalog_key)
+    latest = remembered_model_catalog(cfg, catalog_key, {"key": catalog_key, **cached} if cached else None)
+    if latest is not None:
+        models = latest
+        cfg["models"] = models
+        remember_model_catalog(cfg, catalog_key, models)
+    elif "model_catalog" in cfg:
+        models = []
+        cfg["models"] = models
 
     try:
         cfg["models_synced_at"] = max(0.0, float(raw_provider.get("models_synced_at") or 0.0))
@@ -800,6 +821,10 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
 
     selected_id = str(raw_provider.get("selected_model_id", "") or "").strip()
     selected_name = str(raw_provider.get("selected_model_display_name", "") or "").strip()
+    if selected_id and (latest is not None or "model_catalog" in cfg):
+        selected = next((item for item in models if item["id"].lower() == selected_id.lower()), models[0] if models else None)
+        selected_id = str(selected["id"]) if selected else ""
+        selected_name = str(selected["display_name"]) if selected else ""
     if selected_id:
         cfg["selected_model_id"] = selected_id
         matched = next((item for item in models if item["id"].lower() == selected_id.lower()), None)
@@ -945,7 +970,7 @@ def _infer_vision(model_id: str, raw_model: Dict[str, Any]) -> bool:
 
 def _parse_model_list_payload(payload: Any) -> List[Dict[str, Any]]:
     """Extract catalog entries from an OpenAI- or Anthropic-shaped response."""
-    raw_models: Any = []
+    raw_models: Any = None
     if isinstance(payload, dict):
         for key in ("data", "models", "results"):
             value = payload.get(key)
@@ -954,6 +979,8 @@ def _parse_model_list_payload(payload: Any) -> List[Dict[str, Any]]:
                 break
     elif isinstance(payload, list):
         raw_models = payload
+    if raw_models is None:
+        raise ValueError("Model catalog response must contain a model list.")
 
     models: List[Dict[str, Any]] = []
     seen: set = set()
@@ -992,12 +1019,13 @@ def fetch_custom_provider_models(
         raise ValueError("Provider has no base URL configured.")
 
     api_key = resolve_custom_provider_api_key(record)
-    auth_hash = sha256(api_key.encode("utf-8")).hexdigest() if api_key else "anonymous"
-    cache_key = f"{models_url}:{record['format']}:{auth_hash}"
+    cache_key = model_catalog_key(models_url, api_key, record["format"])
     now = time.monotonic()
     cached = _MODEL_CACHE.get(cache_key)
     if not force_refresh and cached and float(cached.get("expires_at") or 0.0) > now:
-        return [dict(item) for item in cached.get("models", [])]
+        models = [dict(item) for item in cached.get("models", [])]
+        remember_model_catalog(provider, cache_key, models)
+        return models
 
     response = requests.get(
         models_url,
@@ -1010,6 +1038,7 @@ def fetch_custom_provider_models(
         "expires_at": now + CUSTOM_PROVIDER_MODEL_CACHE_TTL_SECONDS,
         "models": models,
     }
+    remember_model_catalog(provider, cache_key, models)
     return [dict(item) for item in models]
 
 
@@ -1024,13 +1053,16 @@ def get_custom_provider_model_catalog(
     record = normalize_custom_provider(provider) or {}
     if fetch_live:
         try:
-            live_models = fetch_custom_provider_models(
-                record, timeout=timeout, force_refresh=force_refresh
+            return fetch_custom_provider_models(
+                provider, timeout=timeout, force_refresh=force_refresh
             )
-            if live_models:
-                return live_models
         except Exception:
             report_suppressed_exception("fetch custom provider live model catalog")
+    key = model_catalog_key(custom_provider_models_url(record), resolve_custom_provider_api_key(record), record.get("format", "openai-chat"))
+    cached = _MODEL_CACHE.get(key)
+    latest = remembered_model_catalog(record, key, {"key": key, **cached} if cached else None)
+    if latest is not None:
+        return latest
     return [dict(item) for item in record.get("models", [])]
 
 
@@ -1045,8 +1077,15 @@ def resolve_custom_provider_selected_model(
     if not wanted:
         return None
     saved_limit = record.get("model_context_limits", {}).get(_model_limit_key(wanted))
-    models = record.get("models") or []
+    models = get_custom_provider_model_catalog(record)
     matched = next((item for item in models if item["id"].lower() == wanted.lower()), None)
+    key = model_catalog_key(custom_provider_models_url(record), resolve_custom_provider_api_key(record), record["format"])
+    cached = _MODEL_CACHE.get(key)
+    if matched is None and remembered_model_catalog(record, key, {"key": key, **cached} if cached else None) is not None:
+        matched = models[0] if models else None
+        if matched is None:
+            return None
+        saved_limit = record.get("model_context_limits", {}).get(_model_limit_key(matched["id"]))
     if matched:
         resolved = dict(matched)
         if saved_limit:
@@ -1467,6 +1506,7 @@ def probe_custom_provider(
     *,
     timeout: int = 10,
     require_api_key: bool = True,
+    fetch_catalog: Optional[Callable[[], List[Dict[str, Any]]]] = None,
 ) -> CustomProviderProbe:
     """Check a provider by listing its models. Never raises.
 
@@ -1491,7 +1531,7 @@ def probe_custom_provider(
 
     started = time.monotonic()
     try:
-        models = fetch_custom_provider_models(record, timeout=timeout, force_refresh=True)
+        models = fetch_catalog() if fetch_catalog else fetch_custom_provider_models(provider, timeout=timeout, force_refresh=True)
     except requests.HTTPError as exc:
         result.latency_ms = int((time.monotonic() - started) * 1000)
         status_code = int(getattr(getattr(exc, "response", None), "status_code", 0) or 0)

@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import os
 import time
-from hashlib import sha256
 from typing import Any, Dict, List, Optional
 
 import requests
 
 from .diagnostics import report_suppressed_exception
+from .model_catalog_cache import model_catalog_key, remember_model_catalog, remembered_model_catalog
 from .proxy import normalize_proxy_url, requests_proxy_dict
 
 
-SENSENOVA_DEFAULT_API_URL = "https://token.sensenova.cn/v1"
+SENSENOVA_DEFAULT_API_URL = "https://token.sensenova.cn"
 SENSENOVA_DEFAULT_MODEL_ID = "deepseek-v4-flash"
 SENSENOVA_DEFAULT_MODEL_DISPLAY_NAME = "DeepSeek V4 Flash"
-SENSENOVA_DEFAULT_CONTEXT_TOKENS = 1_000_000
+SENSENOVA_DEFAULT_CONTEXT_TOKENS = 1_048_576
 SENSENOVA_DEFAULT_MAX_TOKENS = 65_536
 SENSENOVA_DEFAULT_TEMPERATURE = 0.6
 SENSENOVA_DEFAULT_TOP_P = 0.95
@@ -29,10 +29,7 @@ SENSENOVA_FLASH_LITE_DEFAULT_MIN_P = 0.0
 SENSENOVA_FLASH_LITE_DEFAULT_PRESENCE_PENALTY = 1.5
 SENSENOVA_FLASH_LITE_DEFAULT_REPETITION_PENALTY = 1.0
 SENSENOVA_MODEL_CACHE_TTL_SECONDS = 60.0
-# SenseNova's /models endpoint can retain retired IDs after their inference
-# route has been removed. Keep those IDs out of selectors and migrate saved
-# configurations to the documented replacement.
-SENSENOVA_DEPRECATED_MODEL_IDS = {"sensenova-6.7-flash-lite"}
+# Migrate legacy saved selections only before a live inventory is available.
 SENSENOVA_MODEL_ID_MIGRATIONS: Dict[str, str] = {
     "sensenova-6.7-flash-lite": "sensenova-6.8-flash-lite",
 }
@@ -47,8 +44,10 @@ def _sensenova_model(
     max_output_tokens: int = SENSENOVA_DEFAULT_MAX_TOKENS,
     vision: bool = False,
     thinking: bool = True,
-    transport: str = "openai-chat",
+    transport: str = "anthropic",
     thinking_control: Optional[str] = None,
+    supports_thinking_disable: bool = True,
+    fixed_temperature: Optional[float] = None,
 ) -> Dict[str, Any]:
     resolved_thinking_control = thinking_control or ("effort" if thinking else "none")
     supports_effort_control = resolved_thinking_control == "effort"
@@ -63,6 +62,8 @@ def _sensenova_model(
         "thinking": bool(thinking),
         "tool_calling": True,
         "thinking_control": resolved_thinking_control,
+        "supports_thinking_disable": supports_thinking_disable,
+        "fixed_temperature": fixed_temperature,
         "thinking_options": [
             {
                 "id": "none",
@@ -95,13 +96,12 @@ _SENSENOVA_MODEL_CATALOG: List[Dict[str, Any]] = [
     _sensenova_model(
         "deepseek-v4-flash",
         "DeepSeek V4 Flash",
-        "SenseNova DeepSeek V4 Flash with 1M context and selectable reasoning_effort.",
+        "SenseNova DeepSeek V4 Flash with 1M context and selectable reasoning effort.",
     ),
     _sensenova_model(
-        "deepseek-v4-pro",
-        "DeepSeek V4 Pro",
-        "SenseNova-hosted DeepSeek V4 Pro with a 1M context window.",
-        context_length=1_048_576,
+        "deepseek-flash",
+        "DeepSeek Flash",
+        "SenseNova-hosted DeepSeek Flash with a 1M context window.",
         thinking_control="provider-managed",
     ),
     _sensenova_model(
@@ -118,6 +118,7 @@ _SENSENOVA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "SenseNova-hosted Kimi K3 with a 1M context window.",
         context_length=1_048_576,
         thinking_control="provider-managed",
+        fixed_temperature=1.0,
     ),
     _sensenova_model(
         "sensenova-6.8-flash-lite",
@@ -125,8 +126,18 @@ _SENSENOVA_MODEL_CATALOG: List[Dict[str, Any]] = [
         "SenseNova lightweight multimodal agent model for text and image workflows.",
         context_length=262_144,
         vision=True,
-        transport="openai-chat",
         thinking_control="provider-managed",
+    ),
+    _sensenova_model(
+        "sensenova-6.8-flash", "SenseNova 6.8 Flash",
+        "SenseNova multimodal agent model for text and image workflows.",
+        context_length=262_144, vision=True, thinking_control="provider-managed",
+    ),
+    _sensenova_model(
+        "glm-5.3", "GLM-5.3",
+        "SenseNova-hosted GLM-5.3 with a 1M context window.",
+        max_output_tokens=131_072, thinking_control="provider-managed",
+        supports_thinking_disable=False,
     ),
 ]
 
@@ -188,7 +199,7 @@ def _live_sensenova_model(raw_model: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw_model, dict):
         return None
     model_id = str(raw_model.get("id") or raw_model.get("model") or "").strip()
-    if not model_id or model_id.lower() in SENSENOVA_DEPRECATED_MODEL_IDS:
+    if not model_id:
         return None
     output_modalities = [str(item).strip().lower() for item in raw_model.get("output_modalities", [])]
     if output_modalities and "text" not in output_modalities:
@@ -213,14 +224,22 @@ def _live_sensenova_model(raw_model: Any) -> Optional[Dict[str, Any]]:
     model["description"] = str(raw_model.get("description") or model["description"]).strip()
     model["context_length"] = int(raw_model.get("context_length") or model["context_length"])
     model["max_output_tokens"] = int(raw_model.get("max_output_length") or model["max_output_tokens"])
-    model["vision"] = "image" in input_modalities or bool(model.get("vision"))
-    model["tool_calling"] = "tools" in features or bool(model.get("tool_calling"))
+    if "input_modalities" in raw_model:
+        model["vision"] = "image" in input_modalities
+    if "supported_features" in raw_model:
+        model["tool_calling"] = "tools" in features
+        model["thinking"] = "reasoning" in features
+        if not model["thinking"]:
+            model.update(thinking_control="none", thinking_options=[], default_thinking_choice="")
+    model["transport"] = "anthropic"
     for field in (
         "input_modalities",
         "output_modalities",
         "supported_features",
         "supported_sampling_parameters",
         "pricing",
+        "supports_thinking_disable",
+        "fixed_temperature",
     ):
         if field in raw_model:
             model[field] = raw_model[field]
@@ -244,14 +263,16 @@ def fetch_sensenova_model_catalog(
         return []
     models_url = _sensenova_models_url(cfg.get("api_url"))
     configured_proxy = normalize_proxy_url(proxy)
-    cache_key = f"{models_url}:{sha256(api_key.encode('utf-8')).hexdigest()}:{configured_proxy}"
+    cache_key = model_catalog_key(models_url, api_key)
     now = time.monotonic()
     if (
         not force_refresh
         and _MODEL_CACHE.get("key") == cache_key
         and float(_MODEL_CACHE.get("expires_at") or 0.0) > now
     ):
-        return [dict(item) for item in _MODEL_CACHE.get("models", [])]
+        models = [dict(item) for item in _MODEL_CACHE.get("models", [])]
+        remember_model_catalog(sensenova_config, cache_key, models)
+        return models
 
     request_kwargs: Dict[str, Any] = {
         "headers": {"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
@@ -262,9 +283,12 @@ def fetch_sensenova_model_catalog(
     response = requests.get(models_url, **request_kwargs)
     response.raise_for_status()
     payload = response.json()
-    raw_models = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else []
+    raw_models = payload.get("data", payload.get("models")) if isinstance(payload, dict) else payload
+    if not isinstance(raw_models, list):
+        raise ValueError("SenseNova model catalog response must contain a model list.")
     models = [model for item in raw_models if (model := _live_sensenova_model(item)) is not None]
     _MODEL_CACHE.update(key=cache_key, expires_at=now + SENSENOVA_MODEL_CACHE_TTL_SECONDS, models=models)
+    remember_model_catalog(sensenova_config, cache_key, models)
     return [dict(item) for item in models]
 
 
@@ -275,17 +299,22 @@ def get_sensenova_model_catalog(
     force_refresh: bool = False,
     proxy: Any = "",
 ) -> List[Dict[str, Any]]:
-    if fetch_live:
+    cfg = default_sensenova_config()
+    if isinstance(sensenova_config, dict):
+        cfg.update(sensenova_config)
+    key = model_catalog_key(_sensenova_models_url(cfg.get("api_url")), resolve_sensenova_api_key(cfg))
+    if fetch_live and resolve_sensenova_api_key(cfg):
         try:
-            live_models = fetch_sensenova_model_catalog(
+            return fetch_sensenova_model_catalog(
                 sensenova_config,
                 force_refresh=force_refresh,
                 proxy=proxy,
             )
-            if live_models:
-                return live_models
         except Exception:
             report_suppressed_exception("fetch SenseNova live model catalog")
+    latest = remembered_model_catalog(cfg, key, _MODEL_CACHE)
+    if latest is not None:
+        return latest
     return [dict(item) for item in _SENSENOVA_MODEL_CATALOG]
 
 
@@ -302,6 +331,11 @@ def resolve_sensenova_selected_model(sensenova_config: Any, model_id: Optional[s
     if isinstance(sensenova_config, dict):
         cfg.update(sensenova_config)
     wanted = str(model_id or cfg.get("selected_model_id", SENSENOVA_DEFAULT_MODEL_ID) or "").strip().lower()
+    key = model_catalog_key(_sensenova_models_url(cfg.get("api_url")), resolve_sensenova_api_key(cfg))
+    latest = remembered_model_catalog(cfg, key, _MODEL_CACHE)
+    if latest is not None:
+        matched = next((item for item in latest if str(item["id"]).lower() == wanted), None)
+        return matched or (latest[0] if latest else None)
     wanted = SENSENOVA_MODEL_ID_MIGRATIONS.get(wanted, wanted)
     matched = get_sensenova_model_metadata(wanted)
     if matched:
@@ -321,12 +355,16 @@ def resolve_sensenova_selected_model(sensenova_config: Any, model_id: Optional[s
 def resolve_sensenova_sdk_base_url(api_url: Any) -> str:
     base = str(api_url or "").strip().rstrip("/")
     if not base:
-        return SENSENOVA_DEFAULT_API_URL
+        base = SENSENOVA_DEFAULT_API_URL
     if not base.startswith(("http://", "https://")):
         base = f"https://{base}"
     lower = base.lower()
-    if lower.endswith("/chat/completions"):
-        base = base[: -len("/chat/completions")]
+    for suffix in ("/chat/completions", "/messages"):
+        if lower.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    if not base.lower().endswith("/v1"):
+        base += "/v1"
     return base.rstrip("/")
 
 
@@ -367,8 +405,8 @@ def normalize_sensenova_config(raw_sensenova: Any) -> Dict[str, Any]:
 
     cfg["enabled"] = bool(cfg.get("enabled", True))
     cfg["api_key"] = str(cfg.get("api_key", "") or "").strip()
-    cfg["api_url"] = resolve_sensenova_sdk_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
-    cfg["endpoint"] = str(cfg.get("endpoint", "") or "").strip()
+    cfg["api_url"] = resolve_sensenova_anthropic_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
+    cfg["endpoint"] = "/v1/messages"
     cfg["selected_model_id"] = str(cfg.get("selected_model_id", SENSENOVA_DEFAULT_MODEL_ID) or "").strip() or SENSENOVA_DEFAULT_MODEL_ID
     cfg["selected_model_display_name"] = str(
         cfg.get("selected_model_display_name", SENSENOVA_DEFAULT_MODEL_DISPLAY_NAME) or ""
@@ -413,6 +451,8 @@ def normalize_sensenova_config(raw_sensenova: Any) -> Dict[str, Any]:
         cfg["max_context_tokens"] = int(matched.get("context_length") or cfg["max_context_tokens"])
         output_limit = int(matched.get("max_output_tokens") or SENSENOVA_DEFAULT_MAX_TOKENS)
         cfg["max_tokens"] = min(int(cfg.get("max_tokens") or output_limit), output_limit)
+        if matched.get("fixed_temperature") is not None:
+            cfg["temperature"] = float(matched["fixed_temperature"])
 
     return cfg
 
@@ -427,20 +467,14 @@ def build_sensenova_runtime_model_data(sensenova_config: Any, model_id: Optional
     selected = resolve_sensenova_selected_model(cfg, model_id=model_id)
     if not selected:
         return None
-    transport = str(selected.get("transport") or "openai-chat").strip().lower()
-    use_openai_chat = transport != "anthropic"
     thinking_control = str(selected.get("thinking_control") or "none").strip().lower()
     return {
         "model": selected["id"],
         "model_display_name": selected["display_name"],
-        "base_url": (
-            resolve_sensenova_sdk_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
-            if use_openai_chat
-            else resolve_sensenova_anthropic_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
-        ),
+        "base_url": resolve_sensenova_anthropic_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL)),
         "api_key": api_key,
         "max_context_tokens": int(selected.get("context_length") or cfg.get("max_context_tokens", SENSENOVA_DEFAULT_CONTEXT_TOKENS)),
-        "provider": "openai-chat" if use_openai_chat else "anthropic",
+        "provider": "anthropic",
         "supports_vision": bool(selected.get("vision", False)),
         "thinking_mode": (
             normalize_sensenova_reasoning_effort(cfg.get("reasoning_effort"))
@@ -451,6 +485,50 @@ def build_sensenova_runtime_model_data(sensenova_config: Any, model_id: Optional
         "custom_headers": {},
         "vision": bool(selected.get("vision", False)),
     }
+
+
+def build_sensenova_anthropic_options(sensenova_config: Any, model_id: Optional[str] = None) -> Dict[str, Any]:
+    """Build native Messages options without OpenAI-only sampling fields."""
+    cfg = normalize_sensenova_config(sensenova_config)
+    selected = resolve_sensenova_selected_model(cfg, model_id=model_id) or {}
+    temperature = selected.get("fixed_temperature")
+    options: Dict[str, Any] = {"temperature": float(cfg["temperature"] if temperature is None else temperature)}
+    if not selected.get("thinking", False):
+        return options
+    effort = normalize_sensenova_reasoning_effort(cfg.get("reasoning_effort"))
+    if effort == "none":
+        if selected.get("supports_thinking_disable", True):
+            options["thinking"] = {"type": "disabled"}
+    elif selected.get("thinking_control") == "effort":
+        options["thinking"] = {"type": "adaptive"}
+        options["extra_body"] = {"output_config": {"effort": effort}}
+    return options
+
+
+class _SenseNovaMessageEvents:
+    """Normalize the provider's null initial content before SDK accumulation."""
+
+    def __init__(self, stream: Any) -> None:
+        self.stream = stream
+        self.response = stream.response
+
+    def __iter__(self):
+        for event in self.stream:
+            if event.type == "message_start" and event.message.content is None:
+                event.message.content = []
+            yield event
+
+    def close(self) -> None:
+        self.stream.close()
+
+
+def stream_sensenova_messages(client: Any, **kwargs: Any) -> Any:
+    """Keep native SDK streaming while accepting SenseNova's initial SSE shape."""
+    from anthropic import NOT_GIVEN
+    from anthropic.lib.streaming import MessageStream
+
+    stream = client.messages.create(stream=True, **kwargs)
+    return MessageStream(_SenseNovaMessageEvents(stream), NOT_GIVEN)
 
 
 def build_sensenova_openai_options(sensenova_config: Any, model_id: Optional[str] = None) -> Dict[str, Any]:

@@ -73,6 +73,7 @@ class ProviderRow:
     probe_note: str = ""
     require_api_key: bool = True
     record: Dict[str, Any] = field(default_factory=dict)
+    config: Optional[Config] = None
 
     @property
     def configured(self) -> bool:
@@ -110,12 +111,12 @@ def _builtin_endpoint(source: str, config: Config) -> Tuple[str, str, str, str, 
             SENSENOVA_DEFAULT_API_URL,
             normalize_sensenova_config,
             resolve_sensenova_api_key,
-            resolve_sensenova_sdk_base_url,
+            resolve_sensenova_anthropic_base_url,
         )
 
         cfg = normalize_sensenova_config(raw)
-        base = resolve_sensenova_sdk_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
-        return base, resolve_sensenova_api_key(cfg), "openai-chat", str(cfg.get("selected_model_id", "") or ""), str(cfg.get("selected_model_display_name", "") or "")
+        base = resolve_sensenova_anthropic_base_url(cfg.get("api_url", SENSENOVA_DEFAULT_API_URL))
+        return base, resolve_sensenova_api_key(cfg), "anthropic", str(cfg.get("selected_model_id", "") or ""), str(cfg.get("selected_model_display_name", "") or "")
     if source == "modelscope":
         from .modelscope import (
             MODELSCOPE_DEFAULT_API_URL,
@@ -232,6 +233,7 @@ def _builtin_row(source: str, config: Config) -> ProviderRow:
         probe_note="" if probeable else f"No catalog endpoint; run /provider {source} test.",
         require_api_key=source not in _KEYLESS_SOURCES,
         record=record,
+        config=config,
     )
 
 
@@ -262,6 +264,7 @@ def _custom_row(provider: Dict[str, Any], config: Config) -> ProviderRow:
         probeable=True,
         require_api_key=True,
         record=dict(provider),
+        config=config,
     )
 
 
@@ -289,23 +292,42 @@ def probe_provider_rows(
         return {}
 
     def _run(row: ProviderRow) -> Tuple[str, CustomProviderProbe]:
+        fetch_catalog = None
+        if row.kind == "builtin" and row.config is not None:
+            from importlib import import_module
+            from .model_catalog_cache import fetch_openai_source_catalog
+
+            module = import_module(f".{row.source}", __package__)
+            provider_config = getattr(row.config, row.source)
+            if row.source in {"sensenova", "opencode"}:
+                fetch = getattr(module, f"fetch_{row.source}_model_catalog")
+                fetch_catalog = lambda: fetch(provider_config, timeout=timeout, force_refresh=True, proxy=row.config.api_proxy)
+            elif row.source == "agnes":
+                fetch_catalog = lambda: module.fetch_agnes_provider_model_catalog(provider_config, timeout=timeout, force_refresh=True)
+            else:
+                builtin = getattr(module, f"_{row.source.upper()}_MODEL_CATALOG")
+                fetch_catalog = lambda: fetch_openai_source_catalog(provider_config, row.base_url, row.record["api_key"], builtin, timeout=timeout)
         probe = probe_custom_provider(
             row.record,
             timeout=timeout,
             require_api_key=row.require_api_key,
+            fetch_catalog=fetch_catalog,
         )
         probe.name = row.name
         return row.key, probe
-
-    if len(targets) == 1:
-        key, probe = _run(targets[0])
-        return {key: probe}
 
     from concurrent.futures import ThreadPoolExecutor
 
     workers = max(1, min(int(max_workers or 8), len(targets)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return dict(pool.map(_run, targets))
+        probes = dict(pool.map(_run, targets))
+    from .custom_providers import upsert_custom_provider
+
+    for row in targets:
+        if row.kind == "custom" and row.config is not None and probes[row.key].status in {"online", "empty"}:
+            row.record["models"] = probes[row.key].models
+            row.config.custom_providers = upsert_custom_provider(row.config.custom_providers, row.record)
+    return probes
 
 
 def find_provider_row(rows: List[ProviderRow], query: Any) -> Optional[ProviderRow]:

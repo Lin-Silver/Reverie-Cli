@@ -20,6 +20,14 @@ from reverie.session.manager import SessionManager, session_title_from_prompt
 from reverie.sdk_bridge import _desktop_tool_record
 
 
+@pytest.fixture(autouse=True)
+def isolate_provider_inventory(monkeypatch):
+    from reverie import agnes, opencode, sensenova, custom_providers, model_catalog_cache
+
+    for module, field in ((agnes, "_MODEL_CACHE"), (opencode, "_OPENCODE_MODEL_CACHE"), (sensenova, "_MODEL_CACHE"), (custom_providers, "_MODEL_CACHE"), (model_catalog_cache, "_OPENAI_MODEL_CACHE")):
+        monkeypatch.setattr(module, field, {})
+
+
 def test_kernel_info_contract(capsys) -> None:
     from reverie.__main__ import main
 
@@ -281,7 +289,7 @@ def test_desktop_live_refresh_passes_sensenova_config_to_provider(monkeypatch) -
     assert source["catalog_live"] is True
 
 
-def test_desktop_catalog_uses_live_opencode_models_when_key_is_configured(monkeypatch) -> None:
+def test_desktop_catalog_explicitly_refreshes_opencode_models(monkeypatch) -> None:
     from reverie import opencode as opencode_module
 
     captured = []
@@ -304,12 +312,12 @@ def test_desktop_catalog_uses_live_opencode_models_when_key_is_configured(monkey
     monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", fake_catalog)
     config = Config(opencode={"api_key": "zen-test", "selected_model_id": "claude-fable-5"})
 
-    source = _source(build_model_sources_payload(config), "opencode")
+    source = _source(build_model_sources_payload(config, fetch_live=True), "opencode")
 
     live_call = next(item for item in captured if item["fetch_live"])
     assert live_call == {
         "fetch_live": True,
-        "force_refresh": False,
+        "force_refresh": True,
         "provider_config": config.opencode,
     }
     assert [item["id"] for item in source["models"]] == ["claude-fable-5"]
@@ -324,7 +332,7 @@ def test_opencode_builtin_catalog_setting_is_persisted_by_provider_patch() -> No
     assert config.opencode["use_builtin_model_catalog"] is True
 
 
-def test_opencode_live_only_model_can_be_selected_and_then_falls_back_to_builtin(monkeypatch) -> None:
+def test_opencode_live_model_remains_selected_when_builtin_fallback_is_enabled(monkeypatch) -> None:
     from reverie import opencode as opencode_module
 
     live_model = {
@@ -336,13 +344,11 @@ def test_opencode_live_only_model_can_be_selected_and_then_falls_back_to_builtin
         "catalog_source": "api",
     }
 
-    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False, proxy=""):
-        return [dict(live_model)] if not provider_config.get("use_builtin_model_catalog") else [
-            {"id": "deepseek-v4-flash-free", "display_name": "DeepSeek V4 Flash Free"}
-        ]
-
-    monkeypatch.setattr(opencode_module, "get_opencode_model_catalog", fake_catalog)
+    monkeypatch.setattr(opencode_module.requests, "get", lambda *args, **kwargs: SimpleNamespace(
+        raise_for_status=lambda: None, json=lambda: {"data": [live_model]},
+    ))
     config = Config(opencode={"api_key": "zen-test"})
+    opencode_module.get_opencode_model_catalog(config.opencode, fetch_live=True, force_refresh=True)
 
     selected = apply_model_selection(config, "opencode", "claude-fable-5")
     assert selected["id"] == "claude-fable-5"
@@ -351,7 +357,7 @@ def test_opencode_live_only_model_can_be_selected_and_then_falls_back_to_builtin
     apply_provider_config_patch(config, "opencode", {"use_builtin_model_catalog": True})
 
     assert config.opencode["use_builtin_model_catalog"] is True
-    assert config.opencode["selected_model_id"] == "deepseek-v4-flash-free"
+    assert config.opencode["selected_model_id"] == "claude-fable-5"
 
 
 def test_desktop_live_refresh_passes_global_proxy_to_opencode(monkeypatch) -> None:

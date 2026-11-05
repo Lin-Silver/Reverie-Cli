@@ -7413,6 +7413,7 @@ class CommandHandler:
         provider_command: str = "",
         normalize_query: Optional[Callable[[str], str]] = None,
         post_select_config: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
+        catalog_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Persist model selection for an external provider."""
         config_manager = self.app.get('config_manager')
@@ -7422,6 +7423,10 @@ class CommandHandler:
             )
             return True
 
+        if catalog_config is not None:
+            config = config_manager.load()
+            setattr(config, config_attr, normalize_config(catalog_config))
+            config_manager.save(config)
         if not catalog:
             self.console.print(
                 f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {provider_label} model catalog is empty.[/{self.theme.CORAL_SOFT}]"
@@ -8361,6 +8366,7 @@ class CommandHandler:
         return self._select_external_provider_model(
             config_attr="opencode",
             normalize_config=normalize_opencode_config,
+            catalog_config=getattr(config, "opencode", {}) if config_manager else None,
             catalog=catalog,
             provider_label="Opencode",
             active_source="opencode",
@@ -8632,10 +8638,12 @@ class CommandHandler:
     def _cmd_aihubmix_model(self, model_query: str) -> bool:
         from ..aihubmix import get_aihubmix_model_catalog, normalize_aihubmix_config
 
+        manager = self.app.get('config_manager')
+        provider_config = getattr(manager.load(), "aihubmix", {}) if manager else {}
         return self._select_external_provider_model(
             config_attr="aihubmix",
             normalize_config=normalize_aihubmix_config,
-            catalog=get_aihubmix_model_catalog(),
+            catalog=get_aihubmix_model_catalog(provider_config),
             provider_label="AIhubMix",
             active_source="aihubmix",
             model_query=model_query,
@@ -9001,6 +9009,7 @@ class CommandHandler:
         result = self._select_external_provider_model(
             config_attr="agnes",
             normalize_config=normalize_agnes_config,
+            catalog_config=current_cfg,
             catalog=get_agnes_model_catalog(current_cfg),
             provider_label="Agnes",
             active_source="agnes",
@@ -9105,13 +9114,7 @@ class CommandHandler:
         effective_api_key = resolve_sensenova_api_key(sensenova_cfg)
         key_origin = " (from environment)" if effective_api_key and not str(sensenova_cfg.get("api_key", "") or "").strip() else ""
         model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
-        transport_id = str((selected or {}).get("transport") or "openai-chat").strip().lower()
-        transport_label = "OpenAI Chat" if transport_id == "openai-chat" else "Anthropic Messages"
-        transport_detail = (
-            "OpenAI-compatible Chat Completions"
-            if transport_id == "openai-chat"
-            else "Anthropic Messages"
-        )
+        transport_label = transport_detail = "Anthropic Messages"
 
         lines = [
             f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
@@ -9192,6 +9195,7 @@ class CommandHandler:
         return self._select_external_provider_model(
             config_attr="sensenova",
             normalize_config=normalize_sensenova_config,
+            catalog_config=provider_config,
             catalog=get_sensenova_model_catalog(
                 provider_config,
                 fetch_live=True,
@@ -9515,10 +9519,12 @@ class CommandHandler:
     def _cmd_modelscope_model(self, model_query: str) -> bool:
         from ..modelscope import get_modelscope_model_catalog, normalize_modelscope_config
 
+        manager = self.app.get('config_manager')
+        provider_config = getattr(manager.load(), "modelscope", {}) if manager else {}
         return self._select_external_provider_model(
             config_attr="modelscope",
             normalize_config=normalize_modelscope_config,
-            catalog=get_modelscope_model_catalog(),
+            catalog=get_modelscope_model_catalog(provider_config),
             provider_label="ModelScope",
             active_source="modelscope",
             model_query=model_query,
@@ -9803,10 +9809,12 @@ class CommandHandler:
     def _cmd_nvidia_model(self, model_query: str) -> bool:
         from ..nvidia import get_nvidia_model_catalog, normalize_nvidia_config
 
+        manager = self.app.get('config_manager')
+        provider_config = getattr(manager.load(), "nvidia", {}) if manager else {}
         return self._select_external_provider_model(
             config_attr="nvidia",
             normalize_config=normalize_nvidia_config,
-            catalog=get_nvidia_model_catalog(),
+            catalog=get_nvidia_model_catalog(provider_config),
             provider_label="NVIDIA",
             active_source="nvidia",
             model_query=model_query,
@@ -9982,7 +9990,8 @@ class CommandHandler:
 
         from ..provider_probe import collect_provider_rows, probe_provider_rows
 
-        rows = collect_provider_rows(config_manager.load())
+        config = config_manager.load()
+        rows = collect_provider_rows(config)
         probes: Dict[str, Any] = {}
         if probe:
             probeable = [row for row in rows if row.probeable and row.record]
@@ -9990,6 +9999,7 @@ class CommandHandler:
                 f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Probing {len(probeable)} providers in parallel...[/{self.theme.PURPLE_SOFT}]"
             ):
                 probes = probe_provider_rows(rows, timeout=10, max_workers=8)
+            config_manager.save(config)
 
         table = Table(
             show_header=True,

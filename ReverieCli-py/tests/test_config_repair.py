@@ -220,7 +220,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.aihubmix["selected_model_id"] == "gpt-5.5-free"
     assert config.agnes["selected_model_id"] == "agnes-3.0-flash"
     assert config.sensenova["selected_model_id"] == "deepseek-v4-flash"
-    assert config.sensenova["max_context_tokens"] == 1_000_000
+    assert config.sensenova["max_context_tokens"] == 1_048_576
     assert config.sensenova["reasoning_effort"] == "medium"
     assert config.modelscope["selected_model_id"] == "Qwen/Qwen3.8-27B"
     assert config.opencode["selected_model_id"] == "deepseek-v4-flash-free"
@@ -236,7 +236,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert saved_payload["aihubmix"]["selected_model_id"] == "gpt-5.5-free"
     assert saved_payload["agnes"]["selected_model_id"] == "agnes-3.0-flash"
     assert saved_payload["sensenova"]["selected_model_id"] == "deepseek-v4-flash"
-    assert saved_payload["sensenova"]["max_context_tokens"] == 1_000_000
+    assert saved_payload["sensenova"]["max_context_tokens"] == 1_048_576
     assert saved_payload["sensenova"]["reasoning_effort"] == "medium"
     assert saved_payload["modelscope"]["selected_model_id"] == "Qwen/Qwen3.8-27B"
     assert saved_payload["opencode"]["selected_model_id"] == "deepseek-v4-flash-free"

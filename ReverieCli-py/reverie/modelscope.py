@@ -176,14 +176,17 @@ def default_modelscope_config() -> Dict[str, Any]:
     }
 
 
-def get_modelscope_model_catalog(modelscope_config: Any = None) -> List[Dict[str, Any]]:
+def get_modelscope_model_catalog(modelscope_config: Any = None, *, fetch_live: bool = False) -> List[Dict[str, Any]]:
     """Return the supported ModelScope model catalog."""
     models = [dict(item) for item in _MODELSCOPE_MODEL_CATALOG]
     selected_id = str((modelscope_config or {}).get("selected_model_id") or "").lower()
     selected = _MODELSCOPE_MODEL_METADATA.get(selected_id)
     if selected and not any(item["id"].lower() == selected_id for item in models):
         models.append({**selected, "deprecated": True})
-    return models
+    from .model_catalog_cache import openai_source_catalog
+
+    cfg = modelscope_config if isinstance(modelscope_config, dict) else {}
+    return openai_source_catalog(cfg, resolve_modelscope_openai_base_url(cfg.get("api_url")), resolve_modelscope_api_key(cfg), models, fetch_live=fetch_live)
 
 
 def get_modelscope_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
@@ -202,10 +205,9 @@ def resolve_modelscope_selected_model(modelscope_config: Any, model_id: Optional
         cfg.update(modelscope_config)
 
     wanted = str(model_id or cfg.get("selected_model_id", MODELSCOPE_DEFAULT_MODEL_ID) or "").strip().lower()
-    matched = get_modelscope_model_metadata(wanted)
-    if matched:
-        return matched
-    return get_modelscope_model_metadata(MODELSCOPE_DEFAULT_MODEL_ID)
+    cfg["selected_model_id"] = wanted
+    catalog = get_modelscope_model_catalog(cfg)
+    return next((item for item in catalog if item["id"].lower() == wanted), catalog[0] if catalog else None)
 
 
 def _normalize_api_url(api_url: Any) -> str:

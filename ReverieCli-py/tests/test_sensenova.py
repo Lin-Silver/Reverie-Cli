@@ -29,11 +29,16 @@ from reverie.provider_smoke import BUILTIN_PROVIDER_NAMES, SMOKE_RUNNERS
 from reverie.tools.text_to_image import TextToImageTool
 
 
+@pytest.fixture(autouse=True)
+def isolate_live_inventory(monkeypatch):
+    monkeypatch.setattr(sensenova_module, "_MODEL_CACHE", {"key": "", "expires_at": 0.0, "models": []})
+
+
 def test_sensenova_deepseek_v4_flash_catalog_contract():
     catalog_by_id = {item["id"]: item for item in get_sensenova_model_catalog()}
     flash = catalog_by_id["deepseek-v4-flash"]
 
-    assert flash["context_length"] == 1_000_000
+    assert flash["context_length"] == 1_048_576
     assert [item["id"] for item in flash["thinking_options"]] == ["none", "low", "medium", "high"]
     assert flash["default_thinking_choice"] == "medium"
     assert normalize_sensenova_reasoning_effort("off") == "none"
@@ -43,17 +48,20 @@ def test_sensenova_deepseek_v4_flash_catalog_contract():
     assert normalize_sensenova_reasoning_effort("max") == "max"
 
 
-def test_sensenova_catalog_only_exposes_flash_lite_for_vision():
+def test_sensenova_catalog_matches_current_chat_inventory_and_vision():
     catalog = {item["id"]: item for item in get_sensenova_model_catalog()}
     assert set(catalog) == {
         "deepseek-v4-flash",
-        "deepseek-v4-pro",
+        "deepseek-flash",
         "glm-5.2",
         "kimi-k3",
         "sensenova-6.8-flash-lite",
+        "sensenova-6.8-flash",
+        "glm-5.3",
     }
     assert [item["id"] for item in catalog.values() if item["vision"]] == [
         "sensenova-6.8-flash-lite",
+        "sensenova-6.8-flash",
     ]
 
 
@@ -127,14 +135,15 @@ def test_sensenova_live_catalog_uses_official_models_endpoint_and_filters_non_ch
         "timeout": 3,
     }
     assert [item["id"] for item in catalog] == [
+        "sensenova-6.7-flash-lite",
         "sensenova-6.8-flash-lite",
         "future-chat-model",
     ]
     assert catalog[0]["vision"] is True
     assert catalog[0]["tool_calling"] is True
     assert catalog[0]["context_length"] == 262_144
-    assert catalog[1]["display_name"] == "Future Chat Model"
-    assert catalog[1]["max_output_tokens"] == 7_890
+    assert catalog[2]["display_name"] == "Future Chat Model"
+    assert catalog[2]["max_output_tokens"] == 7_890
 
 
 def test_sensenova_live_catalog_failure_falls_back_and_migrates_retired_flash_lite(monkeypatch):
@@ -150,10 +159,12 @@ def test_sensenova_live_catalog_failure_falls_back_and_migrates_retired_flash_li
     )
     assert {item["id"] for item in catalog} == {
         "deepseek-v4-flash",
-        "deepseek-v4-pro",
+        "deepseek-flash",
         "glm-5.2",
         "kimi-k3",
         "sensenova-6.8-flash-lite",
+        "sensenova-6.8-flash",
+        "glm-5.3",
     }
 
     current = normalize_sensenova_config({"selected_model_id": "sensenova-6.7-flash-lite"})
@@ -216,21 +227,21 @@ def test_sensenova_config_and_runtime_model_data():
     )
 
     assert cfg["selected_model_id"] == "deepseek-v4-flash"
-    assert cfg["max_context_tokens"] == 1_000_000
+    assert cfg["max_context_tokens"] == 1_048_576
     assert cfg["reasoning_effort"] == "none"
 
     runtime = build_sensenova_runtime_model_data(cfg)
     assert runtime is not None
     assert runtime["model"] == "deepseek-v4-flash"
-    assert runtime["base_url"] == "https://token.sensenova.cn/v1"
-    assert runtime["provider"] == "openai-chat"
-    assert runtime["max_context_tokens"] == 1_000_000
+    assert runtime["base_url"] == "https://token.sensenova.cn"
+    assert runtime["provider"] == "anthropic"
+    assert runtime["max_context_tokens"] == 1_048_576
     assert runtime["thinking_mode"] == "none"
 
     flash_lite = build_sensenova_runtime_model_data(cfg, model_id="sensenova-6.8-flash-lite")
     assert flash_lite is not None
-    assert flash_lite["provider"] == "openai-chat"
-    assert flash_lite["base_url"] == "https://token.sensenova.cn/v1"
+    assert flash_lite["provider"] == "anthropic"
+    assert flash_lite["base_url"] == "https://token.sensenova.cn"
     assert flash_lite["thinking_mode"] == "provider-managed"
     assert {item["id"]: item for item in get_sensenova_model_catalog()}[
         "sensenova-6.8-flash-lite"
@@ -282,7 +293,7 @@ def test_config_accepts_sensenova_active_source():
     assert config.sensenova["selected_model_id"] == "deepseek-v4-flash"
     assert config.active_model is not None
     assert config.active_model.model == "deepseek-v4-flash"
-    assert config.active_model.provider == "openai-chat"
+    assert config.active_model.provider == "anthropic"
 
 
 def test_config_reuses_legacy_sensenova_model_api_key():

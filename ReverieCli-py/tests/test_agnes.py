@@ -22,6 +22,11 @@ from reverie.tools.text_to_video import TextToVideoTool
 from rich.console import Console
 
 
+@pytest.fixture(autouse=True)
+def isolate_live_inventory(monkeypatch):
+    monkeypatch.setattr(agnes_module, "_MODEL_CACHE", {"key": "", "expires_at": 0.0, "models": []})
+
+
 def test_agnes_catalog_contains_documented_text_models(monkeypatch) -> None:
     monkeypatch.delenv("AGNES_API_KEY", raising=False)
     catalog = get_agnes_model_catalog({"live_model_list": False})
@@ -114,6 +119,7 @@ def test_agnes_live_source_catalog_classifies_every_supported_modality(monkeypat
         "agnes-2.5-pro-alpha",
         "agnes-2.5-flash",
         "agnes-2.0-flash",
+        "unrelated-model",
     }
     assert {item["id"] for item in catalog["tti"]} == {
         "agnes-image-2.0-flash",

@@ -228,8 +228,72 @@ def test_sensenova_recorder_url_reaches_the_actual_runtime_model():
     original.sensenova.update(api_key='fixture-key', selected_model_id='sensenova-6.8-flash-lite')
     isolated = Config()
     benchmark.configure_model_source(isolated, original, 'sensenova', 'sensenova-6.8-flash-lite', recorder_url='http://127.0.0.1:12345/v1')
-    assert isolated.active_model.base_url == 'http://127.0.0.1:12345/v1'
+    assert isolated.active_model.base_url == 'http://127.0.0.1:12345'
+    assert isolated.active_model.provider == 'anthropic'
     assert original.sensenova['api_url'] != isolated.active_model.base_url
+
+
+def test_recorder_forwards_native_messages_and_accounts_for_sse_events(tmp_path, monkeypatch):
+    import anthropic
+    from types import SimpleNamespace
+    from reverie.sensenova import stream_sensenova_messages
+
+    monkeypatch.setenv('NO_PROXY', '127.0.0.1,localhost')
+    received = []
+    message = {'id': 'msg_fixture', 'type': 'message', 'role': 'assistant', 'content': None,
+               'model': 'fixture-model', 'stop_reason': None, 'stop_sequence': None,
+               'usage': {'input_tokens': 10, 'output_tokens': 0}}
+    events = [
+        {'type': 'message_start', 'message': message},
+        {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'tool_use', 'id': 'toolu_fixture', 'name': 'echo', 'input': {}}},
+        {'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'input_json_delta', 'partial_json': '{"value":"OK"}'}},
+        {'type': 'content_block_stop', 'index': 0},
+        {'type': 'message_delta', 'delta': {'stop_reason': 'tool_use', 'stop_sequence': None}, 'usage': {'output_tokens': 2}},
+        {'type': 'message_stop'},
+    ]
+    raw = ''.join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events).encode()
+
+    class Upstream(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            received.append((self.path, self.headers.get('Authorization'), json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    upstream = benchmark.recorder_upstream(SimpleNamespace(provider='anthropic', base_url=f'http://127.0.0.1:{server.server_port}'))
+    recorder = benchmark.Recorder(tmp_path, upstream, 'fixture-key')
+    try:
+        assert recorder.models_url == f'http://127.0.0.1:{server.server_port}/v1/models'
+        with anthropic.Anthropic(base_url=f'http://127.0.0.1:{recorder.server.server_port}', auth_token='fixture-key', max_retries=0) as client:
+            with stream_sensenova_messages(client, model='fixture-model', max_tokens=64,
+                                          system='fixture system', messages=[{'role': 'user', 'content': 'Echo OK.'}]) as stream:
+                result = stream.get_final_message()
+        assert result.content[0].input == {'value': 'OK'}
+        assert received[0][:2] == ('/v1/messages', 'Bearer fixture-key')
+        assert received[0][2]['system'] == 'fixture system'
+        recorder.close()
+        record = recorder.records[0]
+        assert record['usage'] == {'input_tokens': 10, 'output_tokens': 2}
+        assert record['response_model'] == 'fixture-model'
+        assert record['response_tool_names'] == ['echo']
+        assert record['finish_reasons'] == ['tool_use']
+        assert record['sse_done'] is True
+        assert record['system_messages'] == 1
+        assert 'first_parseable_tool_arguments_ms' in record
+        assert Path(record['request']).with_suffix('.sse').read_bytes() == raw
+    finally:
+        recorder.close()
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def test_registration_without_business_checks_is_not_quality_success():
@@ -495,6 +559,8 @@ def test_recorder_preserves_live_model_selection_for_new_raw_ids(tmp_path, monke
         cfg = Config()
         cfg.opencode.update(api_url=f'http://127.0.0.1:{recorder.server.server_port}/v1',
                             api_key='', use_builtin_model_catalog=False)
+        from reverie.opencode import get_opencode_model_catalog
+        get_opencode_model_catalog(cfg.opencode, fetch_live=True, force_refresh=True)
         selected = apply_model_selection(cfg, 'opencode', 'new-free-model')
         assert selected['id'] == 'new-free-model'
         assert cfg.active_model.model == 'new-free-model'

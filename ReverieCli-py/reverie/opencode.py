@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
+from hashlib import sha256
 import re
 import time
-from hashlib import sha256
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
@@ -13,6 +13,7 @@ from uuid import uuid4
 import requests
 
 from .proxy import normalize_proxy_url, requests_proxy_dict
+from .model_catalog_cache import model_catalog_key, remember_model_catalog, remembered_model_catalog
 from .version import __version__
 
 
@@ -357,16 +358,17 @@ def fetch_opencode_model_catalog(
         cfg.update(opencode_config)
     api_key = resolve_opencode_api_key(cfg)
     models_url = _opencode_models_url(cfg.get("api_url"))
-    auth_hash = sha256(api_key.encode("utf-8")).hexdigest() if api_key else "anonymous"
     configured_proxy = normalize_proxy_url(proxy)
-    cache_key = f"{models_url}:{auth_hash}:{configured_proxy}"
+    cache_key = model_catalog_key(models_url, api_key)
     now = time.monotonic()
     if (
         not force_refresh
         and _OPENCODE_MODEL_CACHE.get("key") == cache_key
         and float(_OPENCODE_MODEL_CACHE.get("expires_at") or 0.0) > now
     ):
-        return [dict(item) for item in _OPENCODE_MODEL_CACHE.get("models", [])]
+        models = [dict(item) for item in _OPENCODE_MODEL_CACHE.get("models", [])]
+        remember_model_catalog(opencode_config, cache_key, models)
+        return models
 
     headers = {"Accept": "application/json"}
     if api_key:
@@ -380,7 +382,9 @@ def fetch_opencode_model_catalog(
     response = requests.get(models_url, **request_kwargs)
     response.raise_for_status()
     payload = response.json()
-    raw_models = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else []
+    raw_models = payload.get("data", payload.get("models")) if isinstance(payload, dict) else payload
+    if not isinstance(raw_models, list):
+        raise ValueError("OpenCode model catalog response must contain a model list.")
     models: List[Dict[str, Any]] = []
     seen_ids = set()
     for raw_model in raw_models if isinstance(raw_models, list) else []:
@@ -398,6 +402,7 @@ def fetch_opencode_model_catalog(
         expires_at=now + OPENCODE_MODEL_CACHE_TTL_SECONDS,
         models=models,
     )
+    remember_model_catalog(opencode_config, cache_key, models)
     return [dict(item) for item in models]
 
 
@@ -408,17 +413,20 @@ def get_opencode_model_catalog(
     force_refresh: bool = False,
     proxy: Any = "",
 ) -> List[Dict[str, Any]]:
-    """Return the live catalog or the dedicated built-in catalog when selected."""
+    """Keep a successful API inventory ahead of the built-in fallback."""
     cfg = default_opencode_config()
     if isinstance(opencode_config, dict):
         cfg.update(opencode_config)
-    if fetch_live and not bool(cfg.get("use_builtin_model_catalog", False)):
+    if fetch_live:
         try:
-            live_models = fetch_opencode_model_catalog(cfg, force_refresh=force_refresh, proxy=proxy)
-            if live_models:
-                return live_models
+            models = fetch_opencode_model_catalog(opencode_config, force_refresh=force_refresh, proxy=proxy)
+            return models
         except (requests.RequestException, ValueError, TypeError):
             pass
+    key = model_catalog_key(_opencode_models_url(cfg.get("api_url")), resolve_opencode_api_key(cfg))
+    latest = remembered_model_catalog(cfg, key, _OPENCODE_MODEL_CACHE)
+    if latest is not None:
+        return latest
     has_api_key = bool(resolve_opencode_api_key(cfg))
     return [dict(item) for item in _OPENCODE_MODEL_CATALOG if has_api_key or bool(item.get("free"))]
 
@@ -449,12 +457,11 @@ def _live_opencode_model(model_id: Any, raw_model: Optional[Dict[str, Any]] = No
     if known:
         model = dict(known)
         model.update(dict(raw_model or {}))
-        # The live endpoint does not publish transport details. Keep the
-        # source-of-truth mapping for known special endpoints such as Muse.
+        # Known transports fill missing API fields, including Muse's endpoint.
         model["id"] = normalized_id
-        model["display_name"] = str(known.get("display_name") or normalized_id)
-        model["transport"] = str(known.get("transport") or "openai-chat")
-        model["endpoint"] = str(known.get("endpoint") or OPENCODE_DEFAULT_ENDPOINT)
+        model["display_name"] = str((raw_model or {}).get("display_name") or (raw_model or {}).get("name") or known.get("display_name") or normalized_id)
+        model["transport"] = str(model.get("transport") or "openai-chat")
+        model["endpoint"] = str(model.get("endpoint") or OPENCODE_DEFAULT_ENDPOINT)
     else:
         raw = dict(raw_model or {})
         inferred_transport, inferred_endpoint = _infer_live_opencode_transport(normalized_id)
@@ -495,6 +502,9 @@ def resolve_opencode_selected_model(opencode_config: Any, model_id: Optional[str
     matched = next((dict(item) for item in catalog if str(item.get("id") or "").lower() == wanted), None)
     if matched:
         return matched
+    key = model_catalog_key(_opencode_models_url(cfg.get("api_url")), resolve_opencode_api_key(cfg))
+    if remembered_model_catalog(cfg, key, _OPENCODE_MODEL_CACHE) is not None:
+        return dict(catalog[0]) if catalog else None
     if wanted and not bool(cfg.get("use_builtin_model_catalog", False)) and wanted not in _OPENCODE_MODEL_METADATA:
         return _live_opencode_model(wanted)
     default_model = next(

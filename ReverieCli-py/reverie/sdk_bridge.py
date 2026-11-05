@@ -421,7 +421,12 @@ class ReverieSdkBridge:
         from .desktop_catalog import build_model_sources_payload
 
         interface = self.ensure_interface()
-        return _json_safe(build_model_sources_payload(interface.config_manager.load(), fetch_live=fetch_live))
+        config = interface.config_manager.load()
+        before = config.to_dict()
+        payload = build_model_sources_payload(config, fetch_live=fetch_live)
+        if fetch_live or config.to_dict() != before:
+            interface.config_manager.save(config)
+        return _json_safe(payload)
 
     def image_model_sources_payload(self) -> Dict[str, Any]:
         from .desktop_catalog import build_image_model_sources_payload
@@ -1113,15 +1118,14 @@ class ReverieSdkBridge:
             interface = self.ensure_interface()
             config = interface.config_manager.load()
             keys = payload.get("keys")
+            probes = probe_provider_availability(
+                config, [str(key) for key in keys] if isinstance(keys, list) else None,
+            )
+            interface.config_manager.save(config)
             return {
                 "id": request_id,
                 "type": "providers.probed",
-                "probes": _json_safe(
-                    probe_provider_availability(
-                        config,
-                        [str(key) for key in keys] if isinstance(keys, list) else None,
-                    )
-                ),
+                "probes": _json_safe(probes),
             }
         if action == "listSessions":
             return {"id": request_id, "type": "sessions", "sessions": self.sessions_payload()}

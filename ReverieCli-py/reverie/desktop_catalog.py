@@ -45,7 +45,7 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "client_name", "label": "Client name override", "kind": "text", "optional": True},
         {"key": "user_agent", "label": "User-Agent override", "kind": "text", "optional": True},
-        {"key": "use_builtin_model_catalog", "label": "Use built-in model catalog", "kind": "bool"},
+        {"key": "use_builtin_model_catalog", "label": "Use built-in before first refresh", "kind": "bool"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
         {"key": "temperature", "label": "Temperature", "kind": "float", "min": 0, "max": 2},
     ],
@@ -90,16 +90,21 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
     if source == "custom":
         from .custom_providers import (
             get_custom_provider_model_catalog,
+            list_custom_providers,
             resolve_active_custom_provider,
+            upsert_custom_provider,
         )
 
+        if fetch_live:
+            for record in list_custom_providers(getattr(config, "custom_providers", {})):
+                get_custom_provider_model_catalog(record, fetch_live=True, force_refresh=True)
+                config.custom_providers = upsert_custom_provider(config.custom_providers, record)
         provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
         if not provider:
             return []
         return get_custom_provider_model_catalog(
             provider,
-            fetch_live=fetch_live,
-            force_refresh=fetch_live,
+            fetch_live=False,
         )
     if source == "codex":
         from .codex import get_codex_model_catalog
@@ -113,28 +118,27 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
         from .opencode import get_opencode_model_catalog, resolve_opencode_api_key
 
         opencode_config = getattr(config, "opencode", {})
-        use_builtin_catalog = bool(
-            isinstance(opencode_config, dict)
-            and opencode_config.get("use_builtin_model_catalog", False)
+        cached_catalog = get_opencode_model_catalog(opencode_config)
+        has_live_catalog = all(item.get("catalog_source") == "api" for item in cached_catalog)
+        load_live = fetch_live or (
+            not has_live_catalog
+            and not opencode_config.get("use_builtin_model_catalog", False)
+            and bool(resolve_opencode_api_key(opencode_config))
         )
-        # A configured key makes the normal desktop state use the provider's
-        # complete live catalog. An explicit refresh still works anonymously.
-        load_live_catalog = fetch_live or (not use_builtin_catalog and bool(resolve_opencode_api_key(opencode_config)))
-
         return get_opencode_model_catalog(
             opencode_config,
-            fetch_live=load_live_catalog,
+            fetch_live=load_live,
             force_refresh=fetch_live,
             proxy=getattr(config, "api_proxy", ""),
         )
     if source == "aihubmix":
         from .aihubmix import get_aihubmix_model_catalog
 
-        return get_aihubmix_model_catalog()
+        return get_aihubmix_model_catalog(getattr(config, "aihubmix", {}), fetch_live=fetch_live)
     if source == "agnes":
         from .agnes import get_agnes_model_catalog
 
-        return get_agnes_model_catalog(getattr(config, "agnes", {}))
+        return get_agnes_model_catalog(getattr(config, "agnes", {}), fetch_live=True if fetch_live else None, force_refresh=fetch_live)
     if source == "sensenova":
         from .sensenova import get_sensenova_model_catalog
 
@@ -147,11 +151,11 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
     if source == "modelscope":
         from .modelscope import get_modelscope_model_catalog
 
-        return get_modelscope_model_catalog(getattr(config, "modelscope", {}))
+        return get_modelscope_model_catalog(getattr(config, "modelscope", {}), fetch_live=fetch_live)
     if source == "nvidia":
         from .nvidia import get_nvidia_model_catalog
 
-        return get_nvidia_model_catalog()
+        return get_nvidia_model_catalog(getattr(config, "nvidia", {}), fetch_live=fetch_live)
     return []
 
 
@@ -368,6 +372,8 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
         else:
             selected_id = str(provider_config.get("selected_model_id") or "")
         selected = next((item for item in models if str(item.get("id", "")).lower() == selected_id.lower()), None)
+        if not models:
+            selected_id = ""
         if selected is None and models:
             selected = models[0]
             selected_id = str(selected.get("id") or "")
@@ -393,13 +399,13 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
             source_payload["custom_providers"] = custom_provider_entries(config)
             source_payload["custom_provider_formats"] = custom_provider_format_options()
         if source in {"sensenova", "opencode"}:
-            source_payload["catalog_live"] = bool(models) and all(
+            source_payload["catalog_live"] = all(
                 item.get("catalog_source") == "api" for item in models
             )
         if source == "agnes":
             from .agnes import get_agnes_source_catalog
 
-            agnes_catalog = get_agnes_source_catalog(provider_config)
+            agnes_catalog = get_agnes_source_catalog(getattr(config, "agnes", {}), fetch_live=False)
             source_payload["modalities"] = {
                 "live": bool(agnes_catalog.get("live", False)),
                 "llm": len(agnes_catalog.get("llm", [])),
@@ -508,7 +514,7 @@ def apply_model_selection(
         else _external_catalog(
             normalized_source,
             config,
-            fetch_live=normalized_source in {"sensenova", "opencode", "custom"},
+            fetch_live=False,
         )
     )
     selection_query = model_id
@@ -647,11 +653,13 @@ def apply_provider_config_patch(
         provider_config[key] = ""
     setattr(config, normalized_source, provider_config)
     selection_id = provider_config.get("selected_model_id", "")
-    if normalized_source == "opencode" and bool(provider_config.get("use_builtin_model_catalog", False)):
-        from .opencode import OPENCODE_DEFAULT_MODEL_ID, get_opencode_model_catalog
-
-        if _catalog_match(get_opencode_model_catalog(provider_config), selection_id) is None:
-            selection_id = OPENCODE_DEFAULT_MODEL_ID
+    catalog = _external_catalog(normalized_source, config)
+    if not catalog:
+        provider_config["selected_model_id"] = ""
+        provider_config["selected_model_display_name"] = ""
+        return
+    if _catalog_match(catalog, selection_id) is None:
+        selection_id = catalog[0]["id"]
     # Re-apply the current selection so the provider's native normalizer runs.
     apply_model_selection(
         config,
@@ -738,6 +746,7 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
         custom_provider_models_url,
         custom_provider_reasoning_choices,
         get_custom_provider_model_context_limit,
+        get_custom_provider_model_catalog,
         mask_secret,
         normalize_custom_provider_reasoning_effort,
         resolve_custom_provider_api_key,
@@ -749,7 +758,7 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
     stored_key = str(record.get("api_key") or "").strip()
     key_source = "config" if stored_key else "env" if resolved_key else "none"
     models = []
-    for item in record.get("models", []):
+    for item in get_custom_provider_model_catalog(record):
         model = _normalized_model("custom", item, record)
         # The desktop needs to know which models still owe the user a context
         # limit, so it can ask once on first selection just like the CLI does.

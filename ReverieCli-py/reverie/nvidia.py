@@ -421,9 +421,12 @@ def default_nvidia_config() -> Dict[str, Any]:
     }
 
 
-def get_nvidia_model_catalog() -> List[Dict[str, Any]]:
+def get_nvidia_model_catalog(nvidia_config: Any = None, *, fetch_live: bool = False) -> List[Dict[str, Any]]:
     """Return the supported NVIDIA model catalog."""
-    return [dict(item) for item in _NVIDIA_MODEL_CATALOG]
+    from .model_catalog_cache import openai_source_catalog
+
+    cfg = nvidia_config if isinstance(nvidia_config, dict) else {}
+    return openai_source_catalog(cfg, resolve_nvidia_sdk_base_url(cfg.get("api_url")), resolve_nvidia_api_key(cfg), _NVIDIA_MODEL_CATALOG, fetch_live=fetch_live)
 
 
 def get_nvidia_model_metadata(model_id: Any) -> Optional[Dict[str, Any]]:
@@ -720,10 +723,8 @@ def resolve_nvidia_selected_model(nvidia_config: Any, model_id: Optional[str] = 
         cfg.update(nvidia_config)
 
     wanted = str(model_id or cfg.get("selected_model_id", NVIDIA_DEFAULT_MODEL_ID) or "").strip().lower()
-    matched = get_nvidia_model_metadata(wanted)
-    if matched:
-        return matched
-    return get_nvidia_model_metadata(NVIDIA_DEFAULT_MODEL_ID) or get_nvidia_model_catalog()[0]
+    catalog = get_nvidia_model_catalog(cfg)
+    return next((item for item in catalog if item["id"].lower() == wanted), catalog[0] if catalog else None)
 
 
 def resolve_nvidia_thinking_choice(nvidia_config: Any, model_id: Optional[str] = None) -> str:

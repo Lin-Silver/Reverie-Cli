@@ -21,7 +21,9 @@ const unpackedRoot = process.env.REVERIE_UNPACKED_ROOT
 const cacheRoot = path.join(uiRoot, ".cache", "portable-build");
 const outputRoot = path.join(repositoryRoot, "dist");
 const packageJson = JSON.parse(readFileSync(path.join(uiRoot, "package.json"), "utf8"));
-const artifactName = `Reverie-Portable-${packageJson.version}-${process.arch}.exe`;
+const artifactName = process.env.GITHUB_ACTIONS === "true"
+  ? `Reverie-Portable-${packageJson.version}-${process.arch}.exe`
+  : `Reverie-Portable-${process.arch}.exe`;
 const output = path.join(outputRoot, artifactName);
 
 function walkFiles(root) {

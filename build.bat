@@ -41,7 +41,9 @@ if not exist "%UI_ROOT%\release\Reverie-Setup-%VERSION%-x64.exe" (
   echo [ERROR] Windows installer was not produced.
   goto finish
 )
-if not exist "%REPO_ROOT%\dist\Reverie-Portable-%VERSION%-x64.exe" (
+set "PORTABLE_NAME=Reverie-Portable-x64.exe"
+if /i "%GITHUB_ACTIONS%"=="true" set "PORTABLE_NAME=Reverie-Portable-%VERSION%-x64.exe"
+if not exist "%REPO_ROOT%\dist\%PORTABLE_NAME%" (
   echo [ERROR] Windows portable executable was not produced.
   goto finish
 )

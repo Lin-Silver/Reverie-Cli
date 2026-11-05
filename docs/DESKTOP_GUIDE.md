@@ -12,7 +12,7 @@ RIU 的指标卡、表格、图文推荐、来源与链接使用同一回答渲�
 
 ## 启动与更新
 
-Windows 构建提供 `Reverie-Portable-2.5.3-x64.exe`、`Reverie-Setup-2.5.3-x64.exe` 和终端核心 `reverie.exe`。下载 / 发布入口在 [项目 README](../README.md)。便携版首次启动需要解压运行时；包内桌面核心与外部单文件核心是不同启动路径。
+Windows 本地构建的便携 GUI 固定为 `Reverie-Portable-x64.exe`；GitHub Actions / 发布产物继续使用 `Reverie-Portable-2.5.3-x64.exe`。安装包为 `Reverie-Setup-2.5.3-x64.exe`，终端核心为 `reverie.exe`。下载 / 发布入口在 [项目 README](../README.md)。便携版首次启动需要解压运行时；包内桌面核心与外部单文件核心是不同启动路径。
 
 便携版在自身目录下保存运行时和配置。深层目录中的内置 Skill 也应完整解压；写入失败会以退出码 2 停止，只有全部文件写入后才保存完成标记。更新启动器会更新缓存身份，首次启动可能重新解压运行时；请保留足够磁盘空间。解压、核心启动和恢复视图的总等待不等于模型生成或单个视图的渲染耗时。
 

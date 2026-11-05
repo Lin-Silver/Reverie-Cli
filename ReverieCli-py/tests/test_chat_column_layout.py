@@ -42,7 +42,7 @@ def test_user_bubbles_stay_right_and_answers_stay_left(browser, theme, variant, 
             </article>
           </div></body></html>''')
         # Match main.tsx import order, including the nested Liquid Glass rules.
-        for stylesheet in ("styles.css", "desktop.css", "liquid-glass.css"):
+        for stylesheet in ("styles.css", "desktop.css", "liquid-glass.css", "classic-light.css"):
             page.add_style_tag(content=(UI_ROOT / "src" / stylesheet).read_text(encoding="utf-8"))
         column = page.locator(".message-column").bounding_box()
         answer = page.locator(".message.assistant .markdown").bounding_box()

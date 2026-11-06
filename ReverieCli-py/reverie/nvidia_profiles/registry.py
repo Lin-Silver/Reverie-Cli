@@ -11,11 +11,12 @@ from . import (
     gpt_oss_20b,
     laguna_xs_21,
     minimax_m3_1_flash,
+    mistral_large_4,
     muse_glimmer,
-    nemotron_3_super,
     nemotron_3_ultra,
     nemotron_35_lightning,
     nemotron_35_super,
+    nemotron_35_bolt,
     step_5_preview,
 )
 
@@ -28,7 +29,8 @@ _OPENAI_PROFILES: Dict[str, ProfileBuilder] = {
     "minimaxai/minimax-m3.1-flash": minimax_m3_1_flash.build_openai_options,
     "meta/muse-glimmer-30b": muse_glimmer.build_openai_options,
     "nvidia/nemotron-3.5-lightning-30b-a3b": nemotron_35_lightning.build_openai_options,
-    "nvidia/nemotron-3-super-120b-a12b": nemotron_3_super.build_openai_options,
+    "mistralai/mistral-large-4-1t-a52b": mistral_large_4.build_openai_options,
+    "nvidia/nemotron-3.5-bolt-e4b": nemotron_35_bolt.build_openai_options,
     "nvidia/nemotron-3-ultra-550b-a55b": nemotron_3_ultra.build_openai_options,
     "nvidia/nemotron-3.5-super-vl-120b-a12b": nemotron_35_super.build_openai_options,
     "openai/gpt-oss-20b": gpt_oss_20b.build_openai_options,

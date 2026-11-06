@@ -1,6 +1,6 @@
 # NVIDIA offline catalog
 
-Refreshed on 2026-10-23. This is a curated catalog for general assistance, coding, and tool use. The CLI and desktop obtain the same bundled list from `reverie/nvidia.py`; opening it does not require an inventory request.
+Refreshed on 2026-11-05. This is a curated catalog for general assistance, coding, and tool use. The CLI and desktop obtain the same bundled list from `reverie/nvidia.py`; opening it does not require an inventory request.
 
 ## Current models
 
@@ -9,7 +9,8 @@ Refreshed on 2026-10-23. This is a curated catalog for general assistance, codin
 | `meta/muse-glimmer-30b` | 131,072 | none / minimal / low / medium / high / max | 16,384 |
 | `minimaxai/minimax-m3.1-flash` | 262,144 | low / medium / high / xhigh / max | 65,536 |
 | `nvidia/nemotron-3.5-lightning-30b-a3b` | 1,048,576 | on / off | 16,384 |
-| `nvidia/nemotron-3-super-120b-a12b` | 1,000,000 | none / low / high | Full remaining context |
+| `mistralai/mistral-large-4-1t-a52b` | 262,144 | Verified high reasoning | 16,384 |
+| `nvidia/nemotron-3.5-bolt-e4b` | 65,536 | on / off | 16,384 |
 | `nvidia/nemotron-3-ultra-550b-a55b` | 1,000,000 | Fixed reasoning | 16,384 |
 | `poolside/laguna-xs-2.1` | 262,000 | None | 8,192 |
 | `nvidia/nemotron-3.5-super-vl-120b-a12b` | 262,144 | none / low / high | 16,384 |
@@ -22,14 +23,15 @@ Generation budgets include reasoning where the provider counts it. Reverie reser
 
 ## Model-specific sampling
 
-Sampling was checked against publishers' Hugging Face model cards, generation configurations, and NVIDIA API references on 2026-10-23, rather than copying Build playground slider values where a model-specific recommendation is documented. These are author-recommended defaults for general/agentic use, not a claim that a single preset is optimal for every task. Only the NVIDIA source uses these profiles.
+The existing profiles were checked against publishers' Hugging Face model cards, generation configurations, and NVIDIA API references on 2026-10-23, rather than copying Build playground slider values where a model-specific recommendation is documented. These are author-recommended defaults for general/agentic use, not a claim that a single preset is optimal for every task. Only the NVIDIA source uses these profiles.
 
 | Hosted model | Temperature | Top-p | Additional sampling | Official source |
 | --- | ---: | ---: | --- | --- |
 | Muse Glimmer 30B | 1.0 | 0.95 | `top_k=64` | [Meta best practices](https://huggingface.co/meta-models/Muse-Glimmer-30B#best-practices) |
 | MiniMax M3.1 Flash | 1.0 | 0.95 | `chat_template_kwargs.reasoning_effort` | [NVIDIA inference reference](https://docs.api.nvidia.com/nim/reference/minimaxai-minimax-m3-1-flash-infer) |
 | Nemotron 3.5 Lightning | 1.0 | 0.95 | Provider defaults | [NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) |
-| Nemotron 3 Super | 1.0 | 0.95 | Provider defaults | [NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16) |
+| Mistral Large 4 | 1.0 | 0.95 | Native `reasoning_effort=high` | [NVIDIA model reference](https://docs.api.nvidia.com/nim/reference/mistralai-mistral-large-4-1t-a52b) |
+| Nemotron 3.5 Bolt E4B | 1.0 | 0.95 | `chat_template_kwargs.enable_thinking`, `skip_special_tokens=false` | [NVIDIA inference reference](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3_5-bolt-e4b-infer) |
 | Nemotron 3 Ultra | 1.0 | 0.95 | Provider defaults | [NVIDIA generation config](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16/blob/main/generation_config.json) |
 | Laguna XS 2.1 | 1.0 | 1.0 | `top_k=20`, `min_p=0.0` | [Poolside model card/config](https://huggingface.co/poolside/Laguna-XS-2.1/blob/main/generation_config.json) |
 | Nemotron 3.5 Super VL | Text: 1.0; image/video: 0.6 | 0.95 | Automatic input-dependent temperature | [NVIDIA model summary](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16#model-summary) |
@@ -63,6 +65,26 @@ GLM-5.3's non-Flash endpoint is marked for deprecation on NVIDIA's model catalog
 
 DeepSeek V4.1 Flash and GLM 5.3 Flash remain selectable, as requested, with this note in both the CLI and desktop model descriptions: “NVIDIA 可能尚未针对该模型进行多并发调用优化；本次验证多次超时。” The concurrency explanation is a possibility, not a confirmed diagnosis. The observed result is repeated request timeouts.
 
+
+## November 2026 update
+
+The bundled catalog now contains 12 callable models. NVIDIA's [Nemotron 3 Super page](https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b) marks its free endpoint deprecated; the page payload dates retirement to 2026-10-19. An authenticated bounded probe on 2026-11-05 returned HTTP 404. The old entry and its unused request profile were removed. Saved selections use the existing Muse Glimmer fallback; credentials are preserved.
+
+Two new models have dedicated SDK profiles:
+
+- [Mistral Large 4](https://build.nvidia.com/mistralai/mistral-large-4-1t-a52b) supports text and image input. Reverie uses the hosted 262,144-token context, a 16,384-token default output budget, and the documented 262,144 output cap. Sampling follows the vendor recommendation of temperature 1.0 / top-p 0.95. Tool continuations preserve assistant `reasoning_content`. The [hosted inference schema](https://docs.api.nvidia.com/nim/reference/mistralai-mistral-large-4-1t-a52b-infer) lists `none/high`, but authenticated `none` requests returned HTTP 400 and `low/medium` requests timed out. Reverie sends the verified `high` value and exposes fixed reasoning rather than offering unqualified controls. It does not send the ignored `enable_thinking` template option.
+- [Nemotron 3.5 Bolt E4B](https://build.nvidia.com/nvidia/nemotron-3.5-bolt-e4b) supports text only. The hosted model reference specifies 64K context, used as 65,536 tokens; the Build display rounds this to 66K. Its output cap is 65,536, with a 16,384 default budget. Thinking uses the documented boolean `chat_template_kwargs.enable_thinking`; `skip_special_tokens=false` retains reasoning/tool parser boundaries. The profile omits Lightning's unsupported `reasoning_budget`. The inference reference mentions a `stg/` prefix, but that alias returned HTTP 404; the ordinary model ID returned HTTP 200 and is the one used by Reverie.
+
+[Kimi K3.1 Pro](https://build.nvidia.com/moonshotai/kimi-k3_1-pro) appears in NVIDIA's latest catalog, but its prototype text explicitly says programmatic API access is unavailable and no API key authorizes it. It is excluded until a callable endpoint exists. Retrieval, safety, speech and image-generation models are outside this general assistant catalog. Existing endpoint timeouts alone do not qualify a model for removal.
+
+Reproduce bounded live text/tool/stream/image checks with:
+
+```powershell
+python scripts/verification/nvidia_catalog_smoke.py --output .runtime/fresh-nvidia-run
+```
+
+The script uses the configured NVIDIA key in memory, applies bundled profiles, disables SDK retries, and records only stage timing/status metadata. It does not save credentials, reasoning or image base64. Current verification results are recorded in `docs/verification/nvidia-refresh-2026-11-05.md`; the sections below are historical checks and do not validate the November source or package.
+
 ## Removed endpoints
 
 All six endpoints returned authenticated HTTP 410 with an explicit end-of-life message on 2026-10-16:
@@ -78,7 +100,7 @@ All six endpoints returned authenticated HTTP 410 with an explicit end-of-life m
 
 Saved configurations containing an unavailable model fall back to the existing Muse Glimmer default.
 
-## Sampling refinement verification
+## Historical sampling refinement verification (2026-10-23)
 
 - Python: 549 tests passed; desktop type checking and production build passed.
 - The rebuilt desktop kernel and standalone CLI each passed 10 local HTTP serialization checks across the nine SDK models, including Super VL text/image temperature switching. Both expose only the four remaining NVIDIA connection/reasoning fields, without shared temperature/top-p inputs. Step's raw adapter is bound to the official API URL and was checked separately through authenticated requests.
@@ -87,7 +109,7 @@ Saved configurations containing an unavailable model fall back to the existing M
 - DeepSeek V4.1, GLM 5.3 Flash, Nemotron 3 Ultra, and Lightning timed out in bounded source checks. Laguna returned HTTP 503 with an explicit worker request-limit error. These availability results are recorded separately from sampling configuration correctness; the checks were serial and do not establish a local concurrency fault.
 - A headless production-renderer check with a real source bridge confirms that NVIDIA has no shared temperature/top-p controls while OpenCode retains its temperature control. Native Electron window APIs were stubbed for that UI check; the independent frozen attachment/inference check used the actual desktop kernel. No installed GUI release or installer was replaced.
 
-## Verification
+## Historical verification (2026-10-23)
 
 - Python: 444 tests passed across the NVIDIA, agent, desktop bridge, configuration, transport, batch prompt, cancellation, SubAgent, and adjacent built-in provider tests.
 - Desktop: type checking passed; all 104 application interaction tests passed.

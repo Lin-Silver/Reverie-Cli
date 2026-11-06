@@ -19,6 +19,7 @@ from reverie.nvidia import (
 
 
 RETIRED_MODELS = (
+    "nvidia/nemotron-3-super-120b-a12b",
     "deepseek-ai/deepseek-v4-flash-0731",
     "deepseek-ai/deepseek-v4-pro-0813",
     "moonshotai/kimi-k3",
@@ -176,4 +177,48 @@ def test_gpt_oss_20b_uses_hosted_output_cap_and_model_specific_reasoning():
     assert options == {
         "temperature": 1.0, "top_p": 1.0, "max_tokens": 4096,
         "extra_body": {"reasoning_effort": "medium"},
+    }
+
+
+@pytest.mark.parametrize("model_id,context,modalities", [
+    ("mistralai/mistral-large-4-1t-a52b", 262144, ["image"]),
+    ("nvidia/nemotron-3.5-bolt-e4b", 65536, []),
+])
+def test_november_models_persist_selection_and_effective_capabilities(model_id, context, modalities):
+    config = Config(nvidia={"api_key": "test"})
+    apply_model_selection(config, "nvidia", model_id)
+    restored = Config.from_dict(config.to_dict())
+    model = restored.active_model
+    assert model.model == model_id
+    assert model.max_context_tokens == context
+    assert model.supports_vision is bool(modalities)
+    assert get_nvidia_model_metadata(model_id)["vision_modalities"] == modalities
+
+
+def test_preview_only_kimi_is_not_advertised_as_callable():
+    assert get_nvidia_model_metadata("moonshotai/kimi-k3.1-pro") is None
+    assert get_nvidia_model_metadata("moonshotai/kimi-k3_1-pro") is None
+
+
+def test_mistral_hosted_profile_uses_verified_reasoning_and_retains_tool_history():
+    model_id = "mistralai/mistral-large-4-1t-a52b"
+    options = build_nvidia_openai_options({"selected_model_id": model_id, "max_tokens": 999999})
+    assert options == {
+        "temperature": 1.0, "top_p": 0.95, "max_tokens": 262144,
+        "extra_body": {"reasoning_effort": "high"},
+    }
+    assert get_nvidia_model_metadata(model_id)["thinking_control"] == "fixed"
+    assert nvidia_model_requires_preserved_reasoning_history(model_id)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_bolt_uses_supported_toggle_and_preserves_parser_boundaries(enabled):
+    options = build_nvidia_openai_options({
+        "selected_model_id": "nvidia/nemotron-3.5-bolt-e4b", "enable_thinking": enabled,
+        "reasoning_budget": 32768, "max_tokens": 999999,
+    })
+    assert options == {
+        "temperature": 1.0, "top_p": 0.95, "max_tokens": 65536,
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": enabled},
+                       "skip_special_tokens": False},
     }

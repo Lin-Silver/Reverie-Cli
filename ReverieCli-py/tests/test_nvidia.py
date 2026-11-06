@@ -74,7 +74,8 @@ def test_nvidia_catalog_context_lengths_match_model_cards():
         "meta/muse-glimmer-30b": 131072,
         "minimaxai/minimax-m3.1-flash": 262144,
         "nvidia/nemotron-3.5-lightning-30b-a3b": 1048576,
-        "nvidia/nemotron-3-super-120b-a12b": 1000000,
+        "mistralai/mistral-large-4-1t-a52b": 262144,
+        "nvidia/nemotron-3.5-bolt-e4b": 65536,
         "nvidia/nemotron-3-ultra-550b-a55b": 1000000,
         "poolside/laguna-xs-2.1": 262000,
         "nvidia/nemotron-3.5-super-vl-120b-a12b": 262144,
@@ -263,7 +264,7 @@ def test_nvidia_catalog_and_options_for_nemotron_35_lightning():
 def test_nvidia_catalog_contains_model_specific_thinking_options():
     assert [item["id"] for item in get_nvidia_thinking_options("meta/muse-glimmer-30b")] == ["none", "minimal", "low", "medium", "high", "max"]
     assert [item["id"] for item in get_nvidia_thinking_options("nvidia/nemotron-3.5-lightning-30b-a3b")] == ["true", "false"]
-    assert [item["id"] for item in get_nvidia_thinking_options("nvidia/nemotron-3-super-120b-a12b")] == ["high", "low", "none"]
+    assert [item["id"] for item in get_nvidia_thinking_options("nvidia/nemotron-3.5-super-vl-120b-a12b")] == ["high", "low", "none"]
     assert [item["id"] for item in get_nvidia_thinking_options("deepseek-ai/deepseek-v4.1-flash")] == []
     assert [item["id"] for item in get_nvidia_thinking_options("z-ai/glm-5.3-flash")] == ["low", "high", "max"]
     assert [item["id"] for item in get_nvidia_thinking_options("openai/gpt-oss-20b")] == ["low", "medium", "high"]
@@ -290,21 +291,15 @@ def test_nvidia_apply_thinking_choice_updates_toggle_and_effort_config():
 
 def test_nvidia_openai_options_for_nemotron_and_gpt_oss_use_model_specific_effort():
     nemotron = build_nvidia_openai_options(
-        {"selected_model_id": "nvidia/nemotron-3-super-120b-a12b", "reasoning_effort": "low"},
-        "nvidia/nemotron-3-super-120b-a12b",
+        {"selected_model_id": "nvidia/nemotron-3.5-super-vl-120b-a12b", "reasoning_effort": "low"},
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
     )
     gpt_oss = build_nvidia_openai_options(
         {"selected_model_id": "openai/gpt-oss-20b"},
         "openai/gpt-oss-20b",
     )
 
-    assert nemotron["extra_body"] == {
-        "chat_template_kwargs": {
-            "enable_thinking": True,
-            "force_nonempty_content": True,
-            "low_effort": True,
-        }
-    }
+    assert nemotron["extra_body"] == {"reasoning_effort": "low"}
     assert gpt_oss["extra_body"] == {"reasoning_effort": "medium"}
 
 

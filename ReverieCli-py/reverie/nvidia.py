@@ -27,7 +27,6 @@ NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME = NVIDIA_DEFAULT_MODEL_DISPLAY_NAM
 NVIDIA_API_KEY_HINT_URL = "https://build.nvidia.com/settings/api-keys"
 NVIDIA_DEFAULT_IMAGE_TOKEN_ESTIMATE = 1024
 NVIDIA_DEFAULT_CONTEXT_TOKENS = 131_072
-NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS = 1_000_000
 NVIDIA_DEFAULT_REASONING_EFFORT = "high"
 NVIDIA_DEFAULT_REASONING_BUDGET = 16_384
 NVIDIA_REASONING_EFFORTS = ("max", "high", "medium", "low", "none")
@@ -300,14 +299,28 @@ _NVIDIA_MODEL_CATALOG: List[Dict[str, Any]] = [
         default_max_tokens=16_384,
     ),
     _openai_model(
-        "nvidia/nemotron-3-super-120b-a12b",
-        "Nemotron 3 Super 120B",
-        "OpenAI SDK transport with selectable none/low/high reasoning and optional reasoning_budget.",
+        "mistralai/mistral-large-4-1t-a52b",
+        "Mistral Large 4",
+        "Text and image input with verified high reasoning and preserved tool-call reasoning history.",
+        vision=True,
         thinking=True,
-        thinking_control="effort",
-        thinking_options=list(NVIDIA_REASONING_NONE_LOW_HIGH_OPTIONS),
-        default_thinking_choice="high",
-        context_length=NVIDIA_NEMOTRON_3_SUPER_CONTEXT_TOKENS,
+        thinking_control="fixed",
+        context_length=262_144,
+        max_output_tokens=262_144,
+        default_max_tokens=16_384,
+        preserve_reasoning_history=True,
+    ),
+    _openai_model(
+        "nvidia/nemotron-3.5-bolt-e4b",
+        "Nemotron 3.5 Bolt E4B",
+        "Text-only OpenAI SDK transport with toggleable thinking and explicit parser token boundaries.",
+        thinking=True,
+        thinking_control="toggle",
+        thinking_options=list(NVIDIA_THINKING_TOGGLE_OPTIONS),
+        default_thinking_choice="true",
+        context_length=65_536,
+        max_output_tokens=65_536,
+        default_max_tokens=16_384,
     ),
     _openai_model(
         "nvidia/nemotron-3-ultra-550b-a55b",

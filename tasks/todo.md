@@ -18,6 +18,6 @@
 - [x] NVIDIA follow-up: verify official endpoint retirement and preview-only access; add Mistral Large 4 and Nemotron 3.5 Bolt dedicated profiles, catalog/config/request regressions and bounded authenticated API qualification.
 - [x] Publication follow-up: isolate the staged source from unrelated task/log edits, verify backend/UI behavior and address the desktop diagnostics error path.
 - [x] Publication follow-up: finish rebuilt kernel/wheel/portable verification, including an isolated build and system-PATH-only portable extraction check.
-- [ ] Publication follow-up: push the authorized source and verification records to main.
+- [x] Publication follow-up: push the authorized source and verification records to main; origin/main verified at source commit 8dcff3f32b3cd4683cf8e80c774720961dd72db5 before the final publication note.
 
 - [x] Harness2 follow-up: fix the reproduced missing-edits contract with supported structured output; real Bolt recursion passed 4 CLI runs / 12 requests / 1 experience; deterministic final-kernel regression passed 14 CLI runs / 28 requests. Formal benchmark scores remain unverified.

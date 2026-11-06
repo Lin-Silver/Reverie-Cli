@@ -52,3 +52,10 @@
 目录包在 .runtime/publication-check/ReverieCli-ui/release/win-unpacked，需要整个目录。UI build 为 9ecc1e4b15779c7b；便携解压标记为 6e54cfe9805c8d01，二者用途不同。实际便携入口 --tui --kernel-info 在仅有 Windows 系统 PATH 的新隔离目录启动，退出 0；解压后的内核、app.asar 和 agent-desktop 与目录包逐项哈希一致。这个启动检查没有操作 GUI，不替代 GUI 交互验收。
 
 旧 dist 便携包保持原状，新包使用明确的独立文件名。当前授权是源码提交与推送，不包含创建 GitHub Release 或上传大二进制；本地产物保留供使用与检查。源码、参数、使用指南、复现脚本和验证文档共同提交。
+
+
+## GitHub 发布核对
+
+按用户授权直接推送 Lin-Silver/Reverie-Cli 的 main：NVIDIA 源码提交 f09bf57；Computer Use/Harness2/构建与验证记录提交 8dcff3f。git push 成功后，git ls-remote origin refs/heads/main 与本地源码 HEAD 均为 8dcff3f32b3cd4683cf8e80c774720961dd72db5。此发布核对记录随后作为单独文档提交补充，不改变已经验证的内核代码。
+
+未创建 PR、未上传 GitHub Release 二进制。任务清单、活动日志相关的无关修改及既有 rce.md 删除仍留在本地，未包含在这些源码提交中。

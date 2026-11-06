@@ -40,6 +40,56 @@ def test_empty_trajectory_is_not_a_successful_read(tmp_path):
     assert adapter.inventory_tool_scope([], tmp_path) == (False, False)
 
 
+@pytest.mark.parametrize('edits', [
+    {'systemprompt.md': 'changed', '../escape.md': 'outside'},
+    {'systemprompt.md': 'changed', 'guardrails.md': 'disabled'},
+    {'systemprompt.md': 'changed', 'LongTermMEMORY.md': None},
+])
+def test_model_editor_rejects_whole_invalid_patch_before_any_write(tmp_path, edits):
+    prompt = tmp_path / 'systemprompt.md'
+    prompt.write_text('original', encoding='utf-8')
+    with pytest.raises(ValueError):
+        adapter.apply_model_edits(json.dumps({'edits': edits}), tmp_path)
+    assert prompt.read_text(encoding='utf-8') == 'original'
+    assert not (tmp_path / 'LongTermMEMORY.md').exists()
+
+
+def test_model_editor_preserves_chinese_text_and_nested_component(tmp_path):
+    edits = {'systemprompt.md': '中文规则\n第二行', 'tool_descriptions/tool_guidance.md': '先观察，再报告。'}
+    result = adapter.apply_model_edits(json.dumps({'edits': edits, 'notes': '有限证据'}), tmp_path)
+    assert result == '<notes>有限证据</notes>'
+    for name, content in edits.items():
+        assert (tmp_path / name).read_text(encoding='utf-8') == content
+
+
+@pytest.mark.parametrize('response', ['{"notes":"no edits"}', '[]', 'null'])
+def test_model_editor_reports_contract_violation_without_touching_harness(tmp_path, response):
+    prompt = tmp_path / 'systemprompt.md'
+    prompt.write_text('original', encoding='utf-8')
+    with pytest.raises(ValueError, match='invalid or off-surface edit'):
+        adapter.apply_model_edits(response, tmp_path)
+    assert prompt.read_text(encoding='utf-8') == 'original'
+
+
+def test_configured_executor_does_not_persist_real_provider_key():
+    from reverie.config import Config, ModelConfig
+    selected = Config()
+    selected.active_model_source = 'standard'
+    selected.models = [ModelConfig('fixture-real', 'fixture', 'https://provider.test/v1', 'synthetic-real-secret')]
+    isolated = Config()
+    adapter.configure_executor(isolated, 'configured', 'http://127.0.0.1:1234/v1', selected_config=selected)
+    assert isolated.active_model.api_key == 'local-recorder-only'
+    assert isolated.active_model.base_url == 'http://127.0.0.1:1234/v1'
+    assert selected.active_model.api_key == 'synthetic-real-secret'
+
+
+def test_configured_cli_environment_has_no_provider_credentials(monkeypatch, tmp_path):
+    for name in ('NVIDIA_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'GOOGLE_APPLICATION_CREDENTIALS'):
+        monkeypatch.setenv(name, 'synthetic-secret')
+    env = adapter.execution_environment(tmp_path / 'home', tmp_path / 'state')
+    assert 'synthetic-secret' not in env.values()
+
+
 INVENTORY = '项目：晨星1\n数量：17\n标识：松林1\n'
 
 
@@ -204,6 +254,7 @@ def test_existing_executors_keep_standard_provider_and_empty_credentials(provide
 
 @pytest.mark.parametrize(('provider', 'request_timeout', 'cli_timeout'), [
     ('agnes', 90, 210), ('fixture', 65, 100), ('vireonix', 65, 100),
+    ('configured', 180, 420),
 ])
 def test_exploratory_timeout_budgets_and_explicit_cli_override(provider, request_timeout, cli_timeout):
     assert adapter.provider_request_timeout(provider) == request_timeout

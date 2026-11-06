@@ -2,26 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, Type
 
 from .base import BaseTool, ToolResult
 from ..computer_use import ComputerUseError, OpenComputerUseService
-from ..config import get_project_data_dir
 
 
 def _service(context: Dict[str, Any]) -> OpenComputerUseService:
-    existing = context.get("open_computer_use_service")
-    if isinstance(existing, OpenComputerUseService):
-        return existing
-    project_data_dir = context.get("project_data_dir")
-    if project_data_dir:
-        output_dir = Path(project_data_dir) / "computer_use" / "observations"
-    else:
-        output_dir = get_project_data_dir(context.get("project_root")) / "computer_use" / "observations"
-    service = OpenComputerUseService(output_dir)
-    context["open_computer_use_service"] = service
-    return service
+    from ..computer_use.legacy import LegacyComputerUse
+    from .computer import runtime_for, supports_vision
+    return LegacyComputerUse(runtime_for(context), vision=supports_vision(context))
 
 
 _REFRESH_HINT = "Refresh get_app_state before the next app action."
@@ -34,11 +24,21 @@ def _action_result(report: Any, fallback: str) -> ToolResult:
     services return nothing, in which case only the fallback is reported.
     """
     observed = str(report or "").strip()
+    if observed.startswith('{'):
+        import json
+        from .computer import as_result
+        try:
+            envelope = json.loads(observed)
+            if envelope.get('version') == '2.6':
+                return as_result(envelope)
+        except (ValueError, AttributeError):
+            pass
     output = f"{observed}\n{_REFRESH_HINT}" if observed else f"{fallback} {_REFRESH_HINT}"
     return ToolResult.ok(output, data={"observed_change": observed})
 
 
 class _ComputerUseTool(BaseTool):
+    required_permission = "full_control"
     tool_category = "desktop"
     tool_tags = ("desktop", "accessibility", "computer-use", "embedded-mcp")
     concurrency_safe = False
@@ -46,12 +46,19 @@ class _ComputerUseTool(BaseTool):
     workspace_checkpoint = False
 
     def _run(self, operation) -> ToolResult:
+        from ..computer_use.runtime import NativeDesktopError, failure
+        from .computer import as_result, runtime_for
+        if self.context.get("is_subagent"):
+            return ToolResult.fail("Subagent policy denies desktop tools.")
         try:
-            return operation(_service(self.context))
+            with runtime_for(self.context)._lock:
+                return operation(_service(self.context))
+        except NativeDesktopError as exc:
+            return as_result(exc.envelope)
         except ComputerUseError as exc:
             return ToolResult.fail(str(exc))
         except Exception as exc:
-            return ToolResult.fail(f"Computer Use failed: {exc}")
+            return as_result(failure(self.name, 'RUNTIME_ERROR', str(exc), uncertain=not self.read_only).envelope)
 
 
 class ListAppsTool(_ComputerUseTool):
@@ -112,10 +119,7 @@ class LaunchAppTool(_ComputerUseTool):
     def execute(self, target: str, arguments: str = "", **kwargs) -> ToolResult:
         def operation(service: OpenComputerUseService) -> ToolResult:
             report = service.launch_app(target, arguments=arguments)
-            return ToolResult.ok(
-                f"{report}\nCall get_app_state on the new window before acting on it.",
-                data={"target": target, "arguments": arguments, "observed_change": report},
-            )
+            return _action_result(report, 'Launch requested; observe the target window.')
 
         return self._run(operation)
 
@@ -156,6 +160,7 @@ class GetAppStateTool(_ComputerUseTool):
             return ToolResult.ok(
                 output,
                 data={
+                    **({'computer_use': state.computer_envelope} if hasattr(state, 'computer_envelope') else {}),
                     "app": state.process_name,
                     "pid": state.process_id,
                     "window_title": state.window_title,
@@ -167,8 +172,9 @@ class GetAppStateTool(_ComputerUseTool):
                     "base64_image": state.screenshot_base64,
                     "message_content": [
                         {"type": "text", "text": output},
+                    ] + ([
                         {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
+                    ] if state.screenshot_base64 else []),
                 },
             )
 

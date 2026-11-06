@@ -134,8 +134,7 @@ jobs:
         shell: pwsh
         run: |
           $env:REVERIE_EXTERNAL_KERNEL_PATH = Join-Path $env:GITHUB_WORKSPACE "dist\reverie.exe"
-          $env:REVERIE_PYINSTALLER_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\venv\Scripts\pyinstaller.exe")
-          $env:REVERIE_PYTHON_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\venv\Scripts\python.exe")
+          $env:REVERIE_PYTHON_PATH = (Join-Path $env:GITHUB_WORKSPACE "ReverieCli-py\build\venv\Scripts\python.exe")
           Push-Location ReverieCli-ui
           npm run build:kernel
           if ($LASTEXITCODE -ne 0) { throw "Validation kernel staging failed" }
@@ -149,7 +148,6 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           export REVERIE_EXTERNAL_KERNEL_PATH="$GITHUB_WORKSPACE/dist/reverie"
-          export REVERIE_PYINSTALLER_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/pyinstaller"
           export REVERIE_PYTHON_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/python"
           cd ReverieCli-ui
           npm run build:kernel
@@ -160,7 +158,6 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           export REVERIE_EXTERNAL_KERNEL_PATH="$GITHUB_WORKSPACE/dist/reverie"
-          export REVERIE_PYINSTALLER_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/pyinstaller"
           export REVERIE_PYTHON_PATH="$GITHUB_WORKSPACE/ReverieCli-py/venv/bin/python"
           cd ReverieCli-ui
           npm run build:kernel
@@ -280,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$RIU_RUNNER_OS" == "Windows" ]]; then
-            test_python="ReverieCli-py/venv/Scripts/python.exe"
+            test_python="ReverieCli-py/build/venv/Scripts/python.exe"
           else
             test_python="ReverieCli-py/venv/bin/python"
           fi

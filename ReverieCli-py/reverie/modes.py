@@ -36,9 +36,8 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
     },
     "computer-controller": {
         "display_name": "Computer Controller",
-        "description": "Pinned NVIDIA desktop orchestrator using an embedded Open Computer Use-compatible desktop runtime and managed Reverie SubAgents.",
+        "description": "Desktop orchestrator using shared native Computer Use tools and the selected text or vision model.",
         "switchable": False,
-        "requires_source": "nvidia",
     },
 }
 

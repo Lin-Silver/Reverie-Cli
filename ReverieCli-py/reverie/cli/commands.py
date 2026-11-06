@@ -7517,7 +7517,7 @@ class CommandHandler:
         if not api_key:
             self.console.print()
             self.console.print(
-                f"[{self.theme.TEXT_DIM}]Computer Controller mode uses a NVIDIA request-based vision model. Get an API key from {NVIDIA_API_KEY_HINT_URL} and paste it here to continue.[/{self.theme.TEXT_DIM}]"
+                f"[{self.theme.TEXT_DIM}]The NVIDIA source requires an API key. Get an API key from {NVIDIA_API_KEY_HINT_URL} and paste it here to continue.[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
                 f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
@@ -7525,50 +7525,20 @@ class CommandHandler:
             ).strip()
             if not api_key:
                 self.console.print(
-                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} NVIDIA API key is required for Computer Controller mode.[/{self.theme.CORAL_SOFT}]"
+                    f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} NVIDIA API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
         nvidia_cfg["api_key"] = api_key
 
         selected = resolve_nvidia_selected_model(nvidia_cfg)
-        if not selected or str(selected.get("transport", "")).strip().lower() != "request" or not bool(selected.get("vision")):
+        if not selected:
             fallback = get_nvidia_default_vision_model()
             nvidia_cfg["selected_model_id"] = fallback["id"]
             nvidia_cfg["selected_model_display_name"] = fallback["display_name"]
             self.console.print(
-                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Computer Controller requires a NVIDIA request-based vision model, so Reverie switched this source to {fallback['display_name']}.[/{self.theme.AMBER_GLOW}]"
+                f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} The saved NVIDIA selection is unavailable; selected {fallback['display_name']}.[/{self.theme.AMBER_GLOW}]"
             )
 
-        config.nvidia = normalize_nvidia_config(nvidia_cfg)
-        config.active_model_source = "nvidia"
-        return True
-
-    def _prepare_computer_controller_nvidia_configuration(self, config) -> bool:
-        """Pin Computer Controller mode to the fixed NVIDIA request model."""
-        from ..nvidia import (
-            NVIDIA_COMPUTER_CONTROLLER_MODEL_ID,
-            NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME,
-            build_nvidia_computer_controller_runtime_model_data,
-            normalize_nvidia_config,
-        )
-
-        if not self._ensure_nvidia_configuration(config):
-            return False
-
-        nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
-        runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(nvidia_cfg)
-        if not runtime_nvidia:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Computer Controller mode requires a NVIDIA API key in config or NVIDIA_API_KEY before it can start.[/{self.theme.CORAL_SOFT}]"
-            )
-            return False
-
-        nvidia_cfg["enabled"] = True
-        nvidia_cfg["api_key"] = runtime_nvidia.get("api_key", "")
-        nvidia_cfg["selected_model_id"] = str(runtime_nvidia.get("model", NVIDIA_COMPUTER_CONTROLLER_MODEL_ID))
-        nvidia_cfg["selected_model_display_name"] = str(
-            runtime_nvidia.get("model_display_name", NVIDIA_COMPUTER_CONTROLLER_MODEL_DISPLAY_NAME)
-        )
         config.nvidia = normalize_nvidia_config(nvidia_cfg)
         config.active_model_source = "nvidia"
         return True
@@ -7577,8 +7547,6 @@ class CommandHandler:
         """Apply normalized mode changes with any mode-specific provider setup."""
         normalized_mode = normalize_mode(candidate)
         config.mode = normalized_mode
-        if normalized_mode == "computer-controller":
-            return self._prepare_computer_controller_nvidia_configuration(config)
         return True
 
     def cmd_codex(self, args: str) -> bool:
@@ -9649,8 +9617,6 @@ class CommandHandler:
 
         nvidia_cfg["api_key"] = api_key
         config.nvidia = normalize_nvidia_config(nvidia_cfg)
-        if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller":
-            config.active_model_source = "nvidia"
         config_manager.save(config)
 
         if self.app.get('reinit_agent'):

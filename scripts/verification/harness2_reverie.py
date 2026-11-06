@@ -1,7 +1,7 @@
 """Exploratory Harness² adapter running the real Reverie prompt CLI.
 
 Uses the upstream recursion, selection and experience library unchanged. The
-editor is deterministic; executors use a local protocol fixture, the explicitly
+editor is deterministic or a configured model; executors use a local protocol fixture, the explicitly
 selected anonymous Vireonix service, or Agnes through an external loopback
 bridge that alone holds the real credentials. These are integration smokes,
 not JobBench/LAB/WorkBuddy scores or formal model-quality acceptance samples.
@@ -11,6 +11,7 @@ tools, executor, approvals, session locks and sandbox remain on their normal pat
 from __future__ import annotations
 
 import argparse
+import copy
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -19,7 +20,6 @@ import json
 import os
 from pathlib import Path
 import re
-import signal
 import ssl
 import subprocess
 import sys
@@ -31,7 +31,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ReverieCli-py"))
-PIN = "1cfe254e8d25b15f37048c3730134686abe60335"
+PIN = "6868817518876de8fd170c6a8354daca273b6191"
 COMPONENTS = ("systemprompt.md", "guardrails.md", "LongTermMEMORY.md", "tool_descriptions/tool_guidance.md")
 GUARDRAILS = "Respect the user's tool scope. Never disable approvals, session locks, workspace boundaries or sandbox.\n"
 PROMPT = ("仅使用 file_ops 的 read 操作读取 inventory.txt；先读取，再回答文件中的项目、数量和标识。"
@@ -41,6 +41,23 @@ PROMPT = ("仅使用 file_ops 的 read 操作读取 inventory.txt；先读取，
 
 def dump(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+
+
+def apply_model_edits(text, workspace):
+    """Validate the entire returned edit map before touching its harness."""
+    start = text.find('{')
+    if start < 0:
+        raise ValueError('The model editor attempted an invalid or off-surface edit; expected a JSON object')
+    patch, _ = json.JSONDecoder().raw_decode(text[start:])
+    edits = patch.get('edits') if isinstance(patch, dict) else None
+    if (not isinstance(edits, dict) or any(name not in COMPONENTS or name == 'guardrails.md' for name in edits)
+            or any(not isinstance(content, str) for content in edits.values())):
+        raise ValueError('The model editor attempted an invalid or off-surface edit')
+    for name, content in edits.items():
+        target = workspace / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding='utf-8')
+    return '<notes>' + str(patch.get('notes', '')) + '</notes>'
 
 
 def validate_agnes_bridge_url(value):
@@ -62,18 +79,30 @@ def validate_agnes_bridge_url(value):
 
 
 def provider_request_timeout(provider):
-    return 90 if provider == 'agnes' else 65
+    return 180 if provider == 'configured' else (90 if provider == 'agnes' else 65)
 
 
 def cli_execution_timeout(provider, timeout=None):
-    return timeout if timeout is not None else (210 if provider == 'agnes' else 100)
+    return timeout if timeout is not None else (420 if provider == 'configured' else (210 if provider == 'agnes' else 100))
 
 
-def configure_executor(cfg, provider, recorder_url, agnes_model='agnes-3.0-flash'):
+def configure_executor(cfg, provider, recorder_url, agnes_model='agnes-3.0-flash', selected_config=None):
     """Keep Agnes on its native provider path with an invalid local-only key."""
     from reverie.config import ModelConfig
 
-    if provider == 'agnes':
+    if provider == 'configured' and selected_config is not None:
+        model = selected_config.active_model
+        if selected_config.active_model_source == 'nvidia':
+            cfg.models = []
+            cfg.nvidia = {**selected_config.nvidia, 'api_key': 'local-recorder-only',
+                          'api_url': recorder_url.rstrip('/') + '/chat/completions'}
+            cfg.active_model_source = 'nvidia'
+        else:
+            base = recorder_url.rstrip('/') + '/chat/completions' if model.provider == 'request' else recorder_url
+            cfg.models = [type(model)(model.model, 'Harness2 configured executor', base, 'local-recorder-only',
+                                     provider=model.provider, thinking_mode=model.thinking_mode)]
+            cfg.active_model_source = 'standard'
+    elif provider == 'agnes':
         cfg.models = []
         cfg.agnes = {**cfg.agnes, 'enabled': True, 'api_key': 'local-recorder-only',
                      'selected_model_id': agnes_model, 'api_url': recorder_url,
@@ -93,7 +122,8 @@ def configure_executor(cfg, provider, recorder_url, agnes_model='agnes-3.0-flash
 def execution_environment(home, state):
     # Do not read or inherit Agnes secrets; only the external bridge needs
     # real Agnes credentials. The CLI talks to this adapter with a placeholder.
-    env = {name: os.environ[name] for name in os.environ if name not in ('AGNES_API_KEY', 'AGNES_TOKEN')}
+    env = {name: value for name, value in os.environ.items()
+           if not name.upper().endswith(('_API_KEY', '_TOKEN')) and name.upper() != 'GOOGLE_APPLICATION_CREDENTIALS'}
     env.update(HOME=str(home), REVERIE_APP_ROOT=str(state), NO_PROXY='127.0.0.1,localhost',
                no_proxy='127.0.0.1,localhost', PYTHONPATH=str(ROOT / 'ReverieCli-py'))
     return env
@@ -225,8 +255,9 @@ def app_root(path):
 class Transport:
     """Capture exact bodies; bound upstream calls without inventing credentials."""
 
-    def __init__(self, output, provider, budget, *, agnes_base_url=None):
+    def __init__(self, output, provider, budget, *, agnes_base_url=None, selected_config=None):
         self.output, self.provider, self.budget = output, provider, budget
+        self.selected_config = selected_config
         self.agnes_base_url = validate_agnes_bridge_url(agnes_base_url) if provider == 'agnes' else None
         self.bridge_opener = (urllib.request.build_opener(urllib.request.ProxyHandler({}), NoBridgeRedirect())
                               if provider == 'agnes' else None)
@@ -273,10 +304,20 @@ class Transport:
                             "created": int(time.time()), "model": "h2-fixture", "choices": [{"index": 0,
                             "message": message, "finish_reason": finish}]}).encode()
                     else:
-                        url = (f'{owner.agnes_base_url}/chat/completions' if owner.provider == 'agnes'
-                               else 'https://vireonix.ai/v1/chat/completions')
+                        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+                        if owner.provider == 'configured':
+                            model = owner.selected_config.active_model
+                            url = model.base_url.rstrip('/')
+                            if not url.endswith('/chat/completions'):
+                                url += '/chat/completions'
+                            headers.update(model.custom_headers or {})
+                            if model.api_key:
+                                headers['Authorization'] = 'Bearer ' + model.api_key
+                        else:
+                            url = (f'{owner.agnes_base_url}/chat/completions' if owner.provider == 'agnes'
+                                   else 'https://vireonix.ai/v1/chat/completions')
                         request = urllib.request.Request(url, data=raw,
-                            headers={"Content-Type": "application/json", "Accept": "application/json"})
+                            headers=headers)
                         try:
                             if owner.provider == 'agnes':
                                 # The bridge owns official-endpoint authentication. Never
@@ -285,12 +326,14 @@ class Transport:
                             else:
                                 # Keep certificate validation enabled, including the managed proxy CA.
                                 context = ssl.create_default_context(cafile=os.environ.get('CODEX_PROXY_CERT') or None)
-                                response = urllib.request.urlopen(request, timeout=65, context=context)
+                                response = urllib.request.urlopen(request, timeout=provider_request_timeout(owner.provider), context=context)
                             with response:
                                 status, body = response.status, response.read()
                         except urllib.error.HTTPError as error:
                             status, body = error.code, error.read()
-                    prefix.with_suffix('.response').write_bytes(body)
+                    secret = owner.selected_config.active_model.api_key if owner.selected_config else ''
+                    stored_body = body.replace(secret.encode(), b'[redacted]') if secret else body
+                    prefix.with_suffix('.response').write_bytes(stored_body)
                     try:
                         parsed = json.loads(body)
                         if isinstance(parsed, dict):
@@ -307,7 +350,9 @@ class Transport:
                     self.end_headers()
                     self.wfile.write(body)
                 except Exception as error:
-                    record.update(error=type(error).__name__ + ': ' + str(error))
+                    secret = owner.selected_config.active_model.api_key if owner.selected_config else ''
+                    detail = str(error).replace(secret, '[redacted]') if secret else str(error)
+                    record.update(error=type(error).__name__ + ': ' + detail)
                     try:
                         self.send_error(502, 'Exploratory transport failed; inspect recorded error')
                     except OSError:
@@ -336,6 +381,24 @@ def run(args):
     from reverie.config import ConfigManager
     from reverie.context_engine.workspace import detect_workspace_profile
     from reverie.session.manager import SessionManager
+    if os.name == 'nt':
+        from harness2_windows import install_summary_lock, install_tree_paths
+        install_summary_lock()
+        install_tree_paths()
+    selected_config = None
+    if args.provider == 'configured':
+        selected_config = copy.deepcopy(ConfigManager(ROOT).load())
+        if args.model.startswith('source:'):
+            selected_config.active_model_source = args.model.removeprefix('source:')
+            if args.nvidia_model:
+                if selected_config.active_model_source != 'nvidia':
+                    raise ValueError('--nvidia-model requires --model source:nvidia')
+                selected_config.nvidia['selected_model_id'] = args.nvidia_model
+        else:
+            selected_config.active_model_source = 'standard'
+            selected_config.active_model_index = next(i for i, model in enumerate(selected_config.models) if model.model == args.model)
+        if selected_config.active_model.provider not in ('openai-chat', 'request'):
+            raise ValueError('Configured Harness² evaluation currently requires a Chat Completions model')
 
     # The pinned upstream prompt registry only ships OpenCode/Codex metadata.
     # Add a scoped Reverie description; leave recursion/selection/library code
@@ -423,7 +486,7 @@ def run(args):
                 manager = ConfigManager(workspace)
                 manager.ensure_dirs()
                 cfg = manager.load()
-                configure_executor(cfg, args.provider, f'http://127.0.0.1:{transport.server.server_port}/v1', args.agnes_model)
+                configure_executor(cfg, args.provider, f'http://127.0.0.1:{transport.server.server_port}/v1', args.agnes_model, selected_config)
                 manager.save(cfg)
                 (manager.project_data_dir / 'rules.txt').write_text(tree.always_on_text(self.substrate.surface(), component_tree), encoding='utf-8')
                 report_path = run_dir / 'prompt-report.json'
@@ -433,18 +496,15 @@ def run(args):
                            '--prompt', PROMPT, '--report-file', str(report_path)]
                 with (run_dir / 'cli.log').open('x') as log:
                     process = subprocess.Popen(command, env=env, cwd=workspace, stdout=log, stderr=log,
-                                               start_new_session=True)
+                                               start_new_session=os.name != 'nt',
+                                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                     try:
                         exit_code = process.wait(timeout=cli_execution_timeout(args.provider, timeout))
                     except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGTERM)
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            os.killpg(process.pid, signal.SIGKILL)
-                            process.wait(timeout=5)
+                        from desktop_process import stop_process
+                        stop_process(process)
                         exit_code = 124
-                prompt_report = json.loads(report_path.read_text()) if report_path.exists() else {}
+                prompt_report = json.loads(report_path.read_text(encoding='utf-8')) if report_path.exists() else {}
                 session = SessionManager(manager.project_data_dir, project_root=workspace).load_session(prompt_report.get('session_id', ''))
             messages = session.messages if session else []
             dump(run_dir / 'messages.json', messages)
@@ -466,11 +526,11 @@ def run(args):
             return completed_delivery(run_dir)
 
         def trajectory(self, run_dir, *, obs_trunc):
-            return (run_dir / 'trajectory.md').read_text()
+            return (run_dir / 'trajectory.md').read_text(encoding='utf-8')
 
         def deliverable_text(self, run_dir):
             path = run_dir / 'answer.txt'
-            return path.read_text() if path.exists() else ''
+            return path.read_text(encoding='utf-8') if path.exists() else ''
 
         def deliverable_files(self, run_dir):
             return {'answer.txt': self.deliverable_text(run_dir)} if self.delivered(run_dir) else {}
@@ -481,7 +541,7 @@ def run(args):
             context = Path(context_dir)
             workspace = None
             if label.startswith('experience.'):
-                observed = any(has_inventory_read_observation(p.read_text()) for p in (context / 'rollouts').glob('*.md'))
+                observed = any(has_inventory_read_observation(p.read_text(encoding='utf-8')) for p in (context / 'rollouts').glob('*.md'))
                 text = ('<experience>\ncue: A user requests a local read-only inventory\n'
                         'lesson: Keep the explicit file_ops read scope and report only observed fields.\n'
                         'evidence: The retained trajectory contains a file_ops action and its returned inventory.\n'
@@ -498,22 +558,80 @@ def run(args):
             self._calls.append(reply)
             return reply
 
+    class ModelEditor(Proposer):
+        """Ask the configured model to edit or select from upstream evidence."""
+        def call(self, mission, context_dir, label, **kwargs):
+            context = Path(context_dir)
+            material = []
+            for path in sorted(context.rglob('*')):
+                if path.is_file() and path.suffix in ('.md', '.txt', '.json', '.csv'):
+                    material.append('\nFILE ' + path.relative_to(context).as_posix() + '\n' + path.read_text(encoding='utf-8'))
+            evidence_text = ''.join(material)
+            if len(evidence_text) > 200000:
+                raise ValueError('The local model editor evidence exceeded its explicit context budget')
+            editing = not label.startswith(('select.', 'experience.'))
+            contract = ('Return one JSON object with edits (a map of relative component names to complete replacement text) '
+                        'and notes. Only systemprompt.md, LongTermMEMORY.md and tool_descriptions/tool_guidance.md are editable. '
+                        'Use an empty edits map to retain the harness. Do not retain the inventory values in memory. '
+                        'Do not change guardrails or claim an improvement unsupported by observed contrasts.' if editing else
+                        'Return the selection or experience in the exact format requested by the mission. Base it only on the supplied task and observed executions.')
+            contract += (' You have no tools or filesystem access. All context files have already been read and their full text follows. '
+                         'Treat mission instructions to inspect or edit files as instructions to reason over this supplied text and return your response. '
+                         'Do not emit tool calls, requests to read files, or simulated execution. The host applies validated edits.')
+            model = selected_config.active_model
+            payload = {'model': model.model, 'messages': [
+                {'role': 'system', 'content': contract},
+                {'role': 'user', 'content': mission + '\n\nEVIDENCE FILES\n' + evidence_text}], 'max_tokens': 4096, 'stream': False}
+            if editing:
+                payload['response_format'] = {'type': 'json_object'}
+                if model.model in {'nvidia/nemotron-3.5-bolt-e4b', 'mistralai/mistral-large-4-1t-a52b'}:
+                    payload['response_format'] = {'type': 'json_schema', 'json_schema': {
+                        'name': 'harness_edits', 'strict': False, 'schema': {
+                            'type': 'object', 'required': ['edits', 'notes'], 'additionalProperties': False,
+                            'properties': {
+                                'edits': {'type': 'object', 'additionalProperties': False,
+                                          'properties': {name: {'type': 'string'} for name in COMPONENTS if name != 'guardrails.md'}},
+                                'notes': {'type': 'string'},
+                            },
+                        },
+                    }}
+            if selected_config.active_model_source == 'nvidia':
+                from reverie.nvidia import build_nvidia_openai_options
+                options = build_nvidia_openai_options(selected_config.nvidia, model.model, messages=payload['messages'])
+                payload.update(options.get('extra_body') or {})
+            request = urllib.request.Request(f'http://127.0.0.1:{transport.server.server_port}/v1/chat/completions',
+                data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+            started = time.monotonic()
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoBridgeRedirect())
+            with opener.open(request, timeout=provider_request_timeout(args.provider) + 15) as response:
+                result = json.load(response)
+            text = result['choices'][0]['message'].get('content') or ''
+            workspace = None
+            if editing:
+                workspace = context / 'harness'
+                text = apply_model_edits(text, workspace)
+            reply = Reply(label=label, text=text, ok=bool(text.strip()), attempts=1,
+                          wall_s=time.monotonic() - started, workspace=workspace)
+            self._calls.append(reply)
+            return reply
+
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    transport = Transport(output, args.provider, args.max_requests, agnes_base_url=args.agnes_base_url)
+    transport = Transport(output, args.provider, args.max_requests, agnes_base_url=args.agnes_base_url, selected_config=selected_config)
     adapter = Adapter(output)
     modes = ('agg', 'seq') if args.mode == 'both' else ('agg' if args.mode == 'parallel' else 'seq',)
     try:
+        editor = ModelEditor if args.provider == 'configured' else ScopeEditor
         result = run_domain('read-only-inventory', adapter.tasks(), 1, adapter=adapter,
-            prop=ScopeEditor(adapter.spec.channels['proposer']), runs_root=adapter.spec.runs_root,
+            prop=editor(adapter.spec.channels['proposer']), runs_root=adapter.spec.runs_root,
             library_root=output / 'library', modes=modes)
         # Only after selection/reflection: no verdict or expected answer enters editor evidence.
         checks = []
         for run_dir in sorted(adapter.executions):
-            meta = json.loads((run_dir / 'execution.json').read_text())
-            messages = json.loads((run_dir / 'messages.json').read_text())
+            meta = json.loads((run_dir / 'execution.json').read_text(encoding='utf-8'))
+            messages = json.loads((run_dir / 'messages.json').read_text(encoding='utf-8'))
             calls = [call.get('function', {}) for message in messages for call in message.get('tool_calls', []) or []]
-            source = (adapter.task_files(meta['task']) / 'inventory.txt').read_text()
+            source = (adapter.task_files(meta['task']) / 'inventory.txt').read_text(encoding='utf-8')
             answer = adapter.deliverable_text(run_dir)
             valid_read, scope_preserved = inventory_tool_scope(calls, run_dir / 'workspace')
             conditions = {'cli_succeeded': meta['exit_code'] == 0 and meta['execution_success'],
@@ -525,9 +643,10 @@ def run(args):
             checks.append({**meta, 'checks': conditions, 'passed': all(conditions.values())})
         report = {'schema': 'reverie.harness2.exploration.v1', 'harness2_revision': PIN,
             'evaluation_contract': 'completed execution, correlated inventory read, exact labelled field values',
-            'provider': args.provider, 'editor': 'deterministic scope editor; not model optimization',
-            'model_source': 'agnes' if args.provider == 'agnes' else 'standard',
-            'model': args.agnes_model if args.provider == 'agnes' else ('auto' if args.provider == 'vireonix' else 'h2-fixture'),
+            'provider': args.provider, 'editor': 'configured model from upstream execution evidence' if selected_config else 'deterministic scope editor; not model optimization',
+            'model_source': selected_config.active_model_source if selected_config else ('agnes' if args.provider == 'agnes' else 'standard'),
+            'model': selected_config.active_model.model if selected_config else (args.agnes_model if args.provider == 'agnes' else ('auto' if args.provider == 'vireonix' else 'h2-fixture')),
+            'windows_compatibility': os.name == 'nt',
             'bridge': ({'base_url': args.agnes_base_url, 'authentication': 'external in-memory bridge only',
                         'cli_credential': 'invalid local-recorder-only placeholder; no real key inherited',
                         'payload': 'native Agnes provider request forwarded unchanged'} if args.provider == 'agnes' else None),
@@ -556,7 +675,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--harness2-source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--provider', choices=('fixture', 'vireonix', 'agnes'), default='fixture')
+    parser.add_argument('--provider', choices=('fixture', 'vireonix', 'agnes', 'configured'), default='fixture')
+    parser.add_argument('--model', default='source:nvidia', help='Configured model ID or source:nvidia; credentials stay in the local recorder')
+    parser.add_argument('--nvidia-model', help='Optional NVIDIA model ID for this isolated qualification only')
     parser.add_argument('--agnes-base-url', help='External credential-holding HTTP loopback bridge /v1 URL; never an official API URL')
     parser.add_argument('--agnes-model', default='agnes-3.0-flash', help='Agnes text model for the isolated exploratory profile')
     parser.add_argument('--mode', choices=('parallel', 'sequential', 'both'), default='sequential')

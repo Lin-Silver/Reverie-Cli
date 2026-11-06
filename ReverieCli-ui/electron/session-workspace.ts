@@ -32,6 +32,18 @@ export async function atomicJson(file:string,value:unknown):Promise<void>{await 
 export async function readJson<T>(file:string,fallback:T):Promise<T>{try{return JSON.parse(await readFile(file,"utf8")) as T;}catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return fallback;throw error;}}
 export function redact(value:unknown):unknown {
   if(Array.isArray(value))return value.map(redact);
+  if(value && typeof value==="object" && "tool_name" in value) {
+    const record=value as Record<string,unknown>;
+    const name=String(record.tool_name || "");
+    if(name.startsWith("computer_") || ["list_apps","launch_app","get_app_state","click","drag","scroll","type_text","press_key","set_value","perform_secondary_action"].includes(name)) {
+      const safe=Object.fromEntries(Object.entries(record).filter(([key])=>["at","type","event","tool_name","tool_call_id","project_root","session_id","run_id","agent_id","success","status","elapsed_ms"].includes(key)));
+      for(const key of ["output","error"])if(record[key]) {
+        try {const envelope=typeof record[key]==="string"?JSON.parse(record[key].replace(/^Error:\s*/,"")):record[key];const payload="ok" in envelope?(envelope.ok?envelope.data:envelope.error):envelope;safe[key]=Object.fromEntries(Object.entries(payload || {}).filter(([field])=>["code","disposition","complete","truncated"].includes(field)));}
+        catch {safe[key]="Computer Use result; content remains in the conversation.";}
+      }
+      return safe;
+    }
+  }
   if(value && typeof value==="object")return Object.fromEntries(Object.entries(value).map(([name,data])=>[name,/(api.?key|password|secret|authorization|access.?token|refresh.?token)/i.test(name)?"[redacted]":redact(data)]));
   if(typeof value!=="string")return value;
   let text=value.replace(/(Bearer\s+)[\w.\-/+=]+/gi,"$1[redacted]").replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi,"$1[redacted]@").replace(/((?:api[_-]?key|password|access[_-]?token|secret)\s*[=:]\s*)[^\s,;]+/gi,"$1[redacted]");

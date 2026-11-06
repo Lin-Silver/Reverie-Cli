@@ -1,0 +1,326 @@
+{
+  "created_at": "2026-11-05T12:55:22.453698+00:00",
+  "scope": "Local Windows x64 Computer Use delivery; accessibility-first; no Git publication",
+  "implementation_complete": true,
+  "full_environment_acceptance_complete": false,
+  "desktop_build": {
+    "version": "2.5.3",
+    "id": "5045501ca869f5d2",
+    "builtAt": "2026-11-05T12:41:25.078Z",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "native_engine": {
+    "version": "1.2.0",
+    "protocol": "2.6",
+    "repository": "https://github.com/vercel-labs/agent-desktop",
+    "commit": "2b0a7334fc111730454b726e6800aa41cdafc093",
+    "license": "Apache-2.0",
+    "platform": "windows-x64",
+    "archive": "agent-desktop-v1.2.0-x86_64-pc-windows-msvc.tar.gz",
+    "archive_sha256": "a4199f741a441cedd349bf56c5eba01783b1261258b498efeb7ec9945220c3e8",
+    "binary_sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3"
+  },
+  "artifacts": [
+    {
+      "path": "dist/Reverie-Portable-x64.exe",
+      "bytes": 438301311,
+      "sha256": "2cd4c9b7e1f55a1085fbc20123853493e3bf953ac6465bd77443a0585c475a01"
+    },
+    {
+      "path": "ReverieCli-ui/release/win-unpacked/ReverieUI.exe",
+      "bytes": 223114752,
+      "sha256": "0c7640ad2b3752e18f6561d5e9f320e5c4947a680fa7ee2ad7a29bf2cfac1c3d"
+    },
+    {
+      "path": "ReverieCli-ui/.kernel/reverie/reverie.exe",
+      "bytes": 14316188,
+      "sha256": "f657aba5d9a58909b4032ddcf31332db3b864e799c591b2905e129d1fac52277"
+    },
+    {
+      "path": ".runtime/computer-use-packages/reverie_cli-2.5.3-py3-none-win_amd64.whl",
+      "bytes": 7857057,
+      "sha256": "b84e7fa9c19c9edf4e5c570b9749367b666efc642a3922fe88b95a3cd96626ea"
+    }
+  ],
+  "native_copies": [
+    {
+      "path": "ReverieCli-py\\reverie\\computer_use\\native\\windows-x64",
+      "binary_sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3",
+      "license_present": true
+    },
+    {
+      "path": "ReverieCli-ui\\.kernel\\reverie\\reverie-runtime\\reverie\\computer_use\\native\\windows-x64",
+      "binary_sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3",
+      "license_present": true
+    },
+    {
+      "path": "ReverieCli-ui\\release\\win-unpacked\\reverie-runtime\\reverie\\computer_use\\native\\windows-x64",
+      "binary_sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3",
+      "license_present": true
+    },
+    {
+      "path": ".runtime\\computer-package-20261105-055331\\desktop-home\\.reverie\\desktop\\app-runtime\\reverie-runtime\\reverie\\computer_use\\native\\windows-x64",
+      "binary_sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3",
+      "license_present": true
+    }
+  ],
+  "wheel_matches_current_source": [
+    "reverie/computer_use/__init__.py",
+    "reverie/computer_use/images.py",
+    "reverie/computer_use/legacy.py",
+    "reverie/computer_use/operations.py",
+    "reverie/computer_use/preview.py",
+    "reverie/computer_use/prompt.py",
+    "reverie/computer_use/results.py",
+    "reverie/computer_use/runtime.py",
+    "reverie/computer_use/service.py",
+    "reverie/computer_use/windows_launch.py",
+    "reverie/tools/computer.py",
+    "reverie/tools/open_computer_use.py",
+    "reverie/session/operation_history.py",
+    "reverie/agent/agent.py",
+    "reverie/agent/tool_executor.py",
+    "reverie/sdk_bridge.py"
+  ],
+  "portable_extracted_kernel_and_ui_match_directory_build": true,
+  "checks": {
+    "python_full_regression_before_final_scoped_fixes": {
+      "passed": 3130,
+      "skipped": 7
+    },
+    "python_final_scoped": {
+      "passed": 150,
+      "log": ".runtime/computer-use-python-final-tests.log"
+    },
+    "ui_full_regression_before_final_scoped_fixes": {
+      "passed": 475,
+      "skipped": 1
+    },
+    "ui_final_scoped": {
+      "passed": 20,
+      "log": ".runtime/computer-use-ui-final-tests.log"
+    },
+    "typecheck": {
+      "passed": true,
+      "log": ".runtime/computer-use-typecheck-final.log"
+    },
+    "kernel_matches_current_source": ".runtime/computer-use-kernel-source-check.json",
+    "build_logs": [
+      ".runtime/computer-use-kernel-delivery.log",
+      ".runtime/computer-use-ui-delivery.log",
+      ".runtime/computer-use-electron-delivery.log",
+      ".runtime/computer-use-wheel-final.log",
+      ".runtime/computer-use-portable-delivery.log"
+    ],
+    "controlled_desktop": ".runtime/computer-use-20261105-052305/summary.json",
+    "real_applications": ".runtime/computer-apps-20261105-050726/summary.json"
+  },
+  "packaged_ui_evidence": [
+    {
+      "path": ".runtime\\computer-package-20261105-054524",
+      "scope": "Packaged UI with local deterministic provider and real native operations",
+      "requests": [
+        {
+          "model": "package-vision",
+          "images": 0,
+          "computer_tools": 29
+        },
+        {
+          "model": "package-vision",
+          "images": 0,
+          "computer_tools": 29
+        },
+        {
+          "model": "package-vision",
+          "images": 1,
+          "computer_tools": 29
+        }
+      ],
+      "errors": [],
+      "passed": true,
+      "model_picker_switched": true,
+      "reverie_computer_tools": [
+        "computer_status",
+        "computer_list_apps",
+        "computer_list_windows",
+        "computer_list_displays",
+        "computer_list_surfaces",
+        "computer_snapshot",
+        "computer_find",
+        "computer_get",
+        "computer_is",
+        "computer_screenshot",
+        "computer_launch_app",
+        "computer_close_app",
+        "computer_window",
+        "computer_open_system_surface",
+        "computer_click",
+        "computer_focus",
+        "computer_set_value",
+        "computer_type_text",
+        "computer_select",
+        "computer_set_state",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_scroll_to",
+        "computer_drag",
+        "computer_pointer",
+        "computer_wait",
+        "computer_clipboard_get",
+        "computer_clipboard_set",
+        "computer_clipboard_clear"
+      ],
+      "computer-controller_computer_tools": [
+        "computer_status",
+        "computer_list_apps",
+        "computer_list_windows",
+        "computer_list_displays",
+        "computer_list_surfaces",
+        "computer_snapshot",
+        "computer_find",
+        "computer_get",
+        "computer_is",
+        "computer_screenshot",
+        "computer_launch_app",
+        "computer_close_app",
+        "computer_window",
+        "computer_open_system_surface",
+        "computer_click",
+        "computer_focus",
+        "computer_set_value",
+        "computer_type_text",
+        "computer_select",
+        "computer_set_state",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_scroll_to",
+        "computer_drag",
+        "computer_pointer",
+        "computer_wait",
+        "computer_clipboard_get",
+        "computer_clipboard_set",
+        "computer_clipboard_clear"
+      ],
+      "tool_cards": 2,
+      "screenshot_preview_loaded": true,
+      "desktop_build": {
+        "version": "2.5.3",
+        "id": "5045501ca869f5d2",
+        "builtAt": "2026-11-05T12:41:25.078Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    },
+    {
+      "path": ".runtime\\computer-package-20261105-055331",
+      "scope": "Packaged UI with local deterministic provider and real native operations",
+      "requests": [
+        {
+          "model": "package-vision",
+          "images": 0,
+          "computer_tools": 29
+        },
+        {
+          "model": "package-vision",
+          "images": 0,
+          "computer_tools": 29
+        },
+        {
+          "model": "package-vision",
+          "images": 1,
+          "computer_tools": 29
+        }
+      ],
+      "errors": [],
+      "passed": true,
+      "portable_extraction_ms": 45672,
+      "model_picker_switched": true,
+      "reverie_computer_tools": [
+        "computer_status",
+        "computer_list_apps",
+        "computer_list_windows",
+        "computer_list_displays",
+        "computer_list_surfaces",
+        "computer_snapshot",
+        "computer_find",
+        "computer_get",
+        "computer_is",
+        "computer_screenshot",
+        "computer_launch_app",
+        "computer_close_app",
+        "computer_window",
+        "computer_open_system_surface",
+        "computer_click",
+        "computer_focus",
+        "computer_set_value",
+        "computer_type_text",
+        "computer_select",
+        "computer_set_state",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_scroll_to",
+        "computer_drag",
+        "computer_pointer",
+        "computer_wait",
+        "computer_clipboard_get",
+        "computer_clipboard_set",
+        "computer_clipboard_clear"
+      ],
+      "computer-controller_computer_tools": [
+        "computer_status",
+        "computer_list_apps",
+        "computer_list_windows",
+        "computer_list_displays",
+        "computer_list_surfaces",
+        "computer_snapshot",
+        "computer_find",
+        "computer_get",
+        "computer_is",
+        "computer_screenshot",
+        "computer_launch_app",
+        "computer_close_app",
+        "computer_window",
+        "computer_open_system_surface",
+        "computer_click",
+        "computer_focus",
+        "computer_set_value",
+        "computer_type_text",
+        "computer_select",
+        "computer_set_state",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_scroll_to",
+        "computer_drag",
+        "computer_pointer",
+        "computer_wait",
+        "computer_clipboard_get",
+        "computer_clipboard_set",
+        "computer_clipboard_clear"
+      ],
+      "tool_cards": 2,
+      "screenshot_preview_loaded": true,
+      "desktop_build": {
+        "version": "2.5.3",
+        "id": "5045501ca869f5d2",
+        "builtAt": "2026-11-05T12:41:25.078Z",
+        "platform": "win32",
+        "arch": "x64"
+      }
+    }
+  ],
+  "unverified": [
+    "foreground physical input, drag, Start menu and tray interactions",
+    "Explorer target folder window confirmation",
+    "successful real text and vision model tasks",
+    "multiple displays and additional DPI scales",
+    "clean Windows machine or VM"
+  ],
+  "excluded": [
+    "Windows ARM64",
+    "macOS",
+    "Linux",
+    "notification management",
+    "operation animation"
+  ]
+}

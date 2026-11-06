@@ -76,7 +76,6 @@ from ..context_engine import LSPManager
 from ..memory import MemoryOS
 from ..modes import REPOSITORY_MODES, get_mode_display_name, normalize_mode
 from ..nvidia import (
-    build_nvidia_computer_controller_runtime_model_data,
     get_nvidia_model_vision_modalities,
     normalize_nvidia_config,
     resolve_nvidia_selected_model,
@@ -3942,28 +3941,6 @@ class ReverieInterface:
         self.mcp_runtime.set_project_root(self.project_root)
         self.mcp_runtime.set_active_mode(config.mode)
         scope_changed = self._ensure_runtime_services_for_config(config)
-        if normalize_mode(config.mode) == "computer-controller":
-            runtime_nvidia = build_nvidia_computer_controller_runtime_model_data(getattr(config, "nvidia", {}))
-            if not runtime_nvidia:
-                self.console.print(
-                    f"\n[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Computer Controller mode needs a NVIDIA API key in config or NVIDIA_API_KEY before it can start.[/{self.theme.CORAL_SOFT}]"
-                )
-                self.agent = None
-                self._refresh_command_context()
-                return
-
-            nvidia_cfg = normalize_nvidia_config(getattr(config, "nvidia", {}))
-            nvidia_cfg["enabled"] = True
-            nvidia_cfg["api_key"] = runtime_nvidia.get("api_key", "")
-            nvidia_cfg["selected_model_id"] = str(runtime_nvidia.get("model", nvidia_cfg.get("selected_model_id", "")))
-            nvidia_cfg["selected_model_display_name"] = str(
-                runtime_nvidia.get("model_display_name", nvidia_cfg.get("selected_model_display_name", ""))
-            )
-            config.nvidia = normalize_nvidia_config(nvidia_cfg)
-            if str(getattr(config, "active_model_source", "standard")).lower() != "nvidia":
-                config.active_model_source = "nvidia"
-            if persist_config_changes:
-                self.config_manager.save(config)
         model = config.active_model
         if not model:
             self.agent = None

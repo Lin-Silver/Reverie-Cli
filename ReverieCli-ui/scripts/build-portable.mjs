@@ -69,7 +69,7 @@ const extraction = walkFiles(unpackedRoot).sort().map((file) => {
   const suffix = directory === "." ? "" : `\\${directory.replaceAll(path.sep, "\\").replaceAll("$", () => "$$")}`;
   return `  SetOutPath "\\\\?\\$INSTDIR${suffix}"
   ClearErrors
-  File "/oname=${path.basename(file).replaceAll("$", () => "$$")}" "${nsisPath(file)}"
+  File "/oname=${path.basename(file).replaceAll("$", () => "$$")}" "${nsisPath(path.toNamespacedPath(file))}"
   IfErrors extract_failed`;
 }).join("\n");
 const numericVersion = `${packageJson.version}.0`.split(".").slice(0, 4).join(".");
@@ -80,7 +80,8 @@ AutoCloseWindow true
 WindowIcon off
 CRCCheck off
 SetDatablockOptimize on
-SetCompressor /FINAL zlib
+SetCompressor /SOLID /FINAL lzma
+SetCompressorDictSize 32
 Name "Reverie"
 OutFile "${nsisPath(output)}"
 Icon "${nsisPath(path.join(repositoryRoot, "ReverieCli-py", "reverie.ico"))}"

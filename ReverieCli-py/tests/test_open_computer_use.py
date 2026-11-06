@@ -125,7 +125,11 @@ def test_controller_exposes_open_computer_use_contract_instead_of_legacy_tool(tm
         for schema in executor.get_tool_schemas(mode="reverie")
     }
 
-    assert EXPECTED_TOOL_NAMES <= controller_names
+    from reverie.tools.computer import COMPUTER_TOOL_CLASSES
+    current_names = {tool.name for tool in COMPUTER_TOOL_CLASSES}
+    assert current_names <= controller_names
+    assert current_names <= reverie_names
+    assert EXPECTED_TOOL_NAMES.isdisjoint(controller_names)
     assert "computer_control" not in controller_names
     assert {"str_replace_editor", "file_ops", "delete_file", "command_exec", "create_file"}.isdisjoint(
         controller_names

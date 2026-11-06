@@ -1471,6 +1471,10 @@ class ReverieSdkBridge:
                 "mode": mode,
                 "tools": _json_safe([_desktop_tool_record(record) for record in records]),
             }
+        if action == "resolveComputerImage":
+            from .computer_use.preview import resolve_image
+            target = resolve_image(Path(payload.get('projectRoot') or self.project_root), str(payload.get('file') or ''))
+            return {'id': request_id, 'type': 'computer.image', 'path': str(target)}
         if action == "ratsState":
             return {"id": request_id, "type": "rats.state", "rats": _json_safe(self.rats_runtime.refresh())}
         if action == "ratsStateCached":

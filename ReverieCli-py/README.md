@@ -117,7 +117,7 @@ For the full reference, see [docs/CLI_COMMANDS.md](../docs/CLI_COMMANDS.md).
 | `Reverie-Atlas` | Document-driven spec development for complex systems, plus spec-package authoring (requirements/design/tasks) |
 | `Reverie-Gamer` | Work-in-progress game-production mode for prompt-to-blueprint, runtime scaffolding, vertical-slice delivery, and verification |
 | `Writer` | Native long-form fiction workflow with disk-backed chapters, reader TXT exports, and continuity control |
-| `Computer Controller` | Embedded Open Computer Use-compatible desktop runtime plus managed Reverie SubAgents; entered explicitly for desktop work and free to hand off when the task changes |
+| `Computer Controller` | Accessibility-first desktop orchestration using bundled agent-desktop and the selected model; 29 built-in tools are also available in Reverie mode |
 
 ## Architecture
 
@@ -139,7 +139,7 @@ reverie/
 ├── session/                 # sessions, checkpoints, rollback, archives, memory
 ├── tools/                   # tool implementations exposed to the agent
 ├── engine/                  # public API, runtime, project, and modeling implementation
-├── computer_use/            # embedded Open Computer Use Windows adapter
+├── computer_use/            # native desktop runtime, refs, results and optional images
 └── skills_manager.py        # SKILL.md discovery, matching, and prompt injection helpers
 ```
 

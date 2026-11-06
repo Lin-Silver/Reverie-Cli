@@ -149,7 +149,8 @@ def test_explicit_file_tool_scope_does_not_force_repository_retrieval(tmp_path, 
     agent.mode = "reverie"
     agent.messages = [{"role": "user", "content": prompt}]
     tools = [{"type": "function", "function": {"name": name}} for name in ("codebase-retrieval", "file_ops")]
-    assert agent._native_tool_choice(tools) is None
+    assert agent._context_engine_native_tool_choice(tools) is None
+    assert agent._native_tool_choice(tools) == {"type": "function", "function": {"name": "file_ops"}}
 
 
 @pytest.mark.parametrize("prompt", [
@@ -180,7 +181,49 @@ def test_scoped_file_request_keeps_tools_without_forcing_lookup(tmp_path):
     tools = [{"type": "function", "function": {"name": name, "parameters": {"type": "object"}}} for name in ("codebase-retrieval", "file_ops")]
     request = agent._build_openai_chat_completion_kwargs(messages=agent.messages, tools=tools, stream=False)
     assert request["tools"] == tools
-    assert "tool_choice" not in request
+    assert request["tool_choice"] == {"type": "function", "function": {"name": "file_ops"}}
+
+
+@pytest.mark.parametrize('attempt', [
+    {'role': 'assistant', 'tool_calls': [{'function': {'name': 'file_ops'}}]},
+    {'role': 'tool', 'name': 'file_ops', 'content': 'Failed'},
+    {'role': 'assistant', 'tool_calls': [{'function': {'name': 'other'}}]},
+])
+def test_explicit_read_choice_ends_after_any_attempt_including_failure(tmp_path, attempt):
+    agent = make_agent(tmp_path)
+    agent.mode = 'reverie'
+    agent.messages = [{'role': 'user', 'content': 'Only use file_ops to read inventory.txt.'}, attempt]
+    tools = [{'function': {'name': 'file_ops'}}]
+    assert agent._native_tool_choice(tools) is None
+    assert agent._anthropic_tool_choice(tools) is None
+
+
+def test_explicit_read_scopes_visible_tools_until_next_user_turn(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.mode = 'reverie'
+    schemas = [{'function': {'name': n}} for n in ('file_ops', 'computer_click', 'command_exec')]
+    agent.tool_executor.get_tool_schemas = lambda **kwargs: schemas
+    agent.messages = [{'role': 'user', 'content': 'Only use file_ops to read inventory.txt.'}]
+    assert agent.get_visible_tool_schemas() == [schemas[0]]
+    assert agent._anthropic_tool_choice([schemas[0]]) == {'type': 'tool', 'name': 'file_ops'}
+    agent.messages.append({'role': 'tool', 'content': 'observed'})
+    assert agent.get_visible_tool_schemas() == [schemas[0]]
+    assert agent._native_tool_choice([schemas[0]]) is None
+    agent.messages.append({'role': 'user', 'content': 'Inspect the desktop.'})
+    assert agent.get_visible_tool_schemas() == schemas
+
+
+@pytest.mark.parametrize('prompt', [
+    "Only use file_ops to write inventory.txt.",
+    "Do not use file_ops to read inventory.txt.",
+    "不要读取文件，只使用 file_ops 查看是否存在。",
+    "Only use file_ops and command_exec to read inventory.txt.",
+])
+def test_read_choice_does_not_invent_scope_for_writes_denials_or_multiple_tools(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = 'reverie'
+    agent.messages = [{'role': 'user', 'content': prompt}]
+    assert agent._explicit_file_read_native_tool_choice([{'function': {'name': 'file_ops'}}]) is None
 
 
 @pytest.mark.parametrize("prompt", [

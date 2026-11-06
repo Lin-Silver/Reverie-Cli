@@ -2,6 +2,7 @@
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from pathlib import Path
 import os
+import runpy
 
 build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
 datas = [('README.md', '.')]
@@ -98,6 +99,10 @@ add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reve
 add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills", exclude_skill_artifacts=True)
 add_data_if_exists(repo_root / "reverie" / "computer_use" / "ATTRIBUTION.md", "reverie/computer_use")
+add_data_if_exists(repo_root / "reverie" / "computer_use" / "native_manifest.json", "reverie/computer_use")
+if os.name == 'nt':
+    desktop_binary = runpy.run_path(str(repo_root / 'scripts' / 'prepare_computer_use.py'))['prepare']()
+    add_tree_if_exists(desktop_binary.parent, 'reverie/computer_use/native/windows-x64')
 
 for package_name in ('rich', 'bs4', 'PIL', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):
     try:

@@ -53,6 +53,7 @@ from .atlas_delivery_orchestrator import AtlasDeliveryOrchestratorTool
 from .reverie_engine import ReverieEngineTool
 from .mode_switch import ModeSwitchTool
 from .open_computer_use import COMPUTER_USE_TOOL_CLASSES
+from .computer import COMPUTER_TOOL_CLASSES
 from .mcp_resource_tools import ListMcpResourcesTool, ReadMcpResourceTool
 from .subagent import SubagentTool
 from .render_view import RenderViewTool
@@ -246,7 +247,9 @@ def _register_builtin_tools() -> None:
     register_tool_class(ReverieEngineTool, include_modes=reverie_engine_modes)
     register_tool_class(ModeSwitchTool)
     for tool_class in COMPUTER_USE_TOOL_CLASSES:
-        register_tool_class(tool_class, include_modes=("computer-controller",))
+        register_tool_class(tool_class, include_modes=("reverie", "computer-controller"), expose_schema=False)
+    for tool_class in COMPUTER_TOOL_CLASSES:
+        register_tool_class(tool_class, include_modes=("reverie", "computer-controller"))
 
 
 _register_builtin_tools()

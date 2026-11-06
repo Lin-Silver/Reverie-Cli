@@ -197,6 +197,16 @@ class ToolExecutor:
         memory_os = self._get_memory_os()
         if not memory_os:
             return
+        registered = self._tools.get(str(payload.get("tool_name", "")))
+        if registered is not None and registered.tool_category == "desktop":
+            # Durable diagnostics retain delivery metadata, not private UI/text.
+            payload = dict(payload)
+            payload["arguments"] = {key: value for key, value in payload.get("arguments", {}).items()
+                                    if key in {"ref", "window_id", "image_id", "action", "state", "direction"}}
+            for field in ("output", "error"):
+                if payload.get(field):
+                    from ..computer_use.results import diagnostic_result
+                    payload[field] = diagnostic_result(payload[field])
         session_id = "default"
         agent = self.context.get("agent")
         if agent is not None and hasattr(agent, "_current_session_details"):
@@ -324,6 +334,8 @@ class ToolExecutor:
 
     def _tool_is_visible(self, name: str, tool: BaseTool, mode: object) -> bool:
         """Return whether a tool should be exposed in the supplied mode."""
+        if self.context.get("is_subagent") and tool.tool_category == "desktop":
+            return False
         normalized_mode = normalize_mode(mode)
         if name == DEEP_THINK_TOOL_NAME and not self._thinking_tool_enabled():
             return False
@@ -733,6 +745,9 @@ class ToolExecutor:
         if not self.context.get("is_subagent"):
             return None
 
+        if tool.tool_category == "desktop":
+            return "Subagent policy denied desktop access; only the main agent controls the desktop."
+
         write_scope = self._resolve_scope_paths(self.context.get("subagent_write_scope"))
         read_scope = self._resolve_scope_paths(self.context.get("subagent_read_scope"))
 
@@ -817,6 +832,19 @@ class ToolExecutor:
         output = result.output
         error = result.error
         metadata = dict(result.data or {})
+
+        if tool.tool_category == 'desktop' and isinstance(metadata.get('computer_use'), dict):
+            from ..computer_use.results import compact_envelope
+            text = output if result.success else error
+            if isinstance(text, str) and len(text) > limit:
+                path = self._persist_large_text(tool.name, 'output' if result.success else 'error', text)
+                envelope = compact_envelope(metadata['computer_use'], truncated=True)
+                envelope['data' if result.success else 'error']['full_result_path'] = str(path)
+                clipped = json.dumps(envelope, ensure_ascii=False, separators=(',', ':'))
+                metadata.update(tool_result_budget_applied=True, full_result_path=str(path))
+                return ToolResult(success=result.success, output=clipped if result.success else '',
+                                  error='' if result.success else clipped, data=metadata, status=result.status)
+            return result
 
         if isinstance(output, str) and len(output) > limit:
             output, extra = self._truncate_tool_text(tool.name, "output", output, limit)
@@ -1192,6 +1220,8 @@ class ToolExecutor:
         if gate is not None:
             return gate
         active_mode = normalize_mode(getattr(agent, "mode", "reverie")) if agent is not None else "reverie"
+        if tool.tool_category == "desktop" and active_mode not in {"reverie", "computer-controller"}:
+            return ToolResult.fail("Desktop tools are available in Reverie and Computer Controller modes.")
         if active_mode == "writer" and tool.name in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
             raw_path = str(normalized_arguments.get("path", "") or "").strip()
             if raw_path:
@@ -1460,6 +1490,7 @@ class ToolExecutor:
         self._sync_dynamic_tools()
         cache_key = (
             normalized_mode,
+            bool(self.context.get("is_subagent")),
             self._mcp_generation,
             self._runtime_plugin_generation,
             self._rats_generation,

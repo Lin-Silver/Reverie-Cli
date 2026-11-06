@@ -156,6 +156,10 @@ def _get_message_text(message: Dict[str, Any]) -> str:
 
 def _truncate_for_memory(text: Any, limit: int = 320) -> str:
     """Trim text for memory digests without losing the key facts."""
+    from ..computer_use.results import desktop_memory
+    desktop = desktop_memory(text)
+    if desktop:
+        return desktop
     compact = " ".join(str(text or "").split())
     if len(compact) <= limit:
         return compact
@@ -241,6 +245,9 @@ def _format_compression_message(message: Dict[str, Any]) -> str:
     """Render one bounded transcript entry for provider-side compression."""
     role = str(message.get("role", "unknown") or "unknown").strip().lower()
     content = _get_message_text(message)
+    if role == "tool":
+        from ..computer_use.results import desktop_memory
+        content = desktop_memory(content) or content
     tool_names = _tool_call_names(message)
     if tool_names:
         tool_line = f"Tool calls: {', '.join(tool_names)}"
@@ -887,6 +894,12 @@ class ContextCompressor:
                 summary_text,
                 checkpoint_path=source_checkpoint,
             )
+            from ..computer_use.results import desktop_memory
+            desktop_records = [desktop_memory(_get_message_text(message)) for message in history_to_compress
+                               if message.get('role') == 'tool']
+            desktop_records = [record for record in desktop_records if record]
+            if desktop_records:
+                normalized_summary += '\n\nRecent desktop delivery records:\n' + '\n'.join(desktop_records[-8:])
             summary_message = {
                 "role": "system",
                 "content": f"{MEMORY_BLOCK_HEADER}\n{normalized_summary}\n{MEMORY_BLOCK_END}",

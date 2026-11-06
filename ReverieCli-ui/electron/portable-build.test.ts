@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const buildScript = readFileSync(new URL("../scripts/build-portable.mjs", import.meta.url), "utf8");
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const mainSource = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
 
 describe("portable launcher startup", () => {
   it.each([
@@ -24,5 +25,21 @@ describe("portable launcher startup", () => {
     expect(buildScript).toContain("CRCCheck off");
     expect(buildScript).toContain("IfFileExists");
     expect(buildScript).toContain('.reverie-build-${buildId}');
+  });
+
+  it("ships a valid multi-resolution Windows window icon separately from the EXE icon", () => {
+    const resources = packageJson.build.win.extraResources;
+    const icon = resources.find((resource: { to: string }) => resource.to === "reverie.ico");
+    expect(icon).toBeDefined();
+    const bytes = readFileSync(new URL(`../${icon.from}`, import.meta.url));
+    expect(bytes.readUInt16LE(0)).toBe(0);
+    expect(bytes.readUInt16LE(2)).toBe(1);
+    const sizes = Array.from({ length: bytes.readUInt16LE(4) }, (_, index) => bytes[6 + 16 * index] || 256);
+    expect(sizes).toEqual(expect.arrayContaining([16, 32, 48, 256]));
+  });
+
+  it("uses the installer application identity for taskbar grouping", () => {
+    const identity = mainSource.match(/app\.setAppUserModelId\("([^"]+)"\)/)?.[1];
+    expect(identity).toBe(packageJson.build.appId);
   });
 });

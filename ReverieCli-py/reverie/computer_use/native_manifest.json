@@ -1,0 +1,11 @@
+{
+  "version": "1.2.0",
+  "protocol": "2.6",
+  "repository": "https://github.com/vercel-labs/agent-desktop",
+  "commit": "2b0a7334fc111730454b726e6800aa41cdafc093",
+  "license": "Apache-2.0",
+  "platform": "windows-x64",
+  "archive": "agent-desktop-v1.2.0-x86_64-pc-windows-msvc.tar.gz",
+  "archive_sha256": "a4199f741a441cedd349bf56c5eba01783b1261258b498efeb7ec9945220c3e8",
+  "binary_sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3"
+}

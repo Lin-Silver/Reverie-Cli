@@ -65,7 +65,7 @@
       "node_modules/node-pty/**/*"
     ],
     "npmRebuild": false,
-    "compression": "store",
+    "compression": "maximum",
     "directories": {
       "output": "release"
     },
@@ -95,6 +95,12 @@
     ],
     "win": {
       "icon": "../ReverieCli-py/reverie.ico",
+      "extraResources": [
+        {
+          "from": "../ReverieCli-py/reverie.ico",
+          "to": "reverie.ico"
+        }
+      ],
       "target": [
         "nsis"
       ]

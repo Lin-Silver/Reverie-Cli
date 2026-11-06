@@ -91,6 +91,7 @@ class BaseTool(ABC):
     should_defer: bool = False
     always_load: bool = False
     workspace_checkpoint: bool = True
+    required_permission: str = ""
     max_result_chars: float = 50_000
     
     # Parameter schema in JSON Schema format

@@ -1,4 +1,5 @@
 import { FloatingMenu } from "./FloatingMenu";
+import { parseComputerResult } from "./computer-result";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
 import { StarterActions, WelcomeHeader } from "./StartPage";
 import { UiVariantPicker } from "./UiVariantPicker";
@@ -1028,7 +1029,6 @@ function Topbar({
   const reasoning = activeSource?.selected_reasoning;
   const reasoningOptions = reasoning?.options ?? [];
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
-  const modelSelectionLocked = state.workspace.mode === "computer-controller";
   const viewLabels: Record<ViewId, string> = { chat: "对话", tools: "工具", subagents: "SubAgents", rats: "RATS", tasks: "RTP 任务", skills: "技能", plugins: "插件", recovery: "恢复", settings: "设置" };
   useEffect(() => {
     const closeMenus = (event: globalThis.KeyboardEvent) => {
@@ -1047,7 +1047,7 @@ function Topbar({
         <div className="workspace-breadcrumb"><Folder size={14} /><strong>{state.workspace.project_name || projectNameFromPath(state.workspace.project_root)}</strong><ChevronRight size={12} /><span>{t(viewLabels[view])}</span></div>
       </div>
       <div className="topbar-center">
-        {!modelSelectionLocked && (
+        {(
           <button type="button" className="model-trigger" onClick={openModelPicker}>
             <span className="model-copy"><strong>{activeSource ? state.models.active_model?.display_name || t("选择模型") : t("选择模型")}</strong><small>{activeSource?.display_name || t("选择模型来源")}</small></span>
             <ChevronDown size={14} />
@@ -1176,6 +1176,7 @@ const ActivityItem = memo(function ActivityItem({ event }: { event: Record<strin
     : typeof event.arguments === "string" ? event.arguments : event.arguments ? JSON.stringify(event.arguments, null, 2) : "";
   const output = messageText(event.output);
   const error = String(event.error ?? "");
+  const computer = item.toolName.startsWith("computer_") ? parseComputerResult(error || messageText(event.output)) : null;
   const statusIcon = item.status === "success"
     ? <CheckCircle2 size={14} />
     : item.status === "error" || item.status === "warning"
@@ -1195,7 +1196,8 @@ const ActivityItem = memo(function ActivityItem({ event }: { event: Record<strin
       <summary>
       <div className="activity-status">{statusIcon}</div>
       <div className="activity-copy">
-        <div className="activity-heading"><strong>{item.title}</strong><small>{categoryIcon}{item.category}</small>{item.agentId && item.agentId !== "main" && <code>{item.agentId}</code>}</div>
+        <div className="activity-heading"><strong>{item.title}</strong><small>{categoryIcon}{computer ? t(computer.label) : item.category}</small>{item.agentId && item.agentId !== "main" && <code>{item.agentId}</code>}</div>
+        {computer?.target && <small>{computer.target}</small>}
       </div>
       <ChevronDown size={12} />
       </summary>
@@ -1205,6 +1207,7 @@ const ActivityItem = memo(function ActivityItem({ event }: { event: Record<strin
         {error && <pre className="error">{error}</pre>}
         {item.detail && item.detail !== output && item.detail !== error && <pre>{item.detail}</pre>}
         {item.meta && <small className="activity-meta">{item.meta}</small>}
+        {computer?.path && <button type="button" className="message-attachment" onClick={() => window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: { path: computer.path } }))}>{t("打开文件预览")}</button>}
       </div>}
     </details>
   );
@@ -1246,7 +1249,8 @@ function HistoryToolResult({
   const [expanded, setExpanded] = useState(defaultExpanded);
   useEffect(() => setExpanded(defaultExpanded), [defaultExpanded]);
   const name = message.name || t("工具结果");
-  const error = /^\s*(error|\[error|failed|exception)/i.test(text);
+  const computer = name.startsWith("computer_") ? parseComputerResult(text) : null;
+  const error = computer?.error ?? /^\s*(error|\[error|failed|exception)/i.test(text);
   return (
     <details
       className={`tool-message history-tool-result ${error ? "error" : ""}`}
@@ -1257,12 +1261,13 @@ function HistoryToolResult({
         <span className="trace-icon"><ToolGlyph name={name} /></span>
         <span className="trace-summary">
           <strong>{name}</strong>
-          <small>{t(error ? "执行失败" : "工具结果")}</small>
+          <small>{t(computer?.label || (error ? "执行失败" : "工具结果"))}</small>
         </span>
-        <span className="trace-preview">{text.slice(0, 140)}</span>
+        <span className="trace-preview">{computer ? computer.target : text.slice(0, 140)}</span>
         <ChevronDown size={13} />
       </summary>
       {expanded && <pre>{text}</pre>}
+      {computer?.path && <button type="button" className="message-attachment" onClick={() => window.dispatchEvent(new CustomEvent("reverie:file-open", { detail: { path: computer.path } }))}>{t("打开文件预览")}</button>}
     </details>
   );
 }
@@ -6228,7 +6233,6 @@ export default function App() {
   }, [approval, projectRoot, session?.id, t, toast]);
 
   const openModelPicker = useCallback(() => {
-    if (state?.workspace.mode === "computer-controller") return;
     setModelPickerOpen(true);
     void window.reverie.request("refreshModelSources", {}).then((response) => {
       if (!response.models) return;
@@ -6236,10 +6240,6 @@ export default function App() {
     }).catch(() => {
       // Keep the initialized fallback catalog available when live discovery fails.
     });
-  }, [state?.workspace.mode]);
-
-  useEffect(() => {
-    if (state?.workspace.mode === "computer-controller") setModelPickerOpen(false);
   }, [state?.workspace.mode]);
 
   const selectReasoning = useCallback(async (reasoning: string) => {
@@ -6884,7 +6884,7 @@ export default function App() {
         preview={previewInspectorWidth}
         commit={commitInspectorWidth}
       />
-      {modelPickerOpen && state.workspace.mode !== "computer-controller" && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
+      {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}

@@ -1,0 +1,3 @@
+include scripts/prepare_computer_use.py
+include reverie/computer_use/native_manifest.json
+prune reverie/computer_use/native

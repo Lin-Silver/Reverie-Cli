@@ -9,6 +9,12 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "已验证操作效果": "Effect verified",
+  "已发送，尚未验证": "Delivered; not yet verified",
+  "操作结果不确定": "Operation outcome uncertain",
+  "未发送操作": "Operation not delivered",
+  "已获取界面信息": "Observation received",
+  "操作已返回，需验证效果": "Operation returned; verify the effect",
   "界面版本": "Interface",
   "经典界面": "Classic",
   "熟悉的布局与原有外观": "Your familiar layout and appearance",

@@ -37,6 +37,40 @@ If you plan to exercise `/tti`, install its optional dependency set separately:
 pip install -r ReverieCli-py/requirements-tti.txt
 ```
 
+## Building Windows x64 releases
+
+From the repository root, run `build.bat` (or `build.bat --no-pause` for a terminal/CI).
+It uses the same core spec and `npm run dist:win` packaging command as the GitHub
+release workflow and produces:
+
+- `dist/reverie.exe`: standalone core, with no adjacent runtime directory required.
+- `dist/Reverie-Portable-x64.exe`: local standalone GUI distribution; GitHub Actions retains `Reverie-Portable-<version>-x64.exe`.
+- `ReverieCli-ui/release/Reverie-Setup-<version>-x64.exe`: Windows installer.
+
+Use Windows x64 Python 3.10+ and x64 Node.js 24 (GitHub uses Python 3.12).
+For the same bundled video support as GitHub, install FFmpeg on PATH or set
+`REVERIE_FFMPEG_PATH` to its executable before building.
+
+Windows builds install only `.[build]` into `ReverieCli-py/build/venv`, separate
+from the development/TTI environment at `ReverieCli-py/venv`. Build scripts invoke
+that environment's Python explicitly, including `python -m PyInstaller`, so a
+moved checkout does not execute an old absolute path stored in a launcher or
+activation script. If the base Python installation itself has changed, recreate
+the build environment with `ReverieCli-py\build.bat --recreate-venv --skip-plugins --no-pause`.
+Virtual environments are not portable distribution artifacts.
+
+The GUI reuses the core's browser/FFmpeg archives (hard links where supported),
+and the portable payload uses solid LZMA compression. The root build removes
+disposable PyInstaller staging, `.kernel`, `release/win-unpacked`, and portable
+compiler staging after successful packaging. It retains the build venv, browser,
+resource archives and download caches to avoid downloading them on every build.
+Direct `npm run dist:win` retains unpacked output for package verification; run
+`node ReverieCli-ui/scripts/clean-build-staging.mjs` from the repository root
+after those checks if needed. Actual EXE sizes depend on Python and bundled
+FFmpeg; measure the produced files rather than assuming a fixed size.
+The portable GUI extracts its runtime into `.reverie` beside the EXE on first run
+and reuses it on later runs.
+
 ## Running The App
 
 ```bash
@@ -93,7 +127,7 @@ Provider cancellation tests use real loopback HTTP sockets, SDK clients and curl
 
 ## Packaging
 
-Run the following inside `ReverieCli-py` to build the platform-native core. Windows defaults to an EXE with a companion runtime directory for faster startup; Unix builds remain single-file:
+Run the following inside `ReverieCli-py` to build the platform-native core. Windows and Unix default to standalone single-file cores:
 
 ```bat
 .\build.bat
@@ -107,7 +141,7 @@ Run the following inside `ReverieCli-py` to build the platform-native core. Wind
 
 `build.bat` currently:
 
-- Prepares or recreates `venv`
+- Prepares or recreates `build/venv` on Windows (`venv` on Unix)
 - Reuses the existing dependency environment when `requirements.txt` and `setup.py` are unchanged
 - Installs the project in editable mode
 - Validates dependency health
@@ -115,12 +149,12 @@ Run the following inside `ReverieCli-py` to build the platform-native core. Wind
 - Supports progressive Skill metadata/inspection and mandatory prompt pins. Desktop stores session and draft pins; standalone CLI restore, fork/rotation inheritance and per-turn loading checks have [documented gaps](SKILLS.md). `setup.py` recursively includes built-in resources, excluding reports, bytecode and caches; PyInstaller uses the spec's resource collection. Validate both packaging paths when adding scripts or new resources.
 - Bundles required Comfy assets
 - Bundles `ffmpeg` into the runtime when it is available at build time
-- Builds `dist/reverie.exe` and `dist/reverie-runtime/` with PyInstaller. Keep them together; set `REVERIE_PYINSTALLER_MODE=onefile` only when a single EXE is required.
+- Builds standalone `dist/reverie.exe` with PyInstaller. The GUI embeds a separate unpacked kernel for faster startup.
 
 The desktop directory provides end-to-end platform builds:
 
 ```powershell
-cd ..\ReverieCli-ui
+cd ..
 .\build.bat
 ```
 
@@ -133,7 +167,7 @@ The Windows script produces the core EXE, portable desktop EXE, and installer EX
 
 Core/desktop artifacts publish through `build-core-release.yml`; plugin-only paths publish through `build-plugins.yml` to `plugins-latest`. Each core asset set includes SHA-256 kernel metadata, and the aggregate release job fails unless every required platform artifact exists and is non-empty.
 
-Incremental builds reuse the PyInstaller work directory, embedded Chromium, and up-to-date official plugins. Use `--clean` for a full PyInstaller rebuild, `--reinstall-deps` to refresh packaging dependencies, `--refresh-browser` to reinstall Chromium, or `--rebuild-plugins` to force plugin rebuilds.
+Direct core builds reuse the PyInstaller work directory, embedded Chromium, and up-to-date official plugins. The root Windows release build cleans disposable staging after success to reduce disk usage, while retaining dependencies and browser downloads. Use `--clean` for a full PyInstaller rebuild, `--reinstall-deps` to refresh packaging dependencies, `--refresh-browser` to reinstall Chromium, or `--rebuild-plugins` to force plugin rebuilds.
 
 That packaged executable is intended to carry the built-in Reverie-Gamer flows in one file, including the integrated runtime, procedural 3D asset generation, Ren'Py import, and playblast/video export commands.
 

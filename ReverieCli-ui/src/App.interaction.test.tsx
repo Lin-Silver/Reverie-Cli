@@ -2023,7 +2023,7 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("已切换生图模型到 SenseNova U1.5 Lite")).toBeTruthy();
   });
 
-  it("hides model selection while Computer mode uses its pinned model", async () => {
+  it("allows model selection in Computer mode", async () => {
     installDesktopApi({
       initialState: {
         ...desktopState,
@@ -2042,11 +2042,10 @@ describe("desktop GUI interactions", () => {
     const { container } = render(<App />);
 
     expect((await screen.findByRole("button", { name: "选择工作模式" })).textContent).toContain("Computer");
-    expect(container.querySelector(".model-trigger")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "打开工作面板" }));
-    fireEvent.click(screen.getByRole("button", { name: "上下文" }));
-    expect(screen.getByText("Muse Glimmer 30B")).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: "模型来源" })).toBeNull();
+    const trigger = container.querySelector(".model-trigger");
+    expect(trigger).toBeTruthy();
+    fireEvent.click(trigger!);
+    expect(await screen.findByRole("dialog", { name: "模型来源" })).toBeTruthy();
   });
 
   it("opens the RATS page, explicitly enables a service, and inspects one progressive definition", async () => {

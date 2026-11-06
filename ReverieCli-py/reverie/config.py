@@ -58,7 +58,6 @@ from .atlas import (
     normalize_atlas_mode_config,
 )
 from .nvidia import (
-    build_nvidia_computer_controller_runtime_model_data,
     build_nvidia_runtime_model_data,
     default_nvidia_config,
     is_nvidia_api_url,
@@ -1008,12 +1007,6 @@ class Config:
     def active_model(self) -> Optional[ModelConfig]:
         source = str(self.active_model_source).lower()
         runtime_nvidia_config = self._resolved_nvidia_config()
-
-        if normalize_mode(self.mode) == "computer-controller":
-            runtime_nvidia_model = build_nvidia_computer_controller_runtime_model_data(runtime_nvidia_config)
-            if runtime_nvidia_model:
-                return ModelConfig.from_dict(runtime_nvidia_model)
-            return None
 
         if source == "codex":
             runtime_codex_model = build_codex_runtime_model_data(self.codex)
@@ -2136,10 +2129,7 @@ class ConfigManager:
         if build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
             return True
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
-        if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller":
-            if build_nvidia_computer_controller_runtime_model_data(nvidia):
-                return True
-        elif build_nvidia_runtime_model_data(nvidia):
+        if build_nvidia_runtime_model_data(nvidia):
             return True
         if build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
             return True

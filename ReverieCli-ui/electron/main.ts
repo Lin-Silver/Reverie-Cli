@@ -590,7 +590,9 @@ async function createWindow(): Promise<void> {
       height: 58,
     },
     icon: app.isPackaged
-      ? undefined
+      ? process.platform === "win32"
+        ? path.join(process.resourcesPath, "reverie.ico")
+        : undefined
       : path.resolve(uiRoot, "..", "ReverieCli-py", "reverie.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -972,7 +974,20 @@ ipcMain.handle("desktop:workbench", async (_event, operation: string, payload: J
   if (operation === "push-plan") return gitPushPlan(root, String(payload.remote || ""), String(payload.target || ""));
   if (operation === "push") return gitPush(root, payload.plan as PushPlan, payload.confirmed === true);
   if (operation === "fetch") return { output: await gitOutput(root, ["fetch", "--all", "--prune"]) };
-  if (operation === "preview") return readPreview(root, String(payload.file || ""), Number(payload.offset || 0));
+  if (operation === "preview" || operation === "open-editor") {
+    const file = String(payload.file || "");
+    const relative = path.relative(root, path.resolve(root, file));
+    let preview;
+    if (path.isAbsolute(file) && (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))) {
+      const image = await bridge.request("resolveComputerImage", { projectRoot: root, file });
+      if (image.type !== "computer.image" || typeof image.path !== "string") throw new Error(String(image.error || "Desktop image is unavailable."));
+      preview = await readPreview(path.dirname(image.path), path.basename(image.path));
+      preview.relativePath = image.path;
+    } else {
+      preview = await readPreview(root, file, Number(payload.offset || 0));
+    }
+    return operation === "open-editor" ? { error: await shell.openPath(preview.path) } : preview;
+  }
   if (operation === "list-directory") return listDirectory(root, String(payload.directory || "."));
   if (operation === "read-file") return readEditorFile(root, String(payload.file || ""));
   if (operation === "save-file") {
@@ -980,7 +995,6 @@ ipcMain.handle("desktop:workbench", async (_event, operation: string, payload: J
     if (typeof payload.text !== "string") throw new Error("Text content is required.");
     return saveEditorFile(root, String(payload.file || ""), payload.text, String(payload.version || ""));
   }
-  if (operation === "open-editor") { const preview = await readPreview(root, String(payload.file || "")); return { error: await shell.openPath(preview.path) }; }
   if (operation === "reviews" || operation === "save-reviews") {
     const owner = createHash("sha256").update(String(payload.sessionId || "new")).digest("hex");
     const directory = path.join(root, ".reverie", "desktop", "reviews"); const file = path.join(directory, `${owner}.json`);
@@ -1240,7 +1254,7 @@ app.whenReady().then(async () => {
   // Windows attributes a toast to whatever AppUserModelID raised it; without this
   // the notification reads as "electron.app.…" instead of Reverie. Harmless on
   // macOS/Linux, which ignore the id.
-  app.setAppUserModelId("Reverie");
+  app.setAppUserModelId("ai.reverie.desktop");
   if (launchOptions.isolationProbe) {
     // Verification entry point: a dedicated window and session partition, never the user's.
     const code = await runIsolationProbe({

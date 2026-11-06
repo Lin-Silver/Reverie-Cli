@@ -36,3 +36,17 @@ it("keeps the first complete current event when only the previous log is omitted
   await writeFile(`${file}.previous`,"old\n");await writeFile(file,event);
   expect((await readLogTail(file,true)).text.startsWith('{"type":"first"')).toBe(true);
 });
+it("keeps desktop delivery in journal exports without copying private tool content",async()=>{
+  const root=await fixture();const journal=new RunJournal();const record=await journal.start(root,"owner",{},"model");
+  const disposition={delivery:"delivered_unverified",retry:"unsafe"};
+  const event={type:"tool_end",tool_name:"computer_clipboard_set",arguments:{text:"private clipboard"},output:JSON.stringify({ok:true,data:{text:"private clipboard",image:"private base64",disposition,complete:false}}),success:true};
+  const original=structuredClone(event);journal.event(record.id,event);
+  journal.event(record.id,{type:"tool_end",tool_name:"type_text",arguments:{text:"private input"},error:JSON.stringify({ok:false,error:{code:"TIMEOUT",message:"private input",disposition}})});
+  await journal.finish(record.id,{success:true},"completed");
+  const detail=await journal.detail(root,record.id);
+  expect(detail.events?.[0]?.output).toEqual({disposition,complete:false});
+  expect(event).toEqual(original);
+  const exported=await readFile(await journal.export(root,record.id),"utf8");
+  expect(exported).not.toContain("private clipboard");expect(exported).not.toContain("private base64");expect(exported).not.toContain("private input");
+  expect(exported).toContain("delivered_unverified");expect(exported).toContain("unsafe");expect(exported).toContain("TIMEOUT");
+});

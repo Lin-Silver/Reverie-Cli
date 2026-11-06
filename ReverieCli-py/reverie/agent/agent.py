@@ -610,11 +610,18 @@ def _tool_result_content(result: ToolResult) -> Any:
     return result.output if result.success else f"Error: {result.error}"
 
 
-def _tool_result_history_content(result: ToolResult) -> str:
+def _tool_result_history_content(result: ToolResult) -> Any:
     """Persist a compact tool result without inline media payloads."""
     text = str(result.output if result.success else f"Error: {result.error}")
     if isinstance(result.data, dict):
         file_path = str(result.data.get("file_path") or "").strip()
+        computer = result.data.get('computer_use', {})
+        payload = computer.get('data', {}) if isinstance(computer, dict) else {}
+        if (file_path and isinstance(payload, dict) and (payload.get('image_id') or payload.get('reverie_media_id'))
+                and result.data.get('message_content')):
+            return [{'type': 'text', 'text': text},
+                    {'type': 'local_image', 'file_path': file_path,
+                     'computer_image_id': payload.get('image_id') or payload['reverie_media_id']}]
         if file_path and file_path not in text:
             text = f"{text}\nMedia: {file_path}".strip()
     return text
@@ -3104,6 +3111,9 @@ class ReverieAgent:
                 if not is_think_tool(((schema or {}).get("function") or {}).get("name"))
             ]
 
+        scoped_read_choice = getattr(self, "_explicit_file_read_native_tool_choice", None)
+        if callable(scoped_read_choice) and scoped_read_choice(schemas, first_attempt_only=False):
+            schemas = [schema for schema in schemas if (schema.get("function") or {}).get("name") == "file_ops"]
         return schemas
 
     def _writer_should_hide_tools_for_direct_prose(self) -> bool:
@@ -3286,7 +3296,33 @@ class ReverieAgent:
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Resolve the single native tool that should lead the current turn."""
-        return self._writer_native_tool_choice() or self._context_engine_native_tool_choice(tools)
+        return (self._writer_native_tool_choice() or self._explicit_file_read_native_tool_choice(tools)
+                or self._context_engine_native_tool_choice(tools))
+
+    def _explicit_file_read_native_tool_choice(self, tools=None, *, first_attempt_only=True):
+        """Require the first tool attempt for an explicit, scoped file read."""
+        if normalize_mode(self.mode) in {"writer", "computer-controller"}:
+            return None
+        names = {str((s.get("function", {}) or {}).get("name", "")) for s in (tools or []) if isinstance(s, dict)}
+        if "file_ops" not in names:
+            return None
+        index, text = self._writer_latest_user_turn()
+        scoped = re.search(
+            r"(?<!不要)(?<!不)(?:仅|只)(?:(?:允许)?(?:使用|调用|用)|允许|限(?:使用|调用)?)\s*`?file_ops\b|"
+            r"(?<!not\s)\b(?:only|solely)\s+(?:use|call|invoke)\s+(?:the\s+)?`?file_ops\b", text, re.I)
+        direct = re.match(r"^\s*(?:(?:please|请)\s*)?(?:use|call|invoke|使用|调用|用)\s*`?file_ops\b", text, re.I)
+        no_other = re.search(r"不要(?:再)?(?:使用|调用|用)(?:任何)?(?:其他|其它)工具|(?:do\s+not|don't|never)\s+(?:use|call|invoke)\s+(?:any\s+)?other\s+tools\b", text, re.I)
+        if not (scoped or (direct and no_other)) or not re.search(r"\bread\b|读取|查看", text):
+            return None
+        if re.search(r"\bfile_ops`?\s*(?:\band\b|\bor\b|和|与|、)", text):
+            return None
+        if re.search(r"(?:不要|禁止)(?:读取|查看|调用\s*`?file_ops)|(?:do not|don't|never)\s+(?:read|(?:use|call|invoke)\s+`?file_ops)", text):
+            return None
+        # Any attempted tool ends this requirement, including a failed attempt.
+        # It must never cause a retry or replay of a delivered action.
+        if first_attempt_only and any(m.get("tool_calls") or m.get("role") == "tool" for m in self.messages[index + 1:]):
+            return None
+        return {"type": "function", "function": {"name": "file_ops"}}
 
     def _anthropic_tool_choice(
         self,
@@ -3969,23 +4005,46 @@ class ReverieAgent:
     def _resolve_messages_for_request(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Resolve lightweight local-image markers into actual multimodal request payloads."""
         resolved_messages: List[Dict[str, Any]] = []
+        pending_media: List[Dict[str, Any]] = []
         for message in messages or []:
             if not isinstance(message, dict):
                 continue
             normalized = dict(message)
+            if normalized.get("role") != "tool" and pending_media:
+                resolved_messages.append({"role": "user", "content": pending_media})
+                pending_media = []
             if self.provider != "anthropic":
                 normalized.pop("anthropic_thinking", None)
             content = normalized.get("content")
             if isinstance(content, list):
+                if any(isinstance(part, dict) and part.get('computer_image_id') for part in content):
+                    import base64
+                    from ..tools.computer import supports_vision
+                    context = getattr(getattr(self, 'tool_executor', None), 'context', {})
+                    runtime = context.get('computer_use_runtime')
+                    prepared = []
+                    for part in content:
+                        image_id = part.get('computer_image_id') if isinstance(part, dict) else None
+                        if image_id:
+                            record = runtime.images.get(image_id) if runtime is not None else None
+                            if record is not None and supports_vision(context):
+                                encoded = base64.b64encode(Path(record['path']).read_bytes()).decode('ascii')
+                                prepared.append({'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + encoded}})
+                                record['model_visible'] = True
+                            continue
+                        prepared.append(part)
+                    content = prepared
                 normalized["content"] = resolve_inline_image_content_for_request(content, self.project_root)
                 if normalized.get("role") == "tool" and self.provider != "anthropic":
                     media = [part for part in normalized["content"] if isinstance(part, dict) and part.get("type") in {"image_url", "input_audio"}]
                     if media:
                         normalized["content"] = _coerce_text_fragments(normalized["content"])
                         resolved_messages.append(normalized)
-                        resolved_messages.append({"role": "user", "content": [{"type": "text", "text": f"Media returned by tool {normalized.get('tool_call_id', '')}:"}, *media]})
+                        pending_media.extend([{"type": "text", "text": f"Media returned by tool {normalized.get('tool_call_id', '')}:"}, *media])
                         continue
             resolved_messages.append(normalized)
+        if pending_media:
+            resolved_messages.append({"role": "user", "content": pending_media})
         return resolved_messages
 
     def _build_openai_chat_completion_kwargs(
@@ -7485,7 +7544,7 @@ class ReverieAgent:
             self._check_and_compress_context(session_id=session_id)
             tools = self.get_visible_tool_schemas()
             anthropic_tools = _convert_tools_to_anthropic_format(tools)
-            messages = self._build_messages()
+            messages = self._build_messages(resolve_local_images=True)
             request_messages = list(messages)
             system_message, anthropic_messages = _convert_messages_to_anthropic_format(messages)
             # Build kwargs for Anthropic API
@@ -7685,7 +7744,7 @@ class ReverieAgent:
                 raise RuntimeError("The provider reported output tokens but returned no text or client tool calls. Check its /v1/messages response; no automatic retry was sent.")
             empty_turn_count += 1
             if self._recover_empty_model_turn(messages, attempt=empty_turn_count):
-                system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages())
+                system_message, anthropic_messages = _convert_messages_to_anthropic_format(self._build_messages(resolve_local_images=True))
                 continue
 
             notice = self._record_unsummarized_turn(
@@ -7699,6 +7758,8 @@ class ReverieAgent:
     
     def clear_history(self) -> None:
         """Clear conversation history"""
+        from ..tools.computer import reset_runtime
+        reset_runtime(self.tool_executor.context)
         self.messages = []
     
     def get_history(self) -> List[Dict]:
@@ -7707,6 +7768,8 @@ class ReverieAgent:
     
     def set_history(self, messages: List[Dict]) -> None:
         """Set conversation history (for session restore)"""
+        from ..tools.computer import reset_runtime
+        reset_runtime(self.tool_executor.context)
         self.messages = messages.copy()
 
     def _history_from_request_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

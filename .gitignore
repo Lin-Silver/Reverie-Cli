@@ -55,6 +55,7 @@ env/
 /.tmp-*.json
 /result_images/
 @AutomationLog.txt
+/ReverieCli-py/reverie/computer_use/native/
 
 # Reverie local state and secrets
 .reverie/

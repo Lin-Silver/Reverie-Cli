@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  copyFileSync,
   createReadStream,
   existsSync,
   mkdirSync,
+  linkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -22,11 +24,9 @@ const generatedBuildDirectory = path.join(uiRoot, "build", "generated");
 const executableName = process.platform === "win32" ? "reverie.exe" : "reverie";
 const outputExecutable = path.join(kernelDirectory, executableName);
 const outputRuntime = path.join(kernelDirectory, "reverie-runtime");
-const venvBin = path.join(pythonRoot, "venv", process.platform === "win32" ? "Scripts" : "bin");
-const pyInstaller = path.resolve(
-  process.env.REVERIE_PYINSTALLER_PATH
-    || path.join(venvBin, process.platform === "win32" ? "pyinstaller.exe" : "pyinstaller"),
-);
+const venvBin = process.platform === "win32"
+  ? path.join(buildRoot, "venv", "Scripts")
+  : path.join(pythonRoot, "venv", "bin");
 const python = path.resolve(
   process.env.REVERIE_PYTHON_PATH
     || path.join(venvBin, process.platform === "win32" ? "python.exe" : "python"),
@@ -37,7 +37,6 @@ const bundleRoot = path.resolve(
 const temporaryRoot = path.join(buildRoot, "temp");
 
 for (const required of [
-  pyInstaller,
   python,
   path.join(bundleRoot, "comfy", "generate_image.py"),
   path.join(bundleRoot, "browser", "ms-playwright"),
@@ -58,8 +57,9 @@ const iconPath = process.platform === "win32"
   ? path.join(pythonRoot, "reverie.ico")
   : path.join(pythonRoot, "reverie.png");
 const result = spawnSync(
-  pyInstaller,
+  python,
   [
+    "-m", "PyInstaller",
     "--noconfirm",
     "--distpath", outputRoot,
     "--workpath", path.join(buildRoot, `pyinstaller-ui-${process.platform}-${process.arch}`),
@@ -70,6 +70,8 @@ const result = spawnSync(
     stdio: "inherit",
     env: {
       ...process.env,
+      PYTHONNOUSERSITE: "1",
+      PYTHONPATH: "",
       REVERIE_PYINSTALLER_MODE: "ui-onedir",
       REVERIE_BUNDLE_RES_DIR: bundleRoot,
       REVERIE_ICON_PATH: iconPath,
@@ -87,17 +89,33 @@ if (result.status !== 0 || !existsSync(outputExecutable)) {
 }
 if (process.platform !== "win32") chmodSync(outputExecutable, 0o755);
 
-const resourcePack = spawnSync(
-  python,
-  [
-    path.join(pythonRoot, "scripts", "pack_ui_resources.py"),
-    "--browser", path.join(bundleRoot, "browser", "ms-playwright"),
-    "--output", path.join(outputRuntime, "reverie_resources"),
-  ],
-  { cwd: pythonRoot, stdio: "inherit", env: process.env },
-);
-if (resourcePack.status !== 0) {
-  throw new Error(`Failed to pack lazy UI-kernel resources (exit ${resourcePack.status ?? "unknown"}).`);
+const packedRoot = path.resolve(process.env.REVERIE_PACKED_RES_DIR || path.join(bundleRoot, "packed"));
+if (existsSync(path.join(packedRoot, "browser.zip"))) {
+  const resources = path.join(outputRuntime, "reverie_resources");
+  mkdirSync(resources, { recursive: true });
+  for (const name of ["browser.zip", "ffmpeg.zip"]) {
+    const source = path.join(packedRoot, name);
+    if (!existsSync(source)) continue;
+    const target = path.join(resources, name);
+    try {
+      linkSync(source, target);
+    } catch {
+      copyFileSync(source, target);
+    }
+  }
+} else {
+  const resourcePack = spawnSync(
+    python,
+    [
+      path.join(pythonRoot, "scripts", "pack_ui_resources.py"),
+      "--browser", path.join(bundleRoot, "browser", "ms-playwright"),
+      "--output", path.join(outputRuntime, "reverie_resources"),
+    ],
+    { cwd: pythonRoot, stdio: "inherit", env: process.env },
+  );
+  if (resourcePack.status !== 0) {
+    throw new Error(`Failed to pack lazy UI-kernel resources (exit ${resourcePack.status ?? "unknown"}).`);
+  }
 }
 
 async function sha256(filePath) {

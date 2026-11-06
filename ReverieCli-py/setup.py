@@ -6,6 +6,28 @@ Install with: pip install -e .
 
 from setuptools import setup, find_packages
 from pathlib import Path
+from setuptools.command.build_py import build_py
+import runpy
+import sysconfig
+from setuptools.command.bdist_wheel import bdist_wheel
+
+
+class BuildWithDesktop(build_py):
+    def run(self):
+        runpy.run_path(str(Path(__file__).parent / 'scripts' / 'prepare_computer_use.py'))['prepare']()
+        super().run()
+
+
+class DesktopWheel(bdist_wheel):
+    def finalize_options(self):
+        super().finalize_options()
+        if sysconfig.get_platform() == 'win-amd64':
+            self.root_is_pure = False
+
+    def get_tag(self):
+        if sysconfig.get_platform() == 'win-amd64':
+            return 'py3', 'none', 'win_amd64'
+        return super().get_tag()
 
 package_root = Path(__file__).parent / "reverie"
 builtin_root = package_root / "builtin_skills"
@@ -31,6 +53,7 @@ setup(
     url="https://github.com/Lin-Silver/Reverie-Cli",
     license="MIT",
     packages=find_packages(),
+    cmdclass={'build_py': BuildWithDesktop, 'bdist_wheel': DesktopWheel},
     include_package_data=True,
     package_data={
         "reverie": [
@@ -43,6 +66,8 @@ setup(
             ],
             "engine/vendor/live2d/*.js",
             "computer_use/*.md",
+            "computer_use/*.json",
+            "computer_use/native/windows-x64/*",
         ],
         "reverie.agent": ["tool_manifest.json"],
     },

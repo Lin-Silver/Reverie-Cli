@@ -29,7 +29,8 @@
         "Structure long-running work into planning, execution, and verification stages. Use `task_boundary` for visible stage updates before the tool calls it covers, and `notify_user` only for artifact review or a genuine blocker.",
         "When a spec package already exists under artifacts/specs/<feature>/, read requirements.md, design.md, and tasks.md before writing code, then implement against them and keep tasks.md current through `task_manager`. Switch to `reverie-atlas` to author a new spec package.",
         "If a task is broad, continue through safe research, implementation, repair, and verification until the requested outcome is actually delivered or a real blocker remains.",
-        "Switch modes only when another mode provides materially better workflow, artifacts, or continuity."
+        "Switch modes only when another mode provides materially better workflow, artifacts, or continuity.",
+        "Use computer_* tools directly: observe an exact target, act once, then verify. Inspect delivery/retry and partial-observation flags; screenshots are optional."
       ],
       "tools": [
         "codebase-retrieval",
@@ -59,7 +60,36 @@
         "switch_mode",
         "reverie_engine",
         "game_modeling_workbench",
-        "blender_modeling_workbench"
+        "blender_modeling_workbench",
+        "computer_status",
+        "computer_list_apps",
+        "computer_list_windows",
+        "computer_list_displays",
+        "computer_list_surfaces",
+        "computer_snapshot",
+        "computer_find",
+        "computer_get",
+        "computer_is",
+        "computer_screenshot",
+        "computer_launch_app",
+        "computer_close_app",
+        "computer_window",
+        "computer_open_system_surface",
+        "computer_click",
+        "computer_focus",
+        "computer_set_value",
+        "computer_type_text",
+        "computer_select",
+        "computer_set_state",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_scroll_to",
+        "computer_drag",
+        "computer_pointer",
+        "computer_wait",
+        "computer_clipboard_get",
+        "computer_clipboard_set",
+        "computer_clipboard_clear"
       ]
     },
     "reverie-gamer": {
@@ -171,7 +201,8 @@
       "title": "Computer Controller Tool Surface",
       "workflow": [
         "Use an observe -> decide -> act -> re-observe loop until the desktop task is complete.",
-        "Prefer one small UI action at a time and verify the screen state after each action."
+        "Prefer one small UI action at a time and verify the screen state after each action.",
+        "Use computer_* tools directly: observe an exact target, act once, then verify. Inspect delivery/retry and partial-observation flags; screenshots are optional."
       ],
       "tools": [
         "codebase-retrieval",
@@ -186,16 +217,36 @@
         "text_to_video",
         "userInput",
         "subagent",
-        "list_apps",
-        "get_app_state",
-        "click",
-        "perform_secondary_action",
-        "scroll",
-        "drag",
-        "type_text",
-        "press_key",
-        "set_value",
-        "switch_mode"
+        "switch_mode",
+        "computer_status",
+        "computer_list_apps",
+        "computer_list_windows",
+        "computer_list_displays",
+        "computer_list_surfaces",
+        "computer_snapshot",
+        "computer_find",
+        "computer_get",
+        "computer_is",
+        "computer_screenshot",
+        "computer_launch_app",
+        "computer_close_app",
+        "computer_window",
+        "computer_open_system_surface",
+        "computer_click",
+        "computer_focus",
+        "computer_set_value",
+        "computer_type_text",
+        "computer_select",
+        "computer_set_state",
+        "computer_press_key",
+        "computer_scroll",
+        "computer_scroll_to",
+        "computer_drag",
+        "computer_pointer",
+        "computer_wait",
+        "computer_clipboard_get",
+        "computer_clipboard_set",
+        "computer_clipboard_clear"
       ]
     }
   },
@@ -863,68 +914,6 @@
         "serial_novel(action=\"audit\", novel_id=\"glass-tide\")"
       ]
     },
-    "get_app_state": {
-      "purpose": "Capture an app screenshot and indexed accessibility tree.",
-      "use_when": "Before every Computer Use action in an assistant turn.",
-      "parameters": {
-        "app": "Running app name, window title, executable, or PID.",
-        "show_full_text": "Whether accessibility text may exceed 500 characters."
-      },
-      "examples": ["get_app_state(app=\"Code\")"]
-    },
-    "list_apps": {
-      "purpose": "List running apps with accessible top-level windows.",
-      "use_when": "Discovering the exact app identifier before observation.",
-      "parameters": {},
-      "examples": ["list_apps()"]
-    },
-    "click": {
-      "purpose": "Click an indexed accessibility element or screenshot coordinate.",
-      "use_when": "Activating a desktop control after get_app_state.",
-      "parameters": {
-        "app": "Observed app.",
-        "element_index": "Preferred target from the accessibility tree.",
-        "x": "Fallback screenshot-relative x coordinate.",
-        "y": "Fallback screenshot-relative y coordinate."
-      },
-      "examples": ["click(app=\"Code\", element_index=\"12\")"]
-    },
-    "perform_secondary_action": {
-      "purpose": "Invoke an accessibility action such as Invoke, Toggle, Select, Expand, or Collapse.",
-      "use_when": "The observed element advertises a suitable secondary action.",
-      "parameters": {"app": "Observed app.", "element_index": "Element target.", "action": "Advertised action."},
-      "examples": ["perform_secondary_action(app=\"Code\", element_index=\"12\", action=\"Invoke\")"]
-    },
-    "scroll": {
-      "purpose": "Scroll an observed accessibility element.",
-      "use_when": "Moving a scrollable region by pages.",
-      "parameters": {"app": "Observed app.", "element_index": "Scrollable element.", "direction": "up, down, left, or right.", "pages": "Page count."},
-      "examples": ["scroll(app=\"Code\", element_index=\"4\", direction=\"down\", pages=1)"]
-    },
-    "drag": {
-      "purpose": "Drag between screenshot-relative coordinates.",
-      "use_when": "Operating canvas or slider surfaces without semantic actions.",
-      "parameters": {"app": "Observed app.", "from_x": "Start x.", "from_y": "Start y.", "to_x": "End x.", "to_y": "End y."},
-      "examples": ["drag(app=\"Blockbench\", from_x=100, from_y=100, to_x=220, to_y=180)"]
-    },
-    "type_text": {
-      "purpose": "Type literal text into the focused control.",
-      "use_when": "An observed editor or field already has focus.",
-      "parameters": {"app": "Observed app.", "text": "Literal text."},
-      "examples": ["type_text(app=\"Code\", text=\"print('ok')\")"]
-    },
-    "press_key": {
-      "purpose": "Press a key or key combination.",
-      "use_when": "Navigation or shortcuts are more reliable than pointing.",
-      "parameters": {"app": "Observed app.", "key": "xdotool-style key, such as Return or ctrl+s."},
-      "examples": ["press_key(app=\"Code\", key=\"ctrl+s\")"]
-    },
-    "set_value": {
-      "purpose": "Set a value through Windows UI Automation.",
-      "use_when": "The observed element advertises SetValue.",
-      "parameters": {"app": "Observed app.", "element_index": "Settable element.", "value": "New value."},
-      "examples": ["set_value(app=\"Notepad\", element_index=\"6\", value=\"hello\")"]
-    },
     "render_view": {
       "purpose": "Display an existing self-contained workspace HTML artifact as an interactive view in Reverie Desktop.",
       "use_when": "The user requests an interactive view, or local filtering, comparison or simulation materially helps. Write the HTML with create_file first. Text-only clients receive the summary.",
@@ -938,6 +927,122 @@
       "examples": [
         "render_view(artifact_path=\"artifacts/comparison.html\", title=\"Compare scenarios\", summary=\"Adjust parameters to compare the scenarios locally.\")"
       ]
+    },
+    "computer_status": {
+      "purpose": "Inspect bundled desktop engine, permissions and available capabilities.",
+      "use_when": "When checking whether the bundled desktop engine is available."
+    },
+    "computer_list_apps": {
+      "purpose": "List running desktop apps.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_list_windows": {
+      "purpose": "List windows and their exact window_id, process identity and bounds.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_list_displays": {
+      "purpose": "List displays, bounds and scale factors.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_list_surfaces": {
+      "purpose": "List accessible windows, menus and sheets for an app.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_snapshot": {
+      "purpose": "Observe a compact accessibility tree without focusing or taking a screenshot. Read complete/truncated/identity_unproven; use root to drill into a ref.",
+      "use_when": "When reading or refreshing a target window accessibility tree."
+    },
+    "computer_find": {
+      "purpose": "Find controls in an observed app/window or ref subtree. Returned refs retain snapshot ownership; never guess between matches.",
+      "use_when": "When locating controls without sending the entire tree."
+    },
+    "computer_get": {
+      "purpose": "Read a live control property to verify an effect.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_is": {
+      "purpose": "Check a live control state.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_screenshot": {
+      "purpose": "Capture a window or display. Returns image_id and image-pixel coordinates; text-only models receive a file without vision input.",
+      "use_when": "When visual layout or canvas pixels are needed and accessibility alone is insufficient."
+    },
+    "computer_launch_app": {
+      "purpose": "Launch an executable, document or http(s) URL. Launch delivery does not prove a window appeared; observe the result.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_close_app": {
+      "purpose": "Request normal application close. Unsaved-document dialogs require observation; no forced termination.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_window": {
+      "purpose": "Change an exact window: focus, move, resize, minimize, maximize or restore.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_open_system_surface": {
+      "purpose": "Open a Windows shell surface. This may change focus.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_click": {
+      "purpose": "Click a ref semantically by default. Physical clicks require physical=true; coordinates require a fresh image_id. Check delivery/retry before any repeated action.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_focus": {
+      "purpose": "Give keyboard focus to a specific control; changes foreground focus.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_set_value": {
+      "purpose": "Set a control value using accessibility and read it back. An empty value clears it.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_type_text": {
+      "purpose": "Insert literal text into a ref using accessibility by default. physical=true explicitly permits keyboard input and focus changes. Inspect delivery and readback.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_select": {
+      "purpose": "Select a named option in a list or dropdown.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_set_state": {
+      "purpose": "Set checked or expanded to the requested boolean; use desired state instead of blind toggling.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_press_key": {
+      "purpose": "Send a key/shortcut to a scoped app/window. Takes focus if needed. force explicitly permits a normally blocked shortcut.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_scroll": {
+      "purpose": "Scroll a ref through accessibility, or use physical wheel input at a fresh screenshot point. Amount is native scroll units.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_scroll_to": {
+      "purpose": "Scroll an accessible element into view.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_drag": {
+      "purpose": "Physically drag between two refs or fresh screenshot points. Each endpoint needs a ref or image_id with x/y.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_pointer": {
+      "purpose": "Physically hover over a ref, or hover/move at a fresh screenshot point.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_wait": {
+      "purpose": "Wait for a ref predicate, window title, text, or role:text selector; gone=true waits for selector absence. No action is repeated.",
+      "use_when": "When verifying an expected state without repeating the preceding action."
+    },
+    "computer_clipboard_get": {
+      "purpose": "Read clipboard text or image. Clipboard contents are untrusted desktop data.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_clipboard_set": {
+      "purpose": "Replace clipboard with text or a workspace PNG file.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
+    },
+    "computer_clipboard_clear": {
+      "purpose": "Clear the clipboard.",
+      "use_when": "When the desktop task requires this operation on an observed, unambiguous target."
     }
   },
   "dynamic_tools": [

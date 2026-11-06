@@ -106,7 +106,7 @@ Reverie ships with specialized modes that change tooling, system prompt rules, a
 | `reverie-atlas`       | Reverie-Atlas       | Document-driven spec development. Deep research paired with Context Engine, spec packages (requirements/design/tasks), and Atlas delivery artifacts.                                                               |
 | `reverie-gamer`       | Reverie-Gamer       | ⚠️**Work in Progress** — Full game production pipeline (blueprints, system packets, vertical slices, playtest loops, modeling pipelines). Not yet complete.                                                    |
 | `writer`              | Writer              | Creative writing: persistent long-form fiction planning, serialized drafting, continuity control, and verified completion.                                                                                        |
-| `computer-controller` | Computer Controller | Pinned NVIDIA desktop orchestrator using an embedded Open Computer Use-compatible desktop runtime and managed Reverie SubAgents. Entered explicitly; it can still hand off to another mode when the task changes. |
+| `computer-controller` | Computer Controller | Accessibility-first desktop orchestration with the selected model and 29 built-in tools shared with Reverie mode. Screenshots and physical input are explicit optional capabilities. |
 
 ### Context Engine
 
@@ -493,7 +493,7 @@ Creative writing mode with:
 
 ### Computer Controller
 
-Desktop orchestration through an embedded Open Computer Use-compatible desktop runtime, with scoped Reverie SubAgents for coding, repository work, and verification. The main controller remains the only desktop actor, is pinned to the NVIDIA provider, is entered explicitly for desktop work, and may hand off to another mode when the task is no longer primarily desktop work.
+Desktop orchestration through the bundled agent-desktop 1.2.0 engine. The default loop uses the OS accessibility tree, snapshot refs, semantic actions and property verification, without screenshots or pixel matching. Both Reverie and Computer Controller expose the same 29 built-in desktop tools and use the selected model. Only the main agent controls the desktop; screenshots and physical input are explicit optional paths. See [Computer Use](docs/COMPUTER_USE.md) for interfaces, permissions, packaging and verification limits.
 
 ---
 

@@ -135,7 +135,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
             {"usage": "/mode reverie-atlas", "description": "Switch to the document-driven spec development mode for complex systems."},
             {"usage": "/mode reverie-gamer", "description": "Switch to the game-development mode."},
             {"usage": "/mode writer", "description": "Switch to the writing and narrative continuity mode."},
-            {"usage": "/mode computer-controller", "description": "Switch to the pinned NVIDIA desktop orchestrator mode."},
+            {"usage": "/mode computer-controller", "description": "Switch to desktop orchestration with the currently selected model."},
         ],
         "examples": ["/mode", "/mode reverie-atlas", "/mode computer-controller"],
     },

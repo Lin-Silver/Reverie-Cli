@@ -210,6 +210,11 @@ class OperationHistory:
         Returns:
             The created operation
         """
+        from ..computer_use.results import LEGACY_TOOLS, diagnostic_result
+        if tool_name.startswith('computer_') or tool_name in LEGACY_TOOLS:
+            arguments = {key: value for key, value in arguments.items()
+                         if key in {'ref', 'window_id', 'image_id', 'action', 'state', 'direction'}}
+            result, error = diagnostic_result(result), diagnostic_result(error)
         tool_call = ToolCallOperation(
             tool_name=tool_name,
             arguments=arguments,

@@ -1,0 +1,1908 @@
+{
+  "schema": "reverie.computer-use.live-followup.v1",
+  "desktop_semantic": {
+    "semantic_passed": true,
+    "native_limitations": [
+      "semantic_type_not_supported_by_fixture"
+    ],
+    "environment_limitations": [],
+    "checks": 52,
+    "image": "G:\\Reverie\\Reverie-Cli\\.runtime\\computer-use-20261105-164412\\computer_use\\observations\\img-6bb59a24ae214f6a8db37de16dff80cc.png",
+    "find_p50_ms": 250.0,
+    "find_p95_ms": 266.00000000001955,
+    "initial_tree_bytes": 14403,
+    "semantic_image_bytes": 0,
+    "native_calls": [
+      {
+        "command": "list-windows",
+        "elapsed_ms": 203.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 110.0
+      },
+      {
+        "command": "status",
+        "elapsed_ms": 109.0
+      },
+      {
+        "command": "snapshot",
+        "elapsed_ms": 328.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 266.0
+      },
+      {
+        "command": "set-value",
+        "elapsed_ms": 297.0
+      },
+      {
+        "command": "get",
+        "elapsed_ms": 312.0
+      },
+      {
+        "command": "type",
+        "elapsed_ms": 94.0
+      },
+      {
+        "command": "set-value",
+        "elapsed_ms": 328.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 281.0
+      },
+      {
+        "command": "click",
+        "elapsed_ms": 547.0
+      },
+      {
+        "command": "snapshot",
+        "elapsed_ms": 640.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 375.0
+      },
+      {
+        "command": "check",
+        "elapsed_ms": 297.0
+      },
+      {
+        "command": "is",
+        "elapsed_ms": 312.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 328.0
+      },
+      {
+        "command": "expand",
+        "elapsed_ms": 672.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 282.0
+      },
+      {
+        "command": "select",
+        "elapsed_ms": 484.0
+      },
+      {
+        "command": "collapse",
+        "elapsed_ms": 422.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 312.0
+      },
+      {
+        "command": "expand",
+        "elapsed_ms": 485.0
+      },
+      {
+        "command": "is",
+        "elapsed_ms": 297.0
+      },
+      {
+        "command": "collapse",
+        "elapsed_ms": 375.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 234.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "click",
+        "elapsed_ms": 391.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "screenshot",
+        "elapsed_ms": 359.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "focus-window",
+        "elapsed_ms": 188.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "screenshot",
+        "elapsed_ms": 344.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "mouse-move",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 266.0
+      },
+      {
+        "command": "click",
+        "elapsed_ms": 406.0
+      },
+      {
+        "command": "clipboard-set",
+        "elapsed_ms": 32.0
+      },
+      {
+        "command": "clipboard-get",
+        "elapsed_ms": 31.0
+      },
+      {
+        "command": "clipboard-set",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "clipboard-get",
+        "elapsed_ms": 31.0
+      },
+      {
+        "command": "clipboard-clear",
+        "elapsed_ms": 31.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "click",
+        "elapsed_ms": 391.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 265.0
+      },
+      {
+        "command": "click",
+        "elapsed_ms": 422.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 265.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 266.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 250.0
+      }
+    ]
+  },
+  "desktop_physical": {
+    "passed": true,
+    "checks": [
+      {
+        "name": "duplicate AutomationId and name remain separate refs",
+        "passed": true
+      },
+      {
+        "name": "physical ref click delivered exactly once",
+        "passed": true
+      },
+      {
+        "name": "image click delivered exactly once",
+        "passed": true
+      },
+      {
+        "name": "verification timeout is reported",
+        "passed": true
+      },
+      {
+        "name": "delivered click not replayed after verification timeout",
+        "passed": true
+      },
+      {
+        "name": "editor receives focus",
+        "passed": true
+      },
+      {
+        "name": "physical multiline Chinese typing readback",
+        "passed": true
+      },
+      {
+        "name": "diagonal drag actual counter",
+        "passed": true
+      },
+      {
+        "name": "scroll_to brings target into viewport",
+        "passed": true
+      },
+      {
+        "name": "physical scroll preserves counter",
+        "passed": true
+      },
+      {
+        "name": "window actually moved",
+        "passed": true
+      },
+      {
+        "name": "moved image rejected before input",
+        "passed": true
+      },
+      {
+        "name": "window actually resized",
+        "passed": true
+      },
+      {
+        "name": "window actually minimized",
+        "passed": true
+      },
+      {
+        "name": "window actually maximized",
+        "passed": true
+      },
+      {
+        "name": "window restored size",
+        "passed": true
+      }
+    ],
+    "native_calls": [
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 109.0
+      },
+      {
+        "command": "focus-window",
+        "elapsed_ms": 125.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 79.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 46.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "snapshot",
+        "elapsed_ms": 438.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 406.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 297.0
+      },
+      {
+        "command": "click",
+        "elapsed_ms": 593.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 313.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "screenshot",
+        "elapsed_ms": 422.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 375.0
+      },
+      {
+        "command": "get",
+        "elapsed_ms": 265.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "mouse-click",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 313.0
+      },
+      {
+        "command": "snapshot",
+        "elapsed_ms": 578.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 297.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 296.0
+      },
+      {
+        "command": "focus",
+        "elapsed_ms": 282.0
+      },
+      {
+        "command": "is",
+        "elapsed_ms": 390.0
+      },
+      {
+        "command": "press",
+        "elapsed_ms": 110.0
+      },
+      {
+        "command": "type",
+        "elapsed_ms": 422.0
+      },
+      {
+        "command": "get",
+        "elapsed_ms": 250.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 47.0
+      },
+      {
+        "command": "screenshot",
+        "elapsed_ms": 406.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 359.0
+      },
+      {
+        "command": "snapshot",
+        "elapsed_ms": 282.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "drag",
+        "elapsed_ms": 1328.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 265.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 297.0
+      },
+      {
+        "command": "scroll-to",
+        "elapsed_ms": 610.0
+      },
+      {
+        "command": "is",
+        "elapsed_ms": 547.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 296.0
+      },
+      {
+        "command": "scroll",
+        "elapsed_ms": 391.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "screenshot",
+        "elapsed_ms": 406.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "get",
+        "elapsed_ms": 500.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "mouse-wheel",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "find",
+        "elapsed_ms": 312.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 63.0
+      },
+      {
+        "command": "screenshot",
+        "elapsed_ms": 453.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "move-window",
+        "elapsed_ms": 187.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "resize-window",
+        "elapsed_ms": 172.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "minimize",
+        "elapsed_ms": 172.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "restore",
+        "elapsed_ms": 172.0
+      },
+      {
+        "command": "maximize",
+        "elapsed_ms": 172.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 78.0
+      },
+      {
+        "command": "restore",
+        "elapsed_ms": 172.0
+      },
+      {
+        "command": "list-windows",
+        "elapsed_ms": 62.0
+      }
+    ]
+  },
+  "real_apps": [
+    {
+      "app": "Chromium",
+      "passed": false,
+      "stage": "page_ready",
+      "error": "Selector (37 chars) did not appear within 20000ms"
+    },
+    {
+      "app": "Notepad",
+      "passed": true,
+      "complete": true,
+      "window_id": "w-1247076",
+      "tree_bytes": 11864,
+      "screenshot": "G:\\Reverie\\Reverie-Cli\\.runtime\\computer-apps-20261105-172332\\computer_use\\observations\\img-e426ac16f93f4047b37a53f51096ee96.png",
+      "launch": {
+        "target": "G:\\Reverie\\Reverie-Cli\\.runtime\\computer-apps-20261105-172332\\Reverie-Notepad-Verification.txt",
+        "disposition": {
+          "delivery": "delivered_unverified",
+          "retry": "unsafe"
+        },
+        "verification_scope": "launch_request_only",
+        "windows": [
+          {
+            "accessible": true,
+            "app_name": "chrome.exe",
+            "bounds": {
+              "height": 1024.0,
+              "width": 1936.0,
+              "x": -8.0,
+              "y": -8.0
+            },
+            "id": "w-198194",
+            "is_focused": true,
+            "minimized": false,
+            "pid": 22340,
+            "process_instance": "windows-proc-v1:13438395618:7768389",
+            "title": "Models | Try NVIDIA NIM APIs - Google Chrome",
+            "visible": true
+          },
+          {
+            "accessible": true,
+            "app_name": "ChatGPT.exe",
+            "bounds": {
+              "height": 28.0,
+              "width": 160.0,
+              "x": -32000.0,
+              "y": -32000.0
+            },
+            "id": "w-198354",
+            "is_focused": false,
+            "minimized": true,
+            "pid": 24348,
+            "process_instance": "windows-proc-v1:13438395626:3528603",
+            "title": "ChatGPT",
+            "visible": true
+          }
+        ]
+      }
+    },
+    {
+      "app": "Explorer",
+      "passed": true,
+      "complete": true,
+      "window_id": "w-2885448",
+      "tree_bytes": 35961,
+      "screenshot": "G:\\Reverie\\Reverie-Cli\\.runtime\\computer-apps-20261105-172332\\computer_use\\observations\\img-6a1a00c4f87a4832b8a663f9abf47175.png",
+      "launch": {
+        "target": "G:\\Reverie\\Reverie-Cli\\.runtime\\computer-apps-20261105-172332\\Reverie-Explorer-Verification",
+        "disposition": {
+          "delivery": "delivered_unverified",
+          "retry": "unsafe"
+        },
+        "verification_scope": "launch_request_only",
+        "windows": [
+          {
+            "accessible": true,
+            "app_name": "chrome.exe",
+            "bounds": {
+              "height": 1024.0,
+              "width": 1936.0,
+              "x": -8.0,
+              "y": -8.0
+            },
+            "id": "w-198194",
+            "is_focused": true,
+            "minimized": false,
+            "pid": 22340,
+            "process_instance": "windows-proc-v1:13438395618:7768389",
+            "title": "Models | Try NVIDIA NIM APIs - Google Chrome",
+            "visible": true
+          },
+          {
+            "accessible": true,
+            "app_name": "explorer.exe",
+            "bounds": {
+              "height": 417.0,
+              "width": 1021.0,
+              "x": 191.0,
+              "y": 422.0
+            },
+            "id": "w-2885448",
+            "is_focused": false,
+            "minimized": false,
+            "pid": 11176,
+            "process_instance": "windows-proc-v1:13438395602:7968760",
+            "title": "Reverie-Explorer-Verification - File Explorer",
+            "visible": true
+          },
+          {
+            "accessible": true,
+            "app_name": "ChatGPT.exe",
+            "bounds": {
+              "height": 28.0,
+              "width": 160.0,
+              "x": -32000.0,
+              "y": -32000.0
+            },
+            "id": "w-198354",
+            "is_focused": false,
+            "minimized": true,
+            "pid": 24348,
+            "process_instance": "windows-proc-v1:13438395626:3528603",
+            "title": "ChatGPT",
+            "visible": true
+          }
+        ]
+      }
+    }
+  ],
+  "text_model": {
+    "model": "stepfun-ai/step-5-preview",
+    "mode": "reverie",
+    "provider": "request",
+    "vision": false,
+    "requests": [
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "image_parts": 0,
+        "request_chars": 50560,
+        "tool_names": [
+          "computer_snapshot",
+          "computer_find",
+          "computer_get",
+          "computer_is",
+          "computer_screenshot",
+          "computer_set_value",
+          "computer_wait"
+        ]
+      },
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "image_parts": 0,
+        "request_chars": 54245,
+        "tool_names": [
+          "computer_snapshot",
+          "computer_find",
+          "computer_get",
+          "computer_is",
+          "computer_screenshot",
+          "computer_set_value",
+          "computer_wait"
+        ]
+      },
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "image_parts": 0,
+        "request_chars": 56323,
+        "tool_names": [
+          "computer_snapshot",
+          "computer_find",
+          "computer_get",
+          "computer_is",
+          "computer_screenshot",
+          "computer_set_value",
+          "computer_wait"
+        ]
+      },
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "image_parts": 0,
+        "request_chars": 57134,
+        "tool_names": [
+          "computer_snapshot",
+          "computer_find",
+          "computer_get",
+          "computer_is",
+          "computer_screenshot",
+          "computer_set_value",
+          "computer_wait"
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "computer_find",
+        "success": true,
+        "elapsed_ms": 390.0
+      },
+      {
+        "name": "computer_set_value",
+        "success": true,
+        "elapsed_ms": 391.0
+      },
+      {
+        "name": "computer_get",
+        "success": true,
+        "elapsed_ms": 266.0
+      }
+    ],
+    "passed": true,
+    "answer": "\n\nI'll locate the editable control named \"Verification editor\" in the specified window.\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]Executing computer_find...[/bold #e4b0ff]\n[bold #66bb6a]   ✔ Success[/bold #66bb6a]\n\n\nFound the editable textfield \"Verification editor\" (ref `@s2v5n4xtjql0wv:e1`) in window w-984204. Setting its value now.\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]Executing computer_set_value...[/bold #e4b0ff]\n[bold #66bb6a]   ✔ Success[/bold #66bb6a]\n\n\nThe write was delivered. Per the task, I'll verify the exact value with `computer_get`.\n[bold #ffb8d1]✧[/bold #ffb8d1] [bold #e4b0ff]Executing computer_get...[/bold #e4b0ff]\n[bold #66bb6a]   ✔ Success[/bold #66bb6a]\nVerified. Summary of the bounded operation:\n\n- **Target**: editable control named `Verification editor` (role `textfield`) in window `w-984204` (\"Reverie Computer Use Verification\"), ref `@s2v5n4xtjql0wv:e1`.\n- **Write**: set via accessibility `ValuePattern.SetValue` (semantic API, single delivery, no repeat).\n- **Verification**: `computer_get` on property `value` returned exactly `Reverie MODEL 中文` — an exact match to the requested string, including the CJK characters `中文`.\n\nNo launches, closes, key presses, screenshots, or other windows were touched. The write was not repeated after delivery. The control remains enabled and focused; nothing further to do on this fixture.",
+    "final_value": {
+      "property": "value",
+      "ref": "@s1e8sn1hw9evsf:e1",
+      "value": "Reverie MODEL 中文"
+    }
+  },
+  "text_model_scope": "Verified image-free task with a vision-capable Step 5 model; historical --text override was ineffective for dynamic provider configs. Real text-only capability acceptance remains unverified.",
+  "vision_model": {
+    "model": "stepfun-ai/step-5-preview",
+    "mode": "computer-controller",
+    "provider": "request",
+    "vision": true,
+    "requests": [
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "image_parts": 0,
+        "request_chars": 31714,
+        "tool_names": [
+          "computer_snapshot",
+          "computer_find",
+          "computer_get",
+          "computer_is",
+          "computer_screenshot",
+          "computer_set_value",
+          "computer_drag",
+          "computer_wait"
+        ]
+      },
+      {
+        "model": "stepfun-ai/step-5-preview",
+        "image_parts": 1,
+        "request_chars": 67711,
+        "tool_names": [
+          "computer_snapshot",
+          "computer_find",
+          "computer_get",
+          "computer_is",
+          "computer_screenshot",
+          "computer_set_value",
+          "computer_drag",
+          "computer_wait"
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "computer_screenshot",
+        "success": true,
+        "elapsed_ms": 750.0
+      }
+    ],
+    "passed": false,
+    "error_type": "Timeout",
+    "error": "",
+    "actual_canvas_labels": [
+      "Drag completed: 0"
+    ]
+  },
+  "harness2": {
+    "revision": "6868817518876de8fd170c6a8354daca273b6191",
+    "official_demo": {
+      "domain": "accounting",
+      "n_tasks": 2,
+      "seed": null,
+      "done": 2,
+      "failed": 0,
+      "tasks": [
+        {
+          "task": "ledger-1",
+          "status": "ok",
+          "library_entries_before": {
+            "agg": 0,
+            "seq": 0
+          }
+        },
+        {
+          "task": "ledger-2",
+          "status": "ok",
+          "library_entries_before": {
+            "agg": 1,
+            "seq": 1
+          }
+        }
+      ],
+      "execution_count": 28,
+      "editor_calls": 32
+    },
+    "reverie_fixture": {
+      "schema": "reverie.harness2.exploration.v1",
+      "harness2_revision": "6868817518876de8fd170c6a8354daca273b6191",
+      "evaluation_contract": "completed execution, correlated inventory read, exact labelled field values",
+      "provider": "fixture",
+      "editor": "deterministic scope editor; not model optimization",
+      "model_source": "standard",
+      "model": "h2-fixture",
+      "windows_compatibility": true,
+      "bridge": null,
+      "timeouts_seconds": {
+        "request": 65,
+        "default_cli": 100
+      },
+      "cli": "G:\\Reverie\\Reverie-Cli\\ReverieCli-ui\\.kernel\\reverie\\reverie.exe",
+      "cli_sha256": "cc7645e86ceecfaad08798a9664daf625e14e164c0cbeef05da38b62375e2146",
+      "formal_model_quality_samples": 0,
+      "official_benchmark_score": null,
+      "upstream_workflow": {
+        "domain": "read-only-inventory",
+        "n_tasks": 2,
+        "seed": null,
+        "done": 2,
+        "failed": 0,
+        "tasks": [
+          {
+            "task": "inventory-1",
+            "status": "ok",
+            "library_entries_before": {
+              "agg": 0,
+              "seq": 0
+            }
+          },
+          {
+            "task": "inventory-2",
+            "status": "ok",
+            "library_entries_before": {
+              "agg": 1,
+              "seq": 1
+            }
+          }
+        ]
+      },
+      "executions": [
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-1/agg1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-1/base1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e4b8bcd6e80e1075a463b094472c90f4ecd00ba6644205918849f93323fa4828",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-1/dom1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-1/inv1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-2/agg1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-2/base1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e4b8bcd6e80e1075a463b094472c90f4ecd00ba6644205918849f93323fa4828",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-2/dom1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-agg1/inventory-2/inv1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-seq1/inventory-1/c1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-seq1/inventory-1/dom1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-1",
+          "run_id": "reverie-smoke-reverie-seq1/inventory-1/inv1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-seq1/inventory-2/c1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-seq1/inventory-2/dom1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        },
+        {
+          "task": "inventory-2",
+          "run_id": "reverie-smoke-reverie-seq1/inventory-2/inv1",
+          "exit_code": 0,
+          "timeout_seconds": 100,
+          "component_fingerprint": "e362afe6d58a7d4e3cc71d0715793d96881ab898a44ffbf74524dea39983dc9c",
+          "inventory_unchanged": true,
+          "execution_success": true,
+          "checks": {
+            "cli_succeeded": true,
+            "read_executed": true,
+            "tool_result_present": true,
+            "tool_returned_inventory": true,
+            "scope_preserved": true,
+            "answer_matches_observed_fields": true,
+            "input_unchanged": true
+          },
+          "passed": true
+        }
+      ],
+      "requests": [
+        {
+          "index": 0,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:08.802251+00:00",
+          "request_sha256": "6c339d511740aaa517b362bdb66dde546661484c4b7ee06d37667b80ebd55e8a",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "be50096743b426ee68dde411a6bff88c85a376085eb31896b541f406d24fd7ff"
+        },
+        {
+          "index": 1,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:09.715641+00:00",
+          "request_sha256": "02f516763b5c7c5d31667e1d55927a51a41c0582c9be6397868d3253c3a5d401",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "82425fadbd69522be9adb96dacb724217a0a6247cecb1eff60d39d264d6b5688"
+        },
+        {
+          "index": 2,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:12.544627+00:00",
+          "request_sha256": "18a8de8671669765977f83e7fb7c42170cbb1fdde6811e5e3e512d2124942c68",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "41a6116b11b2dbb6aacf12e888e532fe0a17d93989e566af5503ce05fcd0f6c2"
+        },
+        {
+          "index": 3,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:12.897247+00:00",
+          "request_sha256": "078b39c1a2b61077718d893c446a54325e97c040b0b87e884f75c220a8e182a7",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "4337529bbe16f5c0db91c051e8ee32ccd6278db9d23b90d81ebb57a765cbb956"
+        },
+        {
+          "index": 4,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:18.442404+00:00",
+          "request_sha256": "c6e3fcaa524826420899d26f2d56aa6bf3e2489ae904c006be11285dac0db960",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "ef9a56f49b18cf374cd86a1a0c72237dfa9e035970f4e186353579a1efa80696"
+        },
+        {
+          "index": 5,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:18.744580+00:00",
+          "request_sha256": "f33c85ab34318a51f75eebfa677d3418d20ef12005b6f0e367259f75a9f9ed82",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "309f857d2d60c5edb7ac944d1d4f937b95e75d5a18bed01ce21e891aeadcef6a"
+        },
+        {
+          "index": 6,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:23.619537+00:00",
+          "request_sha256": "c3b36ed8e3897c9b7167a8bdef34adbb9fc72d9e6ca0ea5dda5cba2bdee95f4b",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "9bb0c838bd2565e45e121da6a1c0c83bd76289ba78aac40649c22fdec2d9c07d"
+        },
+        {
+          "index": 7,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:24.350075+00:00",
+          "request_sha256": "824d43714809248f0a9c7c39f0d749a0cd2a684a86c1e73d34b2e736df135915",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "73688113eb7ee8d60eecdd22f71bc6737c35112b4c51481973d92247fefbab8c"
+        },
+        {
+          "index": 8,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:26.461971+00:00",
+          "request_sha256": "f7a41964b52695670d2eb82efd183ad5354de3fe75766f41dc148414ebd59ca9",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "063903c080ccd3ea010e1a4daef348ce38007c51438afc7944dd55c029e6117d"
+        },
+        {
+          "index": 9,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:26.706266+00:00",
+          "request_sha256": "17434956f21ab8695437c82a55a206be876c88fd85a2106c7af5ae5eb555bd87",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "f271c5ec2189ae9c52eea3b776019eb206c8b5abb0cd8da7a3a7cd39bb8334d9"
+        },
+        {
+          "index": 10,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:28.353098+00:00",
+          "request_sha256": "125e50e7c0e3996fa1d79b5fcd692266ff0e865f23c41542bdd1ce12881233f8",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "819fdc341c161c2874d2cc391faf6572e7dbd13dda1f78764e7f21c5ae947011"
+        },
+        {
+          "index": 11,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:29.003655+00:00",
+          "request_sha256": "b96837fb0f2a34df38f310f632b764354fe2899ffe5b1c1c6080782d3bdb8142",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "24fe2d306e8fa7251203d4d4615d29c5e0d6ca5b927d81a315e319d56a29cc60"
+        },
+        {
+          "index": 12,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:30.847690+00:00",
+          "request_sha256": "ca746efdcdaf34aafbf1b2a4b977daa48d668a31dd42d51f775cf6dcfb18468f",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "8f1d13428c15d8c5207ab0cdbae9c26c23dbab85473092a11929cccdcc85b318"
+        },
+        {
+          "index": 13,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:31.072767+00:00",
+          "request_sha256": "4af3e5ec5a233d6104fe4fed4b85c06bfd613685b43ccf0a04c9b6cb489f13b6",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "dae0a8ca21721a746ed3f3131557d8a83e12f31bf8d5e91f93b02b619ce166d6"
+        },
+        {
+          "index": 14,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:33.652828+00:00",
+          "request_sha256": "d5a0448461f12d6cfed2cdf9b14a285c8d3a96cecd7c183c2f695741bfe486b6",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "363303c0a869723087800b1cb43a3060f4bf50aa9055512fb566074b89a5086e"
+        },
+        {
+          "index": 15,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:34.779908+00:00",
+          "request_sha256": "c5c68f0ba06a878e56556785e55b6a3b0a7c6fa365fddc36279f0d1314c203b0",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "77156edcb9a454d6207cba29ee0462ca9c0934ca3fc300151f77080912b56f77"
+        },
+        {
+          "index": 16,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:37.034237+00:00",
+          "request_sha256": "9ccf46faf00cd07c5ed1b6b1b78760884445d478b76a0416576536c5ffdf3e5f",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "f953562238909ee0a42622e4d4a8651a193bb378d81b90da14045addf36d7d19"
+        },
+        {
+          "index": 17,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:37.975586+00:00",
+          "request_sha256": "3c6e311ebcdc4c8e23155ab8959ad61e792511d1057f8ebf10967385cc5792f8",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "308afc76ae5f6cc8a39501cbafdaeac95b081aa5c25c9a63ba2c811bcf44101e"
+        },
+        {
+          "index": 18,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:41.469412+00:00",
+          "request_sha256": "7ec67b0f6ff82b4a3e02d8146a817e544fbe01f477c9cff89169d1740081296e",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "1a53dad4259fcaee0aa894fac792506f5d40777864c00f7e477316fb5ec82ce8"
+        },
+        {
+          "index": 19,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:41.765024+00:00",
+          "request_sha256": "41f26b55a93d0db5c860cf8108ac0a8a4255584338ed00cb5c35a0a9be3861e4",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "0027dc3393d48854c3ddc8f1f1533810fb0aae95ae5dfcdf4f7af279e04da86f"
+        },
+        {
+          "index": 20,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:44.578254+00:00",
+          "request_sha256": "d330c6213d373b0363a605108f88b4c251ede86f81f40812b01b9a3112dac711",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.016,
+          "response_sha256": "e89701734249bc57727d66d1f2af77f6751d13c414dcec71314841443551989b"
+        },
+        {
+          "index": 21,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:44.901074+00:00",
+          "request_sha256": "8f7fc113891e4e325eec577524d06f55d07f4b7fc3c057e4907915c80a90d92b",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "765a7fe9a9a600f709c1b2ebaac2002c7bc69eeddc51cfadaf37dc40500dc50a"
+        },
+        {
+          "index": 22,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:47.266253+00:00",
+          "request_sha256": "185da8836039c9aedc9c19b77c9d50088afbfc343e277c89f4078a4665b575e8",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "794655cd92344eff3dd1d51575f47d5ef01127fc23d9b60054fb98091aef357d"
+        },
+        {
+          "index": 23,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:47.722256+00:00",
+          "request_sha256": "28632ce2a21f6b653b4703f0b4b3b6bf97592de420933d793e8e19e88704275d",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "440b18a62032d1ce0248d1f1cfc7fb7b7cf31e36e36bc2ef497f4f0df1eb2093"
+        },
+        {
+          "index": 24,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:49.955848+00:00",
+          "request_sha256": "5561677bb72c0205784f3fd887fc6281753ac5f007e390c9a01a203a36c2965a",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "4e038dcc513455b4f312017aff52e68e3c608793d2027343928fdd304860585a"
+        },
+        {
+          "index": 25,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:50.182577+00:00",
+          "request_sha256": "c01abd1b86a589681d36f8ca3f9664fa1eb3a3acc121174b36e73967d4f22cea",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "837c8d829b8a71c13b424a8a5164f26d7de3fc4b3225c4d2cdad9d209404ec45"
+        },
+        {
+          "index": 26,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:52.015573+00:00",
+          "request_sha256": "1ebca8913a36406bc206bf21bb84b85ba60ff08bbaf4288e57ed4792206141e2",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "229ec6d580cdc9dbc4bddaa3cb9bc6b1bffd466e6cc5b1976ec6b734c5f80d11"
+        },
+        {
+          "index": 27,
+          "stream": false,
+          "tools": 1,
+          "started_at": "2026-11-06T00:39:53.255582+00:00",
+          "request_sha256": "874305f35e1225e6f78c759c12f88a187012cd4d123bd9f7ae14247e16a75246",
+          "response_model": "h2-fixture",
+          "status": 200,
+          "elapsed_seconds": 0.0,
+          "response_sha256": "46bd2e930de5c325119fa809a47a141bc6109c048a2adde05329c8e03793ce47"
+        }
+      ],
+      "library_entries": [
+        "library\\agg\\read-only-inventory\\harnesses\\inventory-1\\EXPERIENCE.md",
+        "library\\agg\\read-only-inventory\\harnesses\\inventory-2\\EXPERIENCE.md",
+        "library\\seq\\read-only-inventory\\harnesses\\inventory-1\\EXPERIENCE.md",
+        "library\\seq\\read-only-inventory\\harnesses\\inventory-2\\EXPERIENCE.md"
+      ],
+      "passed": true
+    },
+    "real_model_reports": [
+      ".runtime/computer-harness2-reverie-fixture-delivery/report.json",
+      ".runtime/computer-harness2-reverie-fixture-final/report.json",
+      ".runtime/computer-harness2-reverie-gptoss/report.json",
+      ".runtime/computer-harness2-reverie-live-baseline/report.json",
+      ".runtime/computer-harness2-reverie-live-final/report.json",
+      ".runtime/computer-harness2-reverie-live-refined/report.json",
+      ".runtime/computer-harness2-reverie-live-refined2/report.json",
+      ".runtime/computer-harness2-reverie-minimax/report.json",
+      ".runtime/computer-harness2-reverie-minimax-final/report.json"
+    ],
+    "official_benchmark_score": null,
+    "formal_blocker": "Official Linux benchmark environment, installed benchmark data/dependencies and configured judge are unavailable."
+  },
+  "native_checks": [
+    {
+      "path": "ReverieCli-py/reverie/computer_use/native/windows-x64/agent-desktop.exe",
+      "bytes": 3827200,
+      "sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3"
+    },
+    {
+      "path": "ReverieCli-ui/.kernel/reverie/reverie-runtime/reverie/computer_use/native/windows-x64/agent-desktop.exe",
+      "bytes": 3827200,
+      "sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3"
+    },
+    {
+      "path": "ReverieCli-ui/release/win-unpacked/reverie-runtime/reverie/computer_use/native/windows-x64/agent-desktop.exe",
+      "bytes": 3827200,
+      "sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3"
+    }
+  ],
+  "build": {
+    "version": "2.5.3",
+    "id": "6d12093b070bf30f",
+    "builtAt": "2026-11-06T00:39:03.720Z",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "artifacts": [
+    {
+      "path": "dist/Reverie-Portable-x64.exe",
+      "bytes": 438277496,
+      "sha256": "69369317231615fb655e77e8e045c3ec8510eafa9cf4f45cb62ea14660aff8da"
+    },
+    {
+      "path": "ReverieCli-ui/.kernel/reverie/reverie.exe",
+      "bytes": 14317359,
+      "sha256": "cc7645e86ceecfaad08798a9664daf625e14e164c0cbeef05da38b62375e2146"
+    },
+    {
+      "path": "ReverieCli-ui/release/win-unpacked/ReverieUI.exe",
+      "bytes": 223114752,
+      "sha256": "ba72a5ba0733200cfcbc19119d58c897c4d896f546b6092c2d96823ce9759c52"
+    },
+    {
+      "path": "ReverieCli-ui/release/win-unpacked/resources/app.asar",
+      "bytes": 83356266,
+      "sha256": "f20fb864ac123010578096956492fcc9f0fb9de7f79802ea91bbb235416b874d"
+    }
+  ],
+  "wheel": {
+    "path": ".runtime\\computer-use-packages-final\\reverie_cli-2.5.3-py3-none-win_amd64.whl",
+    "size": 7858062,
+    "sha256": "8555165805e6d7594d0b245bb141d10614c679bc5198a5a3b71f4da4777601e3",
+    "source_match": true,
+    "native_integrity": true,
+    "stale_rce_not_included": true
+  },
+  "verification": {
+    "python": {
+      "passed": 3157,
+      "skipped": 7,
+      "log": ".runtime/computer-full-delivery-python.log"
+    },
+    "ui": {
+      "passed": 476,
+      "skipped": 1,
+      "log": ".runtime/computer-full-final-ui.log"
+    },
+    "host_regressions": {
+      "passed": 190,
+      "log": ".runtime/computer-host-regression-fixed.log"
+    },
+    "focused_computer_harness": {
+      "passed": 161,
+      "log": ".runtime/computer-followup-final-focused.log"
+    },
+    "typecheck": {
+      "passed": true,
+      "log": ".runtime/computer-final-typecheck.log"
+    },
+    "embedded_sources": {
+      "current_source_matches_embedded_bytecode": true,
+      "modules": [
+        "reverie.computer_use",
+        "reverie.computer_use.images",
+        "reverie.computer_use.legacy",
+        "reverie.computer_use.operations",
+        "reverie.computer_use.preview",
+        "reverie.computer_use.prompt",
+        "reverie.computer_use.results",
+        "reverie.computer_use.runtime",
+        "reverie.computer_use.service",
+        "reverie.computer_use.windows_launch",
+        "reverie.tools.computer",
+        "reverie.tools.open_computer_use",
+        "reverie.session.operation_history",
+        "reverie.agent.agent",
+        "reverie.agent.tool_executor",
+        "reverie.sdk_bridge"
+      ]
+    },
+    "kernel_windows_only_path": ".runtime/computer-delivery-kernel-version.log"
+  },
+  "current_package_ui_integration": "not rerun after the Computer Use helper stopped this turn; previous build evidence is historical",
+  "git_publication": false
+}

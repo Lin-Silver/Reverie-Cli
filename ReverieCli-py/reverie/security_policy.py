@@ -111,6 +111,9 @@ def permission_mode_description(value: Any) -> str:
 
 
 def required_permission_for_tool(tool: Any) -> str:
+    declared = getattr(tool, "required_permission", "")
+    if declared in PERMISSION_LEVELS:
+        return declared
     name = str(getattr(tool, "name", tool) or "").strip().lower()
     metadata = getattr(tool, "metadata", {})
     if isinstance(metadata, dict) and metadata.get("plugin_id"):

@@ -9,10 +9,13 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass, field
 from enum import Enum
 import json
+import os
 import re
 import uuid
 from datetime import datetime
 from pathlib import Path
+from threading import RLock
+from weakref import WeakValueDictionary
 
 from .base import BaseTool, ToolResult
 
@@ -147,6 +150,26 @@ class TaskStore:
         self.root_tasks: List[str] = []
         self.file_path: Optional[Path] = None
         self.markdown_path: Optional[Path] = None
+        self._source_signature = ()
+        self._lock = RLock()
+
+    def _persistence_signature(self) -> tuple:
+        paths = [self.markdown_path, self.file_path]
+        if self.markdown_path:
+            paths.append(self.markdown_path.parent / "Tasks.md")
+        signature = []
+        for path in paths:
+            try:
+                stat = path.stat() if path else None
+                signature.append((stat.st_mtime_ns, stat.st_size) if stat else None)
+            except FileNotFoundError:
+                signature.append(None)
+        return tuple(signature)
+
+    def refresh_if_changed(self):
+        """Read external checklist changes without discarding unchanged task metadata."""
+        if self._persistence_signature() != self._source_signature:
+            self.load(migrate=False)
     
     def configure(self, project_root: Path):
         """Configure persistence paths and load data."""
@@ -169,9 +192,11 @@ class TaskStore:
                 self.file_path.unlink()
             except Exception as e:
                 print(f"Failed to remove legacy tasks JSON: {e}")
+        self._source_signature = self._persistence_signature()
 
-    def load(self):
+    def load(self, *, migrate: bool = True):
         """Load tasks from canonical markdown, importing legacy JSON if needed."""
+        self._source_signature = self._persistence_signature()
         self.tasks = {}
         self.root_tasks = []
 
@@ -186,7 +211,7 @@ class TaskStore:
             if markdown_path.exists():
                 try:
                     self._load_from_checklist(markdown_path.read_text(encoding="utf-8"))
-                    if markdown_path != self.markdown_path:
+                    if migrate and markdown_path != self.markdown_path:
                         self.save()
                     return
                 except Exception as e:
@@ -202,7 +227,8 @@ class TaskStore:
                     task_id for task_id in data.get("root_tasks", []) if task_id in self.tasks
                 ]
                 self._repair_relationships()
-                self.save()
+                if migrate:
+                    self.save()
                 return
             except Exception as e:
                 print(f"Failed to load tasks JSON: {e}")
@@ -494,8 +520,20 @@ class TaskStore:
         return self.to_checklist_markdown()
 
 
-# Global task store (shared across tool instances)
-_task_store = TaskStore()
+_workspace_task_stores = WeakValueDictionary()
+_workspace_task_stores_lock = RLock()
+
+
+def _task_store_for_workspace(project_root: Path) -> TaskStore:
+    root = project_root.resolve()
+    key = os.path.normcase(str(root))
+    with _workspace_task_stores_lock:
+        store = _workspace_task_stores.get(key)
+        if store is None:
+            store = TaskStore()
+            store.configure(root)
+            _workspace_task_stores[key] = store
+        return store
 
 
 def _checklist_artifact_is_fully_completed(text: str) -> bool:
@@ -530,10 +568,6 @@ def cleanup_completed_task_artifacts(project_root: Path) -> List[Path]:
         except Exception:
             continue
         deleted_paths.append(path)
-
-    if _task_store.markdown_path and _task_store.markdown_path in deleted_paths:
-        _task_store.tasks = {}
-        _task_store.root_tasks = []
 
     return deleted_paths
 
@@ -634,8 +668,9 @@ class TaskManagerTool(BaseTool):
     
     def __init__(self, context: Optional[Dict] = None):
         super().__init__(context)
+        self._task_store = TaskStore()
         if context and 'project_root' in context:
-             _task_store.configure(Path(context['project_root']))
+             self._task_store = _task_store_for_workspace(Path(context['project_root']))
 
     def get_execution_message(self, **kwargs) -> str:
         operation = self._normalize_operation(kwargs.get('operation') or kwargs.get('action'))
@@ -731,6 +766,11 @@ class TaskManagerTool(BaseTool):
         return []
 
     def execute(self, **kwargs) -> ToolResult:
+        with self._task_store._lock:
+            self._task_store.refresh_if_changed()
+            return self._execute_operation(**kwargs)
+
+    def _execute_operation(self, **kwargs) -> ToolResult:
         operation = self._normalize_operation(kwargs.get('operation') or kwargs.get('action'))
         
         if operation == "add_tasks":
@@ -803,7 +843,7 @@ class TaskManagerTool(BaseTool):
         """Collect task data in display order for text and structured results."""
         entries = []
 
-        for indent, task in _task_store.iter_tasks():
+        for indent, task in self._task_store.iter_tasks():
             if not self._matches_filters(task, filters):
                 continue
 
@@ -817,7 +857,7 @@ class TaskManagerTool(BaseTool):
 
     def _build_summary_data(self) -> Dict[str, int]:
         """Build aggregate counts for the full task list."""
-        tasks = list(_task_store.tasks.values())
+        tasks = list(self._task_store.tasks.values())
         return {
             "total": len(tasks),
             "not_started": sum(1 for task in tasks if task.state == TaskState.NOT_STARTED),
@@ -853,10 +893,10 @@ class TaskManagerTool(BaseTool):
             "filtered_tasks": filtered_entries,
             "filters": filters or {},
             "summary": self._build_summary_data(),
-            "checklist": _task_store.to_checklist_markdown(),
+            "checklist": self._task_store.to_checklist_markdown(),
             "filtered_checklist": self._render_task_entries(filtered_entries),
-            "task_markdown_path": str(_task_store.markdown_path) if _task_store.markdown_path else "",
-            "legacy_task_json_path": str(_task_store.file_path) if _task_store.file_path else "",
+            "task_markdown_path": str(self._task_store.markdown_path) if self._task_store.markdown_path else "",
+            "legacy_task_json_path": str(self._task_store.file_path) if self._task_store.file_path else "",
         }
 
     def _build_task_result(
@@ -891,7 +931,7 @@ class TaskManagerTool(BaseTool):
                     or task_data.get('title')
                     or 'Unnamed task'
                 ).strip()
-                task = _task_store.add_task(
+                task = self._task_store.add_task(
                     name=name or 'Unnamed task',
                     description=task_data.get('description', ''),
                     parent_id=task_data.get('parent_id'),
@@ -941,12 +981,12 @@ class TaskManagerTool(BaseTool):
         
         target_task = None
         if task_id:
-            target_task = _task_store.get_task(task_id)
+            target_task = self._task_store.get_task(task_id)
             if not target_task:
                  # Try as name
-                 target_task = _task_store.find_by_name(task_id)
+                 target_task = self._task_store.find_by_name(task_id)
         elif name:
-            target_task = _task_store.find_by_name(name)
+            target_task = self._task_store.find_by_name(name)
         
         # If still not found and we have a name, try to find by name (assuming name is meant as lookup)
         # But caution: if we are trying to RENAME, 'name' argument is the NEW name.
@@ -956,7 +996,7 @@ class TaskManagerTool(BaseTool):
              return ToolResult.fail(f"Task not found: {task_id or name}")
 
         try:
-            task = _task_store.update_task(
+            task = self._task_store.update_task(
                 target_task.id,
                 name=new_name,
                 description=description,
@@ -1006,11 +1046,11 @@ class TaskManagerTool(BaseTool):
             #    But for state updates, this works.
             
             if task_id:
-                target_task = _task_store.get_task(task_id)
+                target_task = self._task_store.get_task(task_id)
                 if not target_task:
-                    target_task = _task_store.find_by_name(task_id)
+                    target_task = self._task_store.find_by_name(task_id)
             elif name: # Fallback: use name as lookup
-                 target_task = _task_store.find_by_name(name)
+                 target_task = self._task_store.find_by_name(name)
             
             if not target_task:
                 errors.append(f"Task not found: {task_id or name}")
@@ -1030,7 +1070,7 @@ class TaskManagerTool(BaseTool):
                 new_name = task_data.get("rename_to")
             
             try:
-                updated_task = _task_store.update_task(
+                updated_task = self._task_store.update_task(
                     target_task.id,
                     name=new_name, 
                     description=task_data.get('description'),

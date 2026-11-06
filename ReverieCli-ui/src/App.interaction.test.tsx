@@ -3432,6 +3432,35 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("Cache inspection complete")).toBeTruthy();
   });
 
+  it("separates API connection activity from tools and completes a task list without a stuck spinner", async () => {
+    const { emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.type(composer, "List the tasks{Enter}");
+    await act(async () => {
+      emitCoreEvent({ type: "ui.event", event: { event: "model_request", activity_id: "api-1", category: "Model", message: "Connecting to API stream", status: "working" } });
+      emitCoreEvent({ type: "ui.event", event: { event: "model_response", activity_id: "api-1", category: "Model", message: "API stream connected", status: "success" } });
+      emitCoreEvent({ type: "ui.event", event: { event: "tool_start", tool_call_id: "tasks-1", tool_name: "task_manager", message: "Viewing the task checklist", arguments: { action: "list" }, status: "working" } });
+      await new Promise(resolve => setTimeout(resolve, 80));
+    });
+    const groups = [...document.querySelectorAll(".activity-group")];
+    expect(groups.map(group => group.querySelector("summary strong")?.textContent)).toEqual(["API 连接", "工具调用步骤"]);
+    expect(groups.map(group => group.querySelector("summary > span")?.textContent)).toEqual(["1 项活动", "1 项活动"]);
+    await user.click(within(groups[1] as HTMLElement).getByText("工具调用步骤"));
+    expect(groups[1].querySelector(".activity-item.working")).toBeTruthy();
+    await act(async () => {
+      emitCoreEvent({ type: "ui.event", event: { event: "tool_result", tool_call_id: "tasks-1", success: true, output: "[ ] Inspect project" } });
+      await new Promise(resolve => setTimeout(resolve, 80));
+    });
+    expect(groups[1].querySelector(".activity-item.working")).toBeNull();
+    await user.click(within(groups[1] as HTMLElement).getByText("Viewing the task checklist"));
+    expect(within(groups[1] as HTMLElement).getByText("[ ] Inspect project")).toBeTruthy();
+    expect(within(groups[1] as HTMLElement).getByText(/"action": "list"/)).toBeTruthy();
+    releasePrompt();
+    await screen.findByText("Cache inspection complete");
+  });
+
   it("hides provisional prose stored beside a thinking-only tool call", async () => {
     const provisional = "This provisional answer must not appear as a second reply.";
     installDesktopApi({

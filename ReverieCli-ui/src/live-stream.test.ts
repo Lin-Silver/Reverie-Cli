@@ -29,6 +29,24 @@ const turn: LiveTurn = {
 };
 
 describe("live stream batching", () => {
+  it("keeps tool arguments and closes working state when a result omits status", () => {
+    const start = { event: "tool_start", tool_call_id: "list-1", tool_name: "task_manager", arguments: { action: "list" }, status: "working" };
+    const existing = mergeLiveTurnBatch({ ...turn, events: [], segments: [] }, { ...emptyLiveTurnBatch(), events: [start] });
+    const merged = mergeLiveTurnBatch(existing, { ...emptyLiveTurnBatch(), events: [{ event: "tool_result", tool_call_id: "list-1", success: true, output: "[ ] Inspect" }] });
+    expect(merged.events).toMatchObject([{ tool_name: "task_manager", arguments: { action: "list" }, status: "success" }]);
+    expect(merged.segments).toMatchObject([{ events: [{ status: "success", output: "[ ] Inspect" }] }]);
+    const replay = mergeLiveTurnBatch(merged, { ...emptyLiveTurnBatch(), events: [start] });
+    expect(replay.events).toEqual(merged.events);
+    expect(replay.segments).toEqual(merged.segments);
+  });
+
+  it("marks a failed result as error even when its start was working", () => {
+    const existing = mergeLiveTurnBatch({ ...turn, events: [], segments: [] }, { ...emptyLiveTurnBatch(), events: [{ event: "tool_start", tool_call_id: "bad", status: "working" }] });
+    const merged = mergeLiveTurnBatch(existing, { ...emptyLiveTurnBatch(), events: [{ event: "tool_result", tool_call_id: "bad", success: false, error: "Task not found" }] });
+    expect(merged.events[0].status).toBe("error");
+    expect(merged.segments).toMatchObject([{ events: [{ status: "error" }] }]);
+  });
+
   it("interleaves commentary and tools even when they arrive in one render batch", () => {
     const merged = mergeLiveTurnBatch({ ...turn, assistantText: "", reasoningText: "", segments: [] }, {
       ...emptyLiveTurnBatch(),

@@ -331,14 +331,14 @@ function eventText(value: unknown): string {
   }
 }
 
-function eventLabel(event: Record<string, unknown>): { title: string; detail: string; status: string; category: string; meta: string; toolName: string; agentId: string } {
+function eventLabel(event: Record<string, unknown>, includeDetail = false): { title: string; detail: string; status: string; category: string; meta: string; toolName: string; agentId: string } {
   const type = String(event.type ?? event.kind ?? event.event ?? "activity");
   const eventType = String(event.event ?? type);
   const toolName = String(event.tool_name ?? event.name ?? "");
   const title = String(event.title ?? event.message ?? event.tool_name ?? event.name ?? eventType);
   // For the Thinking Tool the payload the user wants to read is the reasoning the
   // model wrote into the call, not the acknowledgement it got back.
-  const detail = isThinkTool(toolName)
+  const detail = !includeDetail ? "" : isThinkTool(toolName)
     ? thinkToolText(event.arguments) || eventText(event.detail ?? event.error ?? "")
     : eventText(event.detail ?? event.output ?? event.error ?? event.text ?? "");
   const inferredStatus = eventType === "model_request" || eventType === "tool_start"
@@ -1171,10 +1171,10 @@ function GitBranchPicker({ status, busy, refresh, switchBranch, createBranch }: 
 const ActivityItem = memo(function ActivityItem({ event }: { event: Record<string, unknown> }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  const item = eventLabel(event);
-  const argumentsText = item.toolName.toLowerCase().startsWith("rats_") ? ""
+  const item = eventLabel(event, expanded);
+  const argumentsText = !expanded || item.toolName.toLowerCase().startsWith("rats_") ? ""
     : typeof event.arguments === "string" ? event.arguments : event.arguments ? JSON.stringify(event.arguments, null, 2) : "";
-  const output = messageText(event.output);
+  const output = expanded ? messageText(event.output) : "";
   const error = String(event.error ?? "");
   const computer = item.toolName.startsWith("computer_") ? parseComputerResult(error || messageText(event.output)) : null;
   const statusIcon = item.status === "success"
@@ -1213,13 +1213,36 @@ const ActivityItem = memo(function ActivityItem({ event }: { event: Record<strin
   );
 });
 
+function activityCategory(event: Record<string, unknown>): "tool" | "model" | "activity" {
+  const type = String(event.event ?? event.type ?? "").toLowerCase();
+  if (event.tool_name || type.startsWith("tool_") || String(event.category ?? "").toLowerCase() === "tool") return "tool";
+  if (type.startsWith("model_") || String(event.category ?? "").toLowerCase() === "model") return "model";
+  return "activity";
+}
+
 const ActivityGroup = memo(function ActivityGroup({ events, defaultExpanded = false }: { events: Array<Record<string, unknown>>; defaultExpanded?: boolean }) {
+  const groups = useMemo(() => {
+    const grouped: Array<{ category: ReturnType<typeof activityCategory>; events: Array<Record<string, unknown>> }> = [];
+    for (const event of events) {
+      const category = activityCategory(event);
+      const last = grouped.at(-1);
+      if (last?.category === category) last.events.push(event);
+      else grouped.push({ category, events: [event] });
+    }
+    return grouped;
+  }, [events]);
+  return <>{groups.map((group, index) => <ActivityCategoryGroup key={index} {...group} defaultExpanded={defaultExpanded} />)}</>;
+});
+
+const ActivityCategoryGroup = memo(function ActivityCategoryGroup({ events, category, defaultExpanded }: {
+  events: Array<Record<string, unknown>>; category: ReturnType<typeof activityCategory>; defaultExpanded: boolean;
+}) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(defaultExpanded);
   useEffect(() => setExpanded(defaultExpanded), [defaultExpanded]);
   const working = events.find(event => eventLabel(event).status === "working");
-  return <details className="activity-group" open={expanded} onToggle={(toggle) => setExpanded(toggle.currentTarget.open)}>
-    <summary><Wrench size={14} /><strong>{t("工具调用步骤")}</strong><span>{t("live.activityCount", { count: events.length })}</span>{working && <small>{eventLabel(working).title}</small>}<ChevronDown size={13} /></summary>
+  return <details className="activity-group" data-activity-category={category} open={expanded} onToggle={(toggle) => setExpanded(toggle.currentTarget.open)}>
+    <summary>{category === "tool" ? <Wrench size={14} /> : category === "model" ? <Globe size={14} /> : <Activity size={14} />}<strong>{t(category === "tool" ? "工具调用步骤" : category === "model" ? "API 连接" : "运行活动")}</strong><span>{t("live.activityCount", { count: events.length })}</span>{working && <small>{eventLabel(working).title}</small>}<ChevronDown size={13} /></summary>
     {expanded && <div className="inline-activities">{events.map((event, index) => <ActivityItem key={String(event.tool_call_id || event.activity_id || index)} event={event} />)}</div>}
   </details>;
 });

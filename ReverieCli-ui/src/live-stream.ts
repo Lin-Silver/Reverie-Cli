@@ -30,6 +30,18 @@ function eventLifecycleKey(event: Record<string, unknown>): string {
   return "";
 }
 
+function mergeLifecycleEvent(previous: Record<string, unknown>, incoming: Record<string, unknown>): Record<string, unknown> {
+  const type = String(incoming.event ?? incoming.type ?? "");
+  const previousType = String(previous.event ?? previous.type ?? "");
+  const finished = ["tool_result", "model_response", "model_error"];
+  if (finished.includes(previousType) && ["tool_start", "model_request"].includes(type)) return previous;
+  const event = { ...previous, ...incoming };
+  if (finished.includes(type)) {
+    event.status = incoming.status ?? (type === "model_error" || incoming.success === false ? "error" : "success");
+  }
+  return event;
+}
+
 function mergeActivityEvents(
   existing: Array<Record<string, unknown>>,
   incoming: Array<Record<string, unknown>>,
@@ -52,11 +64,11 @@ function mergeActivityEvents(
     if (lifecycleKey) {
       const lifecycleIndex = lifecycleIndexes.get(lifecycleKey);
       if (lifecycleIndex !== undefined) {
-        merged[lifecycleIndex] = event;
+        merged[lifecycleIndex] = mergeLifecycleEvent(merged[lifecycleIndex], event);
         continue;
       }
       lifecycleIndexes.set(lifecycleKey, merged.length);
-      merged.push(event);
+      merged.push(mergeLifecycleEvent({}, event));
       continue;
     }
     const identity = JSON.stringify(event);
@@ -118,7 +130,7 @@ function mergeTurnSegments(turn: LiveTurn, batch: LiveTurnBatch): TurnSegment[] 
         const eventIndex = segment.events.findIndex(event => eventLifecycleKey(event) === key);
         if (eventIndex < 0) continue;
         const events = [...segment.events];
-        events[eventIndex] = { ...events[eventIndex], ...update.event };
+        events[eventIndex] = mergeLifecycleEvent(events[eventIndex], update.event);
         segments[index] = { kind: "activity", events };
         replaced = true;
         break;

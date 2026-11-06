@@ -145,6 +145,7 @@ class ToolExecutor:
         for tool_class in get_registered_tool_classes(include_hidden=True):
             self._register_tool_instance(tool_class(self.context))
         self._rebuild_tool_alias_lookup()
+        self._builtin_tool_alias_lookup = dict(self._tool_alias_lookup)
 
     def _register_tool_instance(self, tool: BaseTool) -> None:
         """Register one concrete tool instance."""
@@ -364,10 +365,13 @@ class ToolExecutor:
 
     def resolve_tool_name(self, name: str) -> str:
         """Resolve a tool name or alias to the registered primary tool name."""
-        self._sync_dynamic_tools()
         wanted = str(name or "").strip()
         if not wanted:
             return ""
+        builtin = self._builtin_tool_alias_lookup.get(wanted.lower())
+        if builtin:
+            return builtin
+        self._sync_dynamic_tools()
         if wanted in self._tools:
             return wanted
 
@@ -521,7 +525,6 @@ class ToolExecutor:
     
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """Get a tool by name"""
-        self._sync_dynamic_tools()
         resolved = self.resolve_tool_name(name)
         if not resolved:
             return None
@@ -1160,7 +1163,6 @@ class ToolExecutor:
         """
         if INVALID_TOOL_ARGUMENTS in arguments:
             return ToolResult.fail("Incomplete tool arguments; nothing was executed. Resend the complete JSON object.")
-        self._sync_dynamic_tools()
         tool = self.get_tool(tool_name)
 
         if not tool:
@@ -1247,6 +1249,9 @@ class ToolExecutor:
             type(tool).__module__.startswith("reverie.tools.") and (
                 tool.name == "file_ops" and normalized_arguments.get("operation") in {"read", "list", "exists", "info"}
                 or tool.name == "str_replace_editor" and normalized_arguments.get("command") == "view"
+                or tool.name == "task_manager" and tool._normalize_operation(
+                    normalized_arguments.get("operation") or normalized_arguments.get("action")
+                ) == "view_tasklist"
             )
         )
         before_snapshots = {} if read_only_call else self._snapshot_file_paths(self._candidate_file_paths(tool.name, normalized_arguments))

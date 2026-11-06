@@ -408,6 +408,8 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "回到最新": "Back to latest",
   "调用参数": "Arguments",
   "工具调用步骤": "Tool steps",
+  "API 连接": "API connection",
+  "运行活动": "Run activity",
   "任务列表尚未建立": "No task checklist yet",
   "正在处理任务": "Working on task",
   "继续任务": "Continue task",

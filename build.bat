@@ -46,9 +46,10 @@ if not exist "%UI_ROOT%\release\Reverie-Setup-%VERSION%-x64.exe" (
   echo [ERROR] Windows installer was not produced.
   exit /b 1
 )
-set "PORTABLE_NAME=Reverie-Portable-x64.exe"
-if /i "%GITHUB_ACTIONS%"=="true" set "PORTABLE_NAME=Reverie-Portable-%VERSION%-x64.exe"
-if not exist "%REPO_ROOT%\dist\%PORTABLE_NAME%" (
+set "PORTABLE_PATH="
+for /f "delims=" %%P in ('node -p "const fs=require('fs'),path=require('path');const p=path.resolve(JSON.parse(fs.readFileSync('build/generated/portable-artifact.json','utf8')).path);if(!p.startsWith(path.resolve('../dist')+path.sep))throw Error('Unsafe portable artifact path');p"') do set "PORTABLE_PATH=%%P"
+if not defined PORTABLE_PATH exit /b 1
+if not exist "%PORTABLE_PATH%" (
   echo [ERROR] Windows portable executable was not produced.
   exit /b 1
 )
@@ -57,5 +58,6 @@ node scripts/clean-build-staging.mjs
 if errorlevel 1 exit /b 1
 
 echo [OK] Reverie %VERSION% Windows CLI, installer, and portable GUI are ready.
+echo [OK] Portable GUI: %PORTABLE_PATH%
 if "%NO_PAUSE%"=="0" pause
 exit /b 0

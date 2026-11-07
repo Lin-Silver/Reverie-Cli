@@ -24,7 +24,7 @@ const packageJson = JSON.parse(readFileSync(path.join(uiRoot, "package.json"), "
 const artifactName = process.env.GITHUB_ACTIONS === "true"
   ? `Reverie-Portable-${packageJson.version}-${process.arch}.exe`
   : `Reverie-Portable-${process.arch}.exe`;
-const output = path.join(outputRoot, artifactName);
+let output = path.join(outputRoot, artifactName);
 
 function walkFiles(root) {
   const files = [];
@@ -73,6 +73,13 @@ const extraction = walkFiles(unpackedRoot).sort().map((file) => {
   IfErrors extract_failed`;
 }).join("\n");
 const numericVersion = `${packageJson.version}.0`.split(".").slice(0, 4).join(".");
+try {
+  rmSync(output, { force: true });
+} catch (error) {
+  if (!["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+  output = path.join(outputRoot, `Reverie-Portable-${packageJson.version}-${process.arch}-${buildId}.exe`);
+  console.warn(`The previous portable executable cannot be replaced; writing ${output}`);
+}
 const script = `Unicode true
 RequestExecutionLevel user
 SilentInstall silent
@@ -130,7 +137,6 @@ const globalNsisRoot = process.env.LOCALAPPDATA
 const makeNsis = findMakeNsis(localNsisRoot) ?? findMakeNsis(globalNsisRoot);
 if (!makeNsis) throw new Error("makensis.exe was not found. Run the Electron NSIS build once first.");
 
-rmSync(output, { force: true });
 const result = spawnSync(makeNsis, ["-WX", "-INPUTCHARSET", "UTF8", scriptPath], {
   cwd: uiRoot,
   stdio: "inherit",
@@ -140,3 +146,6 @@ if (result.status !== 0 || !existsSync(output)) {
 }
 
 console.log(`Portable Reverie: ${output}`);
+const manifestDirectory = path.join(uiRoot, "build", "generated");
+mkdirSync(manifestDirectory, { recursive: true });
+writeFileSync(path.join(manifestDirectory, "portable-artifact.json"), JSON.stringify({ path: output, buildId, version: packageJson.version }, null, 2), "utf8");

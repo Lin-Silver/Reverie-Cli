@@ -8,6 +8,7 @@ TUI, one-shot CLI, and Electron host on the same source of truth.
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
+from .api_keys import normalize_api_key_env
 
 from .config import (
     Config,
@@ -42,6 +43,7 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
     ],
     "opencode": [
         {"key": "api_key", "label": "API key", "kind": "secret", "optional": True},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "client_name", "label": "Client name override", "kind": "text", "optional": True},
         {"key": "user_agent", "label": "User-Agent override", "kind": "text", "optional": True},
@@ -51,12 +53,14 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
     ],
     "aihubmix": [
         {"key": "api_key", "label": "API key", "kind": "secret"},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
         {"key": "temperature", "label": "Temperature", "kind": "float", "min": 0, "max": 2},
     ],
     "agnes": [
         {"key": "api_key", "label": "API key", "kind": "secret"},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "live_model_list", "label": "Load live model list", "kind": "bool"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
@@ -64,6 +68,7 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
     ],
     "sensenova": [
         {"key": "api_key", "label": "API key", "kind": "secret"},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
         {"key": "temperature", "label": "Temperature", "kind": "float", "min": 0, "max": 2},
@@ -71,11 +76,13 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
     ],
     "modelscope": [
         {"key": "api_key", "label": "API key", "kind": "secret"},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
     ],
     "nvidia": [
         {"key": "api_key", "label": "API key", "kind": "secret"},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
         {"key": "reasoning_budget", "label": "Reasoning budget", "kind": "int", "min": -1, "max": 32768},
@@ -179,11 +186,13 @@ def _standard_catalog(config: Config) -> List[Dict[str, Any]]:
                 "thinking_options": [],
                 "base_url": model.base_url,
                 "endpoint": model.endpoint,
-                "configured": bool(str(model.api_key or "").strip() or model.provider in {"webgemini", "codex"}),
+                "configured": bool(model.resolve_api_key() or model.provider in {"webgemini", "codex"}),
                 # Enough to prefill the desktop's edit form without ever sending
                 # the key itself: `configured` also covers keyless transports, so
                 # the form needs to know whether a key is actually stored.
-                "api_key_configured": bool(str(model.api_key or "").strip()),
+                "api_key_configured": bool(model.resolve_api_key()),
+                "api_key_env": model.api_key_env,
+                "api_key_source": "config" if str(model.api_key or "").strip() else "env" if model.api_key_env else "none",
                 "custom_headers": dict(getattr(model, "custom_headers", {}) or {}),
             }
         )
@@ -647,6 +656,10 @@ def apply_provider_config_patch(
         else:
             value = str(value or "").strip()
         provider_config[str(key)] = value
+    if "api_key_env" in patch:
+        provider_config["api_key_env"] = normalize_api_key_env(patch["api_key_env"])
+        if provider_config["api_key_env"]:
+            provider_config["api_key"] = ""
     for key in clear_fields or []:
         if key not in field_specs or str(field_specs[key].get("kind")) != "secret":
             raise ValueError(f"Only declared secret fields can be cleared: {key}")
@@ -676,12 +689,14 @@ def add_standard_model(config: Config, payload: Dict[str, Any]) -> int:
     base_url = str(payload.get("base_url") or "").strip()
     if not model_id or not display_name or not base_url:
         raise ValueError("Model id, display name, and base URL are required.")
+    api_key_env = normalize_api_key_env(payload.get("api_key_env"))
     model = ModelConfig.from_dict(
         {
             "model": model_id,
             "model_display_name": display_name,
             "base_url": base_url,
-            "api_key": str(payload.get("api_key") or "").strip(),
+            "api_key": "" if api_key_env else str(payload.get("api_key") or "").strip(),
+            "api_key_env": api_key_env,
             "max_context_tokens": payload.get("max_context_tokens"),
             "provider": normalize_model_provider(payload.get("provider", "openai-chat")),
             "supports_vision": bool(payload.get("supports_vision", False)),
@@ -716,6 +731,8 @@ def update_standard_model(
         if key == "api_key" and value in (None, ""):
             continue
         merged[key] = value
+    if str(payload.get("api_key_env") or "").strip():
+        merged["api_key"] = ""
     for key in clear_fields or []:
         if key != "api_key":
             raise ValueError(f"Only the api_key field can be cleared: {key}")
@@ -788,6 +805,7 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
         "api_key_masked": mask_secret(resolved_key),
         "api_key_configured": bool(resolved_key),
         "api_key_source": key_source,
+        "api_key_env": str(record.get("api_key_env") or ""),
         "selected_model_id": str(record.get("selected_model_id") or ""),
         "selected_model_display_name": str(record.get("selected_model_display_name") or ""),
         "max_context_tokens": int(record.get("max_context_tokens") or 0),
@@ -886,14 +904,16 @@ def create_custom_provider(config: Config, payload: Dict[str, Any]) -> Dict[str,
     if not base_url:
         raise ValueError("A base URL is required.")
     api_key = str(payload.get("api_key") or "").strip()
-    if not api_key:
-        raise ValueError("An API key is required.")
+    api_key_env = normalize_api_key_env(payload.get("api_key_env"))
+    if not api_key and not api_key_env:
+        raise ValueError("An API key is required. You can also select an environment variable.")
 
     provider = default_custom_provider(
         provider_id=provider_id,
         name=name,
         base_url=base_url,
-        api_key=api_key,
+        api_key="" if api_key_env else api_key,
+        api_key_env=api_key_env,
         provider_format=payload.get("format") or payload.get("provider_format") or "openai-chat",
     )
     config.custom_providers = upsert_custom_provider(getattr(config, "custom_providers", {}), provider)
@@ -931,6 +951,7 @@ def update_custom_provider(
         "name",
         "base_url",
         "api_key",
+        "api_key_env",
         "format",
         "enabled",
         "thinking",
@@ -955,6 +976,12 @@ def update_custom_provider(
         api_key = str(patch["api_key"]).strip()
         endpoint_changed = endpoint_changed or api_key != record.get("api_key")
         record["api_key"] = api_key
+    if "api_key_env" in patch:
+        api_key_env = normalize_api_key_env(patch["api_key_env"])
+        endpoint_changed = endpoint_changed or api_key_env != record.get("api_key_env", "")
+        record["api_key_env"] = api_key_env
+        if api_key_env:
+            record["api_key"] = ""
     if "format" in patch:
         provider_format = normalize_custom_provider_format(patch.get("format"))
         endpoint_changed = endpoint_changed or provider_format != record.get("format")

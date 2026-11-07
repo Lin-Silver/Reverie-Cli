@@ -238,8 +238,10 @@ export interface ModelRecord {
   reasoning: ReasoningCapability;
   /** `standard` models only: request path override. */
   endpoint?: string;
-  /** `standard` models only: whether a key is stored (never the key itself). */
+  /** `standard` models only: whether a key is available, including from the environment (never its value). */
   api_key_configured?: boolean;
+  api_key_env?: string;
+  api_key_source?: "config" | "env" | "none";
   /** `standard` models only: extra request headers. */
   custom_headers?: Record<string, string>;
 }
@@ -274,6 +276,7 @@ export interface CustomProviderRecord {
   api_key_masked: string;
   api_key_configured: boolean;
   api_key_source: "config" | "env" | "none";
+  api_key_env?: string;
   selected_model_id: string;
   selected_model_display_name: string;
   max_context_tokens: number;

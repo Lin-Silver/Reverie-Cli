@@ -1,4 +1,5 @@
 import { FloatingMenu } from "./FloatingMenu";
+import { ApiKeyEnvironmentField } from "./ApiKeyEnvironmentField";
 import { parseComputerResult } from "./computer-result";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
 import { StarterActions, WelcomeHeader } from "./StartPage";
@@ -2635,6 +2636,7 @@ function ProviderFieldControl({ field, value, configured, update, reveal }: { fi
     <div className="field-input-wrap">
       <input
         type={type}
+        aria-label={field.key === "api_key" ? t(field.label) : undefined}
         value={String(value ?? "")}
         min={field.min}
         max={field.max}
@@ -2827,7 +2829,7 @@ function CustomProviderModal({
   provider: CustomProviderRecord | null;
   formats: CustomProviderFormat[];
   close: () => void;
-  save: (values: { name: string; base_url: string; api_key: string; format: string }, clearApiKey: boolean) => void;
+  save: (values: { name: string; base_url: string; api_key: string; api_key_env: string; format: string }, clearApiKey: boolean) => void;
   reveal?: () => Promise<string>;
 }) {
   const { t } = useI18n();
@@ -2839,14 +2841,16 @@ function CustomProviderModal({
     name: provider?.name ?? "",
     base_url: provider?.base_url ?? "",
     api_key: "",
+    api_key_env: provider?.api_key_source === "config" ? "" : provider?.api_key_env ?? "",
     format: provider?.format ?? formats[0]?.id ?? "openai-chat",
   });
   const [visible, setVisible] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [keyValid, setKeyValid] = useState(true);
   const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
   // An existing provider already has a stored key, so only a new one must supply it.
-  const valid = Boolean(values.name.trim() && values.base_url.trim() && (editing || values.api_key.trim()));
+  const valid = keyValid && Boolean(values.name.trim() && values.base_url.trim() && (editing || values.api_key.trim() || values.api_key_env.trim()));
   // The stored key was pulled into the field and then emptied: an explicit clear.
   const clearApiKey = editing && configured && revealed && values.api_key.trim() === "";
   const activeFormat = formats.find((item) => item.id === values.format);
@@ -2892,18 +2896,21 @@ function CustomProviderModal({
             <span>{t("基础 URL")}</span>
             <input value={values.base_url} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.xkiro.com/v1" />
           </label>
-          <label>
+          <div className="api-key-label">
             <span>{t("API 密钥")}</span>
+            <ApiKeyEnvironmentField envName={values.api_key_env} stored={provider?.api_key_source === "config"} validity={setKeyValid} update={(name) => setValues((current) => ({ ...current, api_key: "", api_key_env: name }))}>
             <div className="field-input-wrap">
               <input
                 type={visible ? "text" : "password"}
+                aria-label={t("API 密钥")}
                 value={values.api_key}
                 onChange={(event) => update("api_key", event.target.value)}
                 placeholder={editing && configured ? t("已配置；点击眼睛查看，清空并保存即可移除") : ""}
               />
               {editing && configured && <button type="button" aria-label={t("查看/隐藏密钥")} onClick={() => void onEye()} disabled={busy}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
             </div>
-          </label>
+            </ApiKeyEnvironmentField>
+          </div>
           <label>
             <span>{t("API 请求格式")}</span>
             <select value={values.format} onChange={(event) => update("format", event.target.value)}>
@@ -3028,7 +3035,8 @@ function ProviderSettings({
   const sources = settingsModelSources(state.models.sources);
   const source = sources.find((item) => item.id === sourceId) ?? sources[0];
   const [patch, setPatch] = useState<Record<string, unknown>>({});
-  useEffect(() => setPatch({}), [source?.id]);
+  const [keyValid, setKeyValid] = useState(true);
+  useEffect(() => { setPatch({}); setKeyValid(true); }, [source?.id]);
   if (!source) return null;
   const valueFor = (field: ConfigField) => field.key in patch ? patch[field.key] : source.config?.values[field.key];
   const sourceDescription = source.id === "standard"
@@ -3087,11 +3095,17 @@ function ProviderSettings({
                 .filter((field) => field.kind === "secret" && Boolean(source.config?.configured_secrets[field.key]) && field.key in patch && String(patch[field.key] ?? "") === "")
                 .map((field) => field.key);
               saveProvider(source, patch, clearFields);
-            }} disabled={!Object.keys(patch).length}>{t("保存")}</button></div>
+            }} disabled={!keyValid || !Object.keys(patch).length}>{t("保存")}</button></div>
             <div className="form-grid">
-              {source.config_fields.map((field) => (
-                <label key={field.key}><span>{t(field.label)}{field.optional && <small>{t("可选")}</small>}</span><ProviderFieldControl field={field} value={valueFor(field)} configured={Boolean(source.config?.configured_secrets[field.key])} update={(key, value) => setPatch((current) => ({ ...current, [key]: value }))} reveal={field.kind === "secret" ? () => revealSecret({ kind: "provider", source: source.id, field: field.key }) : undefined} /></label>
-              ))}
+              {source.config_fields.filter((field) => field.key !== "api_key_env").map((field) => {
+                const FieldContainer = field.key === "api_key" ? "div" : "label";
+                return (
+                <FieldContainer key={field.key} className={field.key === "api_key" ? "api-key-label" : undefined}><span>{t(field.label)}{field.optional && <small>{t("可选")}</small>}</span>{field.key === "api_key" ? (
+                  <ApiKeyEnvironmentField key={source.id} envName={String(patch.api_key_env ?? source.config?.values.api_key_env ?? "")} stored={Boolean(source.config?.configured_secrets.api_key)} validity={setKeyValid} update={(name) => setPatch((current) => ({ ...current, api_key: "", api_key_env: name }))}>
+                    <ProviderFieldControl field={field} value={valueFor(field)} configured={Boolean(source.config?.configured_secrets[field.key])} update={(key, value) => setPatch((current) => ({ ...current, [key]: value }))} reveal={() => revealSecret({ kind: "provider", source: source.id, field: field.key })} />
+                  </ApiKeyEnvironmentField>
+                ) : <ProviderFieldControl field={field} value={valueFor(field)} configured={Boolean(source.config?.configured_secrets[field.key])} update={(key, value) => setPatch((current) => ({ ...current, [key]: value }))} reveal={field.kind === "secret" ? () => revealSecret({ kind: "provider", source: source.id, field: field.key }) : undefined} />}</FieldContainer>
+              ); })}
             </div>
           </div>
         )}
@@ -3558,6 +3572,7 @@ function standardModelDraft(model?: ModelRecord | null): Record<string, unknown>
     // Carried through untouched: the form has no header editor, and dropping
     // the key here would silently erase headers on every edit.
     custom_headers: { ...(model.custom_headers ?? {}) },
+    api_key_env: model.api_key_source === "config" ? "" : model.api_key_env ?? "",
   };
 }
 
@@ -3577,11 +3592,12 @@ function StandardModelModal({
   useDialogFocus(dialogRef, close);
   const editing = target !== null;
   const [model, setModel] = useState<Record<string, unknown>>(() => standardModelDraft(target?.model));
+  const [keyValid, setKeyValid] = useState(true);
   const [visible, setVisible] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const update = (key: string, value: unknown) => setModel((current) => ({ ...current, [key]: value }));
-  const valid = Boolean(model.model && model.model_display_name && model.base_url);
+  const valid = keyValid && Boolean(model.model && model.model_display_name && model.base_url);
   const keyStored = Boolean(target?.model.api_key_configured);
   // The stored key was pulled into the field and then emptied: an explicit clear.
   const clearApiKey = editing && keyStored && revealed && String(model.api_key ?? "").trim() === "";
@@ -3615,7 +3631,7 @@ function StandardModelModal({
     <div className="modal-backdrop" onMouseDown={close}>
       <form ref={dialogRef} className="form-modal" role="dialog" aria-modal="true" aria-labelledby="standard-model-title" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); if (valid) save(model, clearApiKey); }}>
         <div className="form-modal-header"><div><h2 id="standard-model-title">{editing ? t("编辑标准模型") : t("添加标准模型")}</h2><p>{t("该模型会同时出现在 TUI、命令行和 GUI 中。")}</p></div><IconButton label={t("关闭")} onClick={close}><X size={16} /></IconButton></div>
-         <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>{t("提供者")}</span><select value={providerId} onChange={(event) => update("provider", event.target.value)}>{providerOptions.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}</select></label><label><span>{t("基础 URL")}</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>{t("请求路径")}<small>{t("可选")}</small></span><input value={String(model.endpoint ?? "")} onChange={(event) => update("endpoint", event.target.value)} placeholder="/chat/completions" /></label><label><span>{t("API 密钥")}{keyStored && <small>{t("点击眼睛查看，清空并保存即可移除")}</small>}</span><div className="field-input-wrap"><input type={visible ? "text" : "password"} value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} placeholder={keyStored ? "••••••••" : ""} />{keyStored && <button type="button" aria-label={t("查看/隐藏密钥")} onClick={() => void onEye()} disabled={busy}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}</div></label><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
+         <div className="form-grid single"><label><span>{t("模型 ID")}</span><input autoFocus value={String(model.model ?? "")} onChange={(event) => update("model", event.target.value)} placeholder={t("例如 gpt-5.4")} /></label><label><span>{t("显示名称")}</span><input value={String(model.model_display_name ?? "")} onChange={(event) => update("model_display_name", event.target.value)} placeholder={t("例如 GPT-5.4")} /></label><label><span>{t("提供者")}</span><select value={providerId} onChange={(event) => update("provider", event.target.value)}>{providerOptions.map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}</select></label><label><span>{t("基础 URL")}</span><input value={String(model.base_url ?? "")} onChange={(event) => update("base_url", event.target.value)} placeholder="https://api.example.com/v1" /></label><label><span>{t("请求路径")}<small>{t("可选")}</small></span><input value={String(model.endpoint ?? "")} onChange={(event) => update("endpoint", event.target.value)} placeholder="/chat/completions" /></label><div className="api-key-label"><span>{t("API 密钥")}{keyStored && !model.api_key_env && <small>{t("点击眼睛查看，清空并保存即可移除")}</small>}</span><ApiKeyEnvironmentField envName={String(model.api_key_env ?? "")} stored={target?.model.api_key_source === "config"} validity={setKeyValid} update={(name) => setModel((current) => ({ ...current, api_key: "", api_key_env: name }))}><div className="field-input-wrap"><input aria-label={t("API 密钥")} type={visible ? "text" : "password"} value={String(model.api_key ?? "")} onChange={(event) => update("api_key", event.target.value)} placeholder={keyStored ? "••••••••" : ""} />{keyStored && <button type="button" aria-label={t("查看/隐藏密钥")} onClick={() => void onEye()} disabled={busy}>{visible ? <EyeOff size={14} /> : <Eye size={14} />}</button>}</div></ApiKeyEnvironmentField></div><label><span>{t("上下文长度")}</span><input type="number" value={Number(model.max_context_tokens)} onChange={(event) => update("max_context_tokens", Number(event.target.value))} /></label><label className="inline-toggle"><span>{t("支持视觉")}</span><Toggle checked={Boolean(model.supports_vision)} onChange={(value) => update("supports_vision", value)} /></label></div>
         {editing && headerCount > 0 && <p className="form-modal-note">{t("standardModel.headersKept", { count: headerCount })}</p>}
         <div className="form-modal-footer"><button type="button" className="secondary-button" onClick={close}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{editing ? t("保存") : t("添加模型")}</button></div>
       </form>
@@ -6324,7 +6340,7 @@ export default function App() {
     setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
   }, [t, toast]);
 
-  const saveCustomProvider = useCallback(async (values: { name: string; base_url: string; api_key: string; format: string }, clearApiKey = false) => {
+  const saveCustomProvider = useCallback(async (values: { name: string; base_url: string; api_key: string; api_key_env: string; format: string }, clearApiKey = false) => {
     const editing = providerModal?.provider ?? null;
     try {
       const response = editing

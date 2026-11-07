@@ -9,6 +9,10 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "使用环境变量": "Use environment variable",
+  "手动输入密钥": "Enter key manually",
+  "环境变量名称": "Environment variable name",
+  "仅保存变量名，运行时读取密钥。新增环境变量后请重启 Reverie。": "Only the variable name is saved; the key is read at runtime. Restart Reverie after adding environment variables.",
   "已验证操作效果": "Effect verified",
   "已发送，尚未验证": "Delivered; not yet verified",
   "操作结果不确定": "Operation outcome uncertain",

@@ -89,6 +89,7 @@ interface CoreRequestMap {
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
   getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: ContextUsage | null }> };
   revealProviderSecret: { payload: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }; response: Envelope<"provider.secret", { value: string }> };
+  listApiKeyEnvironmentVariables: { payload: Record<string, never>; response: Envelope<"provider.environment", { names: string[] }> };
   getSubagents: { payload: EmptyPayload; response: Envelope<"subagents", { subagents: SubagentsState }> };
   getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };
   createSession: { payload: { name?: string }; response: Envelope<"session.created", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> };
@@ -121,7 +122,7 @@ interface CoreRequestMap {
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   updateStandardModel: { payload: { index: number; model: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   deleteStandardModel: { payload: { index: number }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
-  addCustomProvider: { payload: { provider: { name: string; base_url: string; api_key: string; format: string } }; response: CustomProviderEnvelope };
+  addCustomProvider: { payload: { provider: { name: string; base_url: string; api_key: string; api_key_env?: string; format: string } }; response: CustomProviderEnvelope };
   updateCustomProvider: { payload: { providerId: string; patch: Record<string, unknown>; clearFields?: string[] }; response: CustomProviderEnvelope };
   deleteCustomProvider: { payload: { providerId: string }; response: CustomProviderEnvelope };
   refreshCustomProviderModels: { payload: { providerId: string }; response: CustomProviderEnvelope };

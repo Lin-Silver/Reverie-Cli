@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import requests
 
 from .diagnostics import report_suppressed_exception
+from .api_keys import normalize_api_key_env
 from .model_catalog_cache import model_catalog_key, remember_model_catalog, remembered_model_catalog
 from .request_identity import apply_reverie_client_identity
 
@@ -344,6 +345,7 @@ def default_custom_provider(
     name: str = "",
     base_url: str = "",
     api_key: str = "",
+    api_key_env: str = "",
     provider_format: str = "openai-chat",
 ) -> Dict[str, Any]:
     """Build a provider record from the four user-supplied inputs."""
@@ -354,7 +356,7 @@ def default_custom_provider(
         "name": display_name or resolved_id,
         "base_url": resolve_custom_provider_base_url(base_url),
         "api_key": str(api_key or "").strip(),
-        "api_key_env": "",
+        "api_key_env": normalize_api_key_env(api_key_env),
         "format": normalize_custom_provider_format(provider_format),
         "enabled": True,
         "selected_model_id": "",

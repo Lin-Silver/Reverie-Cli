@@ -997,6 +997,10 @@ class ReverieSdkBridge:
                 "selected": _json_safe(selected),
                 "imageModels": self.image_model_sources_payload(),
             }
+        if action == "listApiKeyEnvironmentVariables":
+            from .api_keys import api_key_environment_names
+            return {"id": request_id, "type": "provider.environment", "names": api_key_environment_names()}
+
         if action == "revealProviderSecret":
             from .desktop_catalog import reveal_provider_secret
 

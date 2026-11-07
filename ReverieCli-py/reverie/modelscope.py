@@ -245,6 +245,9 @@ def resolve_modelscope_api_key(modelscope_config: Any) -> str:
     key = str(cfg.get("api_key", "") or "").strip()
     if key:
         return key
+    env_name = str(cfg.get("api_key_env", "") or "").strip()
+    if env_name:
+        return str(os.getenv(env_name, "") or "").strip()
     for env_name in ("MODELSCOPE_API_KEY", "MODELSCOPE_TOKEN", "MODELSCOPE_ACCESS_TOKEN"):
         value = str(os.getenv(env_name, "") or "").strip()
         if value:

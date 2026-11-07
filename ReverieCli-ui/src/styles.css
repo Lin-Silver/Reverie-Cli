@@ -581,6 +581,11 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; }.form-grid.single { grid-template-columns: 1fr; }
 .form-grid label { min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: var(--font-caption); }.form-grid label > span { display: flex; gap: 5px; }.form-grid label small { color: var(--dim); }
 .field-input-wrap { position: relative; }.field-input-wrap input { padding-right: 32px; }.field-input-wrap button { position: absolute; right: 3px; top: 3px; width: 25px; height: 24px; display: grid; place-items: center; border: 0; background: transparent; color: var(--dim); cursor: pointer; }
+.api-key-environment-field { display: grid; gap: 8px; min-width: 0; }
+.api-key-label { min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: var(--font-caption); }
+.api-key-label > span { display: flex; gap: 5px; }
+.api-key-environment-field > button { justify-self: start; }
+.api-key-environment-field > small { color: var(--dim); line-height: 1.5; }
 .section-heading-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
 .custom-provider-card { margin-top: 13px; padding: 13px; border: 1px solid var(--border); border-radius: 10px; background: #11151b; }
 .custom-provider-card.active { border-color: var(--accent-2); }

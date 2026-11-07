@@ -153,6 +153,9 @@ def resolve_aihubmix_api_key(aihubmix_config: Any) -> str:
     key = str(cfg.get("api_key", "") or "").strip()
     if key:
         return key
+    env_name = str(cfg.get("api_key_env", "") or "").strip()
+    if env_name:
+        return str(os.getenv(env_name, "") or "").strip()
     for env_name in ("AIHUBMIX_API_KEY", "AIHUBMIX_TOKEN"):
         value = str(os.getenv(env_name, "") or "").strip()
         if value:

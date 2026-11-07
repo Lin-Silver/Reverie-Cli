@@ -20,6 +20,7 @@ import re
 import concurrent.futures
 
 from ..diagnostics import report_suppressed_exception
+from ..api_keys import api_key_settings
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -4757,7 +4758,7 @@ class ReverieInterface:
             )
             
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key (or env:VARIABLE_NAME)",
                 password=True
             )
             
@@ -4795,7 +4796,7 @@ class ReverieInterface:
                 model=model_name,
                 model_display_name=display_name,
                 base_url=base_url,
-                api_key=api_key,
+                **api_key_settings(api_key),
                 max_context_tokens=max_tokens_int,
                 provider=provider,
                 supports_vision=supports_vision,

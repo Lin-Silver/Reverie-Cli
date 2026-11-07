@@ -2746,11 +2746,50 @@ describe("desktop GUI interactions", () => {
     await user.click(within(dialog).getByRole("button", { name: "添加 Provider" }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("addCustomProvider", {
-      provider: { name: "xkiro", base_url: "https://api.xkiro.invalid/v1", api_key: "sk-live-secret", format: "anthropic" },
+      provider: { name: "xkiro", base_url: "https://api.xkiro.invalid/v1", api_key: "sk-live-secret", api_key_env: "", format: "anthropic" },
     }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "添加 Provider" })).toBeNull());
     expect(await screen.findByText("Anthropic 消息")).toBeTruthy();
     expect(document.body.textContent).not.toContain("sk-live-secret");
+  });
+
+  it("adds a provider with an environment reference and no literal key", async () => {
+    const { request } = installDesktopApi({ customProviders: [] });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    await openCustomProviderPage(user);
+    await user.click(screen.getByRole("button", { name: "添加 Provider" }));
+    const dialog = await screen.findByRole("dialog", { name: "添加 Provider" });
+    await user.type(within(dialog).getByLabelText("Provider 名称"), "env-relay");
+    await user.type(within(dialog).getByLabelText("基础 URL"), "https://relay.invalid/v1");
+    await user.click(within(dialog).getByRole("button", { name: "使用环境变量" }));
+    expect((within(dialog).getByRole("button", { name: "添加 Provider" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.type(within(dialog).getByLabelText("环境变量名称"), "RELAY_API_KEY");
+    await user.click(within(dialog).getByRole("button", { name: "添加 Provider" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("addCustomProvider", {
+      provider: { name: "env-relay", base_url: "https://relay.invalid/v1", api_key: "", api_key_env: "RELAY_API_KEY", format: "openai-chat" },
+    }));
+  });
+
+  it("switches a standard model to an environment reference", async () => {
+    const { request } = installDesktopApi({ standardModels: [{
+      model: "gpt-test", model_display_name: "Test", provider: "openai-chat", base_url: "https://api.invalid/v1", api_key: "old-key",
+    }] });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("button", { name: "命令面板" });
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "模型与提供商" }));
+    await user.click(await screen.findByRole("button", { name: /Manual Model/ }));
+    await user.click(screen.getByRole("button", { name: "编辑标准模型" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑标准模型" });
+    await user.click(within(dialog).getByRole("button", { name: "使用环境变量" }));
+    await user.type(within(dialog).getByLabelText("环境变量名称"), "OPENAI_API_KEY");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("updateStandardModel", {
+      index: 0, model: expect.objectContaining({ api_key: "", api_key_env: "OPENAI_API_KEY" }),
+    }));
   });
 
   it("shows every custom provider with a masked key and tests availability in one pass", async () => {
@@ -3240,6 +3279,7 @@ describe("desktop GUI interactions", () => {
       model: {
         model: "gpt-5.4",
         model_display_name: "GPT-5.4 Turbo",
+        api_key_env: "",
         provider: "openai-chat",
         base_url: "https://api.example.com/v1",
         endpoint: "/chat/completions",

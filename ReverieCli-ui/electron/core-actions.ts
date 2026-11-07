@@ -28,6 +28,7 @@ export const CORE_RESPONSE_CONTRACT = {
   getContextStatus: { type: "context.status", required: ["context_engine"] },
   getContextUsage: { type: "context.usage", required: ["usage"] },
   revealProviderSecret: { type: "provider.secret", required: ["value"] },
+  listApiKeyEnvironmentVariables: { type: "provider.environment", required: ["names"] },
   getSubagents: { type: "subagents", required: ["subagents"] },
   getSubagentRunLog: { type: "subagent.log", required: ["run_id", "log"] },
   createSession: { type: "session.created", required: ["session", "sessions"] },

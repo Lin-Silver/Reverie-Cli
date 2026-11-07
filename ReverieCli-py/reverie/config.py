@@ -9,7 +9,7 @@ Handles loading and saving configuration including:
 
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 import json
 import os
@@ -19,6 +19,7 @@ import re
 import logging
 
 from .diagnostics import report_suppressed_exception
+from .api_keys import normalize_api_key_env
 from .security_utils import write_json_secure
 from .proxy import normalize_proxy_url
 from .security_policy import (
@@ -851,6 +852,10 @@ class ModelConfig:
     thinking_mode: Optional[str] = None  # Legacy/runtime-only provider option; not persisted for standard models
     endpoint: str = ""  # Optional custom endpoint path/url for OpenAI-compatible providers
     custom_headers: Dict[str, str] = field(default_factory=dict)  # Optional request headers
+    api_key_env: str = ""
+
+    def resolve_api_key(self) -> str:
+        return str(self.api_key or "").strip() or str(os.getenv(self.api_key_env, "") or "").strip()
     
     def to_dict(self) -> dict:
         payload = {
@@ -867,6 +872,8 @@ class ModelConfig:
         endpoint = str(self.endpoint or "").strip()
         if endpoint:
             payload["endpoint"] = endpoint
+        if self.api_key_env:
+            payload["api_key_env"] = self.api_key_env
         return payload
     
     @classmethod
@@ -887,6 +894,7 @@ class ModelConfig:
             ),
             base_url=data.get('base_url', ''),
             api_key=data.get('api_key', ''),
+            api_key_env=normalize_api_key_env(data.get('api_key_env')),
             max_context_tokens=data.get('max_context_tokens'),
             provider=normalize_model_provider(data.get('provider', 'openai-chat')),
             supports_vision=bool(data.get('supports_vision', data.get('vision', False))),
@@ -1045,7 +1053,8 @@ class Config:
             return ModelConfig.from_dict(runtime_custom_model) if runtime_custom_model else None
 
         if 0 <= self.active_model_index < len(self.models):
-            return self.models[self.active_model_index]
+            model = self.models[self.active_model_index]
+            return replace(model, api_key=model.resolve_api_key()) if model.api_key_env else model
         return None
     
     def to_dict(self) -> dict:

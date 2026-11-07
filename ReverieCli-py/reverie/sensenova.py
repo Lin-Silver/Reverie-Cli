@@ -386,6 +386,9 @@ def resolve_sensenova_api_key(sensenova_config: Any) -> str:
     key = str(cfg.get("api_key", "") or "").strip()
     if key:
         return key
+    env_name = str(cfg.get("api_key_env", "") or "").strip()
+    if env_name:
+        return str(os.getenv(env_name, "") or "").strip()
     return str(os.getenv("SENSENOVA_API_KEY") or os.getenv("SENSE_API_KEY") or "").strip()
 
 

@@ -20,6 +20,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from ..diagnostics import report_suppressed_exception
+from ..api_keys import api_key_settings
 from rich.align import Align
 from rich.columns import Columns
 from rich.padding import Padding
@@ -4673,7 +4674,7 @@ class CommandHandler:
                     f"[{self.theme.TEXT_DIM}]Agnes image generation uses the shared top-level Agnes API key. Get one from {AGNES_API_KEY_HINT_URL} and paste it here to continue.[/{self.theme.TEXT_DIM}]"
                 )
                 api_key = Prompt.ask(
-                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key",
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key (or env:VARIABLE_NAME)",
                     password=True,
                 ).strip()
                 if not api_key:
@@ -4681,7 +4682,7 @@ class CommandHandler:
                         f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agnes API key is required to activate this TTI source.[/{self.theme.CORAL_SOFT}]"
                     )
                     return True
-                agnes_cfg["api_key"] = api_key
+                agnes_cfg.update(api_key_settings(api_key))
                 config.agnes = normalize_agnes_config(agnes_cfg)
 
         if candidate == "sensenova":
@@ -4694,7 +4695,7 @@ class CommandHandler:
                     f"[{self.theme.TEXT_DIM}]SenseNova image generation uses the shared top-level SenseNova API key.[/{self.theme.TEXT_DIM}]"
                 )
                 api_key = Prompt.ask(
-                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key",
+                    f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key (or env:VARIABLE_NAME)",
                     password=True,
                 ).strip()
                 if not api_key:
@@ -4702,7 +4703,7 @@ class CommandHandler:
                         f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} SenseNova API key is required to activate this TTI source.[/{self.theme.CORAL_SOFT}]"
                     )
                     return True
-                sensenova_cfg["api_key"] = api_key
+                sensenova_cfg.update(api_key_settings(api_key))
                 config.sensenova = normalize_sensenova_config(sensenova_cfg)
 
         tti_cfg["active_source"] = candidate
@@ -7520,7 +7521,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]The NVIDIA source requires an API key. Get an API key from {NVIDIA_API_KEY_HINT_URL} and paste it here to continue.[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key (or env:VARIABLE_NAME)",
                 password=True,
             ).strip()
             if not api_key:
@@ -7528,7 +7529,8 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} NVIDIA API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
-        nvidia_cfg["api_key"] = api_key
+        if not resolve_nvidia_api_key(nvidia_cfg):
+            nvidia_cfg.update(api_key_settings(api_key))
 
         selected = resolve_nvidia_selected_model(nvidia_cfg)
         if not selected:
@@ -8286,14 +8288,14 @@ class CommandHandler:
             self.console.print(f"[{self.theme.TEXT_DIM}]OpenCode Zen key page: {OPENCODE_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]")
             self.console.print(f"[{self.theme.TEXT_DIM}]Current Opencode key: {mask_secret(current)}[/{self.theme.TEXT_DIM}]")
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Opencode API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Opencode API Key (or env:VARIABLE_NAME)",
                 password=True,
                 default="",
             ).strip()
         if not api_key:
             self.console.print(f"[{self.theme.TEXT_DIM}]Opencode key unchanged.[/{self.theme.TEXT_DIM}]")
             return True
-        opencode_cfg["api_key"] = api_key
+        opencode_cfg.update(api_key_settings(api_key))
         config.opencode = normalize_opencode_config(opencode_cfg)
         config_manager.save(config)
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} Opencode API key saved.[/{self.theme.MINT_VIBRANT}]")
@@ -8437,7 +8439,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Get your AIhubMix API key here: {AIHUBMIX_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] AIhubMix API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] AIhubMix API Key (or env:VARIABLE_NAME)",
                 password=True,
             ).strip()
             if not api_key:
@@ -8445,7 +8447,8 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} AIhubMix API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
-        aihubmix_cfg["api_key"] = api_key
+        if not resolve_aihubmix_api_key(aihubmix_cfg):
+            aihubmix_cfg.update(api_key_settings(api_key))
         config.aihubmix = normalize_aihubmix_config(aihubmix_cfg)
         config.active_model_source = "aihubmix"
         return True
@@ -8516,7 +8519,7 @@ class CommandHandler:
             f"[{self.theme.TEXT_DIM}]Get your AIhubMix API key here: {AIHUBMIX_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
         )
         api_key = Prompt.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] AIhubMix API Key",
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] AIhubMix API Key (or env:VARIABLE_NAME)",
             password=True,
         ).strip()
         if not api_key:
@@ -8525,7 +8528,7 @@ class CommandHandler:
             )
             return True
 
-        aihubmix_cfg["api_key"] = api_key
+        aihubmix_cfg.update(api_key_settings(api_key))
         config.aihubmix = normalize_aihubmix_config(aihubmix_cfg)
         config_manager.save(config)
 
@@ -8674,7 +8677,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Get your Agnes API key here: {AGNES_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key (or env:VARIABLE_NAME)",
                 password=True,
             ).strip()
             if not api_key:
@@ -8682,7 +8685,8 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Agnes API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
-        agnes_cfg["api_key"] = api_key
+        if not resolve_agnes_api_key(agnes_cfg):
+            agnes_cfg.update(api_key_settings(api_key))
         config.agnes = normalize_agnes_config(agnes_cfg)
         config.active_model_source = "agnes"
         return True
@@ -8759,7 +8763,7 @@ class CommandHandler:
             f"[{self.theme.TEXT_DIM}]Get your Agnes API key here: {AGNES_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
         )
         api_key = Prompt.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key",
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] Agnes API Key (or env:VARIABLE_NAME)",
             password=True,
         ).strip()
         if not api_key:
@@ -8768,7 +8772,7 @@ class CommandHandler:
             )
             return True
 
-        agnes_cfg["api_key"] = api_key
+        agnes_cfg.update(api_key_settings(api_key))
         config.agnes = normalize_agnes_config(agnes_cfg)
         config_manager.save(config)
 
@@ -9047,7 +9051,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Set SENSENOVA_API_KEY, SENSE_API_KEY, or paste a SenseNova API key here.[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key (or env:VARIABLE_NAME)",
                 password=True,
             ).strip()
             if not api_key:
@@ -9055,7 +9059,8 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} SenseNova API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
-        sensenova_cfg["api_key"] = api_key
+        if not resolve_sensenova_api_key(sensenova_cfg):
+            sensenova_cfg.update(api_key_settings(api_key))
         config.sensenova = normalize_sensenova_config(sensenova_cfg)
         config.active_model_source = "sensenova"
         return True
@@ -9127,14 +9132,14 @@ class CommandHandler:
         current = resolve_sensenova_api_key(sensenova_cfg)
         self.console.print(f"[{self.theme.TEXT_DIM}]Current SenseNova key: {mask_secret(current)}[/{self.theme.TEXT_DIM}]")
         api_key = Prompt.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key",
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] SenseNova API Key (or env:VARIABLE_NAME)",
             password=True,
             default="",
         ).strip()
         if not api_key:
             self.console.print(f"[{self.theme.TEXT_DIM}]SenseNova key unchanged.[/{self.theme.TEXT_DIM}]")
             return True
-        sensenova_cfg["api_key"] = api_key
+        sensenova_cfg.update(api_key_settings(api_key))
         config.sensenova = normalize_sensenova_config(sensenova_cfg)
         config_manager.save(config)
         self.console.print(f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} SenseNova API key saved.[/{self.theme.MINT_VIBRANT}]")
@@ -9319,7 +9324,7 @@ class CommandHandler:
                 f"[{self.theme.TEXT_DIM}]Get your ModelScope token here: {MODELSCOPE_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
             )
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] ModelScope API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] ModelScope API Key (or env:VARIABLE_NAME)",
                 password=True,
             ).strip()
             if not api_key:
@@ -9327,7 +9332,8 @@ class CommandHandler:
                     f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} ModelScope API key is required to activate this source.[/{self.theme.CORAL_SOFT}]"
                 )
                 return False
-        modelscope_cfg["api_key"] = api_key
+        if not resolve_modelscope_api_key(modelscope_cfg):
+            modelscope_cfg.update(api_key_settings(api_key))
         config.modelscope = normalize_modelscope_config(modelscope_cfg)
         config.active_model_source = "modelscope"
         return True
@@ -9397,7 +9403,7 @@ class CommandHandler:
             f"[{self.theme.TEXT_DIM}]Get your ModelScope token here: {MODELSCOPE_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
         )
         api_key = Prompt.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] ModelScope API Key",
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] ModelScope API Key (or env:VARIABLE_NAME)",
             password=True,
         ).strip()
         if not api_key:
@@ -9406,7 +9412,7 @@ class CommandHandler:
             )
             return True
 
-        modelscope_cfg["api_key"] = api_key
+        modelscope_cfg.update(api_key_settings(api_key))
         config.modelscope = normalize_modelscope_config(modelscope_cfg)
         config_manager.save(config)
 
@@ -9606,7 +9612,7 @@ class CommandHandler:
             f"[{self.theme.TEXT_DIM}]Get your NVIDIA API key here: {NVIDIA_API_KEY_HINT_URL}[/{self.theme.TEXT_DIM}]"
         )
         api_key = Prompt.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key",
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] NVIDIA API Key (or env:VARIABLE_NAME)",
             password=True,
         ).strip()
         if not api_key:
@@ -9615,7 +9621,7 @@ class CommandHandler:
             )
             return True
 
-        nvidia_cfg["api_key"] = api_key
+        nvidia_cfg.update(api_key_settings(api_key))
         config.nvidia = normalize_nvidia_config(nvidia_cfg)
         config_manager.save(config)
 
@@ -10194,7 +10200,7 @@ class CommandHandler:
 
         # 3. API key
         api_key = Prompt.ask(
-            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key",
+            f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key (or env:VARIABLE_NAME)",
             password=True,
         ).strip()
         if not api_key:
@@ -10212,7 +10218,7 @@ class CommandHandler:
             provider_id=provider_id,
             name=name,
             base_url=base_url,
-            api_key=api_key,
+            **api_key_settings(api_key),
             provider_format=provider_format,
         )
         self.console.print()
@@ -10818,6 +10824,22 @@ class CommandHandler:
 
     def _cmd_provider_key(self, row: Any, value: str) -> bool:
         """Replace the stored API key for one provider."""
+        value = str(value or "").strip()
+        if value == "--env" or value.startswith("--env "):
+            value = "env:" + value[5:].strip()
+        if row.kind == "builtin" and value.lower().startswith("env:"):
+            if row.source == "webgemini":
+                return self._provider_builtin_only(row, "API key environment variables")
+            config_manager = self.app.get("config_manager")
+            if not config_manager:
+                return True
+            config = config_manager.load()
+            provider_config = dict(getattr(config, row.source, {}) or {})
+            provider_config.update(api_key_settings(value))
+            setattr(config, row.source, provider_config)
+            self._save_provider_config(config, config_manager)
+            self.console.print(f"API key environment variable saved for {escape(row.name)}.")
+            return True
         if row.kind == "builtin":
             delegate = self._provider_builtin_delegate(row.source, "key")
             if delegate is None:
@@ -10833,7 +10855,7 @@ class CommandHandler:
         api_key = str(value or "").strip()
         if not api_key:
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] {escape(row.name)} API Key",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] {escape(row.name)} API Key (or env:VARIABLE_NAME)",
                 password=True,
             ).strip()
         if not api_key:
@@ -10842,7 +10864,7 @@ class CommandHandler:
             )
             return True
 
-        record["api_key"] = api_key
+        record.update(api_key_settings(api_key))
         config.custom_providers = upsert_custom_provider(config.custom_providers, record)
         self._save_provider_config(config, config_manager, mirror_custom=True)
         self.console.print(
@@ -12957,7 +12979,7 @@ class CommandHandler:
             )
             
             api_key = Prompt.ask(
-                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key (hidden)",
+                f"[{self.theme.BLUE_SOFT}]{self.deco.CHEVRON_RIGHT}[/{self.theme.BLUE_SOFT}] API Key (or env:VARIABLE_NAME)",
                 password=True
             )
             
@@ -12991,7 +13013,7 @@ class CommandHandler:
                 model=model_name,
                 model_display_name=display_name,
                 base_url=base_url,
-                api_key=api_key,
+                **api_key_settings(api_key),
                 max_context_tokens=max_tokens,
                 provider=provider,
                 supports_vision=supports_vision,
@@ -13004,7 +13026,7 @@ class CommandHandler:
                          from openai import OpenAI
                          client = OpenAI(
                              base_url=base_url,
-                             api_key=api_key
+                             api_key=new_model.resolve_api_key()
                          )
                          # Try to list models to verify auth and availability
                          models = client.models.list()

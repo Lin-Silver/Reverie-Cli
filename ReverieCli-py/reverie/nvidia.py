@@ -726,6 +726,9 @@ def resolve_nvidia_api_key(nvidia_config: Any) -> str:
     key = str(cfg.get("api_key", "") or "").strip()
     if key:
         return key
+    env_name = str(cfg.get("api_key_env", "") or "").strip()
+    if env_name:
+        return str(os.getenv(env_name, "") or "").strip()
     return str(os.getenv("NVIDIA_API_KEY", "") or "").strip()
 
 

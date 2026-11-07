@@ -82,6 +82,8 @@ Every stored provider also extends command completion: once `xkiro` exists, `/pr
 
 The Desktop app exposes the same surface under **Settings → 模型与提供商 → Custom Provider**: add, edit, enable/disable, delete, refresh the live catalog, test availability, pick a model, and confirm a model's context limit.
 
+API keys can also come from environment variables. In Desktop provider settings and the add/edit model dialogs, click **使用环境变量 / Use environment variable**, then select or enter a variable name such as `OPENAI_API_KEY`. The terminal setup and `/model add` or `/provider add` prompts accept `env:OPENAI_API_KEY`; an existing provider can use `/provider <name> key --env OPENAI_API_KEY`. Reverie saves `api_key_env` and reads the value at runtime, clearing the saved key when you switch to a variable reference. The variable must be available to the Reverie process; restart Reverie after adding or changing variables in your system settings. Selecting **手动输入密钥 / Enter key manually** restores direct key entry.
+
 ### Debug output
 
 Raw internal stream frames (`[[REVERIE_EVENT]]{...}`) are protocol details that the display turns into activity lines. They are only printed when debug mode is on — start with `reverie --debug`, or set `REVERIE_DEBUG=1`. Debug mode only widens what Reverie prints; it never changes what is sent to a provider or written to disk.

@@ -3,9 +3,9 @@
   "id": "blender",
   "display_name": "Blender Portable Plugin",
   "runtime_family": "dcc",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "delivery": "python-exe",
-  "description": "Self-contained Reverie CLI plugin wrapper that embeds Blender Portable, deploys it into the plugin runtime folder, launches Blender, runs background scripts, and manages plugin-local MMD Tools import support.",
+  "description": "Portable Blender plugin with automatic RuiC Skill loading for source-preserving browser/OBS 2D avatars, local pose synchronization, illustration cards, and reference-guided humanoid authoring.",
   "entry": {
     "preferred": {
       "windows": "dist/reverie-blender.exe",
@@ -41,7 +41,7 @@
         "build.bat"
       ],
       "default": [
-        "python -m PyInstaller --noconfirm --clean --onefile --name reverie-blender plugin.py"
+        "python build_plugin.py"
       ]
     }
   },
@@ -58,6 +58,13 @@
     "vmd",
     "vpd",
     "addon-management",
-    "scene-inspection"
+    "scene-inspection",
+    "ruic-card-skill",
+    "2d-avatar",
+    "obs-avatar",
+    "illustration-to-3d",
+    "holographic-cards",
+    "2.5d-avatar",
+    "humanoid-avatar-workflow"
   ]
 }

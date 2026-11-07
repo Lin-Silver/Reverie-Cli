@@ -149,7 +149,7 @@ Attach images and videos directly in conversations:
 
 Reverie-Gamer mode currently includes a work-in-progress modeling toolchain:
 
-- **Blender integration**: Blender plugin-assisted authoring workflow — generate scripts, run in background mode, export `.blend`/`.glb`/`.gltf`, render previews
+- **Blender integration**: Blender plugin-assisted authoring workflow — generate scripts, run in background mode, export `.blend`/`.glb`/`.gltf`, render previews; enabling the plugin automatically supplies RuiC Card Skill for source-preserving browser/OBS 2D avatars, layered illustration-to-3D-style cards and reference-guided humanoid authoring
 - **Blockbench `.bbmodel`**: Headless validation and export without launching Blockbench
 - **Ashfox MCP**: Live Blockbench automation via the Ashfox plugin (when running)
 - **Model registry sync**: Auto-generate `model_registry.yaml` from `assets/models/` directories
@@ -196,7 +196,7 @@ Reverie-Cli/
 │   ├── generate_image.py
 │   ├── pack_embedded.py
 │   └── ...
-├── plugins/                   ← Optional runtime plugins (release assets: Blender + game_models; source plugins: Ren'Py SDK + Live2D)
+├── plugins/                   ← Four official runtime plugins: Blender, game_models, Ren'Py SDK, Live2D
 │   ├── blender/
 │   └── game_models/
 ├── ReverieCli-py/             ← Python source (primary runtime)

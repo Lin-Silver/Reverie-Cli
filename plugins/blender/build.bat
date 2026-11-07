@@ -2,7 +2,6 @@
 setlocal
 cd /d "%~dp0"
 
-set "PLUGIN_NAME=reverie-blender"
 set "ARCHIVE_NAME=blender-5.1.1-windows-x64.zip"
 set "ARCHIVE_SOURCE="
 set "PYTHON_EXE=python"
@@ -32,12 +31,6 @@ if not defined ARCHIVE_SOURCE (
   exit /b 1
 )
 
-"%PYTHON_EXE%" -m PyInstaller ^
-  --noconfirm ^
-  --onefile ^
-  --name "%PLUGIN_NAME%" ^
-  --specpath build ^
-  --add-data "%ARCHIVE_SOURCE%;." ^
-  plugin.py
+"%PYTHON_EXE%" build_plugin.py --archive "%ARCHIVE_SOURCE%"
 
 endlocal & exit /b %ERRORLEVEL%

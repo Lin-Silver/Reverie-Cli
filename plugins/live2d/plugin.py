@@ -14,7 +14,7 @@ import zipfile
 
 
 PLUGIN_ID = "live2d"
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.2.1"
 LIVE2D_MCP_HINT = "https://github.com/Mitscherlich/live2d-mcp"
 LIVE2D_DOCS = "https://docs.live2d.com/"
 RENPY_LIVE2D_DOCS = "https://www.renpy.org/doc/html/live2d.html"
@@ -24,7 +24,7 @@ SDK_CORE_MEMBER = "CubismSdkForWeb-5-r.5/Core/live2dcubismcore.min.js"
 
 
 def _write_json(payload: dict[str, Any]) -> int:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True))
     sys.stdout.flush()
     return 0
 

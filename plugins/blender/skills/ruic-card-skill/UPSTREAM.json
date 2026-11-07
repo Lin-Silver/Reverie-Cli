@@ -1,0 +1,60 @@
+{
+  "repository": "https://github.com/HRuiCcc/RuiC-card-skill",
+  "commit": "8f31e323ccab637671ee5553772873d448868dd4",
+  "license": "MIT",
+  "upstream_sha256": {
+    "LICENSE": "5b008ac094575a28402ea10b7edbe750772be52868c05d29b8fbe2ee75205ec2",
+    "SKILL.md": "db096475e6234b9eb975dc9d010d92c1164c280a5c45b1678df5ea3bcf54c442",
+    "agents/openai.yaml": "8ce4872df26cd6f42e85a73b64c0656b8fd81eca764b6c28b26fd839f98c9aa2",
+    "assets/web-template/app.bundle.js": "9fe02ac080c14700d011cfc7ee0d79d5833a195e3128e7938250882e9253a3bb",
+    "assets/web-template/app.js": "663170ac5959f9e3457351d0275a4e73c3d13bbd2509b982577d4cd6dbcac939",
+    "assets/web-template/bundle.sh": "c4384e23490a8cc3a0a400b9b5c771c63815a98b61f22ba84b2130102ad49966",
+    "assets/web-template/card-config.json": "135a07051a844c31bd904d530cd7eafec20d8d3a617b70dc53685571587ce623",
+    "assets/web-template/icons.data.js": "5dbb9392b2a8cfaad6ee29a4947ad349ba60b5636c041794540d01a58f66ff96",
+    "assets/web-template/index.html": "cdd1721c1286c27849071b2cbc5c53219e9148e0dcca03c99d130f56066ed2c5",
+    "assets/web-template/package-lock.json": "dbbba0f91e91f0dac4ca3e7179558c0d45c9438d4c503267a6d9219f3f87c851",
+    "assets/web-template/package.json": "0f629e6a1bdbff51ac14ebd4f684fa144692df73ce51fc5bff994fdf709d5f0b",
+    "assets/web-template/server.mjs": "a0d974bc9a7d44264ecf190ff5388fbbc3d89afeb1155141b2f8432c5e3b7f09",
+    "assets/web-template/style.css": "e49e3f51cd8795e842540695038ada34d055aa95dac9584259d6705068cd4f89",
+    "references/art-direction.md": "dbde6aae8420d8e848b70d6d07ea32ce44da0d88dafaec0cf3f6daeccd933683",
+    "references/config.example.json": "a3adcebadb01bc793a48da91d0d75f8c01e05ad2c4fd0557eb166eb0ff040bf4",
+    "references/verification.md": "fc15d2e7c2b64db6240c5937b593d851799bce6ba5a8557d780b95478b054e00",
+    "scripts/build_card.py": "38f7a6630a774d22f9d4e4d6abe30631b1baf21d2f669088b7b37d30a447669c",
+    "scripts/checkerboard_to_alpha.py": "bd6267c083fd951bca4db51a5e3b85203561f97b7f996f0bdc02405ca5f334ee",
+    "scripts/ensure_blender.py": "7b79f7f7f1526998f04a234c2c3fb2aba7a5e95c05cbe46a10126c53b025fefd",
+    "scripts/export_web.py": "6c184e16a380e7bf46dad3e1c01b088c4b44427772e939d8095f98749030930d",
+    "scripts/generate_typography.py": "41f340efc13770c615ad6ec7dd9b0d785ebd9e51483fcea48962b24d8779f3f4",
+    "scripts/package_skill.py": "0cb67ed442327c3549eb33b45c3baa6e96875ebd50191e3ad90c9a17315a8619",
+    "scripts/run_pipeline.py": "5c2237d1e920a66d04f234e668f45fcc05f848e50a4f820b13514e08ce889cb9",
+    "scripts/test_checkerboard.py": "9d56db01faedd8713441db990074c50c040b0b1d1a6bfcdc82f6f4894f28bc78",
+    "scripts/validate_assets.py": "2a5f29c6286130a0070afb9639862306b25ad6ddde7b3fbe202371f378a9d91f",
+    "scripts/verify_web.mjs": "6965038f0a0b6474c8b15b6349ee12c8bad0283fbe858005b48957f9c33c0db5"
+  },
+  "adapted_files": [
+    "SKILL.md",
+    "scripts/ensure_blender.py",
+    "scripts/run_pipeline.py",
+    "scripts/build_card.py"
+  ],
+  "reverie_resources": [
+    "references/avatar-workflows.md",
+    "references/avatar-config.example.json",
+    "scripts/run_avatar_pipeline.py",
+    "scripts/build_avatar.py",
+    "assets/avatar-template/index.html",
+    "assets/avatar-template/avatar.css",
+    "assets/avatar-template/avatar.js",
+    "assets/avatar-template/server.mjs"
+  ],
+  "reverie_adaptation": {
+    "storage": "Blender and user configuration remain plugin-local; npm/bun caches remain output-project-local",
+    "discovery": "enabled/trusted -RC Skill with persistent resources",
+    "avatar_routes": [
+      "mesh-2D-browser-OBS",
+      "layered-2.5D",
+      "reference-guided-humanoid-3D"
+    ],
+    "blender_api": "5.0+ compositor node groups, Group Output, and Glare input sockets; 4.5 branch retained",
+    "api_source": "https://developer.blender.org/docs/release_notes/5.0/migration/compositor_migration/"
+  }
+}

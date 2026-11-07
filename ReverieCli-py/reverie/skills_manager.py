@@ -478,6 +478,14 @@ class SkillsManager:
             virtual_path = install_dir / "__plugin_skills__" / _normalize_skill_key(name) / "SKILL.md"
             source_uri = f"plugin://{plugin_id}/skills/{_normalize_skill_key(name)}"
             metadata = definition.get("metadata")
+            resource_dir = str(metadata.get("resource_dir") or "").strip() if isinstance(metadata, dict) else ""
+            if resource_dir:
+                try:
+                    candidate = (install_dir / resource_dir).resolve()
+                    if candidate.is_relative_to(install_dir.resolve()) and (candidate / "SKILL.md").is_file():
+                        virtual_path = candidate / "SKILL.md"
+                except (OSError, ValueError, RuntimeError):
+                    pass
             normalized_name = _normalize_skill_key(name)
             root = SkillRoot("plugin", f"plugin:{plugin_id}", install_dir, -5)
             records.append(

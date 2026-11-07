@@ -2642,9 +2642,12 @@ def export_outputs():
         ensure_parent(OUTPUTS["runtime"])
         gltf_format = "GLB" if export_format == "glb" else "GLTF_SEPARATE"
         bpy.ops.object.select_all(action="DESELECT")
+        export_visibility = []
         for name in export_names:
             obj = bpy.data.objects.get(name)
             if obj is not None:
+                export_visibility.append((obj, obj.hide_get()))
+                obj.hide_set(False)
                 obj.select_set(True)
         if export_names:
             bpy.context.view_layer.objects.active = bpy.data.objects.get(export_names[0])
@@ -2652,7 +2655,7 @@ def export_outputs():
             bpy.ops.export_scene.gltf(
                 filepath=str(OUTPUTS["runtime"]),
                 export_format=gltf_format,
-                export_apply=True,
+                export_apply=SPEC["preset"] != "production_character_pipeline",
                 use_selection=bool(export_names),
             )
         except TypeError:
@@ -2660,11 +2663,13 @@ def export_outputs():
                 bpy.ops.export_scene.gltf(
                     filepath=str(OUTPUTS["runtime"]),
                     export_format=gltf_format,
-                    export_apply=True,
+                    export_apply=SPEC["preset"] != "production_character_pipeline",
                     export_selected=bool(export_names),
                 )
             except TypeError:
                 bpy.ops.export_scene.gltf(filepath=str(OUTPUTS["runtime"]))
+        for obj, hidden in export_visibility:
+            obj.hide_set(hidden)
     if RENDER_PREVIEW:
         ensure_parent(OUTPUTS["preview"])
         bpy.context.scene.render.filepath = str(OUTPUTS["preview"])

@@ -21,6 +21,8 @@ references/
 !/ReverieCli-py/reverie/builtin_skills/*/references/**
 !/ReverieCli-py/reverie/builtin_skills/reverse-skill/upstream/**/references/
 !/ReverieCli-py/reverie/builtin_skills/reverse-skill/upstream/**/references/**
+!/plugins/blender/skills/*/references/
+!/plugins/blender/skills/*/references/**
 .pytest_cache/
 tests/
 !tests/

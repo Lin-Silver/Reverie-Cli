@@ -18,7 +18,8 @@ import time
 import zipfile
 
 
-PLUGIN_VERSION = "0.5.0"
+PLUGIN_VERSION = "0.6.0"
+RUIC_SKILL_NAME = "RuiC-card-skill"
 ARCHIVE_NAME = "blender-5.1.1-windows-x64.zip"
 MMD_TOOLS_REPO_URL = "https://github.com/MMD-Blender/blender_mmd_tools.git"
 MMD_TOOLS_MODULE = "mmd_tools"
@@ -45,7 +46,7 @@ class ReverieRuntimePluginHost:
         raise NotImplementedError
 
     def write_json(self, payload: dict[str, Any]) -> int:
-        sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+        sys.stdout.write(json.dumps(payload, ensure_ascii=True))
         sys.stdout.flush()
         return 0
 
@@ -139,7 +140,9 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 "rc_blender_mcp_info to expose Blender MCP from this plugin only after "
                 "installation and health checks succeed. "
                 "Use blender_modeling_workbench to generate production Blender scripts "
-                "and this plugin to provide the actual Blender executable."
+                "and this plugin to provide the actual Blender executable. "
+                "For 2D browser/OBS portrait avatars or holographic cards, inspect "
+                "RuiC-card-skill with skill_lookup before authoring."
             ),
             "system_prompt": (
                 "This plugin owns the local portable Blender environment. It can unpack the "
@@ -154,7 +157,13 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                 "only when discovery or static health checks are available. "
                 "For AI modeling workflows, combine blender_modeling_workbench for script/"
                 "asset planning with rc_blender_ensure_runtime and rc_blender_run_script "
-                "for execution."
+                "for execution. This enabled plugin automatically supplies RuiC-card-skill "
+                "and its local scripts/references through skill_lookup. It covers layered "
+                "2D browser/OBS avatars with original portrait textures, blinking, lips, "
+                "head motion and breathing, as well as layered card and rigged 3D avatar "
+                "authoring. Keep Blender under this plugin's runtime folder and pass its "
+                "detected executable to the Skill pipeline; inspect avatar-workflows.md "
+                "for the requested 2D or 3D route and its actual runtime verification."
             ),
             "skills": [
                 {
@@ -167,7 +176,8 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
                         "assets prefer import_mmd_model. Verify exported .blend/.glb/.gltf artifacts before claiming success. "
                         "Only advertise Blender MCP after mcp_info reports a successful tools/list probe."
                     ),
-                }
+                },
+                self._ruic_skill_definition(),
             ],
             "commands": [
                 {
@@ -626,6 +636,32 @@ class BlenderRuntimePlugin(ReverieRuntimePluginHost):
         if getattr(sys, "frozen", False):
             return Path(sys.executable).resolve(strict=False).parent
         return Path(__file__).resolve(strict=False).parent
+
+    def _ruic_skill_definition(self) -> dict[str, Any]:
+        source = self._bundle_root() / "skills" / "ruic-card-skill"
+        target = (self.plugin_root / "skills" / "ruic-card-skill").resolve(strict=False)
+        if not self._is_inside(target, self.plugin_root):
+            raise RuntimeError("Blender Skill resources must stay inside the plugin folder.")
+        if source.resolve(strict=False) != target:
+            for item in source.rglob("*"):
+                relative = item.relative_to(source)
+                if not item.is_file() or "__pycache__" in relative.parts:
+                    continue
+                destination = (target / relative).resolve(strict=False)
+                if not destination.is_relative_to(target) or not item.resolve().is_relative_to(source.resolve()):
+                    raise RuntimeError("Unsafe Blender Skill resource path.")
+                if not destination.is_file() or destination.read_bytes() != item.read_bytes():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, destination)
+        text = (target / "SKILL.md").read_text(encoding="utf-8-sig")
+        body = text.split("---", 2)[2].strip()
+        return {
+            "name": RUIC_SKILL_NAME,
+            "description": "立绘制作浏览器/OBS 2D 虚拟形象，保留原画并驱动眨眼、嘴型和动作；同时提供全息卡牌和参考引导的 Blender 3D 建模流程。",
+            "include_modes": [],
+            "body": f"Skill resources: {target}\n\n{body}",
+            "metadata": {"resource_dir": str(target), "upstream": "https://github.com/HRuiCcc/RuiC-card-skill"},
+        }
 
     def _archive_candidates(self) -> list[Path]:
         candidates = [
@@ -1235,7 +1271,7 @@ if strict and not result["success"]:
             return self._fail("script_path does not exist.", {"script_path": str(payload.get("script_path") or "")})
 
         blend_path = self._resolve_existing_path(payload.get("blend_path"))
-        command = [detection["path"], "--background"]
+        command = [detection["path"], "--background", "--python-exit-code", "23"]
         if blend_path is not None:
             command.append(str(blend_path))
         mmd_result: dict[str, Any] | None = None

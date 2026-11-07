@@ -3,7 +3,7 @@
   "id": "renpy",
   "display_name": "Ren'Py Engine Plugin",
   "runtime_family": "visual-novel-engine",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "delivery": "python-exe",
   "template": "runtime_python_exe",
   "description": "Ren'Py-focused runtime management, .rpy project/script inspection, lint/compile/distribute workflows, and Galgame production support for Reverie-Gamer.",

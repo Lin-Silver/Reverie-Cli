@@ -255,7 +255,7 @@ and scripts without granting access outside that skill package.
 
         if operation == "read_resource":
             record = manager.get_record(str(kwargs.get("skill_name") or ""), force_refresh=False)
-            if record is None or record.source_uri:
+            if record is None or (record.source_uri and not record.path_to_skill_md.is_file()):
                 return ToolResult.fail("A local discovered skill is required for read_resource.")
             try:
                 relative = Path(str(kwargs.get("resource_path") or ""))

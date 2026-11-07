@@ -38,13 +38,19 @@ jobs:
           ReverieCli-py\venv\Scripts\python.exe -m pip install "pip==26.1.2" "pyinstaller==6.19.0"
           $archive = Join-Path $env:GITHUB_WORKSPACE "plugins\blender\$env:BLENDER_ARCHIVE_NAME"
           Invoke-WebRequest -Uri $env:BLENDER_ARCHIVE_URL -OutFile $archive
+          $expected = "307123caa3bad0c1d04ec373a2f22f622c403eecb34b9c646ede104906b04ced"
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -ne $expected) {
+            throw "Blender portable archive SHA-256 mismatch"
+          }
 
       - name: Build and handshake official plugins
         shell: pwsh
         run: |
           $plugins = @(
             @{ Id = "blender"; Dir = "plugins\blender"; Asset = "reverie-blender.exe" },
-            @{ Id = "game_models"; Dir = "plugins\game_models"; Asset = "reverie-game-models.exe" }
+            @{ Id = "game_models"; Dir = "plugins\game_models"; Asset = "reverie-game-models.exe" },
+            @{ Id = "renpy"; Dir = "plugins\renpy"; Asset = "reverie-renpy.exe" },
+            @{ Id = "live2d"; Dir = "plugins\live2d"; Asset = "reverie-live2d.exe" }
           )
           foreach ($plugin in $plugins) {
             & "$($plugin.Dir)\build.bat"
@@ -61,7 +67,9 @@ jobs:
           $entries = @()
           foreach ($plugin in @(
             @{ Id = "blender"; Dir = "blender"; Asset = "reverie-blender.exe" },
-            @{ Id = "game_models"; Dir = "game_models"; Asset = "reverie-game-models.exe" }
+            @{ Id = "game_models"; Dir = "game_models"; Asset = "reverie-game-models.exe" },
+            @{ Id = "renpy"; Dir = "renpy"; Asset = "reverie-renpy.exe" },
+            @{ Id = "live2d"; Dir = "live2d"; Asset = "reverie-live2d.exe" }
           )) {
             $source = "plugins\$($plugin.Dir)\dist\$($plugin.Asset)"
             Copy-Item $source release-assets
@@ -84,7 +92,7 @@ jobs:
             plugins = $entries
           } | ConvertTo-Json -Depth 20 | Set-Content release-assets\plugins-manifest.json -Encoding utf8
           $manifest = Get-Content release-assets\plugins-manifest.json -Raw | ConvertFrom-Json
-          if ($manifest.plugins.Count -ne 2) { throw "Expected two official compiled plugins" }
+          if ($manifest.plugins.Count -ne 4) { throw "Expected four official compiled plugins" }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -103,17 +111,25 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f plugins-latest $env:GITHUB_SHA
           git push origin refs/tags/plugins-latest --force
-          $notes = "Official Windows x64 plugin executables, isolated from the Reverie core/desktop release. The manifest includes SHA-256, size, version, capabilities, and stable plugins-latest download URLs."
+          $notes = @'
+          This release contains all four official Windows x64 plugins: Blender, Game Models, Ren'Py, and Live2D.
+
+          Blender now bundles RuiC Card Skill. When the Blender plugin is enabled and trusted, Reverie automatically discovers the Skill and its persistent scripts and references. The 2D portrait-avatar workflow preserves the original illustration, creates an editable Blender mesh and face masks, and delivers a browser/OBS character with blinking, mouth movement, smile, gaze, breathing, and hair motion. A local pose relay lets the normal browser controls and microphone lips drive OBS; only numeric character parameters are sent, and audio stays in the browser. Transparent PNG export and a software renderer are included.
+
+          Blender 5.1.1 keeps the existing portable plugin depot. Blender Python failures are reported as failed plugin calls. Rigged character GLB exports retain skinning, facial morphs, and animations. The separate 3D authoring route is a scaffold that requires reference-specific modeling and visual validation. Game Models, Ren'Py, and Live2D have also been rebuilt with the current protocol and packaging fixes.
+
+          Use the Reverie core from this revision for persistent plugin Skill resource lookup and the corrected character export. The accompanying manifest records all four versions, capabilities, SHA-256 digests, sizes, and stable download URLs. Upstream application runtimes are unchanged.
+          '@
+          $notesPath = Join-Path $env:RUNNER_TEMP "plugin-release-notes.md"
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
           gh release view plugins-latest *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit plugins-latest --title "Reverie Plugins Latest" --notes $notes
+            gh release edit plugins-latest --title "Reverie Plugins Latest" --notes-file $notesPath
           } else {
-            gh release create plugins-latest --title "Reverie Plugins Latest" --notes $notes --latest=false
+            gh release create plugins-latest --title "Reverie Plugins Latest" --notes-file $notesPath --latest=false
           }
-          $existing = gh release view plugins-latest --json assets --jq '.assets[].name'
-          foreach ($asset in $existing) {
-            gh release delete-asset plugins-latest $asset --yes
-          }
-          foreach ($asset in Get-ChildItem -LiteralPath release-assets -File) {
+          $assets = Get-ChildItem -LiteralPath release-assets -File | Sort-Object { $_.Name -eq 'plugins-manifest.json' }, Name
+          foreach ($asset in $assets) {
             gh release upload plugins-latest $asset.FullName --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Plugin asset upload failed: $($asset.Name)" }
           }

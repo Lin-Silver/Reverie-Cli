@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "id": "game_models",
   "display_name": "Game Auxiliary Models",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "runtime_family": "model-depot",
   "description": "Plugin-local deployment manager for open auxiliary models used by Reverie-Gamer asset production.",
   "delivery": "plugin-exe",

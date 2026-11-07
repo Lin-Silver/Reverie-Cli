@@ -193,7 +193,7 @@ if "%SKIP_PLUGINS%"=="0" if defined BLENDER_ARCHIVE_SOURCE (
     echo       Blender portable archive build input: %BLENDER_ARCHIVE_SOURCE%
     set "BUILD_BLENDER_PLUGIN=0"
     if "%FORCE_PLUGINS%"=="1" set "BUILD_BLENDER_PLUGIN=1"
-    if "%BUILD_BLENDER_PLUGIN%"=="0" "%PYTHON_EXE%" -c "from pathlib import Path; o=Path(r'%SHARED_PLUGINS_DIR%\blender\dist\reverie-blender.exe'); i=[Path(r'%SHARED_PLUGINS_DIR%\blender\plugin.py'),Path(r'%SHARED_PLUGINS_DIR%\blender\plugin.json'),Path(r'%BLENDER_ARCHIVE_SOURCE%')]; raise SystemExit(0 if o.is_file() and all(not p.is_file() or o.stat().st_mtime >= p.stat().st_mtime for p in i) else 1)" >nul 2>&1
+    if "%BUILD_BLENDER_PLUGIN%"=="0" "%PYTHON_EXE%" -c "from pathlib import Path; o=Path(r'%SHARED_PLUGINS_DIR%\blender\dist\reverie-blender.exe'); i=[Path(r'%SHARED_PLUGINS_DIR%\blender\plugin.py'),Path(r'%SHARED_PLUGINS_DIR%\blender\plugin.json'),Path(r'%SHARED_PLUGINS_DIR%\blender\build.bat'),Path(r'%SHARED_PLUGINS_DIR%\blender\build_plugin.py'),Path(r'%BLENDER_ARCHIVE_SOURCE%'),*Path(r'%SHARED_PLUGINS_DIR%\blender\skills').rglob('*')]; raise SystemExit(0 if o.is_file() and all(not p.is_file() or o.stat().st_mtime >= p.stat().st_mtime for p in i if '__pycache__' not in p.parts) else 1)" >nul 2>&1
     if errorlevel 1 set "BUILD_BLENDER_PLUGIN=1"
     if "%BUILD_BLENDER_PLUGIN%"=="1" (
         echo       Building official Blender plugin with embedded portable archive...
@@ -241,6 +241,21 @@ if "%SKIP_PLUGINS%"=="0" if exist "%SHARED_PLUGINS_DIR%\game_models\plugin.py" (
 )
 
 echo.
+if "%SKIP_PLUGINS%"=="0" for %%P in (renpy live2d) do if exist "%SHARED_PLUGINS_DIR%\%%P\plugin.py" (
+    echo       Building official %%P plugin...
+    call "%SHARED_PLUGINS_DIR%\%%P\build.bat"
+    if errorlevel 1 (
+        echo [ERROR] Failed to build %%P plugin executable.
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+    "%PYTHON_EXE%" -c "from reverie.config import get_app_root; from reverie.plugin.runtime_manager import RuntimePluginManager; result=RuntimePluginManager(get_app_root()).install_source_plugin('%%P', overwrite=True); print('      %%P plugin installed:', result.get('target_path') or result.get('target_dir')); raise SystemExit(0 if result.get('success') else 1)"
+    if errorlevel 1 (
+        set "BUILD_EXIT_CODE=1"
+        goto finish
+    )
+)
+
 echo [5/6] Resolving optional ffmpeg and icon...
 if defined USER_FFMPEG_PATH if exist "%USER_FFMPEG_PATH%" set "REVERIE_FFMPEG_PATH=%USER_FFMPEG_PATH%"
 if not defined REVERIE_FFMPEG_PATH (

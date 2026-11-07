@@ -20,7 +20,7 @@ import zipfile
 
 
 PLUGIN_ID = "renpy"
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.2.1"
 RENPY_REPOSITORY = "https://github.com/renpy/renpy"
 RENPY_CLI_DOCS = "https://www.renpy.org/doc/html/cli.html"
 RENPY_LIVE2D_DOCS = "https://www.renpy.org/doc/html/live2d.html"
@@ -34,7 +34,7 @@ _JUMP_RE = re.compile(r"^\s*(jump|call)\s+([A-Za-z0-9_\.]+)\s*")
 
 
 def _write_json(payload: dict[str, Any]) -> int:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True))
     sys.stdout.flush()
     return 0
 

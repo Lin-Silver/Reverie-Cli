@@ -20,7 +20,7 @@ import sys
 import venv
 
 
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.2.1"
 PLUGIN_ID = "game_models"
 
 
@@ -170,7 +170,7 @@ class ReverieRuntimePluginHost:
         raise NotImplementedError
 
     def write_json(self, payload: dict[str, Any]) -> int:
-        sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+        sys.stdout.write(json.dumps(payload, ensure_ascii=True))
         sys.stdout.flush()
         return 0
 

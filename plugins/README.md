@@ -15,8 +15,12 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 
 ## Official Plugins
 
+There are four official Reverie runtime plugins: Blender, Game Models, Ren'Py
+and Live2D. The optional glTF Validator catalog entry and retained legacy engine
+executables are separate from these four plugin sources.
+
 - `plugins/blender/`
-  Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip`, can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`, and can clone MMD Tools into its plugin-local `addons/` folder for PMD/PMX/VMD/VPD import workflows.
+  Official Blender Portable plugin. Its packaged `reverie-blender.exe` embeds `blender-5.1.1-windows-x64.zip`, can unpack it on demand with `rc_blender_ensure_runtime` or `/plugins deploy blender`, and can clone MMD Tools into its plugin-local `addons/` folder for PMD/PMX/VMD/VPD import workflows. Enabling the plugin also registers its bundled RuiC Card Skill for source-preserving browser/OBS 2D avatars, layered illustration/cards and reference-guided humanoid authoring.
 - `plugins/game_models/`
   Game auxiliary model depot manager for plugin-local Python venvs, HuggingFace model snapshots/caches, 8GB-VRAM deployment planning, selectable model profiles, and guarded heavy-model downloads.
 - `plugins/renpy/`
@@ -26,7 +30,7 @@ Plugins in Reverie CLI are portable software/runtime bundles, not another user-f
 
 ## Plugin Release
 
-Compiled official plugins are published on the dedicated `plugins-latest` GitHub Release, not the core/desktop Release. Changes under `plugins/` or the shared plugin protocol trigger the plugin workflow, which rebuilds both official Windows x64 executables, validates their `-RC` handshakes, and replaces the release together with `plugins-manifest.json`. Every `main` push also refreshes the separate core/desktop prerelease. Ren'Py and Live2D remain source plugins.
+Compiled official plugins use the dedicated `plugins-latest` GitHub Release, separate from the core/desktop Release. Changes under `plugins/` or the shared plugin protocol trigger the plugin workflow, which rebuilds all four official Windows x64 executables, validates their `-RC` handshakes, and prepares `plugins-manifest.json`. Every `main` push also refreshes the separate core/desktop prerelease. Ren'Py and Live2D now have compiled plugin build entries; their external SDK/Core payloads are still installed on demand.
 
 ## Fixed Protocol
 
@@ -40,6 +44,11 @@ Every runnable runtime plugin should support:
 When a command has `"expose_as_tool": true`, Reverie can surface it as `rc_<plugin>_<command>`. Empty `include_modes` means the command is available in every mode unless `exclude_modes` blocks it.
 
 Handshake payloads may also include `skills`, `system_prompt`, and `mcp_servers`. `mcp_servers` are transient MCP server definitions owned by an enabled and trusted plugin; Reverie normalizes them into the existing MCP schema and overlays them at runtime without writing them into the user's `.reverie/mcp.json`.
+
+A Skill can set `metadata.resource_dir` to its persistent package directory
+inside that plugin's installation. Reverie retains plugin ownership and
+enable/trust gating while allowing `skill_lookup read_resource` to read text
+files confined to that package. Resources outside the plugin folder are rejected.
 
 ## Blender Flow
 

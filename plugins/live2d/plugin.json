@@ -3,7 +3,7 @@
   "id": "live2d",
   "display_name": "Live2D Cubism Plugin",
   "runtime_family": "interactive-character-runtime",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "delivery": "python-exe",
   "template": "runtime_python_exe",
   "description": "Live2D/Cubism Core deployment, .model3.json validation, dynamic CG control planning, project staging, and MCP bridge contracts for Reverie-Gamer.",

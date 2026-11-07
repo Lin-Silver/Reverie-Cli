@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2D 虚拟形象</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="avatar.css">
+</head>
+<body>
+  <main>
+    <section class="stage" aria-label="角色预览">
+      <canvas id="avatar" aria-label="透明背景的 2D 虚拟形象"></canvas>
+      <div class="caption"><span class="eyebrow">PORTRAIT AVATAR</span><h1 id="name">2D 虚拟形象</h1><p id="status" role="status">正在加载角色…</p></div>
+      <button id="closeup" class="view-button" aria-pressed="false">面部特写</button>
+    </section>
+    <aside id="controls" aria-label="角色控制">
+      <div class="panel-heading"><span class="eyebrow">让原画动起来</span><h2>表情与动作</h2><p>移动鼠标看向你，或直接调整角色参数。</p></div>
+      <div class="actions">
+        <button id="blink">眨眼 <kbd>B</kbd></button><button id="smile" aria-pressed="false">微笑 <kbd>S</kbd></button>
+        <button id="talk" aria-pressed="false">说话演示 <kbd>T</kbd></button><button id="pause" aria-pressed="false">暂停动作</button>
+      </div>
+      <div class="switches">
+        <label><input id="autoBlink" type="checkbox" checked>自动眨眼</label>
+        <label><input id="autoBreath" type="checkbox" checked>呼吸与发梢</label>
+        <label><input id="followPointer" type="checkbox" checked>鼠标视线</label>
+      </div>
+      <div class="sliders">
+        <label for="lookX">头部左右<output id="lookXValue">0.00</output></label><input id="lookX" type="range" min="-1" max="1" step="0.01" value="0">
+        <label for="lookY">头部上下<output id="lookYValue">0.00</output></label><input id="lookY" type="range" min="-1" max="1" step="0.01" value="0">
+        <label for="blinkLeft">左眼闭合<output id="blinkLeftValue">0.00</output></label><input id="blinkLeft" type="range" min="0" max="1" step="0.01" value="0">
+        <label for="blinkRight">右眼闭合<output id="blinkRightValue">0.00</output></label><input id="blinkRight" type="range" min="0" max="1" step="0.01" value="0">
+        <label for="mouthOpen">嘴巴开合<output id="mouthOpenValue">0.00</output></label><input id="mouthOpen" type="range" min="0" max="1" step="0.01" value="0">
+        <label for="breath">呼吸幅度<output id="breathValue">0.00</output></label><input id="breath" type="range" min="0" max="1" step="0.01" value="0">
+        <label for="hairSway">发梢摆动<output id="hairSwayValue">0.00</output></label><input id="hairSway" type="range" min="-1" max="1" step="0.01" value="0">
+      </div>
+      <div class="microphone"><button id="microphone" aria-pressed="false">启用麦克风嘴型</button><meter id="level" min="0" max="1" value="0" aria-label="声音强度"></meter><p id="micStatus" role="status">声音只在本地驱动嘴型。</p></div>
+      <div class="deliver"><button id="obsSync" aria-pressed="false">同步到 OBS</button><p id="syncStatus" role="status">让透明输出跟随当前窗口的表情、动作与嘴型。</p><button id="neutral">原画静态</button><button id="reset">重置 <kbd>R</kbd></button><button id="download">导出透明 PNG</button><a id="obs" href="?obs=1" target="_blank" rel="noopener">打开 OBS 透明模式 ↗</a></div>
+      <p class="hint">OBS 浏览器源使用透明模式地址。在此窗口开启“同步到 OBS”，再启用麦克风或调整表情，OBS 画面会同步跟随。声音只在本地处理。未同步时可在 OBS“交互”窗口按 B 眨眼、S 微笑、T 说话演示；空格暂停动作。普通模式按 H 隐藏控制。</p>
+    </aside>
+  </main>
+  <script type="module" src="avatar.js"></script>
+</body>
+</html>

@@ -314,6 +314,9 @@ def _raw_provider_config(source: str, config: Config) -> Dict[str, Any]:
 
 def _safe_provider_config(source: str, config: Config) -> Dict[str, Any]:
     provider_config = _raw_provider_config(source, config)
+    provider_config.pop('model_catalog', None)
+    if source == 'custom':
+        provider_config.pop('models', None)
     configured_secrets: Dict[str, bool] = {}
     for key in _SECRET_FIELDS:
         if key in provider_config:
@@ -768,7 +771,8 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
         normalize_custom_provider_reasoning_effort,
         resolve_custom_provider_api_key,
         resolve_custom_provider_reasoning_level,
-        suggest_custom_provider_model_context_limit,
+        parse_context_token_limit,
+        CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS,
     )
 
     resolved_key = resolve_custom_provider_api_key(record)
@@ -783,7 +787,7 @@ def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, 
         model["context_limit"] = int(saved_limit or 0)
         model["needs_context_limit"] = not saved_limit
         model["suggested_context_limit"] = int(
-            suggest_custom_provider_model_context_limit(record, model.get("id"))
+            saved_limit or parse_context_token_limit(model.get("context_length")) or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
         )
         models.append(model)
     active_provider_id = str(
@@ -1046,7 +1050,7 @@ def refresh_custom_provider_models(config: Config, provider_ref: Any) -> Dict[st
 
 
 def select_custom_provider_model(
-    config: Config, provider_ref: Any, model_id: Any, context_limit: Any = None
+    config: Config, provider_ref: Any, model_id: Any, context_limit: Any = None, reasoning: Any = None
 ) -> Dict[str, Any]:
     """Activate one provider and pin the model the user picked.
 
@@ -1098,6 +1102,8 @@ def select_custom_provider_model(
         getattr(config, "custom_providers", {}), record, activate=True
     )
     config.active_model_source = "custom"
+    if reasoning is not None:
+        _apply_custom_provider_selection(config, selected, reasoning)
     return _custom_provider_entry(config, _require_custom_provider(config, record["id"]))
 
 

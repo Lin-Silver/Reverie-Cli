@@ -82,6 +82,10 @@ Every stored provider also extends command completion: once `xkiro` exists, `/pr
 
 The Desktop app exposes the same surface under **Settings → 模型与提供商 → Custom Provider**: add, edit, enable/disable, delete, refresh the live catalog, test availability, pick a model, and confirm a model's context limit.
 
+Custom provider model inventories and per-model context limits are stored once in `.reverie/profiles/<Provider name>.json` under the directory containing `reverie.exe`. Connection settings, credentials, and the selected model stay in `config.json`; workspace configurations use the same profiles directory. Existing inline inventories migrate automatically on load. Invalid filename characters are replaced with `_`, and colliding names receive a provider-ID suffix. A missing or invalid profile is reported without replacing the configuration. Large catalogs remain searchable and scrollable while the Desktop picker renders only the rows around the visible area.
+
+Opening the Desktop model picker or running `/opencode models` refreshes OpenCode's inventory from its configured API. Live reasoning efforts, modalities, context limits, and transport metadata are used for newly listed models and saved reasoning choices survive restart. Only efforts declared by the API are offered: a model such as Big Pickle, whose catalog declares reasoning without adjustable efforts, retains its fixed reasoning control.
+
 API keys can also come from environment variables. In Desktop provider settings and the add/edit model dialogs, click **使用环境变量 / Use environment variable**, then select or enter a variable name such as `OPENAI_API_KEY`. The terminal setup and `/model add` or `/provider add` prompts accept `env:OPENAI_API_KEY`; an existing provider can use `/provider <name> key --env OPENAI_API_KEY`. Reverie saves `api_key_env` and reads the value at runtime, clearing the saved key when you switch to a variable reference. The variable must be available to the Reverie process; restart Reverie after adding or changing variables in your system settings. Selecting **手动输入密钥 / Enter key manually** restores direct key entry.
 
 ### Debug output

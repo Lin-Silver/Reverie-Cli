@@ -126,7 +126,7 @@ interface CoreRequestMap {
   updateCustomProvider: { payload: { providerId: string; patch: Record<string, unknown>; clearFields?: string[] }; response: CustomProviderEnvelope };
   deleteCustomProvider: { payload: { providerId: string }; response: CustomProviderEnvelope };
   refreshCustomProviderModels: { payload: { providerId: string }; response: CustomProviderEnvelope };
-  selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number }; response: CustomProviderEnvelope };
+  selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number; reasoning?: string }; response: CustomProviderEnvelope };
   probeProviders: { payload: { keys?: string[] }; response: Envelope<"providers.probed", { probes: ProviderProbe[] }> };
   setPluginEnabled: { payload: { pluginId: string; enabled: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   setPluginTrust: { payload: { pluginId: string; trusted: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };

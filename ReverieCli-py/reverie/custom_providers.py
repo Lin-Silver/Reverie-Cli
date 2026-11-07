@@ -602,14 +602,18 @@ def _model_limit_key(model_id: Any) -> str:
 
 def get_custom_provider_model_context_limit(provider: Any, model_id: Any = None) -> Optional[int]:
     """Return the context limit the user saved for one model, if any."""
-    record = normalize_custom_provider(provider)
-    if not record:
+    if not isinstance(provider, dict):
         return None
-    key = _model_limit_key(model_id or record.get("selected_model_id"))
+    key = _model_limit_key(model_id or provider.get("selected_model_id"))
     if not key:
         return None
-    limit = record.get("model_context_limits", {}).get(key)
-    return int(limit) if limit else None
+    limits = provider.get("model_context_limits") or {}
+    if not isinstance(limits, dict):
+        return None
+    value = limits.get(key)
+    if value is None:
+        value = next((value for name, value in limits.items() if _model_limit_key(name) == key), None)
+    return parse_context_token_limit(value)
 
 
 def custom_provider_model_needs_context_limit(provider: Any, model_id: Any) -> bool:
@@ -748,6 +752,8 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
     )
 
     cfg["api_key_env"] = str(raw_provider.get("api_key_env", "") or "").strip()
+    if raw_provider.get("catalog_profile"):
+        cfg["catalog_profile"] = str(raw_provider["catalog_profile"])
     cfg["enabled"] = bool(raw_provider.get("enabled", True))
     cfg["supports_vision"] = bool(raw_provider.get("supports_vision", False))
     # Thinking is on by default: a custom gateway is usually pointed at a

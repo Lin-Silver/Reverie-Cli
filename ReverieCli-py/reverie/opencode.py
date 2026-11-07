@@ -42,6 +42,7 @@ _REASONING_LABELS = {
     "medium": ("Medium", "Use the provider-recommended balanced reasoning effort."),
     "high": ("High", "Use a high reasoning effort for complex work."),
     "max": ("Max", "Use the model's maximum reasoning effort."),
+    "xhigh": ("X-High", "Use an extra-high reasoning effort."),
 }
 
 
@@ -487,6 +488,36 @@ def _live_opencode_model(model_id: Any, raw_model: Optional[Dict[str, Any]] = No
         model["description"] = str(model.get("description") or OPENCODE_LIVE_MODEL_DESCRIPTION).strip()
         model["transport"] = transport
         model["endpoint"] = endpoint
+    raw = raw_model or {}
+    capabilities = raw.get("capabilities") or {}
+    reasoning = capabilities.get("reasoning")
+    if isinstance(reasoning, dict):
+        efforts = reasoning.get("effort") or []
+        model["thinking"] = bool(reasoning.get("supported", efforts))
+        model["thinking_options"] = [
+            {"id": str(value), "label": _REASONING_LABELS.get(str(value), (str(value), ""))[0],
+             "description": _REASONING_LABELS.get(str(value), (str(value), ""))[1]}
+            for value in efforts if isinstance(value, str) and value
+        ] if model["thinking"] else []
+        model["thinking_control"] = "effort" if model["thinking_options"] else "fixed" if model["thinking"] else "none"
+    limits = raw.get("limit") or {}
+    if limits.get("context"):
+        model["context_length"] = int(limits["context"])
+    if limits.get("output"):
+        model["max_output_tokens"] = int(limits["output"])
+    modalities = raw.get("modalities") or {}
+    if isinstance(modalities.get("input"), list):
+        inputs = modalities["input"]
+        model["vision"] = any(value == "image" or str(value).startswith("image/") for value in inputs)
+        model["vision_modalities"] = list(dict.fromkeys(str(value).split("/")[0] for value in inputs if str(value).split("/")[0] in {"image", "video"}))
+    tools = capabilities.get("tools")
+    if isinstance(tools, dict):
+        model["tool_calling"] = bool(tools.get("supported", False))
+    routes = raw.get("api") or {}
+    for route, transport, endpoint in (("responses", "openai-responses", "/responses"), ("messages", "anthropic", "/messages"), ("chat-completions", "openai-chat", "/chat/completions")):
+        if route in routes:
+            model.update(transport=transport, endpoint=endpoint)
+            break
     model["catalog_source"] = "api"
     return model
 
@@ -711,14 +742,14 @@ def normalize_opencode_config(raw_opencode: Any) -> Dict[str, Any]:
         output_limit = int(matched.get("max_output_tokens") or OPENCODE_DEFAULT_MAX_TOKENS)
         cfg["max_tokens"] = min(int(cfg.get("max_tokens") or output_limit), output_limit)
         raw_choice = cfg.get("reasoning_effort") if raw_has_reasoning_effort else ""
-        cfg["reasoning_effort"] = normalize_opencode_reasoning_choice(matched["id"], raw_choice)
+        cfg["reasoning_effort"] = normalize_opencode_reasoning_choice(matched["id"], raw_choice, metadata=matched)
 
     return cfg
 
 
-def normalize_opencode_reasoning_choice(model_id: Any, value: Any) -> str:
+def normalize_opencode_reasoning_choice(model_id: Any, value: Any, *, metadata: Optional[Dict[str, Any]] = None) -> str:
     """Normalize one model-specific OpenCode reasoning selection."""
-    selected = get_opencode_model_metadata(model_id) or {}
+    selected = metadata if metadata is not None else (get_opencode_model_metadata(model_id) or {})
     options = [str(item.get("id") or "") for item in selected.get("thinking_options", [])]
     default = str(selected.get("default_thinking_choice") or "")
     candidate = str(value or "").strip().lower().replace("_", "-")
@@ -729,8 +760,9 @@ def normalize_opencode_reasoning_choice(model_id: Any, value: Any) -> str:
         "non-think": "none",
         "med": "medium",
         "extra-high": "max",
-        "xhigh": "max",
     }.get(candidate, candidate)
+    if candidate == "xhigh" and candidate not in options:
+        candidate = "max"
     if options:
         return candidate if candidate in options else (default if default in options else options[0])
     return "fixed" if bool(selected.get("thinking")) else ""
@@ -743,7 +775,7 @@ def resolve_opencode_thinking_choice(opencode_config: Any, model_id: Optional[st
     selected = resolve_opencode_selected_model(cfg, model_id=model_id)
     if not selected:
         return ""
-    return normalize_opencode_reasoning_choice(selected["id"], cfg.get("reasoning_effort"))
+    return normalize_opencode_reasoning_choice(selected["id"], cfg.get("reasoning_effort"), metadata=selected)
 
 
 def apply_opencode_thinking_choice(opencode_config: Any, model_id: Any, choice: Any) -> Dict[str, Any]:
@@ -753,7 +785,7 @@ def apply_opencode_thinking_choice(opencode_config: Any, model_id: Any, choice: 
     selected = resolve_opencode_selected_model(cfg, model_id=str(model_id or ""))
     if not selected:
         return normalize_opencode_config(cfg)
-    normalized = normalize_opencode_reasoning_choice(selected["id"], choice)
+    normalized = normalize_opencode_reasoning_choice(selected["id"], choice, metadata=selected)
     valid = {str(item.get("id") or "") for item in selected.get("thinking_options", [])}
     if valid and normalized not in valid:
         raise ValueError(f"Reasoning level {choice!r} is not supported by {selected['id']}")

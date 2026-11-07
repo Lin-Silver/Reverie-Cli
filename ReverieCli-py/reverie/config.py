@@ -1298,11 +1298,14 @@ class ConfigManager:
     """
     
     def __init__(self, project_root: Path, force_workspace_config: bool = False):
+        from .provider_profiles import ProviderProfiles
+
         self.project_root = project_root
         self._logger = logging.getLogger(__name__)
 
         # Use app root for runtime data (next to exe file or script directory).
         self.app_root = get_app_root()
+        self._provider_profiles = ProviderProfiles(self.app_root / '.reverie' / 'profiles')
         self.storage_resolver = ProjectStorageResolver.for_project(project_root, launcher_root=self.app_root)
         self.data_root = self.storage_resolver.projects_root
         self.project_data_dir = self.storage_resolver.project_dir
@@ -1625,6 +1628,8 @@ class ConfigManager:
             # Load global config
             data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
 
+            data = self._provider_profiles.hydrate(data)
+
             # Update to workspace mode
             data['use_workspace_config'] = True
 
@@ -1632,7 +1637,7 @@ class ConfigManager:
             self.ensure_dirs()
 
             # Save to workspace config
-            write_json_secure(self.workspace_config_path, data)
+            write_json_secure(self.workspace_config_path, self._provider_profiles.store(data))
 
             # Clear cache and switch to workspace mode
             self._config = None
@@ -1670,6 +1675,9 @@ class ConfigManager:
 
         data['use_workspace_config'] = bool(enabled)
         self.ensure_dirs()
+        if source_path is not None:
+            data = self._provider_profiles.hydrate(data)
+        data = self._provider_profiles.store(data)
         write_json_secure(self.workspace_config_path, data)
         return True
     
@@ -1688,6 +1696,8 @@ class ConfigManager:
             # Load workspace config
             data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
 
+            data = self._provider_profiles.hydrate(data)
+
             # Update to global mode
             data['use_workspace_config'] = False
 
@@ -1695,7 +1705,7 @@ class ConfigManager:
             self.ensure_dirs()
 
             # Save to global config
-            write_json_secure(self.global_config_path, data)
+            write_json_secure(self.global_config_path, self._provider_profiles.store(data))
             self.set_workspace_config_enabled(False)
 
             # Clear cache and switch to global mode
@@ -1733,13 +1743,14 @@ class ConfigManager:
             self._update_config_path()
             current_mtime = os.path.getmtime(source_path)
             # Reload if file changed or not loaded yet
-            if self._config is None or current_mtime > self._last_mtime:
+            if self._config is None or source_path != self._loaded_config_path or current_mtime != self._last_mtime or self._provider_profiles.changed():
                 try:
                     data = self._load_json_payload(
                         source_path,
                         persist_repairs=True,
                         record_notice=True,
                     )
+                    data = self._provider_profiles.hydrate(data)
                     self._config = Config.from_dict(data)
                     try:
                         self._last_mtime = os.path.getmtime(source_path)
@@ -1757,6 +1768,9 @@ class ConfigManager:
                         if not self._is_workspace_candidate_path(source_path):
                             self._sync_legacy_mirror(self._config.to_dict())
                 except Exception as exc:
+                    from .provider_profiles import ProviderProfileError
+                    if isinstance(exc, ProviderProfileError):
+                        raise
                     self._logger.debug(
                         "Failed to load or repair config from %s",
                         source_path,
@@ -1950,6 +1964,8 @@ class ConfigManager:
             needs_update = True
         elif not isinstance(data.get('custom_providers'), dict):
             needs_update = True
+        elif any(not provider.get('catalog_profile') for provider in data['custom_providers'].get('providers', []) if isinstance(provider, dict)):
+            needs_update = True
         elif normalize_custom_providers_config(data.get('custom_providers')) != data.get('custom_providers'):
             needs_update = True
 
@@ -2109,6 +2125,10 @@ class ConfigManager:
         if is_config_version_older(self._config.config_version):
             self._config.config_version = CONFIG_VERSION
         serialized = self._config.to_dict()
+        self._config.custom_providers = serialized['custom_providers']
+        serialized = self._provider_profiles.store(serialized)
+        for provider, stored in zip(self._config.custom_providers.get('providers', []), serialized['custom_providers']['providers']):
+            provider['catalog_profile'] = stored['catalog_profile']
 
         write_json_secure(target_path, serialized)
         self._loaded_config_path = target_path

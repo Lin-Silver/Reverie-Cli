@@ -1106,6 +1106,7 @@ class ReverieSdkBridge:
                     provider_ref,
                     payload.get("modelId") or payload.get("model") or "",
                     payload.get("contextLimit"),
+                    payload.get("reasoning"),
                 )
             interface.config_manager.save(config)
             self._refresh_agent()

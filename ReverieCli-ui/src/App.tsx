@@ -883,15 +883,24 @@ function ModelPicker({
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef, close);
-  const sources = expandModelSources(state.models.sources);
+  const sources = useMemo(() => expandModelSources(state.models.sources), [state.models.sources]);
   const [sourceId, setSourceId] = useState(() => activeSourceId(sources, state.models.active_source));
   const [query, setQuery] = useState("");
   const [pendingSelection, setPendingSelection] = useState<{ source: ModelSource; model: ModelRecord } | null>(null);
   const source = sources.find((item) => item.id === sourceId) ?? sources[0];
-  if (!source) return null;
-  const models = source.models.filter((model) =>
+  const models = useMemo(() => (source?.models ?? []).filter((model) =>
     `${model.display_name} ${model.id}`.toLowerCase().includes(query.toLowerCase()),
-  );
+  ), [source?.models, query]);
+  const [firstModel, setFirstModel] = useState(0);
+  const modelListRef = useRef<HTMLDivElement>(null);
+  const virtualized = models.length > 80;
+  const rowHeight = source?.id === "nvidia" ? 100 : 84;
+  const visibleModels = virtualized ? models.slice(firstModel, firstModel + 24) : models;
+  useEffect(() => {
+    setFirstModel(0);
+    if (modelListRef.current) modelListRef.current.scrollTop = 0;
+  }, [source?.id, query]);
+  if (!source) return null;
   const pendingReasoning = pendingSelection?.model.reasoning;
   return (
     <div className="popover-backdrop" onMouseDown={close}>
@@ -956,12 +965,17 @@ function ModelPicker({
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("搜索模型")} autoFocus />
             </div>
           </div>
-          <div className="model-option-list" data-source={source.id}>
-            {models.map((model) => (
+          <div ref={modelListRef} className={`model-option-list${virtualized ? " virtualized" : ""}`} data-source={source.id}
+            onScroll={(event) => {
+              if (virtualized) setFirstModel(Math.max(0, Math.floor(event.currentTarget.scrollTop / rowHeight) - 4));
+            }}>
+            {virtualized && <div aria-hidden="true" style={{ height: models.length * rowHeight }} />}
+            {visibleModels.map((model, index) => (
               <button
                 type="button"
                 key={model.id}
                 className={source.active && source.selected_model_id === model.id ? "active" : ""}
+                style={virtualized ? { position: "absolute", top: (firstModel + index) * rowHeight + 10, left: 10, width: "calc(100% - 20px)", height: rowHeight } : undefined}
                 onClick={() => {
                   if (model.reasoning.options.length > 0) {
                     setPendingSelection({ source, model });
@@ -5054,7 +5068,7 @@ export default function App() {
   /** `null` while closed; `{ target: null }` to add; `{ target }` to edit in place. */
   const [standardModelForm, setStandardModelForm] = useState<{ target: { index: number; model: ModelRecord } | null } | null>(null);
   const [providerModal, setProviderModal] = useState<{ provider: CustomProviderRecord | null } | null>(null);
-  const [contextLimitModal, setContextLimitModal] = useState<{ provider: CustomProviderRecord; model: CustomProviderModel } | null>(null);
+  const [contextLimitModal, setContextLimitModal] = useState<{ provider: CustomProviderRecord; model: CustomProviderModel; reasoning?: string } | null>(null);
   const [providerProbes, setProviderProbes] = useState<Record<string, ProviderProbe>>({});
   const [providerProbing, setProviderProbing] = useState(false);
   // Image-generation catalog is fetched lazily (its own bridge action), so it is
@@ -6395,11 +6409,12 @@ export default function App() {
     provider: CustomProviderRecord,
     model: CustomProviderModel,
     contextLimit?: number,
+    reasoning?: string,
   ) => {
     // The limit is asked exactly once per model; afterwards the stored value is
     // reused so switching models stays a single click.
     if (model.needs_context_limit && contextLimit === undefined) {
-      setContextLimitModal({ provider, model });
+      setContextLimitModal({ provider, model, reasoning });
       return;
     }
     try {
@@ -6407,6 +6422,7 @@ export default function App() {
         providerId: provider.id,
         modelId: model.id,
         ...(contextLimit === undefined ? {} : { contextLimit }),
+        ...(reasoning === undefined ? {} : { reasoning }),
       });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setContextLimitModal(null);
@@ -6432,7 +6448,7 @@ export default function App() {
         return;
       }
       setModelPickerOpen(false);
-      await selectCustomProviderModel(provider, model as CustomProviderModel);
+      await selectCustomProviderModel(provider, model as CustomProviderModel, undefined, selectedReasoning);
       return;
     }
     try {
@@ -6467,6 +6483,7 @@ export default function App() {
     provider: CustomProviderRecord,
     model: CustomProviderModel,
     limit: number,
+    reasoning?: string,
   ) => {
     // Reuse the selection call: it both stores the limit and pins the model, so
     // confirming a limit can never leave the two out of step.
@@ -6475,6 +6492,7 @@ export default function App() {
         providerId: provider.id,
         modelId: model.id,
         contextLimit: limit,
+        ...(reasoning === undefined ? {} : { reasoning }),
       });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setContextLimitModal(null);
@@ -6942,7 +6960,7 @@ export default function App() {
           provider={contextLimitModal.provider}
           model={contextLimitModal.model}
           close={() => setContextLimitModal(null)}
-          save={(limit) => void saveCustomProviderContextLimit(contextLimitModal.provider, contextLimitModal.model, limit)}
+          save={(limit) => void saveCustomProviderContextLimit(contextLimitModal.provider, contextLimitModal.model, limit, contextLimitModal.reasoning)}
         />
       )}
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.label} danger={confirmation.danger} close={() => setConfirmation(null)} confirm={() => { const action = confirmation.action; setConfirmation(null); action(); }} />}

@@ -9,7 +9,7 @@ The user has authorized organizing, committing and pushing the current update di
 - [x] Complete an independent read-only review; no remaining code publication blocker was found.
 - [x] Complete fresh full regressions after review fixes: Python 3,352 passed/7 skipped, GUI 511 passed/1 skipped, i18n/types passed, verifier regressions 9 passed. Real source SDK authentication save/reload/revocation and original-text preservation pass in four normally exited workers.
 - [x] Rebuild Windows artifacts, exit 0. Source and both packaged SDK surfaces pass authentication save/reload/revocation, exact original text and secret-free history in 12 normally exited workers. Two kernels each match 36 current modules/tool manifests; 83 compiled UI files match. Actual packaged settings/resume/pause/stop pass with proactive observation disabled and no surviving owned processes. Preserve the first Windows ASAR path-format helper error and its corrected full check.
-- [ ] Publish current source and usage/status documents to `main`, then verify remote identity.
+- [x] Publish current source and usage/status documents to `main`: code `630db11c99bbe8c5cfbd44efa0a826064e48f9a7`, tools/docs `6998930b9659ce0d8b38f955f15d76859ae0634a`. A normal push succeeded and `git ls-remote` matched local HEAD with zero ahead/behind. The publication verification note is a documentation-only follow-up.
 
 Current public status: [AiO implementation status](../docs/AIO_IMPLEMENTATION_STATUS.md). Performance/native/endurance qualification remains open and is not a condition for this authorized source checkpoint.
 

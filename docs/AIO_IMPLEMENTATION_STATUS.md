@@ -2,6 +2,8 @@
 
 本次是 AiO 与全模式独立对话的源码更新检查点，目标分支为 GitHub `main`。本次不新增版本标签，包元数据仍为 2.5.3。
 
+代码检查点 [630db11](https://github.com/Lin-Silver/Reverie-Cli/commit/630db11c99bbe8c5cfbd44efa0a826064e48f9a7) 与验证工具／文档 [6998930](https://github.com/Lin-Silver/Reverie-Cli/commit/6998930b9659ce0d8b38f955f15d76859ae0634a) 已正常推送到 `main`，远端提交身份已核对。源码发布不替代下述完整稳定性验收。
+
 ## 已实现
 
 - AiO 替换旧 Computer 模式入口，使用自己的模型选择、稳定主线、阶段摘要、任务分支、主动发言队列、完整正文回复窗和暂停／恢复／停止控制。

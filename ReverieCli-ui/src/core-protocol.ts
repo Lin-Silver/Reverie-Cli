@@ -25,6 +25,7 @@ import type {
 } from "./types";
 
 type EmptyPayload = Record<never, never>;
+export interface AiOState {assistant_id:'aio';mainline_id:string;enabled:boolean;proactive:boolean;paused:boolean;tasks:Array<{id:string;branch:string;workspace:string;state:string;revision:number}>}
 type Envelope<Type extends string, Body extends object> = { id?: string | number | null; type: Type } & Body;
 /** Every custom-provider mutation answers with the record it touched plus fresh state. */
 type CustomProviderEnvelope = Envelope<
@@ -57,6 +58,25 @@ export interface WorkspaceMention extends Record<string, unknown> {
 }
 
 interface CoreRequestMap {
+  archiveSession: {payload:{projectRoot:string;assistantId?:'aio';sessionId:string;revision:number;archived:boolean};response:Envelope<'sessions',{sessions:SessionListState}>};
+  getWorkspaceConfig: {payload:{projectRoot:string};response:Envelope<'workspace.config',{models:ModelSourcesState;workspace:WorkspaceState;settings:SettingsState}>};
+  queueConversationRun: {payload:{projectRoot:string;sessionId:string;assistantId?:'aio';runId:string;configuration:Record<string,unknown>;configurationRevision:number;executionRoot?:string};response:Envelope<'conversation.run',{revision:number}>};
+  updateConversationRun: {payload:{projectRoot:string;sessionId:string;assistantId?:'aio';runId:string;revision:number;state:string;executionRoot?:string;result?:Record<string,unknown>};response:Envelope<'conversation.run',{revision:number}>};
+  listConversationRuns: {payload:{projectRoot:string;sessionId:string;assistantId?:'aio'};response:Envelope<'conversation.runs',{runs:Record<string,unknown>[]}>};
+  recoverConversationRuns: {payload:{projectRoot:string};response:Envelope<'conversation.runs',{runs:Record<string,unknown>[]}>};
+  aioState: {payload:{assistantId:'aio'};response:Envelope<'aio.state',{aio:AiOState}>};
+  aioControl: {payload:{assistantId:'aio';enable?:boolean;changes?:{enabled?:boolean;proactive?:boolean;paused?:boolean}};response:Envelope<'aio.state',{aio:AiOState}>};
+  aioObserve: {payload:{assistantId:'aio';excludePids?:number[];idleSeconds?:number};response:Envelope<'aio.observation',{observation:Record<string,unknown>|null}>};
+  aioDecision: {payload:{assistantId:'aio';observation:Record<string,unknown>;workspaces:string[];urgent?:boolean};response:Envelope<'aio.decision',{decision:Record<string,unknown>}>};
+  aioMessages: {payload:{assistantId:'aio'};response:Envelope<'aio.messages',{messages:Record<string,unknown>[]}>};
+  aioPendingSignals: {payload:{assistantId:'aio'};response:Envelope<'aio.signals',{signals:Record<string,unknown>[]}>};
+  aioAcknowledgeSignal: {payload:{assistantId:'aio';eventId:string};response:Envelope<'aio.signal-state',{saved:boolean}>};
+  aioPendingTasks: {payload:{assistantId:'aio'};response:Envelope<'aio.tasks',{tasks:Record<string,unknown>[]}>};
+  aioRecoverHost: {payload:{assistantId:'aio'};response:Envelope<'aio.state',{aio:AiOState}>};
+  aioMessageState: {payload:{assistantId:'aio';messageId:string;state:string};response:Envelope<'aio.message-state',{claimed:boolean}>};
+  aioReply: {payload:{assistantId:'aio';messageId:string;replyId:string;text:string};response:Envelope<'aio.state',{aio:AiOState}>};
+  aioTaskState: {payload:{assistantId:'aio';taskId:string;state:string;revision:number;result?:Record<string,unknown>};response:Envelope<'aio.task-state',{revision:number}>};
+  aioMemory: {payload:{assistantId:'aio';memoryId?:string;content?:string};response:Envelope<'aio.memory',{memories:Record<string,unknown>[]}>};
   steerPrompt: { payload: { sessionId: string; projectRoot?: string; prompt: string; attachments?: ComposerAttachment[] }; response: Envelope<"run.control", { state: string; run_id: string; message_id?: string }> };
   stopPrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
   pausePrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
@@ -84,7 +104,8 @@ interface CoreRequestMap {
   searchSessions: { payload: { query: string }; response: Envelope<"session.search", { query: string; results: SessionSearchResult[] }> };
   initialize: { payload: { projectRoot: string; deferPayloads?: boolean }; response: Envelope<"state", { state: DesktopState; deferred?: boolean }> };
   getState: { payload: EmptyPayload; response: Envelope<"state", { state: DesktopState }> };
-  getSession: { payload: { sessionId: string }; response: Envelope<"session", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> };
+  getSession: { payload: { sessionId: string; before?: number; limit?: number; select?: boolean }; response: Envelope<"session", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> };
+  getConversationConfig: { payload: { sessionId: string; configuration?: Record<string, unknown>; revision?: number }; response: Envelope<"conversation.config", { configuration: Record<string, unknown>; revision: number; error: string; models: ModelSourcesState; workspace: WorkspaceState; settings: SettingsState }> };
   getFileChanges: { payload: { sessionId: string }; response: Envelope<"file.changes", { session_id: string; changes: FileChange[] }> };
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
   getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: ContextUsage | null }> };
@@ -94,11 +115,11 @@ interface CoreRequestMap {
   getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };
   createSession: { payload: { name?: string }; response: Envelope<"session.created", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> };
   runPrompt: {
-    payload: { prompt: string; sessionId: string; mode: string; stream?: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string; attachments?: ComposerAttachment[]; runId?: string; runType?: "prompt" | "review"; goalContext?: string };
+    payload: { prompt: string; sessionId: string; mode?: string; configuration?: Record<string, unknown>; stream?: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string; attachments?: ComposerAttachment[]; runId?: string; runType?: "prompt" | "review"; goalContext?: string };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   resumePrompt: {
-    payload: { sessionId: string; mode: string; stream?: boolean };
+    payload: { sessionId: string; mode?: string; configuration?: Record<string, unknown>; stream?: boolean };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   compactContext: {
@@ -128,13 +149,13 @@ interface CoreRequestMap {
   refreshCustomProviderModels: { payload: { providerId: string }; response: CustomProviderEnvelope };
   selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number; reasoning?: string }; response: CustomProviderEnvelope };
   probeProviders: { payload: { keys?: string[] }; response: Envelope<"providers.probed", { probes: ProviderProbe[] }> };
-  setPluginEnabled: { payload: { pluginId: string; enabled: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
+  setPluginEnabled: { payload: { pluginId: string; enabled: boolean;sessionId?:string;projectRoot?:string;assistantId?:'aio' }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   setPluginTrust: { payload: { pluginId: string; trusted: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   refreshPlugins: { payload: EmptyPayload; response: Envelope<"plugins", { plugins: PluginsState }> };
   refreshSkills: { payload: EmptyPayload; response: Envelope<"skills", { skills: SkillsState }> };
-  pinSkill: { payload: { skill: string }; response: SkillPinEnvelope };
-  unpinSkill: { payload: { skill: string }; response: SkillPinEnvelope };
-  clearPinnedSkills: { payload: EmptyPayload; response: SkillPinEnvelope };
+  pinSkill: { payload: { skill: string; draft?:boolean }; response: SkillPinEnvelope };
+  unpinSkill: { payload: { skill: string; draft?:boolean }; response: SkillPinEnvelope };
+  clearPinnedSkills: { payload: {draft?:boolean}; response: SkillPinEnvelope };
   inspectSkill: { payload: { skill: string }; response: Envelope<"skill.inspect", { record: SkillDetail | null }> };
   indexWorkspace: { payload: EmptyPayload; response: Envelope<"workspace.indexed", { result: Record<string, unknown>; workspace: WorkspaceState }> };
   rollbackCheckpoint: { payload: { checkpointId: string; confirmed: true }; response: Envelope<"rollback.result", { result: Record<string, unknown>; recovery: RecoveryState }> };
@@ -162,7 +183,7 @@ interface CoreRequestMap {
 }
 
 export type CoreAction = keyof CoreRequestMap;
-export type CorePayload<Action extends CoreAction> = CoreRequestMap[Action]["payload"];
+export type CorePayload<Action extends CoreAction> = CoreRequestMap[Action]["payload"] & {projectRoot?: string; sessionId?: string; revision?: number;assistantId?:'aio';markRead?:boolean};
 export type CoreResponse<Action extends CoreAction> = CoreRequestMap[Action]["response"];
 
 type MissingRuntimeAction = Exclude<CoreAction, CoreActionName>;

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from rich.console import Console
 
 from reverie.cli.input_handler import InputHandler
+from reverie.config import Config
 from reverie.cli.theme import DECO, THEME
 from reverie.session.manager import SessionManager
 from reverie.sdk_bridge import ReverieSdkBridge
@@ -260,6 +261,7 @@ def test_desktop_pins_survive_restart_and_belong_to_their_session(tmp_path: Path
         bridge = ReverieSdkBridge()
         bridge.project_root = tmp_path.resolve()
         bridge.interface = SimpleNamespace(
+            config_manager=SimpleNamespace(load=lambda:Config()),
             skills_manager=_manager(tmp_path, ("mesh-drafting", "Draft meshes.")),
             session_manager=SessionManager(tmp_path / "data"),
             project_data_dir=tmp_path / "data", agent=None, rats_runtime=None,

@@ -140,11 +140,11 @@ Examples:
             )
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8', newline='') as f:
                 content = f.read()
         except UnicodeDecodeError:
             try:
-                with open(file_path, 'r', encoding='latin-1') as f:
+                with open(file_path, 'r', encoding='latin-1', newline='') as f:
                     content = f.read()
             except Exception as e:
                 return ToolResult.fail(f"Could not read file: {e}")

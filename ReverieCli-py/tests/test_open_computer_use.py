@@ -131,9 +131,8 @@ def test_controller_exposes_open_computer_use_contract_instead_of_legacy_tool(tm
     assert current_names <= reverie_names
     assert EXPECTED_TOOL_NAMES.isdisjoint(controller_names)
     assert "computer_control" not in controller_names
-    assert {"str_replace_editor", "file_ops", "delete_file", "command_exec", "create_file"}.isdisjoint(
-        controller_names
-    )
+    assert {"str_replace_editor", "file_ops", "delete_file", "command_exec", "create_file"} <= controller_names
+    assert controller_names == {schema['function']['name'] for schema in executor.get_tool_schemas(mode='aio')}
     assert EXPECTED_TOOL_NAMES.isdisjoint(reverie_names)
 
 

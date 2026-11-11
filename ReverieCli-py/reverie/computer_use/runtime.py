@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from contextlib import contextmanager
+import ctypes
 import hashlib
 import json
 import os
@@ -15,6 +17,48 @@ import uuid
 
 COMMANDS = frozenset('status version permissions list-apps list-windows list-displays list-surfaces snapshot find get is screenshot launch close-app focus-window resize-window move-window minimize maximize restore open-system-surface click double-click triple-click right-click focus set-value clear type select toggle check uncheck expand collapse press scroll scroll-to drag hover mouse-move mouse-click mouse-wheel wait clipboard-get clipboard-set clipboard-clear'.split())
 READ_COMMANDS = frozenset('status version permissions list-apps list-windows list-displays list-surfaces snapshot find get is screenshot wait clipboard-get'.split())
+
+
+@contextmanager
+def desktop_occupation(command: str, check_cancel, *, mutation: bool, timeout_ms: int = 60000):
+    """Serialize native operations across kernels in this Windows logon session."""
+    if sys.platform != 'win32':
+        yield
+        return
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.CreateMutexW.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.ReleaseMutex.argtypes = [wintypes.HANDLE]
+    kernel.ReleaseMutex.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateMutexW(None, False, 'Local\\ReverieDesktopOperations.v1')
+    if not handle:
+        raise failure(command, 'DESKTOP_LOCK_FAILED', f'Desktop coordination failed ({ctypes.get_last_error()}).')
+    owned = False
+    deadline = time.monotonic() + timeout_ms / 1000
+    try:
+        while True:
+            check_cancel(command)
+            status = kernel.WaitForSingleObject(handle, 100)
+            if status in (0, 0x80):
+                owned = True
+                check_cancel(command)
+                if status == 0x80 and mutation:
+                    raise failure(command, 'DESKTOP_OWNER_INTERRUPTED', 'Another desktop owner ended unexpectedly. Observe actual effects before issuing another action.', uncertain=True)
+                break
+            if status != 0x102:
+                raise failure(command, 'DESKTOP_LOCK_FAILED', f'Desktop wait failed ({ctypes.get_last_error()}).')
+            if time.monotonic() >= deadline:
+                raise failure(command, 'DESKTOP_BUSY', 'Another Reverie task owns the desktop. This operation was not delivered.')
+        yield
+    finally:
+        if owned:
+            kernel.ReleaseMutex(handle)
+        kernel.CloseHandle(handle)
 
 
 class NativeDesktopError(RuntimeError):
@@ -80,7 +124,7 @@ class ComputerUseRuntime:
                 headed: bool = False, timeout_ms: int = 10000) -> dict:
         if command not in COMMANDS:
             raise failure(command, 'INVALID_ARGS', 'This native command is not exposed by Reverie.')
-        with self._lock:
+        with self._lock, desktop_occupation(command, self.check_cancel, mutation=command not in READ_COMMANDS):
             self._verify_binary()
             self.check_cancel(command)
             self.root.mkdir(parents=True, exist_ok=True)

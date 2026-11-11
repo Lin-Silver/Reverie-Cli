@@ -23,24 +23,24 @@ export function normalizeProjectRoot(root: string): string {
   const normalized = root.replaceAll("\\", "/").replace(/\/+$/, "");
   return /^[A-Za-z]:/.test(normalized) ? normalized.toLowerCase() : normalized;
 }
-function structuredKey(root: string, id: string): string {
-  return `${STRUCTURED_PREFIX}${encodeSegment(normalizeProjectRoot(root))}:${encodeSegment(id)}`;
+function structuredKey(root: string, id: string, assistantId?:'aio'): string {
+  return `${STRUCTURED_PREFIX}${encodeSegment(assistantId==='aio'?'assistant:aio':normalizeProjectRoot(root))}:${encodeSegment(id)}`;
 }
-export function saveStructuredDraft(root: string, id: string, draft: StructuredDraft): string {
+export function saveStructuredDraft(root: string, id: string, draft: StructuredDraft,assistantId?:'aio'): string {
   try {
-    if (draft.text || draft.attachments.length) localStorage.setItem(structuredKey(root, id), JSON.stringify(draft));
-    else localStorage.removeItem(structuredKey(root, id));
+    if (draft.text || draft.attachments.length) localStorage.setItem(structuredKey(root, id,assistantId), JSON.stringify(draft));
+    else localStorage.removeItem(structuredKey(root, id,assistantId));
     return "";
   } catch (error) { return error instanceof Error ? error.message : String(error); }
 }
-export function loadStructuredDraft(root: string, id: string): StructuredDraft {
+export function loadStructuredDraft(root: string, id: string,assistantId?:'aio'): StructuredDraft {
   try {
-    const stored = localStorage.getItem(structuredKey(root, id));
+    const stored = localStorage.getItem(structuredKey(root, id,assistantId));
     if (stored) {
       const draft = JSON.parse(stored) as StructuredDraft;
       if (typeof draft.text === "string" && Array.isArray(draft.attachments)) return { text: draft.text, attachments: draft.attachments.map(item => item.status === "pending" ? { ...item, status: "cancelled", error: "导入被中断 / Import interrupted" } : item) };
     }
-    return { text: localStorage.getItem(draftStorageKey(root, id)) ?? "", attachments: [] };
+    return { text: localStorage.getItem(draftStorageKey(root, id,assistantId)) ?? "", attachments: [] };
   } catch { return { text: "", attachments: [] }; }
 }
 
@@ -56,8 +56,8 @@ function encodeSegment(value: string): string {
 }
 
 /** The localStorage key for one conversation's draft. */
-export function draftStorageKey(projectRoot: string, sessionId: string): string {
-  return `${DRAFT_KEY_PREFIX}${encodeSegment(projectRoot)}:${encodeSegment(sessionId)}`;
+export function draftStorageKey(projectRoot: string, sessionId: string,assistantId?:'aio'): string {
+  return `${DRAFT_KEY_PREFIX}${encodeSegment(assistantId==='aio'?'assistant:aio':projectRoot)}:${encodeSegment(sessionId)}`;
 }
 
 /** The key prefix shared by every draft belonging to one project. */
@@ -70,9 +70,9 @@ function projectKeyPrefix(projectRoot: string): string {
  * abandoned drafts never accumulate. Storage failures (quota, private mode) are
  * swallowed: a lost draft must never break the composer.
  */
-export function saveDraft(projectRoot: string, sessionId: string, text: string): void {
+export function saveDraft(projectRoot: string, sessionId: string, text: string,assistantId?:'aio'): void {
   if (!sessionId) return;
-  const key = draftStorageKey(projectRoot, sessionId);
+  const key = draftStorageKey(projectRoot, sessionId,assistantId);
   try {
     if (text) localStorage.setItem(key, text);
     else localStorage.removeItem(key);
@@ -82,11 +82,11 @@ export function saveDraft(projectRoot: string, sessionId: string, text: string):
 }
 
 /** Remove one conversation's draft, e.g. after it is deleted. */
-export function clearDraft(projectRoot: string, sessionId: string): void {
+export function clearDraft(projectRoot: string, sessionId: string,assistantId?:'aio'): void {
   if (!sessionId) return;
   try {
-    localStorage.removeItem(draftStorageKey(projectRoot, sessionId));
-    localStorage.removeItem(structuredKey(projectRoot, sessionId));
+    localStorage.removeItem(draftStorageKey(projectRoot, sessionId,assistantId));
+    localStorage.removeItem(structuredKey(projectRoot, sessionId,assistantId));
   } catch {
     // Non-fatal.
   }

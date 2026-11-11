@@ -64,7 +64,7 @@ from ..rats import RatsRuntime
 from ..engine_constants import ASHFOX_DEFAULT_ENDPOINT, ASHFOX_MCP_SERVER_NAME
 from ..rules_manager import RulesManager
 from ..skills_manager import SkillsManager
-from ..session import SessionManager
+from ..session import SQLiteSessionManager as SessionManager
 from ..stream_protocol import (
     HIDDEN_STREAM_TOKEN,
     STREAM_EVENT_MARKER,
@@ -843,8 +843,10 @@ class ReverieInterface:
         headless: bool = False,
         debug: Optional[bool] = None,
         runtime_surface: str = "terminal",
+        execution_root: Optional[Path] = None,
     ):
-        self.project_root = project_root
+        self.workspace_root = project_root
+        self.project_root = execution_root or project_root
         self.headless = bool(headless)
         normalized_surface = str(runtime_surface or "").strip().lower().replace("_", "-")
         self.runtime_surface = "desktop" if normalized_surface in {"desktop", "electron", "gui"} else "terminal"
@@ -1007,6 +1009,14 @@ class ReverieInterface:
         """Load the config currently in effect for this runtime."""
         if self._runtime_config_override is not None:
             return self._clone_config(self._runtime_config_override)
+        if self.runtime_surface == 'terminal' and getattr(self,'session_manager',None):
+            session = self.session_manager.get_current_session()
+            snapshot = session.metadata.get('runtime_config') if session else None
+            if snapshot:
+                from ..session.runtime_config import resolve_runtime_config
+                return resolve_runtime_config(self.config_manager.load(),snapshot)
+        if getattr(self, '_conversation_config', None) is not None:
+            return self._clone_config(self._conversation_config)
         return self.config_manager.load()
 
     def _ensure_builtin_mcp_servers(self) -> None:
@@ -1045,11 +1055,11 @@ class ReverieInterface:
     def _init_workspace_services(self) -> None:
         """Initialize cache/session/rollback services for the active runtime scope."""
         config = self._load_active_runtime_config()
-        runtime_scope = "computer-controller" if normalize_mode(getattr(config, "mode", "reverie")) == "computer-controller" else "workspace"
+        runtime_scope = "aio" if getattr(self,'_assistant_owner',False) or normalize_mode(getattr(config, "mode", "reverie")) == "aio" else "workspace"
         self._runtime_scope = runtime_scope
         self.project_data_dir = (
-            get_computer_controller_data_dir(self.config_manager.app_root)
-            if runtime_scope == "computer-controller"
+            self.config_manager.app_root / '.reverie' / 'aio'
+            if runtime_scope == "aio"
             else self.config_manager.project_data_dir
         )
         self.project_data_dir.mkdir(parents=True, exist_ok=True)
@@ -1070,26 +1080,37 @@ class ReverieInterface:
 
         from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
-        self.memory_os = MemoryOS(
-            self.project_data_dir,
-            project_root=None if runtime_scope == "computer-controller" else self.project_root,
-        )
-        try:
-            self.memory_indexer.auto_learn_from_sessions(max_items=36, max_sessions=40)
-        except Exception:
-            report_suppressed_exception("run optional CLI integration")
         self.workspace_stats_manager = WorkspaceStatsManager(
             self.project_data_dir,
-            project_root=None if runtime_scope == "computer-controller" else self.project_root,
+            project_root=None if runtime_scope == "aio" else getattr(self,'workspace_root',self.project_root),
         )
 
         self.session_manager = SessionManager(
             self.project_data_dir,
-            project_root=None if runtime_scope == "computer-controller" else self.project_root,
+            project_root=None if runtime_scope == "aio" else getattr(self,'workspace_root',self.project_root),
             memory_indexer=self.memory_indexer,
-            always_new_session=runtime_scope == "computer-controller",
-            refresh_memory_index_on_save=runtime_scope == "computer-controller",
+            always_new_session=False,
+            refresh_memory_index_on_save=runtime_scope == "aio",
+            navigation=self.runtime_surface != 'desktop',
         )
+        if runtime_scope == 'aio':
+            from ..session.aio_store import AiOStore
+            from ..session.runtime_config import capture_runtime_config
+            self.session_manager = AiOStore(self.project_data_dir)
+            if self.session_manager._read_session(self.session_manager.mainline_id) is None:
+                self.session_manager.enable(capture_runtime_config(config))
+        self.memory_os = MemoryOS(
+            self.project_data_dir,
+            project_root=None if runtime_scope == 'aio' else getattr(self,'workspace_root',self.project_root),
+            memory_store=self.session_manager.memory if runtime_scope == 'aio' else None,
+        )
+        self.memory_indexer.session_reader = self.session_manager._read_session
+        self.memory_indexer.session_lister = self.session_manager.list_sessions
+        self.memory_indexer.session_page_reader = self.session_manager.get_page
+        try:
+            self.memory_indexer.auto_learn_from_sessions(max_items=36, max_sessions=40)
+        except Exception:
+            report_suppressed_exception("run optional CLI integration")
 
         from ..session import OperationHistory, RollbackManager
         from ..lifecycle import LifecycleManager
@@ -1097,14 +1118,14 @@ class ReverieInterface:
         self.rollback_manager = RollbackManager(self.project_data_dir, self.operation_history)
         self.lifecycle_manager = LifecycleManager(
             self.project_data_dir,
-            project_root=None if runtime_scope == "computer-controller" else self.project_root,
+            project_root=None if runtime_scope == "aio" else self.project_root,
         )
         self.total_active_time = self.workspace_stats_manager.get_total_active_seconds()
 
     def _runtime_scope_for_config(self, config: Optional[Config] = None) -> str:
         """Return the active runtime scope for the supplied config."""
         active_config = config or self._load_active_runtime_config()
-        return "computer-controller" if normalize_mode(getattr(active_config, "mode", "reverie")) == "computer-controller" else "workspace"
+        return "aio" if getattr(self,'_assistant_owner',False) or normalize_mode(getattr(active_config, "mode", "reverie")) == "aio" else "workspace"
 
     def _ensure_runtime_services_for_config(self, config: Config) -> bool:
         """Rebuild mode-scoped runtime services when the active scope changes."""
@@ -3042,6 +3063,12 @@ class ReverieInterface:
     
     def _process_message(self, message: str) -> bool:
         """Process message with direct streaming output to avoid truncation"""
+        from ..session.runtime_config import validate_conversation_workspace
+        try:
+            validate_conversation_workspace(self.session_manager.get_current_session(),getattr(self,'workspace_root',self.project_root))
+        except ValueError as error:
+            self._show_activity_event('Workspace',str(error),status='warning')
+            return True
         if not self.agent:
             self._init_agent()
         if not self.agent:
@@ -4012,6 +4039,7 @@ class ReverieInterface:
                     detail=f"{len(existing_messages)} messages were preserved across reinitialization.",
                 )
 
+        self.agent.workspace_memory_context = getattr(self, "_workspace_memory_context", "")
         self._bind_agent_runtime_context(config)
         self._show_activity_event(
             "Agent",
@@ -4057,6 +4085,7 @@ class ReverieInterface:
         run_control: Any = None,
         read_only_review: bool = False,
         goal_context: str = "",
+        prompt_already_saved: bool = False,
     ) -> PromptRunResult:
         """Run one prompt non-interactively and return a structured result."""
         prompt_text = str(message or "").strip()
@@ -4081,7 +4110,16 @@ class ReverieInterface:
                 error="Prompt text is empty.",
             )
 
-        base_config = self._clone_config(self.config_manager.load())
+        from ..session.runtime_config import capture_runtime_config, resolve_runtime_config
+        saved_session = self.session_manager.get_current_session() if not fresh_session else None
+        from ..session.runtime_config import validate_conversation_workspace
+        validate_conversation_workspace(saved_session,getattr(self,'workspace_root',self.project_root))
+        snapshot = getattr(self, '_run_configuration', None) or (saved_session.metadata.get('runtime_config') if saved_session else None)
+        base_config = resolve_runtime_config(self.config_manager.load(),snapshot) if snapshot else self._load_active_runtime_config()
+        self._run_configuration = snapshot
+        if snapshot:
+            self.skills_manager.restore_pinned_skills(snapshot.get('pinned_skills',[]))
+            self.runtime_plugin_manager.set_conversation_selection(snapshot.get('plugins',{}))
         if source_override or model_override or reasoning_override:
             from ..desktop_catalog import apply_model_selection
 
@@ -4124,7 +4162,8 @@ class ReverieInterface:
             if not fresh_session and (
                 self.session_manager.get_current_session() or self.session_manager.restore_last_session()
             ):
-                self._restore_session_skill_pins()
+                if not snapshot:
+                    self._restore_session_skill_pins()
             self._init_agent(config_override=base_config, persist_config_changes=False)
             if not self.agent:
                 return PromptRunResult(
@@ -4143,6 +4182,7 @@ class ReverieInterface:
                 part for part in [self.agent.additional_rules, _build_batch_prompt_rules(read_only_review=read_only_review, runtime_surface=self.runtime_surface)] if str(part).strip()
             )
             self.agent.goal_context = goal_context
+            self.agent.tool_executor.update_context('aio_worker',bool(getattr(self,'_aio_worker',False)))
             self.agent.system_prompt = self._build_system_prompt(
                 model_name=self.agent.model_display_name,
                 model_id=getattr(self.agent, "model", ""),
@@ -4198,8 +4238,17 @@ class ReverieInterface:
                 meta=session.id,
             )
             self._sync_workspace_memory_message(session)
-            self.agent.set_history(session.messages)
+            if prompt_already_saved:
+                last = session.messages[-1] if session.messages else {}
+                if last.get('role') != 'user' or last.get('content') != prompt_text:
+                    raise ValueError('Saved AiO task input does not match the queued prompt.')
+                self.agent.set_history(session.messages[:-1])
+            else:
+                self.agent.set_history(session.messages)
             session.metadata["pinned_skills"] = self.skills_manager.pinned_names()
+            if 'runtime_config' not in session.metadata:
+                session.metadata['runtime_config'] = capture_runtime_config(base_config, rules=self.rules_manager.get_rules_text(), pinned_skills=self.skills_manager.pinned_names(), plugins={record.plugin_id:record.enabled for record in self.runtime_plugin_manager.get_snapshot().records})
+            self._run_configuration = snapshot or session.metadata['runtime_config']
             session.metadata["prompt_run"] = {
                 "state": "running", "prompt": prompt_text,
                 "started_at": started_at.isoformat(),
@@ -4217,6 +4266,9 @@ class ReverieInterface:
             error_text = ""
             auto_followup_count = 0
             persisted_message_count = len(self.agent.messages)
+            from ..session.streams import StreamBuffer
+            import uuid
+            stream_buffer = StreamBuffer(self.session_manager, session.id, str(getattr(self,'_active_run_id','') or uuid.uuid4().hex))
 
             def _persist_history_if_changed() -> None:
                 nonlocal persisted_message_count
@@ -4257,13 +4309,16 @@ class ReverieInterface:
                         continue
                     if in_thinking_mode:
                         thinking_chunks.append(chunk)
+                        stream_buffer.append('reasoning',chunk)
                         _emit({"type": "reasoning.delta", "text": chunk})
                     else:
                         output_chunks.append(chunk)
+                        stream_buffer.append('assistant',chunk)
                         if not chunk.startswith("Error processing message:"):
                             _emit({"type": "assistant.delta", "text": chunk})
 
                 _persist_history_if_changed()
+                stream_buffer.flush()
                 turn_thinking = "".join(thinking_chunks)
                 streamed_output = "".join(output_chunks).strip()
                 # A persisted partial answer can precede a transport failure.
@@ -4349,6 +4404,8 @@ class ReverieInterface:
                 session.metadata["prompt_run"]["state"] = "interrupted" if error_text else "completed"
                 self.session_manager.update_messages(self.agent.get_history())
                 self.session_manager.rename_current_session_from_prompt(prompt_text)
+                if not error_text:
+                    self.session_manager.clear_stream(session.id, stream_buffer.run_id)
                 current_session = self.session_manager.get_current_session()
                 if current_session and self.memory_indexer:
                     self.memory_indexer.refresh_session(current_session.id)
@@ -4426,6 +4483,7 @@ class ReverieInterface:
                 self.agent.tool_executor.update_context('context_usage_handler', None)
                 self.agent.tool_executor.update_context('desktop_read_only_review', False)
             self._runtime_config_override = previous_override
+            self._run_configuration = None
 
     def _build_additional_rules_with_tti(
         self,
@@ -4435,7 +4493,11 @@ class ReverieInterface:
         include_harness_guidance: bool = True,
     ) -> str:
         """Append TTI model metadata from config.json into model context."""
-        base_rules = (self.rules_manager.get_rules_text() or "").strip()
+        snapshot = getattr(self, '_run_configuration', None)
+        if snapshot is None:
+            current = self.session_manager.get_current_session()
+            snapshot = current.metadata.get('runtime_config') if current else None
+        base_rules = str(snapshot.get('rules','') if snapshot else self.rules_manager.get_rules_text() or '').strip()
         normalized_mode = normalize_mode(getattr(config, "mode", "reverie"))
         self.skills_manager.set_active_mode(normalized_mode)
         active_model = getattr(config, "active_model", None)
@@ -4445,8 +4507,8 @@ class ReverieInterface:
         except (TypeError, ValueError):
             skill_metadata_budget = 8_000
 
-        memory_title = "Computer Controller History" if normalized_mode == "computer-controller" else "Workspace Global Memory"
-        memory_label = "computer-control history archive" if normalized_mode == "computer-controller" else "workspace global memory"
+        memory_title = "AiO Mainline and Memory" if normalized_mode == "aio" else "Workspace Global Memory"
+        memory_label = "AiO mainline and task history" if normalized_mode == "aio" else "workspace global memory"
 
         lsp_lines = [
             "## Context Engine Enhancements" if normalized_mode in REPOSITORY_MODES else "## Workspace Continuity",
@@ -4545,45 +4607,27 @@ class ReverieInterface:
         return build_system_prompt(*args, **kwargs)
 
     def _sync_workspace_memory_message(self, session) -> None:
-        """Inject a fresh workspace-memory note into the active session."""
-        if not session or not self.memory_indexer:
-            return
-
-        if self._runtime_scope == "computer-controller":
+        """Refresh request context without rewriting acknowledged history."""
+        memory_context = ""
+        if session and self.memory_indexer:
             try:
                 self.memory_indexer.refresh_session(session.id)
             except Exception:
                 report_suppressed_exception("run optional CLI integration")
-            return
-
-        try:
-            self.memory_indexer.refresh_session(session.id)
-        except Exception:
-            report_suppressed_exception("run optional CLI integration")
-
-        memory_text = self.memory_indexer.build_workspace_memory_summary(max_fragments=8, max_chars=3200)
-        if not memory_text:
-            return
-
-        prefix = "[WORKSPACE GLOBAL MEMORY]"
-        memory_message = {
-            "role": "system",
-            "content": f"{prefix}\n{memory_text}\n[END WORKSPACE GLOBAL MEMORY]",
-        }
-        session.messages = [
-            message
-            for message in session.messages
-            if not (
-                isinstance(message, dict)
-                and str(message.get("role", "")).strip().lower() == "system"
-                and str(message.get("content", "")).startswith(prefix)
-            )
-        ]
-        session.messages.insert(0, memory_message)
-        self.session_manager.update_messages(session.messages)
+            if self._runtime_scope != "aio":
+                memory_text = self.memory_indexer.build_workspace_memory_summary(max_fragments=8, max_chars=3200)
+                if memory_text:
+                    memory_context = f"[WORKSPACE GLOBAL MEMORY]\n{memory_text}\n[END WORKSPACE GLOBAL MEMORY]"
+        self._workspace_memory_context = memory_context
+        if getattr(self, "agent", None) is not None:
+            self.agent.workspace_memory_context = memory_context
 
     def _init_session(self) -> None:
         session, resumed = self.session_manager.ensure_session()
+        if 'runtime_config' not in session.metadata:
+            from ..session.runtime_config import capture_runtime_config
+            session.metadata['runtime_config'] = capture_runtime_config(self.config_manager.load(),rules=self.rules_manager.get_rules_text(),pinned_skills=session.metadata.get('pinned_skills',[]),plugins={record.plugin_id:record.enabled for record in self.runtime_plugin_manager.get_snapshot().records})
+            self.session_manager.save_session(session)
         self._restore_session_skill_pins()
         self._sync_workspace_memory_message(session)
         try:
@@ -4601,8 +4645,8 @@ class ReverieInterface:
 
         if resumed:
             detail_text = "Loaded the previous transcript and workspace memory."
-            if self._runtime_scope == "computer-controller":
-                detail_text = "Loaded the previous computer-control transcript and history index."
+            if self._runtime_scope == "aio":
+                detail_text = "Loaded the persistent AiO mainline and task history."
             self._show_activity_event(
                 "Session",
                 f"Resumed session {session.name}",
@@ -4612,8 +4656,8 @@ class ReverieInterface:
             )
         else:
             detail_text = "A fresh session is ready for this workspace."
-            if self._runtime_scope == "computer-controller":
-                detail_text = "A fresh session is ready in the dedicated computer-control archive."
+            if self._runtime_scope == "aio":
+                detail_text = "The persistent AiO mainline is ready."
             self._show_activity_event(
                 "Session",
                 f"Started session {session.name}",
@@ -4630,8 +4674,12 @@ class ReverieInterface:
         self._refresh_agent_prompt_guidance()
 
     def _get_app_context(self) -> dict:
+        config_manager = self.config_manager
+        if self.runtime_surface == 'terminal':
+            from ..session.runtime_config import ConversationConfigView
+            config_manager = ConversationConfigView(self.config_manager,self.session_manager,lambda config:setattr(self,'_conversation_config',config))
         return {
-            'config_manager': self.config_manager, 'rules_manager': self.rules_manager,
+            'config_manager': config_manager, 'rules_manager': self.rules_manager,
             'mcp_config_manager': self.mcp_config_manager, 'mcp_runtime': self.mcp_runtime,
             # Both the instance and the accessor: a command that only reports
             # state should not force the runtime into existence, while one that

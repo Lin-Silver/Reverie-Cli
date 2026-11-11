@@ -987,9 +987,10 @@ class ContextCompressor:
                     include_legacy_cache_prompt=True,
                 )
                 headers = {
-                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 }
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
                 for key, value in (custom_headers or {}).items():
                     normalized_key = str(key or "").strip()
                     normalized_value = str(value or "").strip()

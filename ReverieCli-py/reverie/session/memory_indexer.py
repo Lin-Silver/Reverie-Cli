@@ -15,6 +15,7 @@ from datetime import datetime
 import hashlib
 import json
 import re
+import tempfile
 import logging
 from collections import defaultdict
 
@@ -319,6 +320,13 @@ class MemoryIndexer:
             Number of fragments indexed
         """
         if session_data is None:
+            reader = getattr(self, 'session_reader', None)
+            if reader is not None:
+                session = reader(session_id)
+                if session is None:
+                    return 0
+                session_data = session.to_dict()
+        if session_data is None:
             session_path = self.sessions_dir / f"{session_id}.json"
 
             if not session_path.exists():
@@ -333,11 +341,15 @@ class MemoryIndexer:
 
         try:
             messages = session_data.get('messages', [])
+            offset = max(0,int(session_data.get('total',len(messages)))-len(messages))
+            if getattr(self,'session_page_reader',None) is not None and len(messages) > 200:
+                offset += len(messages)-200
+                messages = messages[-200:]
             indexed_count = 0
             reusable = reuse or {}
             timestamp = session_data.get('updated_at', '')
 
-            for idx, message in enumerate(messages):
+            for idx, message in enumerate(messages,start=offset):
                 role = from_stored_role(message.get('role', ''))
                 content = message.get('content', '')
 
@@ -423,7 +435,7 @@ class MemoryIndexer:
         self._save_fragments()
         return indexed_count
     
-    def build_index(self) -> ProjectIndex:
+    def build_index(self, *, max_sessions=None) -> ProjectIndex:
         """
         Build the complete project index from all sessions.
         
@@ -436,13 +448,17 @@ class MemoryIndexer:
         self.fragments.clear()
         
         # Index all sessions
-        session_files = list(self.sessions_dir.glob('*.json'))
-        total_sessions = len(session_files)
+        lister = getattr(self,'session_lister',None)
+        session_ids = [item.id for item in lister()] if lister else [path.stem for path in self.sessions_dir.glob('*.json')]
+        if max_sessions is not None:
+            session_ids = session_ids[:max_sessions]
+        total_sessions = len(session_ids)
         total_messages = 0
         
-        for session_file in session_files:
-            session_id = session_file.stem
-            count = self.index_session(session_id)
+        for session_id in session_ids:
+            pager = getattr(self,'session_page_reader',None)
+            data = pager(session_id,limit=200) if pager and max_sessions is not None else None
+            count = self.index_session(session_id,session_data=data)
             total_messages += int(count or 0)
         
         # Build inverted indexes
@@ -485,17 +501,32 @@ class MemoryIndexer:
         
         return self.index
     
+    @staticmethod
+    def _write_cache(path: Path, chunks) -> None:
+        """Publish a complete cache without truncating the previous readable copy."""
+        from .manager import SessionManager
+
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=str(path.parent),
+                prefix=f'.{path.name}.', suffix='.tmp', delete=False,
+            ) as output:
+                temporary = Path(output.name)
+                output.writelines(chunks)
+            SessionManager._replace_with_retry(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
     def _save_index(self) -> None:
         """Save project index to disk"""
         if self.index:
-            with open(self.index_path, 'w', encoding='utf-8') as f:
-                json.dump(self.index.to_dict(), f, indent=2, ensure_ascii=False)
+            self._write_cache(self.index_path, json.JSONEncoder(indent=2, ensure_ascii=False).iterencode(self.index.to_dict()))
     
     def _save_fragments(self) -> None:
         """Save memory fragments to disk (JSONL format)"""
-        with open(self.fragments_path, 'w', encoding='utf-8') as f:
-            for fragment in self.fragments.values():
-                f.write(json.dumps(fragment.to_dict(), ensure_ascii=False) + '\n')
+        self._write_cache(self.fragments_path, (json.dumps(fragment.to_dict(), ensure_ascii=False) + '\n' for fragment in self.fragments.values()))
     
     def load_index(self) -> bool:
         """Load project index from disk"""
@@ -554,7 +585,7 @@ class MemoryIndexer:
             'items': [item.to_dict() for item in self.auto_memory],
         }
         self.indexes_dir.mkdir(parents=True, exist_ok=True)
-        self.auto_memory_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
+        self._write_cache(self.auto_memory_path, json.JSONEncoder(indent=2, ensure_ascii=False).iterencode(payload))
         self._auto_memory_loaded = True
 
     @staticmethod
@@ -606,7 +637,7 @@ class MemoryIndexer:
         if not self.index:
             self.load_index()
         if not self.index and self.sessions_dir.exists():
-            self.build_index()
+            self.build_index(max_sessions=max_sessions)
 
         existing_by_id = {item.id: item for item in self._load_auto_memory()}
         candidates: Dict[str, AutoMemoryItem] = dict(existing_by_id)

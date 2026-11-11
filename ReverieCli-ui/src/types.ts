@@ -428,6 +428,9 @@ export interface ToolRecord {
 
 export interface SessionListState {
   current_session_id: string;
+  unread_session_ids?: string[];
+  archive_states?: Record<string,boolean>;
+  owners?: Record<string,{assistant_id?:'aio';workspace?:string}>;
   items: SessionInfo[];
 }
 
@@ -448,7 +451,11 @@ export interface SessionMessage {
 }
 
 export interface SessionState {
-  revision?: string;
+  revision?: string | number;
+  total?: number;
+  before?: number | null;
+  config_error?: string;
+  interrupted_streams?: Array<{run_id: string; kind: string; content: string}>;
   id: string;
   name: string;
   created_at: string;

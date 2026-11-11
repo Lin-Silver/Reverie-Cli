@@ -24,7 +24,10 @@ def test_restricted_modes_keep_discovery_pins_and_actionable_guidance(tmp_path, 
         manager.describe_for_prompt(), manager.describe_pinned_for_prompt(),
         manager.build_explicit_skill_injection([record]), manager.get_status_summary()["mode_notice"],
     ):
-        assert "switch_mode" in text and "/mode reverie" in text
+        if mode == 'writer':
+            assert "switch_mode" in text and "/mode reverie" in text
+        else:
+            assert 'Only the AiO main agent controls the desktop' in text
     assert manager.pinned_names() == ["photo-to-3d"]
     bridge = ReverieSdkBridge()
     sessions = SessionManager(tmp_path / "data")
@@ -32,7 +35,7 @@ def test_restricted_modes_keep_discovery_pins_and_actionable_guidance(tmp_path, 
     session.metadata["pinned_skills"] = manager.pinned_names()
     sessions.save_session(session)
     bridge.interface = SimpleNamespace(skills_manager=manager, session_manager=sessions, project_data_dir=tmp_path / "data", agent=None)
-    assert bridge.skills_payload()["mode"] == mode
+    assert bridge.skills_payload()["mode"] == ('aio' if mode == 'computer-controller' else mode)
     assert bridge.skills_payload()["pinned"]["names"] == ["photo-to-3d"]
     if mode == "writer":
         assert "skill_lookup is unavailable" in manager.describe_for_prompt()
@@ -41,7 +44,7 @@ def test_restricted_modes_keep_discovery_pins_and_actionable_guidance(tmp_path, 
         tool = SkillLookupTool({"skills_manager": manager})
         for operation in ("list", "search", "inspect"):
             result = tool.execute(operation=operation, query="photo-to-3d", skill_name="photo-to-3d")
-            assert result.success and "switch_mode" in result.output
+            assert result.success and 'Only the AiO main agent controls the desktop' in result.output
 
 
 def test_agent_mode_switch_immediately_refreshes_skill_discovery_and_keeps_pins(tmp_path, monkeypatch):

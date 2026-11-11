@@ -627,6 +627,11 @@ def _tool_result_history_content(result: ToolResult) -> Any:
     return text
 
 
+def _assistant_content_for_history(content: str, token: str = HIDDEN_STREAM_TOKEN) -> str:
+    """Preserve provider whitespace, retaining the existing explicit end-marker cleanup."""
+    return content.replace(token, "").strip() if token in content else content
+
+
 def _build_assistant_history_message(
     content: Any,
     tool_calls: Optional[List[Dict[str, Any]]] = None,
@@ -997,7 +1002,8 @@ def _convert_messages_to_anthropic_format(messages: List[Dict[str, Any]]) -> tup
             anthropic_content = blocks or content_text
 
         if role == "system":
-            system_message = content_text
+            if content_text:
+                system_message = f"{system_message}\n\n{content_text}" if system_message else content_text
             continue
 
         if role == "assistant":
@@ -2265,6 +2271,7 @@ class ReverieAgent:
         self.agent_color = str(agent_color or "").strip()
         self.parent_agent_id = str(parent_agent_id or "").strip()
         self.additional_rules = additional_rules
+        self.workspace_memory_context = ""
         self.mode = mode
         self.task_stage = "PLANNING"
         self.provider = normalize_model_provider(provider)
@@ -3084,7 +3091,7 @@ class ReverieAgent:
             return []
         schemas = tool_executor.get_tool_schemas(mode=effective_mode)
         if tool_executor.context.get("desktop_read_only_review"):
-            schemas = [schema for schema in schemas if str((schema.get("function") or {}).get("name")) in {"file_ops", "read_file", "list_dir", "str_replace_editor", "codebase-retrieval"}]
+            schemas = [schema for schema in schemas if str((schema.get("function") or {}).get("name")) in {"file_ops", "read_file", "list_dir", "str_replace_editor", "codebase-retrieval", "computer_status", "computer_list_apps", "computer_list_windows", "computer_list_displays", "computer_list_surfaces", "computer_snapshot", "computer_find", "computer_get", "computer_is", "computer_screenshot", "computer_wait"}]
         if not schemas:
             return []
 
@@ -3185,7 +3192,7 @@ class ReverieAgent:
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Require one Context Engine lookup for high-confidence repository turns."""
-        if normalize_mode(self.mode) in {"writer", "computer-controller"}:
+        if normalize_mode(self.mode) in {"writer", "aio"}:
             return None
         available_names = {
             str((schema.get("function", {}) or {}).get("name", "") or "").strip()
@@ -3280,13 +3287,18 @@ class ReverieAgent:
         explicit_path = bool(
             re.search(r"[\w./\\-]+\.(?:py|ts|tsx|js|jsx|css|html|json|yaml|yml|toml|md|rs|go|java|cpp|h)\b", user_text)
         )
-        strong_repository_turn = any(signal in user_text for signal in strong_repository_signals) and any(
-            signal in user_text for signal in repository_question_signals
+        positive_request = re.sub(r"\b(?:do not|don't|never)\s+(?!only\b)[^.\n;]*(?:[.;]|$)|(?:不要|禁止)(?!只)[^。\n，；]*(?:[。；]|$)","",user_text,flags=re.I)
+        supplied_file_content = (
+            re.search(r"\b(?:create|write)\b|创建|写入", positive_request, re.I)
+            and re.search(r"\bcontent\b|内容", positive_request, re.I)
+            and not re.search(r"\b(?:codebase|repository|existing|source code)\b|代码|仓库|现有", positive_request, re.I)
         )
-        implementation_turn = any(signal in user_text for signal in broad_code_signals) and any(
-            signal in user_text for signal in implementation_signals
-        )
-        path_inspection_turn = explicit_path and any(signal in user_text for signal in repository_question_signals)
+        if supplied_file_content:
+            # Creating an artifact from supplied text has no existing code to retrieve.
+            return None
+        strong_repository_turn = any(signal in positive_request for signal in strong_repository_signals) and any(signal in positive_request for signal in repository_question_signals)
+        implementation_turn = any(signal in positive_request for signal in broad_code_signals) and any(signal in positive_request for signal in implementation_signals)
+        path_inspection_turn = explicit_path and any(signal in positive_request for signal in repository_question_signals)
         if not (path_inspection_turn or strong_repository_turn or implementation_turn):
             return None
         return {"type": "function", "function": {"name": "codebase-retrieval"}}
@@ -3301,7 +3313,7 @@ class ReverieAgent:
 
     def _explicit_file_read_native_tool_choice(self, tools=None, *, first_attempt_only=True):
         """Require the first tool attempt for an explicit, scoped file read."""
-        if normalize_mode(self.mode) in {"writer", "computer-controller"}:
+        if normalize_mode(self.mode) in {"writer", "aio"}:
             return None
         names = {str((s.get("function", {}) or {}).get("name", "")) for s in (tools or []) if isinstance(s, dict)}
         if "file_ops" not in names:
@@ -4498,7 +4510,7 @@ class ReverieAgent:
 
     def _completion_continuation_limit(self) -> int:
         """Return the continuation budget for a turn."""
-        if normalize_mode(self.mode) == "computer-controller":
+        if normalize_mode(self.mode) == "aio":
             return 24
         return 3
 
@@ -4541,7 +4553,7 @@ class ReverieAgent:
 
     def _empty_turn_retry_limit(self) -> int:
         """How many output-less model turns to recover from before giving up."""
-        if normalize_mode(self.mode) == "computer-controller":
+        if normalize_mode(self.mode) == "aio":
             return 6
         return 3
 
@@ -4569,7 +4581,7 @@ class ReverieAgent:
                 "Either call the next tool the request needs, or -- only once the request is genuinely "
                 "complete -- reply with a short plain-text summary of the result."
             )
-        if normalize_mode(self.mode) == "computer-controller":
+        if normalize_mode(self.mode) == "aio":
             parts.append("End a final summary with //END//.")
         return " ".join(parts)
 
@@ -5015,7 +5027,7 @@ class ReverieAgent:
                 for call in state.tool_calls
                 if isinstance(call, dict)
             )
-            history_content = "" if thought_only else clean_content
+            history_content = "" if thought_only else _assistant_content_for_history(state.collected_content, state.token_to_hide)
             assistant_message = _build_assistant_history_message(
                 history_content or None,
                 tool_calls=history_tool_calls,
@@ -5037,7 +5049,7 @@ class ReverieAgent:
                         continuation = previous
                         break
             self._incomplete_turn_error = "" if self._should_end_generation(clean_content, state.finish_reason) else self._unfinished_generation_error(state.finish_reason)
-            history_content = state.collected_content.replace(state.token_to_hide, "") if continuation is not None or self._incomplete_turn_error else clean_content
+            history_content = state.collected_content.replace(state.token_to_hide, "") if continuation is not None or self._incomplete_turn_error else _assistant_content_for_history(state.collected_content, state.token_to_hide)
             if continuation is not None:
                 continuation["content"] += history_content
                 if state.collected_thinking:
@@ -5716,6 +5728,8 @@ class ReverieAgent:
         self.tool_executor.update_context("agent", self)
 
     def _get_memory_os(self) -> Optional[MemoryOS]:
+        if self.tool_executor.context.get('decision_only'):
+            return None
         """Return the Memory OS facade for this workspace, creating it lazily."""
         context = getattr(self.tool_executor, "context", {}) if self.tool_executor else {}
         existing = context.get("memory_os") if isinstance(context, dict) else None
@@ -5854,6 +5868,8 @@ class ReverieAgent:
                 if message.get("role") == "assistant" and not message.get("content"):
                     continue
                 normalized = dict(message)
+                normalized.pop("context_replay", None)
+                normalized.pop("segment_boundary", None)
                 if not include_reasoning and not preserve_nvidia_reasoning:
                     normalized.pop("reasoning_content", None)
                 messages.append(normalized)
@@ -5865,6 +5881,9 @@ class ReverieAgent:
                 ):
                     messages.append(dict(message))
         else:
+            workspace_memory = getattr(self, "workspace_memory_context", "")
+            if workspace_memory:
+                messages.append({"role":"system","content":workspace_memory})
             memory_context = self._memory_context_package_message()
             if memory_context:
                 messages.append(memory_context)
@@ -5879,6 +5898,9 @@ class ReverieAgent:
             for message in self._select_prompt_history():
                 if not isinstance(message, dict):
                     continue
+                if message.get("role") == "system" and str(message.get("content", "")).startswith("[WORKSPACE GLOBAL MEMORY]"):
+                    # Legacy snapshots remain saved; current retrieval is supplied separately.
+                    continue
                 if (
                     message.get("role") == "assistant"
                     and not message.get("content")
@@ -5888,6 +5910,8 @@ class ReverieAgent:
                     # valid assistant content/tool message for the next API call.
                     continue
                 normalized = dict(message)
+                normalized.pop("context_replay", None)
+                normalized.pop("segment_boundary", None)
                 if not include_reasoning and not preserve_nvidia_reasoning:
                     normalized.pop("reasoning_content", None)
                 messages.append(normalized)
@@ -7257,7 +7281,7 @@ class ReverieAgent:
                     clean_content = content.replace("//END//", "").strip()
                     self.messages.append(
                         _build_assistant_history_message(
-                            clean_content,
+                            _assistant_content_for_history(content),
                             reasoning_content=message_reasoning,
                         )
                     )
@@ -7275,7 +7299,7 @@ class ReverieAgent:
                 # streaming does; never overwrite a previous reasoning-only row.
                 self.messages.append(
                     _build_assistant_history_message(
-                        content.strip(),
+                        content,
                         reasoning_content=message_reasoning,
                     )
                 )
@@ -7478,7 +7502,7 @@ class ReverieAgent:
                     clean_content = content.replace("//END//", "").strip()
                     self.messages.append(
                         _build_assistant_history_message(
-                            clean_content,
+                            _assistant_content_for_history(content),
                             reasoning_content=message_reasoning,
                         )
                     )
@@ -7697,7 +7721,7 @@ class ReverieAgent:
                 finish_reason = getattr(response, "stop_reason", None)
                 if self._should_end_generation(collected_content, "end_turn" if finish_reason == "stop_sequence" else finish_reason):
                     clean_content = collected_content.replace("//END//", "").strip()
-                    assistant_message = _build_assistant_history_message(clean_content, reasoning_content=collected_thinking)
+                    assistant_message = _build_assistant_history_message(_assistant_content_for_history(collected_content), reasoning_content=collected_thinking)
                     if thinking_blocks:
                         assistant_message["anthropic_thinking"] = thinking_blocks
                     self.messages.append(assistant_message)
@@ -7799,6 +7823,9 @@ class ReverieAgent:
         """Persist the current in-memory history to the active session when available."""
         session_manager = self.tool_executor.context.get("session_manager")
         if not session_manager:
+            return
+        if getattr(session_manager, 'database_path', None) is not None:
+            session_manager.update_messages(self.messages)
             return
         try:
             session_manager.update_messages(self.messages)
@@ -7956,7 +7983,7 @@ class ReverieAgent:
 
     def _workspace_memory_for_rotation(self, latest_user_message: str) -> str:
         """Fetch a compact workspace-memory hint for auto-rotation handoff."""
-        if normalize_mode(self.mode) == "computer-controller":
+        if normalize_mode(self.mode) == "aio":
             return ""
         memory_indexer = self.tool_executor.context.get("memory_indexer")
         if not memory_indexer:
@@ -8023,12 +8050,16 @@ class ReverieAgent:
         project_data_dir = self.tool_executor.context.get("project_data_dir")
         cache_dir = Path(project_data_dir) if project_data_dir else get_project_data_dir(Path(project_root))
         request_messages = self._build_messages()
-        client = self._ensure_client() if self.provider in {"openai-chat", "openai-responses", "anthropic"} else None
+        provider = self.provider
         provider_base_url = self.base_url
-        if self.provider == "codex":
+        if self._should_use_openai_http_fallback():
+            provider = "request"
+            provider_base_url = self._resolve_openai_request_url()
+        elif self.provider == "codex":
             from ..codex import resolve_codex_request_url
 
             provider_base_url = resolve_codex_request_url(self.base_url, self.endpoint)
+        client = self._ensure_client() if provider in {"openai-chat", "openai-responses", "anthropic"} else None
 
         self._auto_context_compaction_active = True
         try:
@@ -8039,7 +8070,7 @@ class ReverieAgent:
                     client=client,
                     model=self.model,
                     session_id=session_id,
-                    provider=self.provider,
+                    provider=provider,
                     base_url=provider_base_url,
                     api_key=self.api_key,
                     custom_headers=self.custom_headers,
@@ -8056,7 +8087,20 @@ class ReverieAgent:
 
             new_history = self._history_from_request_messages(compressed_messages)
             if new_history and new_history != self.messages:
-                self.messages = new_history
+                session_manager = self.tool_executor.context.get("session_manager")
+                if getattr(session_manager, "database_path", None) is not None:
+                    self._persist_history_to_session()
+                    memory = "\n\n".join(
+                        _coerce_text_fragments(message.get("content"))
+                        for message in new_history if message.get("role") == "system"
+                    )
+                    session = session_manager.rotate_session(memory, reason="Automatic context compaction")
+                    self.messages = list(session.messages) + [
+                        {**message, "context_replay": True}
+                        for message in new_history if message.get("role") != "system"
+                    ]
+                else:
+                    self.messages = new_history
                 self._persist_history_to_session()
                 self._record_compaction_memory(compressed_messages, session_id)
                 self._record_memory_event(
@@ -8170,16 +8214,20 @@ class ReverieAgent:
         self._auto_context_rotation_active = True
         try:
             try:
+                provider = self.provider
                 provider_base_url = self.base_url
-                if self.provider == "codex":
+                if self._should_use_openai_http_fallback():
+                    provider = "request"
+                    provider_base_url = self._resolve_openai_request_url()
+                elif self.provider == "codex":
                     from ..codex import resolve_codex_request_url
 
                     provider_base_url = resolve_codex_request_url(self.base_url, self.endpoint)
                 handoff = build_session_handoff_packet(
                     messages=self._build_messages(),
-                    client=self._ensure_client() if self.provider in {"openai-chat", "openai-responses", "anthropic"} else None,
+                    client=self._ensure_client() if provider in {"openai-chat", "openai-responses", "anthropic"} else None,
                     model=self.model,
-                    provider=self.provider,
+                    provider=provider,
                     session_id=session_id,
                     current_tokens=current_tokens,
                     max_tokens=max_tokens,
@@ -8222,7 +8270,10 @@ class ReverieAgent:
 
             self.messages = list(new_session.messages)
             if latest_user_message:
-                self.messages.append({"role": "user", "content": latest_user_message})
+                replay = {"role": "user", "content": latest_user_message}
+                if getattr(session_manager,'database_path',None) is not None:
+                    replay['context_replay'] = True
+                self.messages.append(replay)
 
             self._persist_history_to_session()
 

@@ -496,9 +496,19 @@ class RuntimePluginManager:
         raw = plugins.get(normalized_id) if isinstance(plugins, dict) else None
         state = raw if isinstance(raw, dict) else {}
         return {
-            "enabled": bool(state.get("enabled", True)),
+            "enabled": bool(state.get("enabled", True)) and bool(getattr(self, '_conversation_selection', {}).get(normalized_id, True)),
             "trusted": bool(state.get("trusted", True)),
         }
+
+    def set_conversation_selection(self, selection: dict[str, bool]) -> None:
+        """Local runtime selection; application activation/trust remains the ceiling."""
+        records = self.get_snapshot().records
+        available = {record.plugin_id for record in records}
+        missing = set(selection) - available
+        if missing:
+            raise ValueError('Saved conversation plugins are unavailable: ' + ', '.join(sorted(missing)))
+        self._conversation_selection = dict(selection)
+        self.scan(force_protocol_refresh=False)
 
     def _set_plugin_state_value(self, plugin_id: str, key: str, value: bool) -> RuntimePluginRecord | None:
         normalized_id = sanitize_plugin_identifier(plugin_id or "")

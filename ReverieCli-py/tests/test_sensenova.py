@@ -363,6 +363,19 @@ def test_sensenova_openai_client_uses_standard_api_key(monkeypatch, tmp_path):
     assert "auth_token" not in captured
 
 
+def test_anthropic_message_conversion_keeps_rules_and_memory_context():
+    rules = "Workspace ownership rules. Use the managed isolated directory."
+    memory = "Relevant memory: preserve existing user work."
+    system, messages = _convert_messages_to_anthropic_format([
+        {"role": "system", "content": rules},
+        {"role": "system", "content": memory},
+        {"role": "system", "content": ""},
+        {"role": "tool", "tool_call_id": "read-file", "content": "AiO VERIFIED 中文\n"},
+    ])
+    assert system == rules + "\n\n" + memory
+    assert messages[0]["content"][0]["content"] == "AiO VERIFIED 中文\n"
+
+
 def test_anthropic_message_conversion_preserves_url_and_base64_images():
     encoded = base64.b64encode(b"image").decode()
     _, messages = _convert_messages_to_anthropic_format(

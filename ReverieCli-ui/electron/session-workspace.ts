@@ -10,8 +10,8 @@ import { gitOutput } from "./workbench";
 export interface TerminalRecord { id:string;projectRoot:string;sessionId:string;cwd:string;shell:string;pid:number;state:"running"|"exited"|"interrupted";exitCode?:number;createdAt:string;endedAt?:string;actionId?:string;command?:string;logPath:string;logTruncated?:boolean }
 export interface ProjectAction { id:string;name:string;command:string;cwd:string;envRefs:string[];kind:"test"|"build"|"dev"|"initialize"|"custom" }
 export interface Goal { title:string;conditions:string;steps:Array<{id:string;text:string;state:"pending"|"implemented"|"verified"|"blocked";source:string}>;validationCommands:string;revisions:Array<{at:string;source:string;summary:string}> }
-export interface RunRecord { id:string;projectRoot:string;sessionId:string;createdAt:string;endedAt?:string;state:string;pid?:number;branch:string;model:string;input:unknown;result?:unknown;beforeRef?:string;afterRef?:string;events?:Record<string,unknown>[];unknownEffects?:string;processPresent?:boolean;goalContext?:string;logTruncated?:boolean }
-export interface LocalNotification { id:string;projectRoot:string;sessionId:string;runId:string;kind:string;title:string;body:string;createdAt:string;read:boolean;osState:string }
+export interface RunRecord { id:string;projectRoot:string;sessionId:string;createdAt:string;endedAt?:string;state:string;pid?:number;branch:string;model:string;input:unknown;result?:unknown;beforeRef?:string;afterRef?:string;events?:Record<string,unknown>[];unknownEffects?:string;processPresent?:boolean;goalContext?:string;logTruncated?:boolean;executionRoot?:string;taskWorkspaceId?:string;incorporation?:{conflicts:string[];files:string[];afterRef:string} }
+export interface LocalNotification { id:string;projectRoot:string;sessionId:string;assistantId?:'aio';runId:string;kind:string;title:string;body:string;createdAt:string;read:boolean;osState:string }
 const runFile=promisify(execFile);
 const key=(value:string)=>createHash("sha256").update(value).digest("hex");
 const store=(root:string)=>path.join(root,".reverie","desktop");
@@ -28,7 +28,16 @@ export async function readLogTail(file:string,lineRecords=false):Promise<{text:s
   const truncated=current.truncated || previous.truncated;const partialFirst=previous.buffer.length?previous.truncated:current.truncated;if(lineRecords && partialFirst){const newline=data.indexOf(10,start);start=newline<0?data.length:newline+1;}
   return {text:data.subarray(start).toString("utf8"),truncated};
 }
-export async function atomicJson(file:string,value:unknown):Promise<void>{await mkdir(path.dirname(file),{recursive:true});const temporary=`${file}.${randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify(value,null,2),"utf8");await rename(temporary,file);}
+const jsonWrites = new Map<string, Promise<void>>();
+export async function atomicJson(file:string,value:unknown):Promise<void>{
+  const target=path.resolve(file);const serialized=JSON.stringify(value,null,2);
+  const write=(jsonWrites.get(target) || Promise.resolve()).catch(()=>undefined).then(async()=>{
+    await mkdir(path.dirname(target),{recursive:true});const temporary=`${target}.${randomUUID()}.tmp`;
+    try{await writeFile(temporary,serialized,"utf8");await rename(temporary,target);}finally{await rm(temporary,{force:true});}
+  });
+  jsonWrites.set(target,write);
+  try{await write;}finally{if(jsonWrites.get(target)===write)jsonWrites.delete(target);}
+}
 export async function readJson<T>(file:string,fallback:T):Promise<T>{try{return JSON.parse(await readFile(file,"utf8")) as T;}catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return fallback;throw error;}}
 export function redact(value:unknown):unknown {
   if(Array.isArray(value))return value.map(redact);
@@ -92,7 +101,14 @@ export async function saveGoal(root:string,session:string,value:Goal|null):Promi
 export class RunJournal {
   private active=new Map<string,{record:RunRecord;writes:Promise<unknown>;pendingBytes:number;dropped:{events:number;bytes:number}}>();
   private file(record:RunRecord){return path.join(store(record.projectRoot),"runs",`${record.id}.json`);}
-  async start(root:string,sessionId:string,input:unknown,model:string):Promise<RunRecord>{let branch="";try{branch=(await gitOutput(root,["branch","--show-current"])).trim();}catch{/* non-Git workspace */}const record:RunRecord={id:randomUUID(),projectRoot:root,sessionId,createdAt:new Date().toISOString(),state:"queued",branch,model,input:redact(input)};await atomicJson(this.file(record),record);this.active.set(record.id,{record,writes:Promise.resolve(),pendingBytes:0,dropped:{events:0,bytes:0}});return record;}
+  async start(root:string,sessionId:string,input:unknown,model:string,restoredId?:string):Promise<RunRecord>{
+    if(restoredId && !/^[\w-]+$/.test(restoredId))throw new Error('Invalid restored task identity.');
+    let branch="";try{branch=(await gitOutput(root,["branch","--show-current"])).trim();}catch{/* non-Git workspace */}
+    const prior=restoredId ? await readJson<RunRecord|null>(path.join(store(root),'runs',`${restoredId}.json`),null) : null;
+    if(prior && (prior.projectRoot.toLowerCase()!==root.toLowerCase() || prior.sessionId!==sessionId || prior.state!=='queued'))throw new Error('Only the original durably queued task may resume.');
+    const record:RunRecord={id:restoredId || randomUUID(),projectRoot:root,sessionId,createdAt:prior?.createdAt || new Date().toISOString(),state:"queued",branch,model,input:redact(input)};
+    await atomicJson(this.file(record),record);this.active.set(record.id,{record,writes:Promise.resolve(),pendingBytes:0,dropped:{events:0,bytes:0}});return record;
+  }
   async update(id:string,patch:Partial<RunRecord>){const item=this.active.get(id);if(!item)return;Object.assign(item.record,patch);item.writes=item.writes.then(()=>atomicJson(this.file(item.record),redact(item.record)));await item.writes;}
   event(id:string,event:Record<string,unknown>){
     const item=this.active.get(id);if(!item)return;

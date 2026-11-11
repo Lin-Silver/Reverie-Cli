@@ -13,12 +13,14 @@ export function createWindowTray(
   language: "zh-CN" | "en-US",
   isQuitting: () => boolean,
   quit: () => void,
+  toggleAiO?: () => void,
 ): Tray {
   const tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 }));
   const restore = () => showWindow(window);
   tray.setToolTip("Reverie");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: language === "en-US" ? "Show Reverie" : "显示 Reverie", click: restore },
+    ...(toggleAiO ? [{ label: language === "en-US" ? "Pause / resume AiO" : "暂停 / 恢复 AiO", click: toggleAiO }] : []),
     { type: "separator" },
     { label: language === "en-US" ? "Quit Reverie" : "退出 Reverie", click: quit },
   ]));

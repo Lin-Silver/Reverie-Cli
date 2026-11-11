@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupTranscriptMessages, inlineStaticTurnMessages, messageReasoningText, previousTurnBoundary, resolveToolResultNames, reuseSessionMessages, sessionIsEmpty, toolCallNames, toolCallRecords, visibleSessionMessages } from "./session-utils";
+import { groupTranscriptMessages, inlineStaticTurnMessages, messageReasoningText, previousTurnBoundary, resolveToolResultNames, reuseSessionMessages, refreshSessionWindow, sessionIsEmpty, toolCallNames, toolCallRecords, visibleSessionMessages } from "./session-utils";
 import type { LiveTurn, SessionState } from "./types";
 
 describe("inline static turns", () => {
@@ -35,6 +35,44 @@ const session = (messages: SessionState["messages"]): SessionState => ({
 });
 
 describe("session interaction helpers", () => {
+  it("retains expanded history and message identities when a paged turn completes", async () => {
+    const messages = Array.from({length:120}, (_, index) => ({role:'user',content:`message ${1080+index}`}));
+    const previous = {...session(messages), before:1080, total:1200, revision:1};
+    const incoming = {...session([...JSON.parse(JSON.stringify(messages.slice(62))),{role:'user',content:'next'},{role:'assistant',content:'answer'}]),before:1142,total:1202,revision:2};
+    const refreshed = await refreshSessionWindow(previous,incoming);
+    expect(refreshed.before).toBe(1080);
+    expect(refreshed.messages).toHaveLength(122);
+    messages.forEach((message,index)=>expect(refreshed.messages[index]).toBe(message));
+    expect(refreshed.messages.slice(-2)).toEqual(incoming.messages.slice(-2));
+  });
+
+  it("loads missing new-turn pages without dropping expanded history or duplicating rows", async () => {
+    const messages = Array.from({length:360}, (_, index) => ({role:'user',content:`message ${940+index}`}));
+    const previous = {...session(messages.slice(0,60)),before:940,total:1000,revision:1};
+    const page = (end:number) => ({...session(JSON.parse(JSON.stringify(messages.slice(Math.max(0,end-1000),end-940)))),before:Math.max(940,end-60),total:1300,revision:2});
+    const requested:number[]=[];
+    const refreshed = await refreshSessionWindow(previous,page(1300),async before=>{requested.push(before);return page(before);});
+    expect(requested).toEqual([1240,1180,1120,1060]);
+    expect(refreshed.before).toBe(940);
+    expect(refreshed.messages).toEqual(messages);
+    previous.messages.forEach((message,index)=>expect(refreshed.messages[index]).toBe(message));
+  });
+
+  it("retains a loaded window when only configuration changes, and resets it after rewind", async () => {
+    const messages = Array.from({length:120}, (_, index) => ({role:'user',content:`message ${index}`}));
+    const previous = {...session(messages),before:null,total:120,revision:1};
+    const changed = {...session(messages.slice(60)),before:60,total:120,revision:2,metadata:{rules:'new'}};
+    expect(await refreshSessionWindow(previous,changed)).toEqual({...changed,before:null,messages});
+    const rewind = {...session(messages.slice(0,40)),before:null,total:40,revision:3};
+    expect(await refreshSessionWindow(previous,rewind)).toEqual(rewind);
+  });
+
+  it("rejects pages from another revision instead of combining inconsistent histories", async () => {
+    const previous={...session([{role:'user',content:'old'}]),before:null,total:1,revision:1};
+    const incoming={...session([{role:'assistant',content:'tail'}]),before:80,total:81,revision:2};
+    await expect(refreshSessionWindow(previous,incoming,async()=>({...incoming,before:20,revision:3}))).rejects.toThrow('Conversation changed');
+  });
+
   it.each([0, 1])("preserves visible message identities when workspace memory is inserted at raw offset %s", offset => {
     const previous = [{ role: "user", content: "question" }, { role: "assistant", content: "answer", reasoning_content: "original trace" }];
     const incoming = JSON.parse(JSON.stringify(previous));

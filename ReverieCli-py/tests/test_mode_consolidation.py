@@ -27,7 +27,7 @@ EXPECTED_MODES = [
     "reverie-atlas",
     "reverie-gamer",
     "writer",
-    "computer-controller",
+    "aio",
 ]
 
 RETIRED_NAMES = [
@@ -45,7 +45,7 @@ def test_registry_exposes_exactly_five_modes() -> None:
     assert list(MODE_METADATA) == EXPECTED_MODES
     assert list_modes(include_computer=True) == EXPECTED_MODES
     assert list_modes(include_computer=False) == EXPECTED_MODES[:-1]
-    assert list_modes(switchable_only=True) == EXPECTED_MODES[:-1]
+    assert list_modes(switchable_only=True) == EXPECTED_MODES
 
 
 def test_every_mode_has_a_discovery_profile() -> None:
@@ -96,6 +96,8 @@ def test_normalize_mode_still_falls_back_for_runtime_callers() -> None:
     assert normalize_mode("reverie-ant") == "reverie"
     for mode in EXPECTED_MODES:
         assert normalize_mode(mode) == mode
+    assert normalize_mode('computer-controller') == 'aio'
+    assert 'computer-controller' not in MODE_METADATA
 
 
 def test_every_mode_builds_a_prompt() -> None:

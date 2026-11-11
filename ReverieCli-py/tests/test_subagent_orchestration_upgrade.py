@@ -29,6 +29,7 @@ class _Interface:
         self.project_root = project_root
         self.project_data_dir = project_root / ".test-reverie"
         self.config_manager = _ConfigManager(config)
+        self.config_manager.app_root = project_root / '.app-root'
         self.agent = None
         self.retriever = None
         self.indexer = None
@@ -91,8 +92,8 @@ def test_subagent_mode_defaults_and_round_trips() -> None:
     )
 
     assert normalized["agents"][0]["mode"] == "reverie"
-    assert SubagentSpec.from_dict(normalized["agents"][1]).mode == "reverie"
-    assert SubagentSpec.from_dict(normalized["agents"][1]).to_dict()["mode"] == "reverie"
+    assert SubagentSpec.from_dict(normalized["agents"][1]).mode == "aio"
+    assert SubagentSpec.from_dict(normalized["agents"][1]).to_dict()["mode"] == "aio"
 
 
 def test_child_does_not_share_parent_session_or_rollback_state(tmp_path: Path, monkeypatch) -> None:

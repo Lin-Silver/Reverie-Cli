@@ -351,7 +351,7 @@ function installDesktopApi(options: {
       probe: "GET /models",
     };
   };
-  const eventListeners: Array<(message: { event: unknown }) => void> = [];
+  const eventListeners: Array<(message: Record<string,unknown>) => void> = [];
   const emitCoreEvent = (event: Record<string, unknown>) => {
     for (const listener of [...eventListeners]) listener({ event });
   };
@@ -439,6 +439,12 @@ function installDesktopApi(options: {
     return legacy;
   };
   const request = vi.fn(async (action: string, payload: Record<string, unknown>) => {
+    if(action==='getWorkspaceConfig')return {type:'workspace.config',models:models(),workspace:desktopState.workspace,settings:settings()};
+    if(action==='getConversationConfig'){
+      const state=options.initialState ?? { ...desktopState, models:models(), settings:settings() };
+      return {type:'conversation.config',configuration:{version:1,model_ref:{source:state.models.active_source,model:state.models.active_model?.id},settings:{mode:state.workspace.mode}},revision:1,error:'',models:state.models,workspace:state.workspace,settings:state.settings};
+    }
+    if(action==='aioState')return {type:'aio.state',aio:{assistant_id:'aio',mainline_id:'aio-mainline',enabled:false,proactive:false,paused:false,tasks:[]}};
     if (action === "getFileChanges") return { type: "file.changes", session_id: payload.sessionId, changes: [] };
     if (action === "initialize") {
       const state = options.initialState ?? { ...desktopState, models: models(), settings: settings() };
@@ -792,7 +798,7 @@ function installDesktopApi(options: {
     }),
     cancel: vi.fn(async () => undefined),
     notify: vi.fn(async () => undefined),
-    onEvent: vi.fn((listener: (message: { event: unknown }) => void) => {
+    onEvent: vi.fn((listener: (message: Record<string,unknown>) => void) => {
       eventListeners.push(listener);
       return () => {
         eventListeners.splice(eventListeners.indexOf(listener), 1);
@@ -830,6 +836,7 @@ function installDesktopApi(options: {
     api,
     request,
     emitCoreEvent,
+    emitDesktopEvent: (message:Record<string,unknown>) => { for(const listener of [...eventListeners])listener(message); },
     releasePrompt: () => releasePrompt(),
     /** Let the held `getSession` resolve, and arm the gate for the next switch. */
     releaseSession: () => {
@@ -866,6 +873,15 @@ afterEach(() => {
 });
 
 describe("desktop GUI interactions", () => {
+  it('shows AiO background failures while keeping the current conversation visible', async () => {
+    const { emitDesktopEvent } = installDesktopApi();
+    render(<App />);
+    await screen.findByRole('textbox', { name:/向 Test Model 提问/ });
+    const current = document.querySelector('.conversation-header strong')?.textContent;
+    act(() => emitDesktopEvent({type:'aio.error',error:'The selected model is unavailable.'}));
+    expect(await screen.findByText('AiO: The selected model is unavailable.')).toBeTruthy();
+    expect(document.querySelector('.conversation-header strong')?.textContent).toBe(current);
+  });
   it("switches UI variants without remounting the composer or workbench", async () => {
     const { api } = installDesktopApi();
     const user = userEvent.setup();
@@ -892,7 +908,7 @@ describe("desktop GUI interactions", () => {
     const composer=await screen.findByRole("textbox",{name:/向 Test Model 提问/});
     for(const [text,key,value] of [["/mode writer","mode","writer"],["/permission mode strict","permission_mode","strict"]]){
       fireEvent.change(composer,{target:{value:text}});await user.click(screen.getByRole("button",{name:"发送"}));
-      await waitFor(()=>expect(request).toHaveBeenCalledWith("setSetting",{key,value}));
+      await waitFor(()=>expect(request).toHaveBeenCalledWith("setSetting",{key,value,projectRoot:"C:/workspace",sessionId:baseSession.id}));
       await waitFor(()=>expect((composer as HTMLTextAreaElement).value).toBe(""));
     }
     fireEvent.change(composer,{target:{value:"/session fork Current copy"}});await user.click(screen.getByRole("button",{name:"发送"}));
@@ -958,7 +974,7 @@ describe("desktop GUI interactions", () => {
     expect((composer as HTMLTextAreaElement).value).toBe("/skill ");
     await user.click(await screen.findByRole("option", { name: /photo-to-3d/ }));
     await waitFor(() => expect(document.querySelector(".composer .skill-chip")?.textContent).toContain("photo-to-3d"));
-    expect(request).toHaveBeenCalledWith("pinSkill", { skill: "photo-to-3d" });
+    expect(request).toHaveBeenCalledWith("pinSkill", { skill: "photo-to-3d",projectRoot:'C:/workspace',sessionId:baseSession.id });
     expect((composer as HTMLTextAreaElement).value).toBe("");
     expect(screen.getByText("必须使用")).toBeTruthy();
     expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
@@ -1447,14 +1463,16 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it.each(["writer", "computer-controller"])("keeps skills browsable with mode guidance in %s", async (mode) => {
+  it.each(["writer", "aio"])("keeps skills browsable with mode guidance in %s", async (mode) => {
     installDesktopApi({ initialState: { ...desktopState, skills: { ...desktopState.skills, mode } } });
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "技能" }));
-    const note = await screen.findByRole("note");
-    expect(note.textContent).toContain("Reverie");
-    expect(note.textContent).toContain("固定状态会保留");
+    if(mode==='writer'){
+      const note = await screen.findByRole("note");
+      expect(note.textContent).toContain("Reverie");
+      expect(note.textContent).toContain("固定状态会保留");
+    }else expect(screen.queryByRole('note')).toBeNull();
     expect(screen.getByText("photo-to-3d")).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "筛选技能" })).toBeTruthy();
   });
@@ -1502,7 +1520,7 @@ describe("desktop GUI interactions", () => {
     const newChatButtons = screen.getAllByRole("button", { name: "新对话" });
     await user.click(newChatButtons[newChatButtons.length - 1]);
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {}));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {projectRoot:"C:/workspace"}));
     expect((await screen.findAllByText("New session")).length).toBeGreaterThan(0);
   });
 
@@ -1518,7 +1536,7 @@ describe("desktop GUI interactions", () => {
     const result = await within(dialog).findByRole("button", { name: /Cache investigation/ }, { timeout: 1500 });
     await user.click(result);
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", { sessionId: searchSession.id }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", { projectRoot:"C:/workspace", sessionId: searchSession.id }));
     expect(screen.getAllByText("Cache investigation").length).toBeGreaterThan(0);
   });
 
@@ -1579,7 +1597,7 @@ describe("desktop GUI interactions", () => {
     fireEvent.drop(document.querySelector(".composer")!, { dataTransfer: { types: ["Files"], files: [file] } });
     await screen.findByRole("button", { name: "移除附件 draft.png" });
     await user.click(screen.getAllByRole("button", { name: /新对话/ })[0]);
-    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {}));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {projectRoot:"C:/workspace"}));
     expect(composer.value).toBe(""); expect(screen.queryByRole("button", { name: "移除附件 draft.png" })).toBeNull();
     await user.click(screen.getAllByRole("button", { name: /Initial session/ })[0]);
     await waitFor(() => expect(composer.value).toBe("unsent photo draft"));
@@ -1597,9 +1615,6 @@ describe("desktop GUI interactions", () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", {
       prompt: "Inspect the cache",
       sessionId: baseSession.id,
-      source: "test-source",
-      model: "test-model",
-      mode: "reverie",
       attachments: [],
       projectRoot: "C:/workspace",
     }));
@@ -1617,7 +1632,7 @@ describe("desktop GUI interactions", () => {
     toggle.focus();
     await user.keyboard(" ");
     await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("true"));
-    expect(request).toHaveBeenCalledWith("setSetting", { key: "stream_responses", value: true });
+    expect(request).toHaveBeenCalledWith("setSetting", { projectRoot:"C:/workspace",sessionId:baseSession.id,key: "stream_responses", value: true });
     expect(composer.value).toBe("保留中文草稿");
     expect(request.mock.calls.filter(([action]) => action === "runPrompt")).toHaveLength(0);
     expect(document.activeElement).toBe(toggle);
@@ -1689,7 +1704,7 @@ describe("desktop GUI interactions", () => {
     await user.type(composer,"first background turn{Enter}");await waitFor(()=>expect(request).toHaveBeenCalledWith("runPrompt",expect.objectContaining({prompt:"first background turn"})));
     await user.type(composer,"background queued turn{Enter}");
     await user.click(screen.getAllByRole("button",{name:/Cache investigation/})[0]);
-    await waitFor(()=>expect(request).toHaveBeenCalledWith("getSession",{sessionId:"session-2"}));
+    await waitFor(()=>expect(request).toHaveBeenCalledWith("getSession",{projectRoot:"C:/workspace",sessionId:"session-2"}));
     await user.type(composer,"other session draft");releasePrompt();
     await waitFor(()=>expect(request).toHaveBeenCalledWith("runPrompt",expect.objectContaining({prompt:"background queued turn",sessionId:"session-1"})));
     expect(composer.value).toBe("other session draft");expect(screen.getByText("Cache investigation",{selector:"strong"})).toBeTruthy();
@@ -1713,7 +1728,7 @@ describe("desktop GUI interactions", () => {
       return root;
     });
     act(() => window.dispatchEvent(new CustomEvent("reverie:workspace-open", { detail: { root: "C:/other" } })));
-    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {}));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("createSession", {projectRoot:"C:/other"}));
     await screen.findAllByText("New session");
     await user.type(composer, "other project draft");
     releasePrompt();
@@ -1935,7 +1950,7 @@ describe("desktop GUI interactions", () => {
     expect(within(dialog).getByText("选择思考程度")).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: /高/ }));
-    await waitFor(() => expect(request).toHaveBeenCalledWith("selectModel", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
       source: "test-source",
       modelId: "thinking-model",
       reasoning: "high",
@@ -1970,7 +1985,7 @@ describe("desktop GUI interactions", () => {
 
     await user.click(await screen.findByRole("button", { name: /Test Model/ }));
     const dialog = await screen.findByRole("dialog", { name: "模型来源" });
-    await waitFor(() => expect(request).toHaveBeenCalledWith("refreshModelSources", {}));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("refreshModelSources", {projectRoot:'C:/workspace',sessionId:baseSession.id}));
     await user.click(await within(dialog).findByRole("button", { name: /SenseNova/ }));
 
     expect(await within(dialog).findByRole("button", { name: /SenseNova 6.8 Flash Lite/ })).toBeTruthy();
@@ -2023,7 +2038,7 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("已切换生图模型到 SenseNova U1.5 Lite")).toBeTruthy();
   });
 
-  it("allows model selection in Computer mode", async () => {
+  it("allows model selection in AiO mode", async () => {
     installDesktopApi({
       initialState: {
         ...desktopState,
@@ -2033,7 +2048,7 @@ describe("desktop GUI interactions", () => {
         },
         workspace: {
           ...desktopState.workspace,
-          mode: "computer-controller",
+          mode: "aio",
           active_source: "nvidia",
           active_model: { id: "meta/muse-glimmer-30b", display_name: "Muse Glimmer 30B", provider: "openai-chat" },
         },
@@ -2041,7 +2056,7 @@ describe("desktop GUI interactions", () => {
     });
     const { container } = render(<App />);
 
-    expect((await screen.findByRole("button", { name: "选择工作模式" })).textContent).toContain("Computer");
+    expect((await screen.findByRole("button", { name: "选择工作模式" })).textContent).toContain("AiO");
     const trigger = container.querySelector(".model-trigger");
     expect(trigger).toBeTruthy();
     fireEvent.click(trigger!);
@@ -2837,7 +2852,7 @@ describe("desktop GUI interactions", () => {
     // xkiro-pro already carries a saved limit, so selecting it must not ask again.
     await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
       providerId: "xkiro",
       modelId: "xkiro-pro",
     }));
@@ -2865,7 +2880,7 @@ describe("desktop GUI interactions", () => {
     await user.type(input, "64k");
     await user.click(within(dialog).getByRole("button", { name: "保存并使用" }));
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
       providerId: "xkiro",
       modelId: "xkiro-lite",
       contextLimit: 64_000,
@@ -2875,7 +2890,7 @@ describe("desktop GUI interactions", () => {
     // The second selection of the same model reuses the stored limit silently.
     await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
     await user.click(screen.getByRole("button", { name: /xkiro-lite/ }));
-    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
       providerId: "xkiro",
       modelId: "xkiro-lite",
     }));
@@ -3129,6 +3144,92 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByRole("button", { name: /上下文窗口已用 99%/ })).toBeNull();
   });
 
+  it('ignores a conversation configuration that finishes after navigation',async()=>{
+    const {api}=installDesktopApi();
+    const original=api.request.getMockImplementation()!;
+    let release:(value:unknown)=>void=()=>{};
+    const gate=new Promise(resolve=>{release=resolve;});
+    api.request.mockImplementation(async(action,payload)=>{
+      if(action==='getConversationConfig' && payload.sessionId===baseSession.id)return await gate as never;
+      return original(action,payload);
+    });
+    render(<App/>);
+    await waitFor(()=>expect(api.request).toHaveBeenCalledWith('getConversationConfig',expect.objectContaining({sessionId:baseSession.id})));
+    const row=[...document.querySelectorAll('.session-item')].find(item=>item.textContent?.includes(searchSession.name));
+    fireEvent.click(row!);
+    await screen.findByText('Investigate cache invalidation');
+    await act(async()=>release({type:'conversation.config',configuration:{},revision:1,error:'Wrong conversation configuration',models:{...desktopState.models,active_model:{id:'stale',display_name:'Stale model',provider:'test'}},workspace:desktopState.workspace,settings:desktopState.settings}));
+    expect(screen.queryByText('Wrong conversation configuration')).toBeNull();
+    expect(document.querySelector('.model-trigger')?.textContent).not.toContain('Stale model');
+    expect(document.querySelector('.conversation-header')?.textContent).toContain(searchSession.name);
+  });
+
+  it('saves archive state with explicit conversation ownership and revision',async()=>{
+    const {api}=installDesktopApi();const original=api.request.getMockImplementation()!;
+    api.request.mockImplementation(async(action,payload)=>{
+      if(action==='getSession' && payload.select===false && payload.limit===1)return {type:'session',session:{...baseSession,revision:1},sessions:desktopState.sessions} as never;
+      if(action==='archiveSession')return {type:'sessions',sessions:{...desktopState.sessions,archive_states:{[String(payload.sessionId)]:true}}} as never;
+      return original(action,payload);
+    });
+    render(<App/>);await screen.findByRole('button',{name:'命令面板'});
+    const row=[...document.querySelectorAll('.session-row')].find(item=>item.querySelector('.session-item')?.getAttribute('title')===baseSession.name)!;
+    fireEvent.click(row.querySelector('.session-more')!);
+    fireEvent.click(screen.getByRole('button',{name:'归档'}));
+    await waitFor(()=>expect(api.request).toHaveBeenCalledWith('archiveSession',expect.objectContaining({projectRoot:'C:/workspace',sessionId:baseSession.id,revision:1,archived:true})));
+    await screen.findByText('会话已归档');
+    expect(document.querySelector('.conversation-header')?.textContent).toContain(baseSession.name);
+  });
+
+  it('keeps the current transcript and draft when a different conversation is deleted',async()=>{
+    const {api}=installDesktopApi();const original=api.request.getMockImplementation()!;
+    api.request.mockImplementation(async(action,payload)=>{
+      if(action==='deleteSession')return {type:'session.updated',session:searchSession,sessions:{...desktopState.sessions,items:desktopState.sessions.items.filter(item=>item.id!==payload.sessionId)}} as never;
+      return original(action,payload);
+    });
+    render(<App/>);await screen.findByRole('button',{name:'命令面板'});
+    const composer=document.querySelector('.composer textarea') as HTMLTextAreaElement;
+    fireEvent.change(composer,{target:{value:'Keep my current draft'}});
+    const row=[...document.querySelectorAll('.session-row')].find(item=>item.querySelector('.session-item')?.getAttribute('title')===searchSession.name)!;
+    fireEvent.click(row.querySelector('.session-more')!);
+    fireEvent.click(screen.getByRole('button',{name:'删除'}));
+    const dialog=await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button',{name:'删除会话'}));
+    await screen.findByText('会话已删除');
+    expect(document.querySelector('.conversation-header')?.textContent).toContain(baseSession.name);
+    expect(composer.value).toBe('Keep my current draft');
+  });
+
+  it('navigates a branch using its saved workspace instead of the viewed workspace',async()=>{
+    const initialState={...desktopState,sessions:{...desktopState.sessions,owners:{[searchSession.id]:{assistant_id:'aio' as const,workspace:'C:/owned-branch'}}}};
+    const {api}=installDesktopApi({initialState});
+    render(<App/>);await screen.findByRole('button',{name:'命令面板'});
+    const row=[...document.querySelectorAll('.session-item')].find(item=>item.getAttribute('title')===searchSession.name)!;
+    fireEvent.click(row);
+    await waitFor(()=>expect(api.switchWorkspace).toHaveBeenCalledWith('C:/owned-branch'));
+    expect(api.request).not.toHaveBeenCalledWith('getSession',expect.objectContaining({sessionId:searchSession.id,projectRoot:'C:/workspace'}));
+  });
+
+  it('keeps the viewed transcript and draft while renaming a different conversation',async()=>{
+    const {api}=installDesktopApi();const original=api.request.getMockImplementation()!;
+    api.request.mockImplementation(async(action,payload)=>{
+      if(action==='renameSession')return {type:'session.updated',session:searchSession,sessions:desktopState.sessions} as never;
+      return original(action,payload);
+    });
+    render(<App/>);await screen.findByRole('button',{name:'命令面板'});
+    const composer=document.querySelector('.composer textarea') as HTMLTextAreaElement;
+    fireEvent.change(composer,{target:{value:'Keep this unsent draft'}});
+    const row=[...document.querySelectorAll('.session-row')].find(item=>item.querySelector('.session-item')?.getAttribute('title')===searchSession.name)!;
+    fireEvent.click(row.querySelector('.session-more')!);
+    fireEvent.click(screen.getByRole('button',{name:'重命名'}));
+    const dialog=await screen.findByRole('dialog',{name:'重命名会话'});
+    fireEvent.change(within(dialog).getByRole('textbox'),{target:{value:'Renamed background'}});
+    fireEvent.click(within(dialog).getByRole('button',{name:'保存'}));
+    await screen.findByText('会话标题已更新');
+    expect(api.request).toHaveBeenCalledWith('renameSession',expect.objectContaining({sessionId:searchSession.id,projectRoot:'C:/workspace',name:'Renamed background'}));
+    expect(document.querySelector('.conversation-header')?.textContent).toContain(baseSession.name);
+    expect(composer.value).toBe('Keep this unsent draft');
+  });
+
   it("lets the user return to the current transcript while another session is loading", async () => {
     const { request, releaseSession } = installDesktopApi({ gateSession: true });
     render(<App />);
@@ -3184,7 +3285,7 @@ describe("desktop GUI interactions", () => {
     expect(screen.queryByText("正在切换会话")).toBeNull();
     releaseSession();
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", { sessionId: "session-2" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", { projectRoot:"C:/workspace", sessionId: "session-2" }));
     // Every switch still reconciles with the core; the cache only decides what
     // is on screen while that is in flight.
     const fetches = request.mock.calls.filter(([action]) => action === "getSession");
@@ -3222,7 +3323,7 @@ describe("desktop GUI interactions", () => {
 
     // Activating a provider is its own core call, not a `selectModel` on a
     // source the core has never heard of.
-    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
       providerId: "xkiro",
       modelId: "xkiro-pro",
     }));
@@ -3623,7 +3724,7 @@ describe("desktop GUI interactions", () => {
     const row = title.closest(".setting-row") as HTMLElement;
     expect(within(row).getByText("实验性")).toBeTruthy();
     await user.click(within(row).getByRole("switch"));
-    await waitFor(() => expect(request).toHaveBeenCalledWith("setSetting", { key: "api_compatibility", value: true }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("setSetting", { projectRoot:"C:/workspace",sessionId:baseSession.id,key: "api_compatibility", value: true }));
     await user.click(screen.getByRole("button", { name: "对话" }));
     expect(screen.queryByText("广泛 API 兼容")).toBeNull();
   });

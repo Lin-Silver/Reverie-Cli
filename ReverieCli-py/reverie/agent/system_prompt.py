@@ -119,13 +119,14 @@ def build_system_prompt(
         prompt = build_atlas_prompt(model_name, additional_rules, current_date)
     elif normalized_mode == "reverie-gamer":
         prompt = build_gamer_prompt(model_name, additional_rules, current_date)
-    elif normalized_mode == "computer-controller":
-        prompt = build_computer_controller_prompt(model_name, additional_rules, current_date)
+    elif normalized_mode == "aio":
+        prompt = build_reverie_prompt(model_name, additional_rules, current_date, runtime_surface=normalized_surface)
+        prompt += '\n\nYou are AiO, the user\'s persistent autonomous assistant. Preserve the stable assistant identity across workspace changes, task branches and context summaries. Distinguish observations, user statements and inferences. Coordinate work in owned task branches with explicit acceptance conditions. Only the main agent controls the desktop; investigation and validation workers remain read-only. Respect the saved conversation configuration and current permission limits.'
     else:
         prompt = build_reverie_prompt(
             model_name, additional_rules, current_date, runtime_surface=normalized_surface,
         )
-    if normalized_mode == 'reverie':
+    if normalized_mode in {'reverie','aio'}:
         from ..computer_use.prompt import COMPUTER_USE_GUIDANCE
         prompt += '\n\n' + COMPUTER_USE_GUIDANCE
     if normalized_surface == 'desktop' and _mode_exposes_tool(normalized_mode, 'render_view'):
@@ -1763,7 +1764,7 @@ Complete desktop tasks through the shared native Computer Use tools. Use the sel
 Use one observed target at a time. Delegate bounded coding or research to a Reverie SubAgent; the main agent remains the only desktop actor. Continue until the task is verified or a concrete blocker remains.
 Prior sessions remain in the dedicated Computer Controller archive. Re-observe after resuming; never reuse archived refs.
 ## Tools
-{get_tool_descriptions_for_mode("computer-controller")}
+{get_tool_descriptions_for_mode("aio")}
 ## Additional user rules
 {additional_rules}
 '''

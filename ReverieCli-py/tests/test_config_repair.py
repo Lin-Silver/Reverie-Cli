@@ -177,7 +177,7 @@ def test_project_storage_resolver_refuses_unwritable_launcher_root(tmp_path: Pat
     original_write_text = Path.write_text
 
     def fail_write_text(self: Path, *args, **kwargs):
-        if self.name == ".write-test":
+        if self.name.startswith(".write-test-"):
             raise PermissionError("read only")
         return original_write_text(self, *args, **kwargs)
 

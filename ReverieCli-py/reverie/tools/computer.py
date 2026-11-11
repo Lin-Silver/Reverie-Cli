@@ -8,7 +8,7 @@ import time
 import uuid
 
 from .base import BaseTool, ToolResult
-from ..computer_use.runtime import ComputerUseRuntime, NativeDesktopError, failure
+from ..computer_use.runtime import ComputerUseRuntime, NativeDesktopError, failure, desktop_occupation
 from ..computer_use.operations import execute
 from ..config import get_project_data_dir
 
@@ -102,7 +102,7 @@ class ComputerTool(BaseTool):
                     payload.setdefault('target', target)
             return as_result(envelope, vision=vision, runtime=runtime)
         try:
-            with runtime._lock:
+            with runtime._lock, desktop_occupation(self.name, runtime.check_cancel, mutation=not self.read_only):
                 if self.name == 'computer_clipboard_set' and kwargs.get('image_path'):
                     from PIL import Image
                     path = self.resolve_workspace_path(kwargs['image_path'], purpose='read clipboard image')

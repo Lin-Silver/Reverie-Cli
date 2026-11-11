@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 
 import pytest
 import requests
@@ -12,6 +13,17 @@ def make_agent(tmp_path, retries=1):
         project_root=tmp_path, provider="openai-sdk", mode="computer-controller",
         config=SimpleNamespace(api_max_retries=retries, api_initial_backoff=0.01, api_timeout=17),
     )
+
+
+def test_desktop_acceptance_can_observe_but_cannot_act_or_run_commands(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.mode = 'aio'
+    agent.tool_executor.context['desktop_read_only_review'] = True
+    names = {schema['function']['name'] for schema in agent.get_visible_tool_schemas()}
+    assert {'computer_snapshot','computer_find','computer_get'} <= names
+    assert not {'computer_click','computer_set_value','command_exec','create_file'} & names
+    agent.tool_executor.context['aio_worker'] = True
+    assert not any(schema['function']['name'].startswith('computer_') for schema in agent.get_visible_tool_schemas())
 
 
 @pytest.mark.parametrize("retries", [0, 2])
@@ -66,6 +78,38 @@ def test_streaming_chat_assembles_context_once_per_request(tmp_path, monkeypatch
     assert any("memory evidence" in str(message["content"]) for message in captured[0]["messages"])
 
 
+@pytest.mark.parametrize('transport', ['stream_sdk','stream_request','buffered_sdk','buffered_request','buffered_anthropic'])
+def test_final_answer_preserves_whitespace_in_authoritative_history(tmp_path, monkeypatch, transport):
+    from reverie.session.sqlite_manager import SQLiteSessionManager
+
+    agent=make_agent(tmp_path)
+    store=SQLiteSessionManager(tmp_path/'history',project_root=tmp_path)
+    session=store.create_session('Exact answer')
+    agent.tool_executor.context['session_manager']=store
+    agent.messages=[{'role':'user','content':'Return the supplied text.'}]
+    text=' \n完整保存的回答。  \n'
+    monkeypatch.setattr(agent,'_check_and_compress_context',lambda **kwargs:None)
+    monkeypatch.setattr(agent,'get_visible_tool_schemas',lambda:[])
+    message=SimpleNamespace(content=text,reasoning_content=None,tool_calls=[])
+    choice=SimpleNamespace(message=message,finish_reason='stop')
+    response=SimpleNamespace(choices=[choice],usage=None)
+    pieces=[{'choices':[{'delta':{'content':text},'finish_reason':'stop'}]}]
+    monkeypatch.setattr(agent,'_create_openai_chat_completion',lambda **kwargs:iter([
+        SimpleNamespace(choices=[SimpleNamespace(delta=message,finish_reason='stop')])
+    ]) if transport.startswith('stream') else response)
+    monkeypatch.setattr(agent,'_make_direct_request',lambda *args,**kwargs:SimpleNamespace(close=lambda:None))
+    monkeypatch.setattr(agent,'_iter_sse_data_strings',lambda response:iter(map(json.dumps,pieces)))
+    monkeypatch.setattr(agent,'_response_json_with_prompt_cache_fallback',lambda *args,**kwargs:{'choices':[{'message':{'content':text},'finish_reason':'stop'}]})
+    monkeypatch.setattr(agent,'_ensure_client',lambda:SimpleNamespace(messages=SimpleNamespace(create=lambda **kwargs:SimpleNamespace(content=[SimpleNamespace(type='text',text=text)],stop_reason='end_turn',usage=None))))
+    methods={'stream_sdk':agent._process_streaming_openai_sdk,'stream_request':agent._process_streaming_request,
+             'buffered_sdk':agent._process_non_streaming_openai_sdk,'buffered_request':agent._process_non_streaming_request,
+             'buffered_anthropic':agent._process_non_streaming_anthropic}
+    result=methods[transport](session_id=session.id)
+    if transport.startswith('stream'):list(result)
+    agent._persist_history_to_session()
+    assert store.get_page(session.id)['messages'][-1]=={'role':'assistant','content':text}
+
+
 @pytest.mark.parametrize("provider,expected_retries", [("openai-chat", 0), ("openai-responses", 0)])
 def test_openai_client_keeps_one_retry_owner(tmp_path, monkeypatch, provider, expected_retries):
     import sys
@@ -110,6 +154,14 @@ def test_memory_implementation_edits_still_force_repository_retrieval(tmp_path, 
     assert agent._native_tool_choice(tools) == {"type": "function", "function": {"name": "codebase-retrieval"}}
 
 
+def test_literal_file_task_does_not_force_retrieval_from_negative_edit_instructions(tmp_path):
+    agent=make_agent(tmp_path)
+    agent.mode='reverie'
+    agent.messages=[{'role':'user','content':'Create aio-proof.txt with exactly AiO VERIFIED followed by a newline. Do not add a trailing extra newline, BOM, or other characters.'}]
+    tools=[{'type':'function','function':{'name':name}} for name in ['codebase-retrieval','create_file','file_ops']]
+    assert agent._native_tool_choice(tools) is None
+
+
 @pytest.mark.parametrize("prompt", [
     "Use render_view to display artifacts/comparison.html. Do not run commands or read other files.",
     "调用 render_view 注册 artifacts/savings-comparator.html。不要重新创建或读取其他文件。",
@@ -121,6 +173,26 @@ def test_artifact_paths_do_not_force_repository_retrieval(tmp_path, prompt):
     agent.messages = [{"role": "user", "content": prompt}]
     tools = [{"type": "function", "function": {"name": name}} for name in ("codebase-retrieval", "create_file", "render_view")]
     assert agent._native_tool_choice(tools) is None
+
+
+@pytest.mark.parametrize('prompt', [
+    'Create aio-proof.txt with UTF-8 content AiO VERIFIED 中文 followed by one newline. Read it back and verify the file.',
+    '创建文件 aio-proof.txt，以 UTF-8 编码写入内容 AiO VERIFIED 中文，然后检查文件的逐字节内容。',
+])
+def test_supplied_file_content_does_not_restrict_the_worker_to_repository_lookup(tmp_path, prompt):
+    agent = make_agent(tmp_path)
+    agent.mode = 'reverie'
+    agent.messages = [{'role':'user','content':prompt}]
+    tools = [{'type':'function','function':{'name':name}} for name in ('codebase-retrieval','create_file','file_ops')]
+    assert agent._native_tool_choice(tools) is None
+
+
+def test_existing_source_change_with_content_still_requires_repository_lookup(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.mode = 'reverie'
+    agent.messages = [{'role':'user','content':'Inspect the repository and write updated content to existing source code in app.py.'}]
+    tools = [{'type':'function','function':{'name':name}} for name in ('codebase-retrieval','create_file','file_ops')]
+    assert agent._native_tool_choice(tools) == {'type':'function','function':{'name':'codebase-retrieval'}}
 
 
 @pytest.mark.parametrize("prompt", [

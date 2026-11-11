@@ -24,6 +24,9 @@ import { createGitBranch, getGitWorkspaceStatus, switchGitBranch } from "./git-w
 import { importAttachments, saveClipboardImage, validateAttachments, type ComposerAttachment } from "./attachments";
 import { gitSnapshot, gitPatch, gitMutate, gitCommit, gitPushPlan, gitPush, gitOutput, readPreview, listDirectory, readEditorFile, saveEditorFile, type DiffScope, type PushPlan } from "./workbench";
 import { TerminalManager, RunJournal, actions, saveActions, loadGoal, saveGoal, goalInstructions, readJson, atomicJson, type ProjectAction, type Goal, type LocalNotification } from "./session-workspace";
+import { isolateTask, incorporateTask } from './task-isolation';
+import { verificationEvidence } from './task-verification';
+import { AiOHost } from './aio-host';
 import { ExecutionCoordinator } from "./execution-coordinator";
 import { WorkerPool } from "./worker-pool";
 import { createManaged, listManaged, copyPlan, archivePlan, archiveManaged, restoreManaged, workingSnapshot } from "./isolated-workspaces";
@@ -50,6 +53,7 @@ import { runIsolationProbe } from "./view-isolation-runner";
 type JsonRecord = Record<string, unknown>;
 type DesktopSettings = {
   projectRoot?: string;
+  workspaceRoots?: string[];
   coreAppRoot?: string;
   theme?: ThemePreference;
   ui?: StoredUiPreferences;
@@ -338,6 +342,7 @@ class CoreBridge {
           PYTHONIOENCODING: "utf-8",
           PYTHONUTF8: "1",
           REVERIE_APP_ROOT: this.coreAppRoot,
+          REVERIE_DESKTOP_SETTINGS: runtimePaths.settings,
           REVERIE_RATS_DISCOVERY_ROOTS: [...new Set(ratsDiscoveryRoots.map((item) => path.resolve(item)))].join(path.delimiter),
           TEMP: runtimePaths.temp,
           TMP: runtimePaths.temp,
@@ -403,6 +408,7 @@ class CoreBridge {
   }
 
   async request(action: string, payload: JsonRecord = {}): Promise<JsonRecord> {
+    payload = {projectRoot:this.projectRoot,...payload};
     await this.start();
     const child = this.child;
     if (!child || child.killed) throw new Error("Reverie core is not running.");
@@ -460,12 +466,13 @@ class CoreBridge {
 
 let mainWindow: BrowserWindow | null = null;
 let windowTray: Tray | null = null;
+let aioHost:AiOHost|null=null;
 let quitRequested = false;
 let quitDialogOpen = false;
 let bridge: CoreBridge | null = null;
 const terminals = new TerminalManager(message => mainWindow?.webContents.send("core:event", message));
 const journal = new RunJournal();
-const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string }>();
+const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string; assistantId?: 'aio' }>();
 const workerPool = new WorkerPool<CoreBridge>(4, worker => worker.stop("Idle kernel released."));
 const approvalOwners = new Map<string, string>();
 const stopBeforeStart = new Set<string>();
@@ -474,10 +481,10 @@ const coordinator = new ExecutionCoordinator(entries => mainWindow?.webContents.
 const notificationFile = path.join(runtimeRoot, "notifications.json");
 let notifications: LocalNotification[] = [];
 let notificationMuted = false;
-async function publishNotification(projectRoot: string, sessionId: string, runId: string, kind: string, title: string, body: string): Promise<void> {
+async function publishNotification(projectRoot: string, sessionId: string, runId: string, kind: string, title: string, body: string, assistantId?: 'aio'): Promise<void> {
   const id = `${runId}:${kind}`;
   if (notifications.some(item => item.id === id)) return;
-  const item: LocalNotification = { id, projectRoot, sessionId, runId, kind, title, body, createdAt: new Date().toISOString(), read: false, osState: notificationMuted ? "muted" : "not requested" };
+  const item: LocalNotification = { id, projectRoot, sessionId, assistantId, runId, kind, title, body, createdAt: new Date().toISOString(), read: false, osState: notificationMuted ? "muted" : "not requested" };
   notifications.unshift(item); await atomicJson(notificationFile, notifications);
   mainWindow?.webContents.send("core:event", { type: "notification.changed", notification: item });
   if (notificationMuted || (mainWindow?.isFocused() && !mainWindow.isMinimized())) return;
@@ -485,8 +492,8 @@ async function publishNotification(projectRoot: string, sessionId: string, runId
   try {
     const notification = new Notification({ title, body: body.slice(0, 220) });
     item.osState = "requested; OS delivery unconfirmed";
-    notification.on("show", () => { item.osState = "shown"; void atomicJson(notificationFile, notifications); });
-    notification.on("failed", (_event, error) => { item.osState = `failed: ${error}`; void atomicJson(notificationFile, notifications); });
+    notification.on("show", () => { item.osState = "shown"; void atomicJson(notificationFile, notifications).catch(error=>log(`Notification save failed: ${String(error)}`)); });
+    notification.on("failed", (_event, error) => { item.osState = `failed: ${error}`; void atomicJson(notificationFile, notifications).catch(error=>log(`Notification save failed: ${String(error)}`)); });
     notification.on("click", () => { focusMainWindow(); mainWindow?.webContents.send("core:event", { type: "notification.open", notification: item }); });
     notification.show(); await atomicJson(notificationFile, notifications);
   } catch (error) { item.osState = `failed: ${String(error)}`; await atomicJson(notificationFile, notifications); }
@@ -544,6 +551,7 @@ async function activateWorkspace(projectRoot: string): Promise<string> {
     await mutateDesktopSettings((settings) => ({
       ...settings,
       projectRoot: nextProjectRoot,
+      workspaceRoots:[...new Set([...(settings.workspaceRoots || []),nextProjectRoot])],
       ui: rememberProject(normalizeUiPreferences(settings.ui), nextProjectRoot),
     }));
   });
@@ -604,6 +612,7 @@ async function createWindow(): Promise<void> {
   });
 
   knownWorkspaceRoots.add(path.resolve(projectRoot).toLowerCase());
+  for(const root of [...(settings.workspaceRoots || []),...normalizeUiPreferences(settings.ui).recentProjects])if(isWorkspaceDirectory(root))knownWorkspaceRoots.add(path.resolve(root).toLowerCase());
   bridge = new CoreBridge(projectRoot, coreAppRoot, executable, (message) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("core:event", message);
@@ -641,14 +650,43 @@ async function createWindow(): Promise<void> {
     normalizeUiPreferences(settings.ui).language,
     () => quitRequested,
     () => void requestAppQuit().catch(error => log(`Quit confirmation failed: ${String(error)}`)),
+    () => {void (async()=>{if(!bridge)return;const state=(await bridge.request('aioState',{assistantId:'aio'})).aio as JsonRecord;if(state.enabled){await bridge.request('aioControl',{assistantId:'aio',changes:{paused:!state.paused}});await aioHost?.controlsChanged();}})().catch(error=>log(`AiO tray control failed: ${String(error)}`));},
   );
   applyWindowAppearance();
+  if(!aioHost){
+    let judgmentWorker:CoreBridge|null=null;
+    let judgmentRoot='';
+    let judgmentGeneration=0;
+    const request=async(action:string,payload:JsonRecord)=>{if(!bridge)throw new Error('Reverie is closing.');return bridge.request(action,payload);};
+    const decide=async(action:string,payload:JsonRecord)=>{
+      if(!bridge)throw new Error('Reverie is closing.');const root=bridge.getProjectRoot();
+      judgmentRoot=root;const generation=judgmentGeneration;
+      const lease=await coordinator.acquire(root,'aio-judgment',true);const key=JSON.stringify([root,'aio-judgment']);let worker:CoreBridge|null=null;
+      try{if(generation!==judgmentGeneration)throw new Error('AiO judgment cancelled.');worker=(await workerPool.acquire(key,()=>new CoreBridge(root,bridge!.getCoreAppRoot(),activeKernelPath,()=>{}))).worker;judgmentWorker=worker;if(generation!==judgmentGeneration)throw new Error('AiO judgment cancelled.');await worker.request('initialize',{projectRoot:root,deferPayloads:true});return await worker.request(action,payload);}
+      finally{judgmentWorker=null;if(worker)await workerPool.release(key,worker,false);coordinator.release(lease.id);}
+    };
+    aioHost=new AiOHost(request,decide,(action,payload)=>executeCoreRequest(assertCoreAction(action),payload),()=>[...knownWorkspaceRoots],message=>{if(mainWindow){showWindow(mainWindow);mainWindow.webContents.send('core:event',{type:'aio.open',project_root:message.root,session_id:message.branch,assistant_id:'aio'});}},event=>{void log(JSON.stringify(event));mainWindow?.webContents.send('core:event',event);},async()=>{judgmentGeneration++;coordinator.cancelQueued(judgmentRoot,'aio-judgment');await judgmentWorker?.stop('AiO judgment cancelled.');});
+    aioHost.start();
+  }
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
   if (devServer) {
     await mainWindow.loadURL(devServer);
   } else {
     await mainWindow.loadFile(path.join(uiRoot, "dist", "index.html"));
+  }
+  void recoverBackgroundRuns().catch(error=>log(`Background recovery failed: ${String(error)}`));
+}
+
+async function recoverBackgroundRuns(){
+  if(!bridge)return;
+  for(const root of knownWorkspaceRoots){
+    const response=await bridge.request('recoverConversationRuns',{projectRoot:root});
+    for(const run of response.runs as JsonRecord[]){
+      const request=run.request as JsonRecord;
+      if(!request.prompt){void log(`Queued task ${run.id} has no durable prompt; user review is required.`);continue;}
+      void executeCoreRequest(assertCoreAction('runPrompt'),{...request,projectRoot:root,sessionId:run.session_id,configuration:run.configuration,restoredRunId:run.id}).catch(error=>log(`Recovered task ${run.id} failed: ${String(error)}`));
+    }
   }
 }
 
@@ -657,9 +695,14 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   if (!mainWindow || _event.sender !== mainWindow.webContents || _event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Only the trusted top frame may use core IPC.");
   const action = assertCoreAction(rawAction);
   const payload = normalizeCorePayload(rawPayload);
+  return executeCoreRequest(action,payload);
+});
+
+async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,payload:JsonRecord):Promise<JsonRecord> {
+  if(!bridge)throw new Error('Reverie core bridge is not initialized.');
   if (action === "getContextUsage" && payload.sessionId) {
     const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot()));
-    const entry = coordinator.find(root, String(payload.sessionId));
+    const entry = coordinator.find(root, String(payload.sessionId),payload.assistantId==='aio'?'aio':undefined);
     const executor = entry ? executors.get(entry.id) : undefined;
     if (executor?.worker.hasActivePrompt()) {
       return assertCoreResponse(action, await executor.worker.request(action, { ...payload, liveRead: true }));
@@ -683,57 +726,114 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   if (["runPrompt", "resumePrompt", "callViewTool"].includes(action)) {
     const admin = bridge; const root = attachmentRoot(String(payload.projectRoot || admin.getProjectRoot())); const sessionId = String(payload.sessionId || "");
     const viewCall = action === "callViewTool";
-    const models = viewCall ? {} : payload.source && payload.model
-      ? { active_model: { id: payload.model }, active_source: payload.source }
-      : (await admin.request("getModelSources")).models as JsonRecord;
-    const selectedModel=models.active_model as JsonRecord | null;
-    if (!payload.source && selectedModel?.id) payload.source=models.active_source;
-    if (!payload.model && selectedModel?.id) payload.model=selectedModel.id;
-    const record = await journal.start(root, sessionId, payload, JSON.stringify(models.active_model || {})); payload.runId = record.id; payload.projectRoot = root;
+    const fixed = viewCall ? null : await admin.request("getConversationConfig",{projectRoot:root,sessionId,...(payload.assistantId==='aio'?{assistantId:'aio'}:{}),...(payload.configuration?{executionConfiguration:payload.configuration}:{})});
+    if (fixed?.error) throw new Error(String(fixed.error));
+    const ownership=fixed?.ownership as JsonRecord|undefined;
+    if(payload.assistantId==='aio' && sessionId!=='aio-mainline' && ownership?.workspace && !samePath(root,String(ownership.workspace)))throw new Error(`This AiO branch belongs to ${ownership.workspace}. Open its original workspace to continue.`);
+    if (fixed && !payload.configuration) payload.configuration = fixed.configuration;
+    const models = viewCall ? {} : fixed!.models as JsonRecord;
+    const record = await journal.start(root, sessionId, payload, JSON.stringify(models.active_model || {}),payload.restoredRunId?String(payload.restoredRunId):undefined); payload.runId = record.id; payload.projectRoot = root;
     let leaseId = ""; let worker: CoreBridge | null = null; let reusable = false;
-    const workerKey = JSON.stringify([root, admin.getCoreAppRoot(), activeKernelPath]);
+    let runRevision=0;
+    let finalized=false;
+    let runWrites:Promise<void>=Promise.resolve();
+    const writeRun=(state:string,result?:JsonRecord,executionRoot?:string)=>{
+      if(viewCall)return Promise.resolve();
+      runWrites=runWrites.then(async()=>{
+        const response=await admin.request('updateConversationRun',{projectRoot:root,sessionId,runId:record.id,revision:runRevision,state,result,executionRoot,...(payload.assistantId==='aio'?{assistantId:'aio'}:{})});
+        runRevision=Number(response.revision);
+      });
+      return runWrites;
+    };
+    let workerKey = JSON.stringify([root, admin.getCoreAppRoot(), activeKernelPath]);
     try {
-      const lease = await coordinator.acquire(root, sessionId, payload.runType === "review", !viewCall); leaseId = lease.id;
+      if(!viewCall){const queued=await admin.request('queueConversationRun',{projectRoot:root,sessionId,runId:record.id,configuration:payload.configuration,configurationRevision:fixed!.revision,request:payload,...(payload.assistantId==='aio'?{assistantId:'aio'}:{})});runRevision=Number(queued.revision);}
+      const lease = await coordinator.acquire(root, sessionId, payload.runType === "review", !viewCall, !viewCall,payload.assistantId==='aio'?'aio':undefined); leaseId = lease.id;
+      if(payload.assistantId==='aio'){
+        let control=(await admin.request('aioState',{assistantId:'aio'})).aio as JsonRecord;
+        if(control.paused)await writeRun('paused');
+        while(control.enabled && control.paused && !stopBeforeStart.has(lease.id)){
+          await new Promise(resolve=>setTimeout(resolve,500));
+          control=(await admin.request('aioState',{assistantId:'aio'})).aio as JsonRecord;
+        }
+        if(!control.enabled || stopBeforeStart.has(lease.id))throw new Error('Run stopped before tools started.');
+      }
+      const task = lease.gitCheckout && !lease.readOnly && !viewCall ? await coordinator.incorporate(lease.id,()=>isolateTask(root,record.id)) : null;
+      if(task){const executionRoot=path.join(task.path,path.relative(task.sourceRoot,root));payload.executionRoot=executionRoot;workerKey=JSON.stringify([root,executionRoot,admin.getCoreAppRoot(),activeKernelPath]);await journal.update(record.id,{executionRoot,taskWorkspaceId:task.id,beforeRef:`refs/reverie/runs/${record.id}/before`});}
       payload.goalContext = payload.runType === "review" ? "" : goalInstructions(await loadGoal(root, sessionId));
+      if(task)payload.goalContext=[String(payload.goalContext),`This task belongs to workspace ${root}, and executes in the managed isolated directory ${payload.executionRoot}. Resolve requested workspace files relative to that execution directory, including paths originally expressed under ${root}. Work and verify only there. The host incorporates verified task changes into the original workspace afterward; their absence in the original directory before incorporation is expected.`].filter(Boolean).join('\n\n');
       await journal.update(record.id, { goalContext: String(payload.goalContext) });
       const acquired = await workerPool.acquire(workerKey, () => new CoreBridge(root, admin.getCoreAppRoot(), activeKernelPath, () => {}));
       worker = acquired.worker;
       worker.setEventHandler(message => {
-        const event: JsonRecord = { ...(message.event as JsonRecord), project_root: root, session_id: sessionId, run_id: record.id };
+        const event: JsonRecord = { ...(message.event as JsonRecord), project_root: root, session_id: sessionId, run_id: record.id,assistant_id:payload.assistantId };
         journal.event(record.id, event);
-        if (event.type === "approval.request") { approvalOwners.set(String(event.approval_id), lease.id); void publishNotification(root, sessionId, record.id, `approval:${event.approval_id}`, "Reverie 需要审批 / Approval needed", String(event.command || event.tool || event.message || "")); }
+        if (event.type === "approval.request") { approvalOwners.set(String(event.approval_id), lease.id); void publishNotification(root, sessionId, record.id, `approval:${event.approval_id}`, "Reverie 需要审批 / Approval needed", String(event.command || event.tool || event.message || ""),payload.assistantId==='aio'?'aio':undefined); }
+        if(event.type==='approval.request' || event.type==='run.control'){
+          const state=event.type==='approval.request'?'waiting_user':String(event.state);
+          void writeRun(state).catch(error=>{void log(`Conversation task state was not saved: ${String(error)}`);void worker?.request('stopPrompt',{projectRoot:root,sessionId}).catch(()=>{});});
+        }
         if (event.type === "run.control") void journal.update(record.id, { state: String(event.state) });
         mainWindow?.webContents.send("core:event", { ...message, event });
       });
-      executors.set(lease.id, { worker, root, sessionId, runId: record.id, interactionId: viewCall ? String(payload.interactionId) : undefined });
+      executors.set(lease.id, { worker, root, sessionId, assistantId:payload.assistantId==='aio'?'aio':undefined, runId: record.id, interactionId: viewCall ? String(payload.interactionId) : undefined });
       if (viewCall) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "running", project_root: root, session_id: sessionId, run_id: record.id } });
       const preparation = await Promise.allSettled([
-        acquired.reused ? Promise.resolve() : worker.request("initialize", { projectRoot: root, deferPayloads: true }),
-        workingSnapshot(root, `refs/reverie/runs/${record.id}/before`).then(() => journal.update(record.id,{beforeRef:`refs/reverie/runs/${record.id}/before`})).catch(error => { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }),
+        acquired.reused ? Promise.resolve() : worker.request("initialize", { projectRoot: root, executionRoot: payload.executionRoot, deferPayloads: true }),
+        task ? Promise.resolve() : workingSnapshot(root, `refs/reverie/runs/${record.id}/before`).then(() => journal.update(record.id,{beforeRef:`refs/reverie/runs/${record.id}/before`})).catch(error => { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }),
       ]);
       for (const result of preparation) if (result.status === "rejected") throw result.reason;
       coordinator.pid(lease.id, worker.getPid() || 0); await journal.update(record.id, { state: "running", pid: worker.getPid() });
+      await writeRun('running',undefined,String(payload.executionRoot || root));
       if (stopBeforeStart.has(lease.id)) throw new Error("Run stopped before tools started.");
       if (viewCall) viewInstances.require(payload);
       const response = await worker.request(action, payload);
       const result = viewCall ? { success: response.status === "success", output_text: response.output, error: response.error } : response.result as JsonRecord;
-      reusable = true;
+      reusable = !task;
       const cancelled = !result.success && stopBeforeStart.has(lease.id);
-      if (!cancelled) {
-        try { await workingSnapshot(root, `refs/reverie/runs/${record.id}/after`); await journal.update(record.id,{afterRef:`refs/reverie/runs/${record.id}/after`}); } catch (error) { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }
+      let completionState=result.success ? 'completed' : cancelled ? 'cancelled' : 'failed';
+      if(result.success && payload.acceptance && !viewCall){
+        await journal.update(record.id,{state:'verifying'});
+        await writeRun('verifying');
+        const verification=await worker.request('runPrompt',{...payload,promptAlreadySaved:false,runType:'review',prompt:`Verify this task against its acceptance conditions: ${payload.acceptance}. Inspect the actual artifacts in the execution directory and tool evidence. For exact text, encoding or line-ending conditions, read the complete file with native file_ops read and inspect its byte size with file_ops info; line-numbered search snippets and creation acknowledgements are insufficient. Report unmet conditions. Return only a JSON object {"passed":true|false,"evidence":"specific observed evidence"}.`});
+        const evidence=verificationEvidence(verification.result as JsonRecord);
+        result.verification=evidence;
+        if(!evidence.passed){result.success=false;result.error=`Acceptance needs review: ${evidence.evidence}`;completionState='waiting_user';}
       }
-      await journal.finish(record.id, result, result.success ? "completed" : cancelled ? "cancelled" : "failed");
-      if (!cancelled) await publishNotification(root, sessionId, record.id, result.success ? "completed" : "failed", result.success ? "Reverie 已完成 / Completed" : "Reverie 运行失败 / Failed", String(result.error || result.output_text || "").slice(0,220));
+      if(task)result.execution_root=String(payload.executionRoot);
+      if(task && result.success){
+        await journal.update(record.id,{state:'waiting_incorporation'});
+        await writeRun('waiting_incorporation');
+        const incorporation=await coordinator.incorporate(lease.id,()=>incorporateTask(root,task,record.id));
+        await journal.update(record.id,{incorporation,afterRef:`refs/reverie/runs/${record.id}/after`});
+        if(incorporation.conflicts.length){completionState='waiting_incorporation';result.success=false;result.error=`Task result retained in ${task.path}. Conflicts: ${incorporation.conflicts.join(', ')}`;}
+      }else if (!cancelled) {
+        try { await workingSnapshot(task?.path || root, `refs/reverie/runs/${record.id}/after`); await journal.update(record.id,{afterRef:`refs/reverie/runs/${record.id}/after`}); } catch (error) { journal.event(record.id,{type:"snapshot.unavailable",error:String(error)}); }
+      }
+      result.completion_state=completionState;
+      await journal.finish(record.id, result, completionState);
+      await writeRun(completionState,result);
+      finalized=true;
+      mainWindow?.webContents.send('core:event',{type:'prompt.event',event:{type:'conversation.saved',project_root:root,session_id:sessionId,assistant_id:payload.assistantId,state:completionState}});
+      if (!cancelled) await publishNotification(root, sessionId, record.id, result.success ? "completed" : "failed", result.success ? "Reverie 已完成 / Completed" : "Reverie 运行失败 / Failed", String(result.error || result.output_text || "").slice(0,220),payload.assistantId==='aio'?'aio':undefined).catch(error=>log(`Completion notification failed: ${String(error)}`));
       if (viewCall) viewInstances.require(payload);
       return assertCoreResponse(action, response);
-    } catch (error) { await journal.finish(record.id, {error:String(error)}, String(error).includes("Queued run cancelled") || (leaseId && stopBeforeStart.has(leaseId)) ? "cancelled" : "interrupted"); await publishNotification(root, sessionId, record.id, "recovery", "Reverie 需要核对 / Needs review", String(error)); throw error; }
+    } catch (error) {
+      if(finalized)throw error;
+      const state=String(error).includes("Queued run cancelled") || (leaseId && stopBeforeStart.has(leaseId)) ? 'cancelled' : 'interrupted';
+      await journal.finish(record.id,{error:String(error)},state);
+      if(runRevision){runWrites=runWrites.catch(()=>{});await writeRun(state,{error:String(error)});}
+      await publishNotification(root,sessionId,record.id,'recovery','Reverie 需要核对 / Needs review',String(error),payload.assistantId==='aio'?'aio':undefined);
+      throw error;
+    }
     finally { if (viewCall && leaseId) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "finished", project_root: root, session_id: sessionId, run_id: record.id } }); if (worker) { worker.setEventHandler(() => {}); await workerPool.release(workerKey, worker, reusable); } if (leaseId) { executors.delete(leaseId); stopBeforeStart.delete(leaseId); coordinator.release(leaseId); for (const [id, owner] of approvalOwners) if (owner === leaseId) approvalOwners.delete(id); } }
   }
   if (["stopPrompt", "steerPrompt", "pausePrompt", "continuePrompt"].includes(action)) {
     const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot())); const sessionId = String(payload.sessionId || "");
-    if (action === "stopPrompt" && coordinator.cancelQueued(root, sessionId)) return { type: "run.control", state: "cancelled", run_id: "" };
-    const entry = coordinator.find(root, sessionId); const executor = entry ? executors.get(entry.id) : undefined;
+    if (action === "stopPrompt" && coordinator.cancelQueued(root, sessionId,payload.assistantId==='aio'?'aio':undefined)) return { type: "run.control", state: "cancelled", run_id: "" };
+    const entry = coordinator.find(root, sessionId,payload.assistantId==='aio'?'aio':undefined); const executor = entry ? executors.get(entry.id) : undefined;
     if (entry && !executor && action === "stopPrompt") { stopBeforeStart.add(entry.id); return { type:"run.control",state:"stopping",run_id:"" }; }
+    if(payload.assistantId==='aio' && entry && !executor)return {type:'run.control',state:action==='pausePrompt'?'paused':'queued',run_id:''};
     if (!entry || !executor) throw new Error("No active run belongs to this project and conversation.");
     if (action === "stopPrompt") { stopBeforeStart.add(entry.id); if (!executor.worker.hasActivePrompt()) return { type:"run.control",state:"stopping",run_id:executor.runId }; }
     return assertCoreResponse(action, await executor.worker.request(action,payload));
@@ -743,6 +843,7 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
     const executor = owner ? executors.get(owner) : undefined;
     if (!executor || stopBeforeStart.has(owner!)) throw new Error("Approval expired or its run stopped.");
     if (payload.sessionId && payload.sessionId !== executor.sessionId || payload.projectRoot && !samePath(String(payload.projectRoot),executor.root)) throw new Error("Approval belongs to a different run.");
+    if ((payload.assistantId==='aio'?'aio':undefined)!==executor.assistantId) throw new Error('Approval belongs to a different assistant.');
     approvalOwners.delete(String(payload.approvalId)); return assertCoreResponse(action, await executor.worker.request(action,payload));
   }
   if (action === "getView") {
@@ -778,11 +879,19 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   if (action === "getSession" && viewInstances.selectSession(String(payload.sessionId || ""))) viewHost.releaseAll();
   if (["initialize", "loadSession", "createSession", "deleteSession", "deleteSessions", "forkSession", "rewindSession", "deleteProjectData"].includes(action)) { viewInstances.clear(); viewHost.releaseAll(); }
   const response = await bridge.request(action, payload);
+  if(action==='aioControl'){
+    await aioHost?.controlsChanged();
+    const changes=payload.changes as JsonRecord|undefined;
+    if(changes && ('paused' in changes || changes.enabled===false))for(const entry of executors.values())if(entry.assistantId==='aio'){
+      const control=changes.enabled===false?'stopPrompt':changes.paused?'pausePrompt':'continuePrompt';
+      void entry.worker.request(control,{projectRoot:entry.root,sessionId:entry.sessionId}).catch(error=>log(`AiO control failed: ${String(error)}`));
+    }
+  }
   if (action === "initialize") {
     void log(`Desktop initialized in ${Date.now() - desktopStartedAt} ms`);
   }
   return assertCoreResponse(action, response);
-});
+}
 
 ipcMain.handle("core:cancel", async (_event, owner?: {projectRoot:string;sessionId:string}) => {
   if (!mainWindow || _event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Only the trusted top frame may cancel runs.");
@@ -1237,6 +1346,7 @@ async function runTuiFromDesktop(settings: DesktopSettings): Promise<void> {
         REVERIE_APP_ROOT: settings.coreAppRoot && existsSync(settings.coreAppRoot)
           ? path.resolve(settings.coreAppRoot)
           : defaultCoreAppRoot(),
+        REVERIE_DESKTOP_SETTINGS: runtimePaths.settings,
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
       },
@@ -1302,8 +1412,9 @@ app.on("before-quit", (event) => {
   if (coreStoppedForQuit) return;
   event.preventDefault();
   const activeBridge = bridge;
+  aioHost?.stop();
   bridge = null;
-  for (const entry of coordinator.list()) if (entry.state === "queued") coordinator.cancelQueued(entry.projectRoot, entry.sessionId);
+  for (const entry of coordinator.list()) if (entry.state === "queued") coordinator.cancelQueued(entry.projectRoot, entry.sessionId,entry.assistantId);
   void Promise.all([activeBridge?.stop("Application is closing."), terminals.closeAll(), workerPool.close()]).finally(() => {
     coreStoppedForQuit = true;
     app.quit();

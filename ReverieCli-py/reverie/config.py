@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import hashlib
+import uuid
 import re
 import logging
 
@@ -511,6 +512,8 @@ def normalize_subagent_config(raw_config: Any) -> Dict[str, Any]:
                     "index": max(0, model_index),
                     "model": str(model_ref.get("model") or "").strip(),
                     "display_name": str(model_ref.get("display_name") or "").strip(),
+                    "profile_id": str(model_ref.get("profile_id") or "").strip(),
+                    "provider_id": str(model_ref.get("provider_id") or "").strip(),
                 },
             }
         )
@@ -853,12 +856,14 @@ class ModelConfig:
     endpoint: str = ""  # Optional custom endpoint path/url for OpenAI-compatible providers
     custom_headers: Dict[str, str] = field(default_factory=dict)  # Optional request headers
     api_key_env: str = ""
+    profile_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def resolve_api_key(self) -> str:
         return str(self.api_key or "").strip() or str(os.getenv(self.api_key_env, "") or "").strip()
     
     def to_dict(self) -> dict:
         payload = {
+            "profile_id": self.profile_id,
             "model": self.model,
             "model_display_name": self.model_display_name,
             "base_url": self.base_url,
@@ -888,6 +893,7 @@ class ModelConfig:
                     custom_headers[k] = v
 
         return cls(
+            profile_id=str(data.get('profile_id') or uuid.uuid5(uuid.NAMESPACE_URL, json.dumps([data.get('provider'), data.get('base_url'), data.get('endpoint'), data.get('model'), data.get('model_display_name')])).hex),
             model=data.get('model', ''),
             model_display_name=derive_model_display_name(
                 data.get('model', ''), data.get('model_display_name', '')

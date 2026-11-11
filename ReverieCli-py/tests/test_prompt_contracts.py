@@ -12,7 +12,7 @@ from reverie.media_capabilities import render_runtime_media_capabilities_digest
 from reverie.tools.registry import get_tool_classes_for_mode
 
 
-MODES = ("reverie", "reverie-atlas", "reverie-gamer", "writer", "computer-controller")
+MODES = ("reverie", "reverie-atlas", "reverie-gamer", "writer", "aio", "computer-controller")
 
 
 def test_commented_rule_examples_do_not_enter_model_requests(tmp_path, monkeypatch):
@@ -212,12 +212,20 @@ def test_atlas_can_use_the_task_ledger_its_prompt_requires(tmp_path):
     assert "task_manager" in get_tool_names_for_mode("reverie-atlas")
 
 
-@pytest.mark.parametrize("mode", ("writer", "computer-controller"))
+@pytest.mark.parametrize("mode", ("writer",))
 def test_specialist_prompts_do_not_require_repository_workflows(mode):
     prompt = build_system_prompt(mode=mode)
     assert "## Project-Wide Coding Guardrails" not in prompt
     assert "## Goal-Driven Task Ledger" not in prompt
     assert "## Context Engine\n" not in prompt
+
+
+def test_aio_main_prompt_supports_task_ownership_and_desktop_views():
+    prompt = build_system_prompt(mode='aio',runtime_surface='desktop')
+    assert 'persistent autonomous assistant' in prompt
+    assert '## Goal-Driven Task Ledger' in prompt
+    assert '## Interactive Views' in prompt
+    assert 'Only the main agent controls the desktop' in prompt
 
 
 def test_writer_does_not_receive_guidance_for_unavailable_media_tools():
@@ -283,7 +291,7 @@ def test_desktop_repository_modes_have_actionable_interactive_view_guidance(mode
     assert "render_view" in get_tool_names_for_mode(mode)
 
 
-@pytest.mark.parametrize("mode,surface", (("writer", "desktop"), ("computer-controller", "desktop"), ("reverie", "terminal")))
+@pytest.mark.parametrize("mode,surface", (("writer", "desktop"), ("aio", "terminal"), ("reverie", "terminal")))
 def test_view_authoring_workflow_is_scoped_to_a_desktop_view_surface(mode, surface):
     assert "## Interactive Views" not in build_system_prompt(mode=mode, runtime_surface=surface)
 
@@ -357,6 +365,7 @@ def test_active_harness_preserves_tasks_without_model_quality_metrics(monkeypatc
 @pytest.mark.parametrize("include_discovery_status", (False, True))
 def test_writer_runtime_additions_do_not_reinject_engineering_instructions(include_discovery_status):
     interface = SimpleNamespace(
+        session_manager=SimpleNamespace(get_current_session=lambda:None),
         rules_manager=SimpleNamespace(get_rules_text=lambda: ""),
         skills_manager=SimpleNamespace(
             set_active_mode=lambda mode: None,

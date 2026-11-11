@@ -243,6 +243,7 @@ def test_first_paint_rules_skip_expensive_harness_enrichment(monkeypatch, tmp_pa
     mcp_runtime = SimpleNamespace(describe_for_prompt=lambda: "")
     interface = SimpleNamespace(
         rules_manager=SimpleNamespace(get_rules_text=lambda: ""),
+        session_manager=SimpleNamespace(get_current_session=lambda:None),
         skills_manager=skills,
         runtime_plugin_manager=runtime_plugins,
         mcp_runtime=mcp_runtime,

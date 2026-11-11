@@ -139,6 +139,7 @@ describe("custom provider reasoning selection", () => {
     await chooseLowInCustomPicker(user);
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+      projectRoot:'C:/fixture',sessionId:undefined,
       providerId: "fixture-provider", modelId: "thought-model", reasoning: "low",
     }));
     expect(document.querySelector(".reasoning-trigger")?.textContent).toContain("低");
@@ -157,6 +158,7 @@ describe("custom provider reasoning selection", () => {
     await user.click(within(confirmation).getByRole("button", { name: "保存并使用" }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
+      projectRoot:'C:/fixture',sessionId:undefined,
       providerId: "fixture-provider", modelId: "thought-model", contextLimit: 128000, reasoning: "low",
     }));
     expect(document.querySelector(".reasoning-trigger")?.textContent).toContain("低");

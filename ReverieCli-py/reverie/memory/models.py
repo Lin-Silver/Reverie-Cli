@@ -10,7 +10,7 @@ from uuid import uuid4
 
 MEMORY_CONTEXT_PROMPT_HEADER = "[REVERIE CONTEXT ENGINE MEMORY PACKAGE]"
 
-MEMORY_SCOPES = ("session", "project", "workflow", "procedural")
+MEMORY_SCOPES = ("session", "project", "workflow", "procedural", "assistant")
 MEMANTO_MEMORY_TYPES = (
     "instruction",
     "fact",

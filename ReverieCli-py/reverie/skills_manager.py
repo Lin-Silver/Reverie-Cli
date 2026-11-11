@@ -595,12 +595,10 @@ class SkillsManager:
                 "switch_mode(operation='switch', mode='reverie') or /mode reverie, then inspect it. "
                 "Keep pins until the user releases them."
             )
-        if self.active_mode == "computer-controller":
+        if self.active_mode == "aio":
             return (
-                "In Computer Controller, skill_lookup can read instructions, but the built-in "
-                "browser-controler, photo-to-3d and reverse-skill workflows require workspace "
-                "tools from Reverie, Atlas or Gamer. Before executing those workflows, use "
-                "switch_mode(operation='switch', mode='reverie') or /mode reverie."
+                "AiO can read skills and use workspace tools. Delegate specialized work to "
+                "Reverie, Atlas, Writer or Gamer workers. Only the AiO main agent controls the desktop."
             )
         return ""
 

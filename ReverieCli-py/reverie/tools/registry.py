@@ -187,9 +187,9 @@ def get_supported_modes_for_tool(tool_name: str, *, include_hidden: bool = False
 
 def _register_builtin_tools() -> None:
     reverie_game_modes = ("reverie-gamer",)
-    reverie_modeling_modes = ("reverie", "reverie-gamer")
-    reverie_engine_modes = ("reverie", "reverie-gamer")
-    no_writer_or_computer = ("writer", "computer-controller")
+    reverie_modeling_modes = ("reverie", "reverie-gamer", "aio")
+    reverie_engine_modes = ("reverie", "reverie-gamer", "aio")
+    no_writer_or_computer = ("writer",)
 
     register_tool_class(CodebaseRetrievalTool, exclude_modes=("writer",))
     register_tool_class(GitCommitRetrievalTool, exclude_modes=("writer",))
@@ -201,9 +201,9 @@ def _register_builtin_tools() -> None:
     register_tool_class(WebFetchTool)
     register_tool_class(BrowserControlerTool, exclude_modes=no_writer_or_computer)
     register_tool_class(ToolCatalogTool, expose_schema=False)
-    register_tool_class(RatsCatalogTool, exclude_modes=("writer", "computer-controller"))
-    register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-atlas", "reverie-gamer"))
-    register_tool_class(SubagentTool, include_modes=("reverie", "computer-controller"))
+    register_tool_class(RatsCatalogTool, exclude_modes=("writer",))
+    register_tool_class(TaskManagerTool, include_modes=("reverie", "reverie-atlas", "reverie-gamer", "aio"))
+    register_tool_class(SubagentTool, include_modes=("reverie", "aio"))
     register_tool_class(ContextManagementTool, expose_schema=False)
     register_tool_class(MemoryRetrievalTool)
     register_tool_class(MemoryManagerTool)
@@ -223,8 +223,8 @@ def _register_builtin_tools() -> None:
     # Intelligent UI (RIU P1): register an in-workspace HTML artifact as a view.
     # Not in writer (prose) or computer-controller (no view panel in P1).
     register_tool_class(RenderViewTool, exclude_modes=no_writer_or_computer)
-    register_tool_class(TaskBoundaryTool, include_modes=("reverie",))
-    register_tool_class(NotifyUserTool, include_modes=("reverie",))
+    register_tool_class(TaskBoundaryTool, include_modes=("reverie", "aio"))
+    register_tool_class(NotifyUserTool, include_modes=("reverie", "aio"))
     register_tool_class(NovelContextManagerTool, include_modes=("writer",))
     register_tool_class(ConsistencyCheckerTool, include_modes=("writer",))
     register_tool_class(PlotAnalyzerTool, include_modes=("writer",))

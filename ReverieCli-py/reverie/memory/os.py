@@ -29,12 +29,12 @@ def workspace_id_for_path(path: Any) -> str:
 class MemoryOS:
     """Single entry point for events, memories, retrieval, assembly, and evolution."""
 
-    def __init__(self, project_data_dir: Path, *, project_root: Optional[Path] = None):
+    def __init__(self, project_data_dir: Path, *, project_root: Optional[Path] = None, memory_store: Optional[MemoryStore] = None):
         self.project_data_dir = Path(project_data_dir)
         self.project_root = Path(project_root).resolve() if project_root else None
         self.workspace_id = workspace_id_for_path(self.project_root or self.project_data_dir)
         self.event_store = EventStore(self.project_data_dir, workspace_id=self.workspace_id)
-        self.memory_store = MemoryStore(self.project_data_dir)
+        self.memory_store = memory_store if memory_store is not None else MemoryStore(self.project_data_dir)
         self.retriever = MemoryRetriever(self.memory_store)
         self.consolidator = MemoryConsolidator(self.event_store, self.memory_store)
         self.assembler = ContextAssembler(self.retriever)

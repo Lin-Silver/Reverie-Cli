@@ -264,10 +264,10 @@ Examples:
             return ToolResult.fail(f"File not found: {file_path}")
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding='utf-8', newline='') as f:
                 content = f.read()
         except UnicodeDecodeError:
-            with open(file_path, 'r', encoding='latin-1') as f:
+            with open(file_path, 'r', encoding='latin-1', newline='') as f:
                 content = f.read()
         
         # Check if old_str exists
@@ -292,7 +292,7 @@ Examples:
         new_content = content.replace(old_str, new_str, 1)
         
         # Write back
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, 'w', encoding='utf-8', newline='') as f:
             f.write(new_content)
         
         # Generate diff for display
@@ -324,7 +324,7 @@ Examples:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Write file
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, 'w', encoding='utf-8', newline='') as f:
             f.write(content)
         
         line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
@@ -349,7 +349,7 @@ Examples:
         if not file_path.exists():
             return ToolResult.fail(f"File not found: {file_path}")
         
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8', newline='') as f:
             lines = f.readlines()
         
         if insert_line < 1 or insert_line > len(lines) + 1:
@@ -369,7 +369,7 @@ Examples:
         new_content = ''.join(lines)
         
         # Write back
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, 'w', encoding='utf-8', newline='') as f:
             f.write(new_content)
         
         # Generate diff

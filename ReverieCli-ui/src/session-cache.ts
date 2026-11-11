@@ -19,8 +19,13 @@ export class SessionCache {
   constructor(private readonly limit: number = SESSION_CACHE_LIMIT) {}
 
   /** The cached transcript for a session, or undefined when not cached. */
-  get(sessionId: string): SessionState | undefined {
-    const key = String(sessionId || "");
+  get(sessionId: string, workspace = "", assistantId?:'aio'): SessionState | undefined {
+    let key = JSON.stringify([assistantId==='aio'?'assistant:aio':workspace.toLowerCase(), String(sessionId || "")]);
+    if (!workspace) {
+      const matches = [...this.entries.keys()].filter(value => JSON.parse(value)[1] === sessionId);
+      if (matches.length !== 1) return undefined;
+      key = matches[0];
+    }
     const cached = this.entries.get(key);
     if (cached === undefined) return undefined;
     // Refresh recency: a session being read is a session in use.
@@ -30,9 +35,11 @@ export class SessionCache {
   }
 
   /** Remember a transcript, evicting the least recently used one when full. */
-  set(session: SessionState | null | undefined): void {
-    const key = String(session?.id || "");
-    if (!key) return;
+  set(session: SessionState | null | undefined, workspace?: string): void {
+    if (!session?.id) return;
+    const metadata = session.metadata || {};
+    const scope = metadata.assistant_id==='aio'?'assistant:aio':workspace ?? String(metadata.workspace_path || metadata.workspace_id || "");
+    const key = JSON.stringify([scope.toLowerCase(), session.id]);
     this.entries.delete(key);
     this.entries.set(key, session as SessionState);
     while (this.entries.size > this.limit) {
@@ -43,8 +50,12 @@ export class SessionCache {
   }
 
   /** Forget one session, e.g. after it is deleted or archived. */
-  delete(sessionId: string): void {
-    this.entries.delete(String(sessionId || ""));
+  delete(sessionId: string, workspace = "",assistantId?:'aio'): void {
+    const owner=assistantId==='aio'?'assistant:aio':workspace.toLowerCase();
+    for (const key of this.entries.keys()) {
+      const [scope,id] = JSON.parse(key);
+      if (id === sessionId && (!owner || scope === owner)) this.entries.delete(key);
+    }
   }
 
   /** Forget everything, e.g. when the workspace changes. */

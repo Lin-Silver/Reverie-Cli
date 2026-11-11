@@ -10,12 +10,14 @@ This module tracks:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import hashlib
 import json
 import os
+import sqlite3
 import time
 
 from ..diagnostics import report_suppressed_exception
@@ -287,6 +289,7 @@ class WorkspaceStatsManager:
         self.project_data_dir = Path(project_data_dir).resolve()
         self.project_root = Path(project_root).resolve() if project_root else None
         self.stats_path = self.project_data_dir / WORKSPACE_STATS_FILENAME
+        self.database_path = self.project_data_dir / "workspace_stats.sqlite3"
         self._dirty = False
         self._last_save_monotonic = 0.0
         self._pending_since_monotonic = 0.0
@@ -306,6 +309,7 @@ class WorkspaceStatsManager:
         )
         self.state = self._load_state()
         self._merge_identity()
+        self._saved_state = self.state.to_dict()
 
     @classmethod
     def _get_encoding(cls):
@@ -444,6 +448,29 @@ class WorkspaceStatsManager:
         self.state.updated_at = _now_iso()
 
     def _load_state(self) -> WorkspaceStatsState:
+        self.project_data_dir.mkdir(parents=True, exist_ok=True)
+        with self._connect() as database:
+            database.execute("CREATE TABLE IF NOT EXISTS statistics (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
+            row = database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()
+            if row:
+                return WorkspaceStatsState.from_dict(json.loads(row[0]))
+            state = self._load_legacy_state()
+            database.execute("INSERT OR IGNORE INTO statistics VALUES (1, ?)", (json.dumps(state.to_dict()),))
+            row = database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()
+            return WorkspaceStatsState.from_dict(json.loads(row[0]))
+
+    @contextmanager
+    def _connect(self):
+        database = sqlite3.connect(self.database_path, timeout=30)
+        try:
+            database.execute("PRAGMA journal_mode=WAL")
+            database.execute("PRAGMA synchronous=FULL")
+            with database:
+                yield database
+        finally:
+            database.close()
+
+    def _load_legacy_state(self) -> WorkspaceStatsState:
         if not self.stats_path.exists():
             return self._default_state
         try:
@@ -470,12 +497,27 @@ class WorkspaceStatsManager:
                     return
         self.project_data_dir.mkdir(parents=True, exist_ok=True)
         self.state.updated_at = _now_iso()
-        temp_path = self.stats_path.with_name(f"{self.stats_path.name}.tmp")
-        temp_path.write_text(
-            json.dumps(self.state.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        temp_path.replace(self.stats_path)
+        current = self.state.to_dict()
+        # Merge only this manager's increments; another kernel's totals must
+        # never be replaced by the copy loaded when this kernel started.
+        def merge(latest, previous, changed):
+            result = dict(latest)
+            for key, value in changed.items():
+                before = previous.get(key)
+                if isinstance(value, dict):
+                    result[key] = merge(latest.get(key, {}), before or {}, value)
+                elif isinstance(value, (int, float)) and key not in {"schema_version", "message_count"}:
+                    result[key] = latest.get(key, 0) + value - (before or 0)
+                elif value != before:
+                    result[key] = value
+            return result
+        with self._connect() as database:
+            database.execute("BEGIN IMMEDIATE")
+            latest = json.loads(database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()[0])
+            merged = merge(latest, self._saved_state, current)
+            database.execute("UPDATE statistics SET payload=? WHERE id=1", (json.dumps(merged, ensure_ascii=False),))
+        self.state = WorkspaceStatsState.from_dict(merged)
+        self._saved_state = merged
         self._dirty = False
         self._last_save_monotonic = now
         self._pending_since_monotonic = 0.0
@@ -783,7 +825,7 @@ class WorkspaceStatsManager:
             if not projects_dir.exists():
                 continue
             for cache_dir in sorted(projects_dir.iterdir(), key=lambda item: item.name.lower()):
-                if not cache_dir.is_dir() or not (cache_dir / WORKSPACE_STATS_FILENAME).exists():
+                if not cache_dir.is_dir() or not ((cache_dir / WORKSPACE_STATS_FILENAME).exists() or (cache_dir / "workspace_stats.sqlite3").exists()):
                     continue
                 manager = cls.from_cache_dir(cache_dir)
                 dashboard = manager.build_dashboard_data()

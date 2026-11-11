@@ -335,7 +335,7 @@ class ToolExecutor:
 
     def _tool_is_visible(self, name: str, tool: BaseTool, mode: object) -> bool:
         """Return whether a tool should be exposed in the supplied mode."""
-        if self.context.get("is_subagent") and tool.tool_category == "desktop":
+        if (self.context.get("is_subagent") or self.context.get('aio_worker')) and tool.tool_category == "desktop":
             return False
         normalized_mode = normalize_mode(mode)
         if name == DEEP_THINK_TOOL_NAME and not self._thinking_tool_enabled():
@@ -1163,7 +1163,11 @@ class ToolExecutor:
         """
         if INVALID_TOOL_ARGUMENTS in arguments:
             return ToolResult.fail("Incomplete tool arguments; nothing was executed. Resend the complete JSON object.")
+        if self.context.get('decision_only'):
+            return ToolResult.fail('AiO event judgment cannot execute tools. Schedule an owned task instead.')
         tool = self.get_tool(tool_name)
+        if tool is not None and tool.tool_category == 'desktop' and self.context.get('aio_worker'):
+            return ToolResult.fail('Only the AiO main agent may control the desktop.')
 
         if not tool:
             self._record_memory_event(
@@ -1222,7 +1226,7 @@ class ToolExecutor:
         if gate is not None:
             return gate
         active_mode = normalize_mode(getattr(agent, "mode", "reverie")) if agent is not None else "reverie"
-        if tool.tool_category == "desktop" and active_mode not in {"reverie", "computer-controller"}:
+        if tool.tool_category == "desktop" and active_mode not in {"reverie", "aio"}:
             return ToolResult.fail("Desktop tools are available in Reverie and Computer Controller modes.")
         if active_mode == "writer" and tool.name in {"str_replace_editor", "create_file", "delete_file", "file_ops"}:
             raw_path = str(normalized_arguments.get("path", "") or "").strip()
@@ -1496,6 +1500,7 @@ class ToolExecutor:
         cache_key = (
             normalized_mode,
             bool(self.context.get("is_subagent")),
+            bool(self.context.get("aio_worker")),
             self._mcp_generation,
             self._runtime_plugin_generation,
             self._rats_generation,

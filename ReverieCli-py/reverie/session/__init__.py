@@ -12,6 +12,7 @@ Session management for conversation persistence:
 """
 
 from .manager import SessionManager, Session, SessionInfo
+from .sqlite_manager import SQLiteSessionManager
 from .roles import (
     STORED_ASSISTANT_ROLE,
     from_stored_messages,
@@ -28,6 +29,7 @@ from .workspace_stats import WorkspaceStatsManager, get_known_workspaces
 
 __all__ = [
     'SessionManager',
+    'SQLiteSessionManager',
     'Session',
     'SessionInfo',
     'STORED_ASSISTANT_ROLE',

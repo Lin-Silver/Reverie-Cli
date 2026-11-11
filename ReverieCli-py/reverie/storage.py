@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -161,7 +162,7 @@ class ProjectStorageResolver:
         try:
             self.reverie_root.mkdir(parents=True, exist_ok=True)
             self.projects_root.mkdir(parents=True, exist_ok=True)
-            probe = self.reverie_root / ".write-test"
+            probe = self.reverie_root / f".write-test-{uuid4().hex}"
             probe.write_text("ok", encoding="utf-8")
             probe.unlink(missing_ok=True)
         except Exception as exc:

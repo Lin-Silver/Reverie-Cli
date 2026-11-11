@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -130,17 +132,18 @@ class ReverieSdkBridge:
         if callable(close):
             close()
 
-    def ensure_interface(self, project_root: Optional[Path] = None):
+    def ensure_interface(self, project_root: Optional[Path] = None, execution_root: Optional[Path] = None):
         from .cli.interface import ReverieInterface
 
         root = Path(project_root or self.project_root).expanduser().resolve()
         if not root.is_dir():
             raise ValueError(f"Workspace does not exist: {root}")
-        if self.interface is None or self.project_root != root:
+        execution = Path(execution_root).resolve() if execution_root else None
+        if self.interface is None or self.project_root != root or (execution is not None and self.interface.project_root != execution):
             if self.interface is not None:
                 self._dispose_interface()
             self.project_root = root
-            self.interface = ReverieInterface(root, headless=True, runtime_surface="desktop")
+            self.interface = ReverieInterface(root, headless=True, runtime_surface="desktop", **({'execution_root':execution} if execution is not None else {}))
             self._skill_pin_owner = None
             self.interface._context_worker_limit = _interactive_context_worker_limit()
             self.interface.rats_runtime = self.rats_runtime
@@ -171,17 +174,68 @@ class ReverieSdkBridge:
         if kind == "workspace":
             return bool(interface.config_manager.is_workspace_mode())
         if kind == "rules":
-            return "\n".join(interface.rules_manager.get_rules())
+            snapshot = getattr(interface,'_view_snapshot',None)
+            return snapshot.get('rules','') if snapshot else "\n".join(interface.rules_manager.get_rules())
         if key in SECURITY_SETTING_KEYS:
             # These live inside `config.security`, so a plain getattr() reads None.
             return security_setting_value(key, config)
         return getattr(config, key, None)
 
+    def _view_config(self, interface=None):
+        interface = interface or self.ensure_interface()
+        return getattr(interface, '_conversation_config', None) or interface.config_manager.load()
+
+    def _aio(self):
+        from .aio import AiORuntime
+        root = self.ensure_interface().config_manager.app_root
+        if getattr(self,'_aio_runtime',None) is None:
+            self._aio_runtime = AiORuntime(root)
+        return self._aio_runtime
+
+    def _save_conversation_config(self, interface, session, config):
+        from .session.runtime_config import capture_runtime_config, _resolve_proxy, update_shared_proxy
+        previous = session.metadata.get('runtime_config') or {}
+        defaults = interface.config_manager.load()
+        previous_proxy = _resolve_proxy(defaults,previous.get('settings',{}).get('api_proxy',defaults.api_proxy))
+        if update_shared_proxy(defaults,previous_proxy,config.api_proxy):
+            interface.config_manager.save(defaults)
+        session.metadata['runtime_config'] = capture_runtime_config(
+            config, rules=previous.get('rules',''), pinned_skills=previous.get('pinned_skills',[]), plugins=previous.get('plugins',{}))
+        interface.session_manager.save_session(session)
+        interface._conversation_config = config
+        interface._view_snapshot = session.metadata['runtime_config']
+
+    def _conversation_config(self, interface, session):
+        from .session.runtime_config import capture_runtime_config, resolve_runtime_config
+        defaults = interface.config_manager.load()
+        snapshot = session.metadata.get('runtime_config')
+        if not isinstance(snapshot, dict):
+            rules = getattr(interface, 'rules_manager', None)
+            plugins = getattr(interface,'runtime_plugin_manager',None)
+            snapshot = capture_runtime_config(defaults, rules=rules.get_rules_text() if rules else '', pinned_skills=session.metadata.get('pinned_skills', []), plugins={record.plugin_id:record.enabled for record in plugins.get_snapshot().records} if plugins else {})
+            session.metadata['runtime_config'] = snapshot
+            interface.session_manager.save_session(session)
+        interface._view_snapshot = snapshot
+        return resolve_runtime_config(defaults, snapshot)
+
+    def _editable_conversation_config(self,interface,session):
+        from copy import deepcopy
+        from .session.runtime_config import capture_runtime_config,resolve_runtime_config
+        try:
+            return self._conversation_config(interface,session)
+        except ValueError:
+            # An explicit replacement may repair a missing model; execution still rejects it.
+            defaults = interface.config_manager.load()
+            snapshot = deepcopy(session.metadata['runtime_config'])
+            snapshot['model_ref'] = capture_runtime_config(defaults)['model_ref']
+            snapshot['provider_settings'] = {}
+            return resolve_runtime_config(defaults,snapshot)
+
     def settings_payload(self) -> Dict[str, Any]:
         from .settings_catalog import get_setting_items
 
         interface = self.ensure_interface()
-        config = interface.config_manager.load()
+        config = self._view_config(interface)
         items = []
         for item in get_setting_items(
             config,
@@ -279,14 +333,21 @@ class ReverieSdkBridge:
         }
 
     def _sync_skill_pins(self, interface) -> None:
-        session = interface.session_manager.get_current_session() or interface.session_manager.restore_last_session()
-        owner = (str(self.project_root), session.id if session else "draft")
+        manager = interface.session_manager
+        view_id = getattr(interface,'_view_session_id',None)
+        if view_id and hasattr(manager,'get_page'):
+            from types import SimpleNamespace
+            page = manager.get_page(view_id,limit=1)
+            session = SimpleNamespace(id=view_id,metadata=page['metadata'])
+        elif getattr(interface, '_view_draft', False):
+            session = None
+        else:
+            session = manager.get_current_session() or manager.restore_last_session()
+        owner = (str(self.project_root), session.id if session else "draft",page['revision'] if view_id and hasattr(manager,'get_page') else getattr(session,'_storage_revision',None))
         if getattr(self, "_skill_pin_owner", None) == owner:
             return
         if session:
             names = session.metadata.get("pinned_skills", [])
-            draft = interface.project_data_dir / "desktop" / "draft-skills.json"
-            draft.unlink(missing_ok=True)
         else:
             target = interface.project_data_dir / "desktop" / "draft-skills.json"
             try:
@@ -301,7 +362,15 @@ class ReverieSdkBridge:
 
     def _save_skill_pins(self, interface) -> None:
         names = interface.skills_manager.pinned_names()
-        session = interface.session_manager.get_current_session()
+        manager = interface.session_manager
+        view_id = getattr(interface,'_view_session_id',None)
+        if view_id and hasattr(manager,'get_page'):
+            page = manager.get_page(view_id,limit=1)
+            snapshot = page['metadata'].get('runtime_config') or {}
+            snapshot['pinned_skills'] = names
+            manager.update_metadata(view_id,{'pinned_skills':names,'runtime_config':snapshot},expected_revision=page['revision'])
+            return
+        session = None if getattr(interface, '_view_draft', False) else interface.session_manager.get_current_session()
         if session:
             session.metadata["pinned_skills"] = names
             interface.session_manager.save_session(session)
@@ -320,7 +389,7 @@ class ReverieSdkBridge:
         interface = self.ensure_interface()
         if interface.agent is not None:
             interface._init_agent(
-                config_override=interface.config_manager.load(),
+                config_override=self._view_config(interface),
                 persist_config_changes=False,
             )
 
@@ -421,10 +490,10 @@ class ReverieSdkBridge:
         from .desktop_catalog import build_model_sources_payload
 
         interface = self.ensure_interface()
-        config = interface.config_manager.load()
+        config = self._view_config(interface)
         before = config.to_dict()
         payload = build_model_sources_payload(config, fetch_live=fetch_live)
-        if fetch_live or config.to_dict() != before:
+        if (fetch_live or config.to_dict() != before) and getattr(interface, '_conversation_config', None) is None:
             interface.config_manager.save(config)
         return _json_safe(payload)
 
@@ -450,11 +519,23 @@ class ReverieSdkBridge:
 
     def sessions_payload(self) -> Dict[str, Any]:
         manager = self.ensure_interface().session_manager
+        if hasattr(manager, 'import_legacy_archives') and not getattr(manager, '_archive_import_checked', False):
+            from .config import get_app_root
+            path = Path(os.environ['REVERIE_DESKTOP_SETTINGS']) if os.environ.get('REVERIE_DESKTOP_SETTINGS') else get_app_root() / '.reverie' / 'desktop' / 'desktop-settings.json'
+            if path.exists():
+                preferences = json.loads(path.read_text(encoding='utf-8')).get('ui', {}).get('archivedSessions', {})
+                ids = [item for values in preferences.values() for item in values] if getattr(manager,'mainline_id',None) else preferences.get(str(self.project_root), [])
+                manager.import_legacy_archives(ids)
+            manager._archive_import_checked = True
         manager.refresh_generated_session_names()
-        current = manager.get_current_session() or manager.restore_last_session()
+        selected = manager.selected_session_id() if hasattr(manager, 'selected_session_id') else ''
+        current = None if hasattr(manager, 'selected_session_id') else manager.get_current_session() or manager.restore_last_session()
         return {
-            "current_session_id": str(getattr(current, "id", "") or ""),
+            "current_session_id": selected or str(getattr(current, "id", "") or ""),
             "items": [self._session_info_payload(info) for info in manager.list_sessions()],
+            "unread_session_ids": manager.unread_session_ids() if hasattr(manager,'unread_session_ids') else [],
+            "archive_states": manager.archive_states() if hasattr(manager,'archive_states') else {},
+            "owners": manager.conversation_owners() if hasattr(manager,'conversation_owners') else {},
         }
 
     def active_session_payload(self, session_id: str = "") -> Optional[Dict[str, Any]]:
@@ -538,7 +619,7 @@ class ReverieSdkBridge:
 
     def workspace_payload(self) -> Dict[str, Any]:
         interface = self.ensure_interface()
-        config = interface.config_manager.load()
+        config = self._view_config(interface)
         active_model = config.active_model
         context_engine = self.context_status_payload()
         return {
@@ -657,16 +738,29 @@ class ReverieSdkBridge:
     def _dispatch_prompt(self, request_id: Any, action: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         from .desktop_control import RunControl
         interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
+        interface.session_manager.navigation = False
         session_id = str(payload.get("sessionId") or "").strip()
         if action == "resumePrompt" and not session_id:
             raise ValueError("Continuing a task requires a session ID.")
         if session_id and interface.session_manager.load_session(session_id) is None:
             raise ValueError(f"Session not found: {session_id}")
+        current = interface.session_manager.get_current_session()
+        from .session.runtime_config import validate_conversation_workspace
+        if payload.get('assistantId')=='aio':
+            validate_conversation_workspace(current,getattr(interface,'workspace_root',getattr(interface,'project_root',self.project_root)))
+        interface._aio_worker = payload.get('assistantId') == 'aio' and session_id != 'aio-mainline' and (current is None or current.metadata.get('executor_role') != 'main')
         self._sync_skill_pins(interface)
         self._run_identity = {"session_id": session_id, "project_root": str(self.project_root), "run_id": str(payload.get("runId") or uuid.uuid4().hex)}
+        interface._active_run_id = self._run_identity['run_id']
         control = RunControl(lambda event: self._emit_request_event(request_id, {**event, **self._run_identity}))
         self._run_control = control
         current_session = interface.session_manager.get_current_session()
+        if current_session is not None and hasattr(interface, 'config_manager'):
+            from .session.runtime_config import resolve_runtime_config
+            snapshot = payload.get('configuration') or current_session.metadata.get('runtime_config')
+            if snapshot is not None:
+                interface._conversation_config = resolve_runtime_config(interface.config_manager.load(), snapshot)
+                interface._run_configuration = snapshot
         history_message_count = len(current_session.messages) if current_session and not payload.get("freshSession") else 0
         from .provider_transport import request_scope
         with request_scope(control):
@@ -686,6 +780,7 @@ class ReverieSdkBridge:
                 run_control=control,
                 read_only_review=payload.get("runType") == "review",
                 goal_context=str(payload.get("goalContext") or ""),
+                **({'prompt_already_saved':True} if payload.get('promptAlreadySaved') and payload.get('assistantId') == 'aio' else {}),
             )
         return {"id": request_id, "type": "prompt.result", "result": _json_safe(result.to_dict()), "sessions": self.sessions_payload(), "recovery": self.recovery_payload(), **self._run_identity}
 
@@ -720,6 +815,75 @@ class ReverieSdkBridge:
         payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
         request_id = message.get("id")
 
+        # Every workspace-bound request can name its owner instead of following UI selection.
+        if payload.get('projectRoot') and action not in {'hello', 'initialize', 'resolveApproval', 'steerPrompt', 'stopPrompt', 'pausePrompt', 'continuePrompt'}:
+            self.ensure_interface(Path(str(payload['projectRoot'])))
+        if action.startswith('aio'):
+            if payload.get('assistantId') != 'aio':
+                raise ValueError('AiO requests require assistantId=aio.')
+            runtime = self._aio()
+            store = runtime.store
+            if action == 'aioState':
+                return {'id':request_id,'type':'aio.state','aio':store.state()}
+            if action == 'aioControl':
+                if payload.get('enable'):
+                    runtime.enable(self._view_config())
+                if payload.get('changes'):
+                    store.control(payload['changes'])
+                return {'id':request_id,'type':'aio.state','aio':store.state()}
+            if action == 'aioObserve':
+                from .aio import observe_foreground
+                state = store.state()
+                observation = observe_foreground(payload.get('excludePids',[]),payload.get('idleSeconds',0)) if state['enabled'] and state['proactive'] and not state['paused'] else None
+                return {'id':request_id,'type':'aio.observation','observation':observation}
+            if action == 'aioDecision':
+                decision = runtime.decide(self.ensure_interface(),payload.get('observation') or {},payload.get('workspaces',[]),urgent=bool(payload.get('urgent')))
+                return {'id':request_id,'type':'aio.decision','decision':decision}
+            if action == 'aioMessages':
+                return {'id':request_id,'type':'aio.messages','messages':store.pending_messages()}
+            if action == 'aioPendingSignals':
+                return {'id':request_id,'type':'aio.signals','signals':store.pending_signals()}
+            if action == 'aioAcknowledgeSignal':
+                store.acknowledge_signal(str(payload['eventId']))
+                return {'id':request_id,'type':'aio.signal-state','saved':True}
+            if action == 'aioPendingTasks':
+                return {'id':request_id,'type':'aio.tasks','tasks':store.pending_tasks()}
+            if action == 'aioRecoverHost':
+                return {'id':request_id,'type':'aio.state','aio':store.recover_host()}
+            if action == 'aioMessageState':
+                if payload.get('state') == 'queued':
+                    store.release_message(str(payload['messageId']))
+                message_id = str(payload.get('messageId') or '')
+                claimed = store.claim_message(message_id) if payload.get('state') == 'displaying' else False
+                if payload.get('state') == 'presented':
+                    store.acknowledge_message(message_id)
+                return {'id':request_id,'type':'aio.message-state','claimed':claimed}
+            if action == 'aioReply':
+                store.reply(str(payload.get('messageId') or ''),str(payload.get('text') or ''),str(payload.get('replyId') or ''))
+                return {'id':request_id,'type':'aio.state','aio':store.state()}
+            if action == 'aioTaskState':
+                revision = store.task_state(str(payload.get('taskId') or ''),str(payload.get('state') or ''),revision=int(payload.get('revision',0)),result=payload.get('result'))
+                return {'id':request_id,'type':'aio.task-state','revision':revision}
+            if action == 'aioMemory':
+                if payload.get('memoryId'):
+                    store.edit_memory(str(payload['memoryId']),payload.get('content'))
+                return {'id':request_id,'type':'aio.memory','memories':[item.to_dict() for item in store.memory.load_items(limit=100)]}
+        if action not in {'hello','initialize','resolveApproval','steerPrompt','stopPrompt','pausePrompt','continuePrompt','listApiKeyEnvironmentVariables'}:
+            interface = self.ensure_interface()
+            wanted = payload.get('assistantId') == 'aio'
+            if wanted != bool(getattr(interface,'_assistant_owner',False)):
+                interface._assistant_owner = wanted
+                interface._conversation_config = None
+                interface._init_workspace_services()
+            if wanted:
+                from types import SimpleNamespace
+                from .session.runtime_config import validate_conversation_workspace
+                identities=payload.get('sessionIds') if isinstance(payload.get('sessionIds'),list) else [payload.get('sessionId')]
+                for session_id in identities:
+                    if session_id and session_id!='aio-mainline':
+                        page=interface.session_manager.get_page(str(session_id),limit=1)
+                        validate_conversation_workspace(SimpleNamespace(id=page['id'],metadata=page['metadata']),getattr(interface,'workspace_root',getattr(interface,'project_root',self.project_root)))
+
         if action == "hello":
             return {
                 "id": request_id,
@@ -733,7 +897,7 @@ class ReverieSdkBridge:
                                            "mcp_apps_protocol": "2026-01-26", "mcp_apps_sdk": "2.0.3", "profile": "offline-server-tools-v1"}},
             }
         if action == "initialize":
-            interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)))
+            interface = self.ensure_interface(Path(str(payload.get("projectRoot") or self.project_root)), **({'execution_root':Path(str(payload['executionRoot']))} if payload.get('executionRoot') else {}))
             if payload.get("prepareModel") and interface.config_manager.load().active_model is not None:
                 interface._init_agent(persist_config_changes=False, defer_runtime_enrichment=True)
                 if interface.agent is not None:
@@ -869,6 +1033,8 @@ class ReverieSdkBridge:
                 waiter = self._approval_waiters.get(approval_id)
                 if waiter is None or waiter["event"].is_set():
                     raise ValueError(f"Approval request is no longer active: {approval_id}")
+                if (payload.get('sessionId') and payload['sessionId'] != self._run_identity.get('session_id')) or (payload.get('projectRoot') and Path(str(payload['projectRoot'])).resolve() != Path(str(self._run_identity.get('project_root'))).resolve()):
+                    raise ValueError('Approval belongs to a different conversation.')
                 waiter["decision"] = decision
                 waiter["message"] = message if decision == "message" else ""
                 waiter["event"].set()
@@ -958,14 +1124,19 @@ class ReverieSdkBridge:
             from .desktop_catalog import apply_model_selection
 
             interface = self.ensure_interface()
-            config = interface.config_manager.load()
+            session_id = str(payload.get('sessionId') or '')
+            session = interface.session_manager.load_session(session_id) if session_id else None
+            config = self._editable_conversation_config(interface,session) if session is not None else interface.config_manager.load()
             selected = apply_model_selection(
                 config,
                 payload.get("source") or config.active_model_source,
                 payload.get("modelId") or payload.get("model") or "",
                 payload.get("reasoning") if "reasoning" in payload else None,
             )
-            interface.config_manager.save(config)
+            if session is not None:
+                self._save_conversation_config(interface,session,config)
+            else:
+                interface.config_manager.save(config)
             self._refresh_agent()
             return {
                 "id": request_id,
@@ -1081,7 +1252,9 @@ class ReverieSdkBridge:
             )
 
             interface = self.ensure_interface()
-            config = interface.config_manager.load()
+            session_id = str(payload.get('sessionId') or '') if action == 'selectCustomProviderModel' else ''
+            selected_session = interface.session_manager.load_session(session_id) if session_id else None
+            config = self._editable_conversation_config(interface,selected_session) if selected_session else interface.config_manager.load()
             provider_ref = payload.get("providerId") or payload.get("provider") or ""
             provider: Optional[Dict[str, Any]] = None
             if action == "addCustomProvider":
@@ -1108,7 +1281,10 @@ class ReverieSdkBridge:
                     payload.get("contextLimit"),
                     payload.get("reasoning"),
                 )
-            interface.config_manager.save(config)
+            if selected_session:
+                self._save_conversation_config(interface,selected_session,config)
+            else:
+                interface.config_manager.save(config)
             self._refresh_agent()
             return {
                 "id": request_id,
@@ -1134,24 +1310,105 @@ class ReverieSdkBridge:
             }
         if action == "listSessions":
             return {"id": request_id, "type": "sessions", "sessions": self.sessions_payload()}
+        if action == 'archiveSession':
+            manager = self.ensure_interface().session_manager
+            manager.update_metadata(str(payload['sessionId']), {'archived':bool(payload['archived'])}, expected_revision=int(payload['revision']))
+            return {'id':request_id,'type':'sessions','sessions':self.sessions_payload()}
         if action == "getSession":
             session_id = str(payload.get("sessionId") or payload.get("id") or "").strip()
-            session = self.active_session_payload(session_id)
+            interface = self.ensure_interface()
+            manager = interface.session_manager
+            if hasattr(manager, 'get_page'):
+                session = manager.get_page(session_id, before=payload.get('before'), limit=payload.get('limit',60))
+                if payload.get('select', True) and payload.get('before') is None:
+                    manager.select_session(session_id)
+                    interface._view_session_id = session_id
+                    interface._view_draft = False
+                session['interrupted_streams'] = manager.read_streams(session_id)
+                if payload.get('markRead'):
+                    manager.mark_read(session_id)
+            else:
+                session = self.active_session_payload(session_id)
             if session is None:
                 raise ValueError(f"Session not found: {session_id}")
-            session_path = self.ensure_interface().session_manager.sessions_dir / f"{session['id']}.json"
-            stat = session_path.stat()
-            session["revision"] = f"{stat.st_mtime_ns}:{stat.st_size}"
-            return {"id": request_id, "type": "session", "session": session, "sessions": self.sessions_payload(), "skills": self.skills_payload()}
+            if not hasattr(manager, "get_page"):
+                stat = (manager.sessions_dir / f"{session['id']}.json").stat()
+                session["revision"] = f"{stat.st_mtime_ns}:{stat.st_size}"
+            return {"id": request_id, "type": "session", "session": _json_safe(session), "sessions": self.sessions_payload()}
+        if action == 'getWorkspaceConfig':
+            interface = self.ensure_interface()
+            interface._conversation_config = None
+            interface._view_snapshot = None
+            return {'id':request_id,'type':'workspace.config','models':self.model_sources_payload(),'workspace':self.workspace_payload(),'settings':self.settings_payload()}
+        if action == 'getConversationConfig':
+            from .session.runtime_config import capture_runtime_config, resolve_runtime_config
+            interface = self.ensure_interface()
+            manager = interface.session_manager
+            session_id = str(payload.get('sessionId') or '')
+            page = manager.get_page(session_id, limit=1)
+            snapshot = page['metadata'].get('runtime_config')
+            if not snapshot:
+                snapshot = capture_runtime_config(interface.config_manager.load(), rules=interface.rules_manager.get_rules_text(), pinned_skills=page['metadata'].get('pinned_skills',[]), plugins={record.plugin_id:record.enabled for record in interface.runtime_plugin_manager.get_snapshot().records})
+                page['revision'] = manager.update_metadata(session_id, {'runtime_config':snapshot}, expected_revision=page['revision'])
+            if payload.get('configuration') is not None:
+                snapshot = payload['configuration']
+                resolve_runtime_config(interface.config_manager.load(),snapshot)
+                page['revision'] = manager.update_metadata(session_id, {'runtime_config':snapshot}, expected_revision=payload.get('revision'))
+            if payload.get('executionConfiguration') is not None:
+                snapshot = payload['executionConfiguration']
+            error = ''
+            interface._view_snapshot = snapshot
+            try:
+                interface._conversation_config = resolve_runtime_config(interface.config_manager.load(),snapshot)
+            except ValueError as exception:
+                error = str(exception)
+                interface._conversation_config = None
+            models = self.model_sources_payload()
+            if error:
+                reference = snapshot.get('model_ref') or {}
+                models['active_source'] = reference.get('source')
+                models['active_model'] = {'id':reference.get('model',''),'display_name':str(reference.get('model') or reference.get('profile_id') or 'Saved model') + ' (unavailable)','provider':reference.get('source','')}
+                for source in models.get('sources',[]):
+                    source['active'] = False
+            return {'id':request_id,'type':'conversation.config','configuration':snapshot,'revision':page['revision'],'error':error,
+                    'models':models,'workspace':self.workspace_payload(),'settings':self.settings_payload(),
+                    'ownership':{'assistant_id':page['metadata'].get('assistant_id'),'workspace':page['metadata'].get('workspace_path'),'session_id':session_id}}
+        if action in {'queueConversationRun','updateConversationRun','listConversationRuns','recoverConversationRuns'}:
+            from .session.runtime_config import resolve_runtime_config
+            interface = self.ensure_interface()
+            manager = interface.session_manager
+            session_id = str(payload.get('sessionId') or '')
+            if action == 'recoverConversationRuns':
+                return {'id':request_id,'type':'conversation.runs','runs':manager.recover_runs()}
+            if action == 'listConversationRuns':
+                return {'id':request_id,'type':'conversation.runs','runs':manager.list_runs(session_id)}
+            run_id = str(payload.get('runId') or '')
+            if not run_id:
+                raise ValueError('Task identity is required.')
+            if action == 'queueConversationRun':
+                configuration = payload['configuration']
+                resolve_runtime_config(interface.config_manager.load(),configuration)
+                revision = manager.register_run(session_id,run_id,configuration,int(payload['configurationRevision']),str(payload.get('executionRoot') or self.project_root),request=payload.get('request'))
+            else:
+                revision = manager.update_run(session_id,run_id,str(payload['state']),expected_revision=int(payload['revision']),execution_root=payload.get('executionRoot'),result=payload.get('result'))
+            return {'id':request_id,'type':'conversation.run','revision':revision}
         if action == "createSession":
             interface = self.ensure_interface()
+            interface._view_session_id = None
+            interface._view_draft = True
             self._sync_skill_pins(interface)
-            draft_pins = interface.skills_manager.pinned_names() if interface.session_manager.get_current_session() is None else []
+            draft_pins = interface.skills_manager.pinned_names()
             name = str(payload.get("name") or "").strip() or None
             session = interface.session_manager.create_session(name)
+            if hasattr(interface.session_manager,'select_session'):
+                interface.session_manager.select_session(session.id)
             if draft_pins:
                 session.metadata["pinned_skills"] = draft_pins
                 interface.session_manager.save_session(session)
+            interface._conversation_config = self._conversation_config(interface, session)
+            interface._view_session_id = session.id
+            interface._view_draft = False
+            (interface.project_data_dir / 'desktop' / 'draft-skills.json').unlink(missing_ok=True)
             if interface.agent is not None:
                 interface.agent.set_history(session.messages)
             return {
@@ -1177,7 +1434,10 @@ class ReverieSdkBridge:
 
             interface = self.ensure_interface()
             manager = interface.session_manager
-            previous_session = manager.get_current_session() or manager.restore_last_session()
+            if getattr(manager,'mainline_id',None) in requested_ids:
+                raise ValueError('The persistent AiO mainline cannot be deleted; archive it or start a new segment instead.')
+            view_id = getattr(interface, '_view_session_id', None)
+            previous_session = manager.load_session(view_id) if view_id else (None if getattr(interface, '_view_draft', False) else manager.restore_last_session())
             deleted_ids = []
             for session_id in requested_ids:
                 session = manager.load_session(session_id)
@@ -1203,7 +1463,8 @@ class ReverieSdkBridge:
         if action in {"renameSession", "deleteSession", "forkSession", "rewindSession"}:
             interface = self.ensure_interface()
             manager = interface.session_manager
-            previous_session = manager.get_current_session() or manager.restore_last_session()
+            view_id = getattr(interface, '_view_session_id', None)
+            previous_session = manager.load_session(view_id) if view_id else (None if getattr(interface, '_view_draft', False) else manager.restore_last_session())
             session_id = str(payload.get("sessionId") or payload.get("id") or "").strip()
             session = manager.load_session(session_id) if session_id else manager.get_current_session()
             if session is None:
@@ -1229,11 +1490,13 @@ class ReverieSdkBridge:
                     remaining = manager.list_sessions()
                     session = manager.load_session(remaining[0].id) if remaining else None
             elif action == "forkSession":
+                from .session.aio_store import AiOStore
                 count = payload.get("messageCount")
                 source_session_id = session.id
                 session = manager.fork_current_session(
                     int(count) if count is not None else None,
                     str(payload.get("name") or "").strip() or None,
+                    **({'workspace':str(interface.project_root)} if isinstance(manager,AiOStore) else {}),
                 )
                 if session is not None and session.id != source_session_id:
                     # Carry the source session's visible views onto the fork,
@@ -1261,7 +1524,7 @@ class ReverieSdkBridge:
                 "id": request_id,
                 "type": "session.search",
                 "query": query,
-                "results": _json_safe(self.ensure_interface().session_manager.search_sessions(query)),
+                "results": _json_safe(self.ensure_interface().session_manager.search_sessions(query,limit=payload.get('limit',50),offset=payload.get('offset',0))),
             }
         if action == "deleteProjectData":
             if not bool(payload.get("confirmed", False)):
@@ -1347,7 +1610,17 @@ class ReverieSdkBridge:
             from .settings_catalog import apply_setting_value
 
             interface = self.ensure_interface()
-            config = interface.config_manager.load()
+            session_id = str(payload.get('sessionId') or '')
+            session = interface.session_manager.load_session(session_id) if session_id else None
+            config = self._conversation_config(interface, session) if session else interface.config_manager.load()
+            key = str(payload.get('key') or '')
+            if session and key == 'rules':
+                value = payload.get('value')
+                if not isinstance(value,(str,list)):
+                    raise ValueError('Rules must be text or a list.')
+                session.metadata['runtime_config']['rules'] = value if isinstance(value,str) else '\n'.join(str(line) for line in value)
+                interface.session_manager.save_session(session)
+                return {'id':request_id,'type':'setting.updated','success':True,'message':'Conversation rules updated.','settings':self.settings_payload()}
             success, detail, reinit = apply_setting_value(
                 config,
                 interface.config_manager,
@@ -1357,12 +1630,15 @@ class ReverieSdkBridge:
                 interface.runtime_plugin_manager,
             )
             if success and not str(payload.get("key") or "").startswith("plugin_enabled:"):
-                interface.config_manager.save(config)
+                if session:
+                    self._save_conversation_config(interface,session,config)
+                else:
+                    interface.config_manager.save(config)
             if success:
                 if str(payload.get("key") or "") != "stream_responses":
                     self._refresh_plugin_dependents()
                 if reinit and interface.agent is not None:
-                    interface._init_agent(config_override=interface.config_manager.load(), persist_config_changes=False)
+                    interface._init_agent(config_override=config, persist_config_changes=False)
             response = {
                 "id": request_id,
                 "type": "setting.updated",
@@ -1391,7 +1667,19 @@ class ReverieSdkBridge:
                 enabled = parse_bool(payload.get("enabled"))
                 if enabled is None:
                     raise ValueError("Plugin enabled value must be a boolean.")
-                manager.set_plugin_enabled(plugin_id, enabled)
+                session_id = str(payload.get('sessionId') or '')
+                if session_id:
+                    session = interface.session_manager.load_session(session_id)
+                    if session is None:
+                        raise ValueError('Conversation not found.')
+                    self._conversation_config(interface,session)
+                    selection = dict(session.metadata['runtime_config'].get('plugins',{}))
+                    selection[plugin_id] = enabled
+                    manager.set_conversation_selection(selection)
+                    session.metadata['runtime_config']['plugins'] = selection
+                    interface.session_manager.save_session(session)
+                else:
+                    manager.set_plugin_enabled(plugin_id, enabled)
             else:
                 trusted = parse_bool(payload.get("trusted"))
                 if trusted is None:
@@ -1422,6 +1710,12 @@ class ReverieSdkBridge:
             }
         if action in {"pinSkill", "unpinSkill", "clearPinnedSkills"}:
             interface = self.ensure_interface()
+            if payload.get('sessionId'):
+                interface._view_session_id = str(payload['sessionId'])
+                interface._view_draft = False
+            elif payload.get('draft'):
+                interface._view_session_id = None
+                interface._view_draft = True
             self._sync_skill_pins(interface)
             manager = interface.skills_manager
             wanted = str(payload.get("skill") or payload.get("name") or payload.get("key") or "").strip()
@@ -1769,6 +2063,11 @@ def main() -> int:
         try:
             result = bridge.dispatch(message)
         except Exception as exc:
+            if isinstance(exc, sqlite3.Error):
+                logging.getLogger(__name__).exception(
+                    "Desktop SQLite request failed: action=%s request_id=%s process_id=%s",
+                    message.get("action"), request_id, os.getpid(),
+                )
             result = {"id": request_id, "type": "error", "error": str(exc)}
         _write_message(result)
         return result

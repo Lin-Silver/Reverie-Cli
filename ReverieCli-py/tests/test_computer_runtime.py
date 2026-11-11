@@ -2,10 +2,55 @@ from pathlib import Path
 import json
 import pytest
 import subprocess
+import sys
 from unittest.mock import Mock
 
 from reverie.computer_use.runtime import ComputerUseRuntime, NativeDesktopError
 from reverie.desktop_control import RunControl
+
+
+def _desktop_holder():
+    script = "from reverie.computer_use.runtime import desktop_occupation; import sys; lock=desktop_occupation('hold',lambda _:None,mutation=False); lock.__enter__(); print('locked',flush=True); sys.stdin.readline(); lock.__exit__(None,None,None)"
+    process = subprocess.Popen([sys.executable,'-c',script],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    assert process.stdout.readline().strip() == 'locked'
+    return process
+
+
+@pytest.mark.skipif(sys.platform != 'win32',reason='Windows logon-session mutex')
+def test_real_desktop_mutex_serializes_separate_processes():
+    from reverie.computer_use.runtime import desktop_occupation
+    holder = _desktop_holder()
+    try:
+        with pytest.raises(NativeDesktopError,match='owns the desktop'):
+            with desktop_occupation('click',lambda _:None,mutation=True,timeout_ms=100):
+                pytest.fail('Overlapping action was granted')
+    finally:
+        holder.communicate('\n',timeout=5)
+    with desktop_occupation('snapshot',lambda _:None,mutation=False,timeout_ms=100):
+        pass
+
+
+@pytest.mark.skipif(sys.platform != 'win32',reason='Windows abandoned-mutex recovery')
+def test_abandoned_desktop_owner_requires_observation():
+    from reverie.computer_use.runtime import desktop_occupation
+    holder = _desktop_holder()
+    checks = 0
+    def check(_):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            holder.kill()
+            holder.wait(timeout=5)
+    try:
+        with pytest.raises(NativeDesktopError) as error:
+            with desktop_occupation('click',check,mutation=True,timeout_ms=2000):
+                pytest.fail('Uncertain prior owner was ignored')
+        assert error.value.envelope['error']['code'] == 'DESKTOP_OWNER_INTERRUPTED'
+        assert error.value.envelope['error']['disposition']['retry'] == 'unsafe'
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+        holder.communicate(timeout=5)
 
 
 def test_missing_engine_is_an_actionable_error(tmp_path):

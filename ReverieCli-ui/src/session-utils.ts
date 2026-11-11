@@ -41,6 +41,29 @@ export function reuseSessionMessages(previous: SessionMessage[], incoming: Sessi
   });
 }
 
+export async function refreshSessionWindow(previous: SessionState | undefined, incoming: SessionState, readEarlier?: (before: number) => Promise<SessionState>): Promise<SessionState> {
+  // Refresh the tail without collapsing the history the user already opened.
+  // Long turns can span several pages; fetch those new rows before merging.
+  if (!previous || previous.id !== incoming.id) return incoming;
+  if (previous.total === undefined || incoming.total === undefined || incoming.total < previous.total) {
+    return {...incoming,messages:reuseSessionMessages(previous.messages,incoming.messages)};
+  }
+  let start = incoming.before ?? 0;
+  let messages = incoming.messages;
+  while (start > previous.total) {
+    if (!readEarlier) throw new Error('New history requires an earlier page.');
+    const page = await readEarlier(start);
+    const next = page.before ?? 0;
+    if (page.id !== incoming.id || page.revision !== incoming.revision || next >= start) throw new Error('Conversation changed while refreshing history; reload it.');
+    messages = [...page.messages,...messages];
+    start = next;
+  }
+  const oldStart = previous.before ?? 0;
+  const prefix = previous.messages.slice(0,Math.max(0,start-oldStart));
+  const overlap = previous.messages.slice(Math.max(0,start-oldStart));
+  return {...incoming,before:Math.min(start,oldStart) || null,messages:[...prefix,...reuseSessionMessages(overlap,messages)]};
+}
+
 export function inlineStaticTurnMessages(turn: LiveTurn | null): SessionMessage[] | null {
   if (!turn || turn.error || turn.stopped || turn.resumed || turn.attachments?.length || !turn.userText) return null;
   const modelActivity = (event: Record<string, unknown>) =>

@@ -11134,10 +11134,10 @@ class CommandHandler:
             "reverie-atlas",
             "writer",
         }
-        if current_mode in {"reverie", "computer-controller"} or current_mode not in non_reverie_modes:
+        if current_mode in {"reverie", "aio"} or current_mode not in non_reverie_modes:
             return True
         self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are available in Reverie and Computer Controller modes.[/{self.theme.AMBER_GLOW}]"
+            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Subagents are available in Reverie and AiO modes.[/{self.theme.AMBER_GLOW}]"
         )
         return False
 
@@ -11372,6 +11372,8 @@ class CommandHandler:
 
         config = config_manager.load()
         raw_mode = args.strip()
+        if raw_mode.lower().replace('_','-') in {'computer','computer-controller','computer-control'}:
+            self.console.print('Computer mode is now AiO. Use /mode aio to open the persistent assistant.')
         # Validate the raw string first: normalize_mode() falls back to "reverie"
         # for anything it does not recognize, which would silently swallow typos
         # and removed mode names.
@@ -13232,6 +13234,8 @@ class CommandHandler:
                         )
                         if agent:
                             agent.set_history(session.messages)
+                        if self.app.get('reinit_agent'):
+                            self.app['reinit_agent']()
                         restore_skills = self.app.get('restore_session_skill_pins')
                         if callable(restore_skills):
                             restore_skills()
@@ -13388,14 +13392,15 @@ class CommandHandler:
         if not session:
             self.console.print("No active session to fork.")
             return True
-        count = len(session.messages)
+        count = None
         if str(args or "").strip():
             try:
                 count = int(str(args).strip())
             except ValueError:
                 self.console.print("Usage: /fork [message-count]")
                 return True
-        forked = manager.fork_current_session(count)
+        from ..session.aio_store import AiOStore
+        forked = manager.fork_current_session(count,**({'workspace':self.app.get('project_root')} if isinstance(manager,AiOStore) else {}))
         self._sync_agent_session_messages(forked.messages)
         self.console.print(f"Forked session {forked.id} at {len(forked.messages)} messages.")
         return True

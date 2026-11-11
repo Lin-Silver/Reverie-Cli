@@ -27,7 +27,7 @@ _NON_REVERIE_WORKFLOW_MODES = {
     "reverie-gamer",
     "reverie-atlas",
     "writer",
-    "computer-controller",
+    "aio",
 }
 _LOG_SECRET_FIELDS = {
     "api_key",
@@ -51,7 +51,7 @@ _LOG_SECRET_TEXT_RE = re.compile(
 def _is_base_reverie_mode(mode: Any) -> bool:
     """Treat unknown model-source strings as base Reverie workflow mode."""
     normalized = normalize_mode(mode)
-    return normalized in {"reverie", "computer-controller"} or normalized not in _NON_REVERIE_WORKFLOW_MODES
+    return normalized in {"reverie", "aio"} or normalized not in _NON_REVERIE_WORKFLOW_MODES
 
 
 def _utc_timestamp() -> str:
@@ -229,6 +229,7 @@ class SubagentManager:
             model_ref = {
                 "source": "standard",
                 "index": index,
+                "profile_id": model.profile_id,
                 "model": model.model,
                 "display_name": model.model_display_name or model.model,
             }
@@ -282,11 +283,14 @@ class SubagentManager:
 
         if source == "standard":
             models = list(getattr(active_config, "models", []) or [])
+            if model_ref.get('profile_id'):
+                matches = [model for model in models if model.profile_id == model_ref['profile_id'] and model.model == model_ref.get('model')]
+                return ModelConfig.from_dict(matches[0].to_dict()) if len(matches) == 1 else None
             try:
                 index = int(model_ref.get("index", -1))
             except (TypeError, ValueError):
                 index = -1
-            if 0 <= index < len(models):
+            if 0 <= index < len(models) and (not model_ref.get('model') or models[index].model == model_ref['model']):
                 return ModelConfig.from_dict(models[index].to_dict())
 
             wanted_model = str(model_ref.get("model") or "").strip()
@@ -296,10 +300,19 @@ class SubagentManager:
                     return ModelConfig.from_dict(model.to_dict())
             return None
 
-        if source in EXTERNAL_MODEL_SOURCES:
+        if source in EXTERNAL_MODEL_SOURCES or source == 'custom':
+            from ..desktop_catalog import apply_model_selection, select_custom_provider_model
             probe = Config.from_dict(active_config.to_dict())
             probe.mode = spec.mode
-            probe.active_model_source = source
+            try:
+                if source == 'custom':
+                    select_custom_provider_model(probe,model_ref.get('provider_id'),str(model_ref.get('model') or ''))
+                elif model_ref.get('model'):
+                    apply_model_selection(probe,source,str(model_ref['model']))
+                else:
+                    probe.active_model_source = source
+            except ValueError:
+                return None
             model = probe.active_model
             return ModelConfig.from_dict(model.to_dict()) if model else None
 
@@ -498,7 +511,7 @@ class SubagentManager:
         parent_agent = getattr(self.interface, "agent", None)
         if parent_agent is not None and getattr(parent_agent, "tool_executor", None) is not None:
             context = dict(getattr(parent_agent.tool_executor, "context", {}) or {})
-            for key in {"agent", "session_manager", "operation_history", "rollback_manager"}:
+            for key in {"agent", "config", "session_manager", "operation_history", "rollback_manager", "skills_manager", "runtime_plugin_manager", "memory_os"}:
                 context.pop(key, None)
             return context
 
@@ -506,8 +519,6 @@ class SubagentManager:
             "config_manager": getattr(self.interface, "config_manager", None),
             "mcp_config_manager": getattr(self.interface, "mcp_config_manager", None),
             "mcp_runtime": getattr(self.interface, "mcp_runtime", None),
-            "runtime_plugin_manager": getattr(self.interface, "runtime_plugin_manager", None),
-            "skills_manager": getattr(self.interface, "skills_manager", None),
             "project_data_dir": getattr(self.interface, "project_data_dir", None),
             "memory_indexer": getattr(self.interface, "memory_indexer", None),
             "workspace_stats_manager": getattr(self.interface, "workspace_stats_manager", None),
@@ -527,11 +538,10 @@ class SubagentManager:
         read_scope: Optional[List[str]] = None,
         write_scope: Optional[List[str]] = None,
     ) -> ReverieAgent:
-        rules_builder = getattr(self.interface, "_build_additional_rules_with_tti", None)
-        additional_rules = rules_builder(config) if callable(rules_builder) else ""
+        additional_rules = str(getattr(config,'_queued_rules',''))
         child = ReverieAgent(
             base_url=model.base_url,
-            api_key=model.api_key,
+            api_key=model.resolve_api_key(),
             model=model.model,
             model_display_name=model.model_display_name,
             project_root=getattr(self.interface, "project_root", Path.cwd()),
@@ -559,6 +569,16 @@ class SubagentManager:
                 continue
             child.tool_executor.update_context(key, value)
         child.tool_executor.update_context("agent", child)
+        from ..skills_manager import SkillsManager
+        from ..plugin.runtime_manager import RuntimePluginManager
+        app_root = self.interface.config_manager.app_root
+        skills = SkillsManager(self.interface.project_root,app_root)
+        skills.set_active_mode(spec.mode)
+        skills.restore_pinned_skills(getattr(config,'_queued_pins',[]))
+        plugins = RuntimePluginManager(app_root)
+        plugins.set_conversation_selection(getattr(config,'_queued_plugins',{}))
+        child.tool_executor.update_context('skills_manager',skills)
+        child.tool_executor.update_context('runtime_plugin_manager',plugins)
         child.tool_executor.update_context("is_subagent", True)
         child.tool_executor.update_context("subagent_id", spec.id)
         child.tool_executor.update_context("subagent_color", spec.color)
@@ -598,6 +618,23 @@ class SubagentManager:
         )
         child_config = Config.from_dict(config.to_dict())
         child_config.mode = spec.mode
+        source = spec.model_ref.get('source','standard')
+        if source == 'standard':
+            child_config.active_model_source = 'standard'
+            child_config.models = [ModelConfig.from_dict(model.to_dict())]
+            child_config.active_model_index = 0
+        else:
+            from ..desktop_catalog import apply_model_selection, select_custom_provider_model
+            if source == 'custom':
+                select_custom_provider_model(child_config,spec.model_ref.get('provider_id'),model.model)
+            else:
+                apply_model_selection(child_config,source,model.model)
+        parent = getattr(self.interface,'agent',None)
+        child_config._queued_rules = str(getattr(parent,'additional_rules',''))
+        skills = getattr(self.interface,'skills_manager',None)
+        plugins = getattr(self.interface,'runtime_plugin_manager',None)
+        child_config._queued_pins = list(skills.pinned_names()) if skills else []
+        child_config._queued_plugins = {record.plugin_id:record.enabled for record in plugins.get_snapshot().records} if plugins else {}
         with self._run_lock:
             self._runs[run.run_id] = run
             self._cancel_events[run.run_id] = Event()

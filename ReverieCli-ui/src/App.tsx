@@ -1,4 +1,6 @@
 import { FloatingMenu } from "./FloatingMenu";
+import { AiOPanel } from './AiOPanel';
+import { VirtualSessionList } from './VirtualSessionList';
 import { ApiKeyEnvironmentField } from "./ApiKeyEnvironmentField";
 import { parseComputerResult } from "./computer-result";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
@@ -141,7 +143,7 @@ import {
   messageReasoningText,
   previousTurnBoundary,
   resolveToolResultNames,
-  reuseSessionMessages,
+  refreshSessionWindow,
   inlineStaticTurnMessages,
   sessionIsEmpty,
   toolCallRecords,
@@ -219,7 +221,7 @@ const MODES = [
   ["reverie-atlas", "Atlas", FileText],
   ["reverie-gamer", "Gamer", Gamepad2],
   ["writer", "Writer", Pencil],
-  ["computer-controller", "Computer", SquareTerminal],
+  ["aio", "AiO", SquareTerminal],
 ] as const;
 
 const THEME_OPTIONS: Array<{
@@ -614,8 +616,8 @@ function Sidebar({
   const inputControls = useInputControls();
   const sessionStatus = (id: string) => inputControls?.sessionStates[ownerKey(state.workspace.project_root, id)] || (id === inputControls?.sessionId && inputControls.running ? inputControls.approval ? "approval" : "running" : "");
   const archivedIds = useMemo(
-    () => new Set(preferences.archivedSessions[state.workspace.project_root] ?? []),
-    [preferences.archivedSessions, state.workspace.project_root],
+    () => new Set(state.sessions.items.filter(item=>state.sessions.archive_states?.[item.id] ?? (preferences.archivedSessions[state.workspace.project_root] ?? []).includes(item.id)).map(item=>item.id)),
+    [preferences.archivedSessions, state.workspace.project_root, state.sessions],
   );
   const filteredSessions = state.sessions.items.filter(session => session.name.toLowerCase().includes(sessionFilter.toLowerCase())).sort((left, right) => {
     const pin = Number(organization.value.sessions.includes(ownerKey(state.workspace.project_root, right.id))) - Number(organization.value.sessions.includes(ownerKey(state.workspace.project_root, left.id)));
@@ -683,9 +685,9 @@ function Sidebar({
             <span>{t(archived ? "移出归档" : "归档")}</span>
           </button>
           <div className="session-menu-separator" />
-          <button type="button" className="danger" onClick={() => { setSessionMenuId(""); deleteSession(session); }}>
+          {session.id !== 'aio-mainline' && <button type="button" className="danger" onClick={() => { setSessionMenuId(""); deleteSession(session); }}>
             <Trash2 size={14} /><span>{t("删除")}</span>
-          </button>
+          </button>}
         </FloatingMenu>
       )}
     </div>
@@ -814,7 +816,7 @@ function Sidebar({
                   )}
                   <div className="session-list">
                     {activeSessions.length === 0 && <div className="sidebar-empty">{t("当前项目还没有活跃会话")}</div>}
-                    {activeSessions.map((session) => renderSession(session, false))}
+                    <VirtualSessionList items={activeSessions} activeId={activeSessionId} renderItem={session => renderSession(session, false)} />
                     {allArchivedSessions.length > 0 && (
                       <div className="archived-sessions">
                         <div className="archived-heading-shell">
@@ -843,7 +845,7 @@ function Sidebar({
                             </FloatingMenu>
                           )}
                         </div>
-                        {archivedOpen && archivedSessions.map((session) => renderSession(session, true))}
+                        {archivedOpen && <VirtualSessionList items={archivedSessions} activeId={activeSessionId} renderItem={session => renderSession(session, true)} />}
                       </div>
                     )}
                   </div>
@@ -1979,18 +1981,21 @@ function HistoryChunk({ children }: { children: ReactNode }) {
   return <div className="history-render-chunk is-static" ref={outer}><div className="history-chunk-content" ref={content}>{children}</div></div>;
 }
 
-const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey, sessionId, live }: {
+const HistoryMessages = memo(function HistoryMessages({ messages, preferences, transcript, readingKey, sessionId, live, before, loadPage }: {
   messages: SessionMessage[];
   preferences: UiPreferences;
   transcript: RefObject<HTMLDivElement | null>;
   readingKey: string;
   sessionId: string;
   live?: InlineLiveRow;
+  before?: number | null;
+  loadPage?: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const [start, setStart] = useState(() => readingPositions.get(readingKey)?.first ?? Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const first = Math.min(start, Math.max(0, messages.length - HISTORY_PAGE_SIZE));
   const rows = useMemo(() => groupTranscriptMessages(messages.slice(first), sessionId), [messages, first, sessionId]);
+  const offset = before ?? 0;
   // Existing structured history always retains its original flat parent. A
   // conversation that starts static keeps its old chunks when a first tool or
   // view arrives; only that newly appended tail uses the original flat path.
@@ -2007,22 +2012,23 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
     const result: Array<{ key: number; rows: typeof rows }> = [];
     for (const row of rows) {
       if (first + row.index >= staticEnd) continue;
-      const key = Math.floor((first + row.index) / 20);
+      const key = Math.floor((offset + first + row.index) / 20);
       let chunk = result.at(-1);
       if (!chunk || chunk.key !== key) { chunk = { key, rows: [] }; result.push(chunk); }
       chunk.rows.push(row);
     }
     return result;
-  }, [first, rows, staticEnd]);
+  }, [first, rows, staticEnd, offset]);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
   useLayoutEffect(() => {
     readingPositions.set(readingKey, { top: 0, follow: true, ...readingPositions.get(readingKey), first });
   }, [readingKey, first]);
-  const loadEarlier = useCallback(() => {
+  const loadEarlier = useCallback(async () => {
     const container = transcript.current;
     if (container) pendingScroll.current = { height: container.scrollHeight, top: container.scrollTop };
-    setStart(Math.max(0, first - HISTORY_PAGE_SIZE));
-  }, [first, transcript]);
+    if (first === 0 && before && loadPage) await loadPage();
+    else setStart(Math.max(0, first - HISTORY_PAGE_SIZE));
+  }, [first, transcript, before, loadPage]);
   useLayoutEffect(() => {
     const container = transcript.current;
     const previous = pendingScroll.current;
@@ -2030,23 +2036,23 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
       container.scrollTop = previous.top + container.scrollHeight - previous.height;
       pendingScroll.current = null;
     }
-  }, [start, transcript]);
+  }, [start, messages.length, transcript]);
   useEffect(() => {
     const container = transcript.current;
-    if (!container || first === 0) return;
+    if (!container || (first === 0 && !before)) return;
     const onScroll = () => {
       if (container.scrollTop < 80 && !pendingScroll.current) loadEarlier();
     };
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => container.removeEventListener("scroll", onScroll);
-  }, [first, transcript, loadEarlier]);
+  }, [first, before, transcript, loadEarlier]);
   const renderRow = (row: typeof rows[number]) => row.kind === "activity"
-      ? (preferences.showToolCalls || preferences.showToolResults) && <ActivityGroup key={`activity-${first + row.index}`} events={row.events.map(event => ({ ...event, ...(!preferences.showToolCalls ? { arguments: undefined } : {}), ...(!preferences.showToolResults ? { output: undefined } : {}) }))} defaultExpanded={preferences.expandToolResults} />
+      ? (preferences.showToolCalls || preferences.showToolResults) && <ActivityGroup key={`activity-${offset + first + row.index}`} events={row.events.map(event => ({ ...event, ...(!preferences.showToolCalls ? { arguments: undefined } : {}), ...(!preferences.showToolResults ? { output: undefined } : {}) }))} defaultExpanded={preferences.expandToolResults} />
       : row.kind === "view"
         ? <InteractiveView key={`view-${row.view.viewId || first + row.index}`} segment={row.view} />
-        : <Message key={`${row.message.role}-${first + row.index}`} message={row.message} preferences={preferences} live={live && first + row.index >= live.first ? live : undefined} />;
+        : <Message key={`${row.message.role}-${offset + first + row.index}`} message={row.message} preferences={preferences} live={live && first + row.index >= live.first ? live : undefined} />;
   return <>
-    {first > 0 && <button type="button" className="history-load-earlier" onClick={loadEarlier}>{t("加载更早的消息")}</button>}
+    {(first > 0 || before) ? <button type="button" className="history-load-earlier" onClick={() => void loadEarlier()}>{t("加载更早的消息")}</button> : null}
     {chunks.map(chunk => <HistoryChunk key={chunk.key}>
       {chunk.rows.map(renderRow)}
     </HistoryChunk>)}
@@ -2093,6 +2099,7 @@ function ChatView({
   approval,
   resolveApproval,
   contextUsage,
+  loadHistoryPage,
 }: {
   controls: InputControls | null;
   session: SessionState | null;
@@ -2126,6 +2133,7 @@ function ChatView({
   approval: Record<string, unknown> | null;
   resolveApproval: (decision: ApprovalDecision, message?: string) => void;
   contextUsage: ContextUsage | null;
+  loadHistoryPage?: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const transcript = useRef<HTMLDivElement>(null);
@@ -2198,7 +2206,7 @@ function ChatView({
               <IconButton label={t("重命名会话")} onClick={renameSession} disabled={!session || running || sessionBusy}><Pencil size={14} /></IconButton>
               <IconButton label={t("分叉会话")} onClick={forkSession} disabled={!session || running || sessionBusy || visibleMessages.length === 0}><Copy size={14} /></IconButton>
               <IconButton label={t("回退上一轮")} onClick={rewindSession} disabled={!session || running || sessionBusy || !canRewind}><RotateCcw size={14} /></IconButton>
-              <IconButton label={t("删除会话")} onClick={deleteSession} disabled={!session || running || sessionBusy}><Trash2 size={14} /></IconButton>
+              {session?.id !== 'aio-mainline' && <IconButton label={t("删除会话")} onClick={deleteSession} disabled={!session || running || sessionBusy}><Trash2 size={14} /></IconButton>}
             </div>
           </div>
         </div>
@@ -2208,7 +2216,7 @@ function ChatView({
           <WelcomeHeader workspace={projectNameFromPath(inputOwner?.projectRoot || "")} />
         ) : (
           <div className="message-column" ref={transcriptContent}>
-            <HistoryMessages key={`history:${readingKey}`} messages={renderedHistory} preferences={preferences} transcript={transcript} readingKey={readingKey} sessionId={session?.id ?? ""} live={inlineLive} />
+            <HistoryMessages key={`history:${readingKey}`} messages={renderedHistory} preferences={preferences} transcript={transcript} readingKey={readingKey} sessionId={session?.id ?? ""} live={inlineLive} before={session?.before} loadPage={loadHistoryPage} />
             {liveTurn && !inlineMessages && <LiveMessage key={`live:${readingKey}`} turn={liveTurn} running={running} preferences={preferences} />}
           </div>
         )}
@@ -2431,7 +2439,7 @@ function SkillsView({
         description={t("固定技能后，每轮都会先读取并遵循它，直到取消固定。也可以在输入框输入 /skill 选择。")}
         action={<button type="button" className="secondary-button" onClick={refresh}><RefreshCw size={14} />{t("重新扫描")}</button>}
       />
-      {(skills.mode === "writer" || skills.mode === "computer-controller") && (
+      {skills.mode === "writer" && (
         <p role="note" className="muted">{t(skills.mode === "writer" ? "skill.mode.writer" : "skill.mode.computer")}</p>
       )}
       <div className="skills-summary">
@@ -5018,13 +5026,14 @@ export default function App() {
   const [desktopPaths, setDesktopPaths] = useState<DesktopPaths | null>(null);
   const [bootError, setBootError] = useState("");
   const [view, setView] = useState<ViewId>("chat");
+  const [settingsTarget,setSettingsTarget]=useState<'conversation'|'workspace'>('conversation');
   const [session, setSession] = useState<SessionState | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
-  const runtimeViews = useRef(new Map<string, { live: LiveTurn | null; running: boolean; approval: Record<string, unknown> | null }>());
+  const runtimeViews = useRef(new Map<string, { live: LiveTurn | null; running: boolean; approval: Record<string, unknown> | null; hostOwned?:boolean }>());
   const pendingLiveBatch = useRef<LiveTurnBatch>(emptyLiveTurnBatch());
   const liveBatchTimer = useRef<number | null>(null);
   const acceptLiveEvents = useRef(false);
@@ -5074,7 +5083,7 @@ export default function App() {
   // Image-generation catalog is fetched lazily (its own bridge action), so it is
   // not part of DesktopState and lives here until the settings tab asks for it.
   const [imageModels, setImageModels] = useState<ImageModelSourcesState | null>(null);
-  const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; name: string } | null>(null);
+  const [renameSessionTarget, setRenameSessionTarget] = useState<{ id: string; name: string; projectRoot?:string; assistantId?:'aio' } | null>(null);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const contextBaselines = useRef(new Map<string, NonNullable<ContextUsage["api_baseline"]>>());
@@ -5096,8 +5105,8 @@ export default function App() {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [queuePaused, setQueuePaused] = useState(true);
   const queueStarting = useRef(new Set<string>());
-  const authorizedQueues = useRef(new Map<string, {projectRoot:string;sessionId:string}>());
-  const draftOwner = useRef({ root: "", id: NEW_SESSION_DRAFT_ID });
+  const authorizedQueues = useRef(new Map<string, {projectRoot:string;sessionId:string;assistantId?:'aio'}>());
+  const draftOwner = useRef<{root:string;id:string;assistantId?:'aio'}>({ root: "", id: NEW_SESSION_DRAFT_ID });
   const [gitStatus, setGitStatus] = useState<GitWorkspaceStatus | null>(null);
   const [gitBusy, setGitBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<{ title: string; message: string; label: string; danger?: boolean; action: () => void } | null>(null);
@@ -5120,13 +5129,15 @@ export default function App() {
   const uiPreferenceRequestSequence = useRef(0);
   const drafts = useRef<Record<string, string>>({});
   const sessionCache = useRef(new SessionCache());
+  const conversationViews = useRef(new Map<string, Pick<DesktopState,"models"|"workspace"|"settings">>());
+  const configurationRequestSequence = useRef(0);
 
   // Feeding the cache from the rendered session covers every path that can
   // produce one -- open, create, prompt, compact, fork, rewind -- so no call
   // site can forget to update it.
   useEffect(() => {
-    if (session) sessionCache.current.set(session);
-  }, [session]);
+    if (session) sessionCache.current.set(session,state?.workspace.project_root);
+  }, [session,state?.workspace.project_root]);
 
   // Auto-save the composer for the active conversation on every keystroke. The
   // in-memory `drafts` map is the fast path for same-session switches; the
@@ -5136,16 +5147,48 @@ export default function App() {
   // a conversation exists parks under a placeholder id until the first send
   // mints the real session.
   const projectRoot = state?.workspace.project_root ?? "";
-  draftOwner.current = { root: projectRoot, id: session?.id ?? NEW_SESSION_DRAFT_ID };
+  const configurationSessionId=view==='settings' && settingsTarget==='workspace'?undefined:session?.id;
+  const assistantId:'aio'|undefined = session?.metadata.assistant_id==='aio'?'aio':undefined;
+  draftOwner.current = { root: projectRoot, id: session?.id ?? NEW_SESSION_DRAFT_ID,assistantId };
   useEffect(() => {
-    setQueue(loadQueue(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID));
-    setQueuePaused(!authorizedQueues.current.has(ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID)));
+    if (!projectRoot || !session?.id) return;
+    const key = ownerKey(projectRoot,session.id,assistantId);
+    const sequence = ++configurationRequestSequence.current;
+    let cancelled = false;
+    if(view==='settings' && settingsTarget==='workspace'){
+      void window.reverie.request('getWorkspaceConfig',{projectRoot}).then(response=>{
+        if(cancelled || sequence!==configurationRequestSequence.current)return;
+        setState(current=>current?{...current,models:response.models,workspace:response.workspace,settings:response.settings}:current);
+      }).catch(error=>{if(!cancelled)setComposerError(String(error));});
+      return ()=>{cancelled=true;};
+    }
+    const cached = conversationViews.current.get(key);
+    if (cached) setState(current => current ? {...current,...cached} : current);
+    void window.reverie.request("getConversationConfig", {projectRoot,sessionId:session.id,...(session.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{})}).then(response => {
+      if (cancelled || sequence !== configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId) !== key) return;
+      const view = {models:response.models,workspace:response.workspace,settings:response.settings};
+      conversationViews.current.delete(key); conversationViews.current.set(key,view);
+      while (conversationViews.current.size > 12) conversationViews.current.delete(conversationViews.current.keys().next().value!);
+      setState(current => current ? {...current,...view} : current);
+      setSession(current => current?.id === session.id ? {...current, config_error:response.error, metadata:{...current.metadata,runtime_config:response.configuration}} : current);
+      if (response.error) setComposerError(response.error);
+    }).catch(error => {
+      if (!cancelled && sequence === configurationRequestSequence.current && ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId) === key) {
+        setSession(current=>current?{...current,config_error:String(error)}:current);
+        setComposerError(String(error));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [projectRoot,session?.id,view==='settings' && settingsTarget==='workspace']);
+  useEffect(() => {
+    setQueue(loadQueue(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID,assistantId));
+    setQueuePaused(!authorizedQueues.current.has(ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID,assistantId)));
     setComposerError("");
     setControlStatus("");
   }, [projectRoot, session?.id]);
   const updateQueue = useCallback((items: QueuedMessage[]) => {
     const owner = draftOwner.current;
-    const error = saveQueue(owner.root, owner.id, items);
+    const error = saveQueue(owner.root, owner.id, items,owner.assistantId);
     if (error) { setComposerError(`${t("队列未保存")}: ${error}`); return false; }
     setQueue(items);
     return true;
@@ -5172,13 +5215,13 @@ export default function App() {
   }, [projectRoot, refreshGitStatus]);
   useEffect(() => {
     const draftId = session?.id ?? NEW_SESSION_DRAFT_ID;
-    drafts.current[draftId] = prompt;
+    drafts.current[ownerKey(projectRoot,draftId,assistantId)] = prompt;
     if (projectRoot && workspaceReady && !sessionBusy) {
-      saveDraft(projectRoot, draftId, prompt);
-      const error = saveStructuredDraft(projectRoot, draftId, { text: prompt, attachments });
+      saveDraft(projectRoot, draftId, prompt,assistantId);
+      const error = saveStructuredDraft(projectRoot, draftId, { text: prompt, attachments },assistantId);
       setDraftError(error ? `${t("草稿未保存")}: ${error}` : "");
     }
-  }, [prompt, attachments, session?.id, projectRoot, workspaceReady, sessionBusy, t]);
+  }, [prompt, attachments, session?.id, projectRoot, workspaceReady, sessionBusy, t,assistantId]);
 
   const toggleSidebar = useCallback(() => {
     if (compactViewport) {
@@ -5333,7 +5376,6 @@ export default function App() {
     setWorkspaceReady(false);
     setBootError("");
     // Transcripts are per project, and switching projects re-enters this path.
-    sessionCache.current.clear();
     try {
       const [paths, preferences] = await Promise.all([
         window.reverie.paths(),
@@ -5351,26 +5393,29 @@ export default function App() {
       let nextSession: SessionState | null = null;
       // Restore this project's saved composer drafts before painting a session,
       // so the persistence effect and the prompt restore below both read the
-      // text that survived the last quit. Drafts are keyed per project, so a
-      // fresh hydrate replaces whatever the previous workspace left in memory.
+      // text that survived the last quit. Keep other workspaces' cached drafts.
       const resolvedRoot = nextState.workspace.project_root;
-      drafts.current = loadProjectDrafts(resolvedRoot);
+      for(const [id,text] of Object.entries(loadProjectDrafts(resolvedRoot)))drafts.current[ownerKey(resolvedRoot,id)] ??= text;
+      setSessionStates(current=>{const next={...current};for(const id of nextState.sessions.unread_session_ids || [])next[ownerKey(resolvedRoot,id)]='unread';return next;});
       // Paint the workspace shell from the compact bootstrap response before
       // loading a transcript or the large provider/tool catalogs.
       setState(nextState);
       setSession(null);
       const currentId = nextState.sessions.current_session_id || nextState.sessions.items[0]?.id;
       if (currentId) {
-        const sessionResponse = await window.reverie.request("getSession", { sessionId: currentId });
+        const cached = sessionCache.current.get(currentId, resolvedRoot);
+        if (cached) { setSession(cached); nextSession = cached; }
+        const sessionResponse = await window.reverie.request("getSession", { sessionId: currentId, projectRoot: resolvedRoot });
+        const refreshed = await refreshSessionWindow(cached,sessionResponse.session,async before=>(await window.reverie.request('getSession',{projectRoot:resolvedRoot,sessionId:currentId,before,select:false})).session);
         if (requestSequence !== initializeSequence.current) return;
-        nextSession = sessionResponse.session;
+        nextSession = refreshed;
         nextState = { ...nextState, sessions: sessionResponse.sessions };
         setState(nextState);
         setSession(nextSession);
       }
       // Re-open the composer exactly where it was left for the restored session
       // (or the pre-session placeholder when the workspace has none yet).
-      const restoredDraft = loadStructuredDraft(resolvedRoot, nextSession?.id ?? NEW_SESSION_DRAFT_ID);
+      const restoredDraft = loadStructuredDraft(resolvedRoot, nextSession?.id ?? NEW_SESSION_DRAFT_ID,nextSession?.metadata.assistant_id==='aio'?'aio':undefined);
       setPrompt(restoredDraft.text);
       setAttachments(restoredDraft.attachments);
       if (response.deferred === true) {
@@ -5450,13 +5495,38 @@ export default function App() {
       const event = asRecord(message.event);
       const type = String(event.type ?? "");
       if (message.type === "executors.changed") {
-        const entries = (message.entries || []) as Array<{ projectRoot: string; sessionId: string; state: string; reason: string }>;
-        setSessionStates(current => { const next = { ...current }; for (const entry of entries) next[ownerKey(entry.projectRoot, entry.sessionId)] = entry.state === "queued" ? `queued: ${entry.reason}` : "running"; return next; });
+        const entries = (message.entries || []) as Array<{ projectRoot: string; sessionId: string;assistantId?:'aio'; state: string; reason: string }>;
+        setSessionStates(current => { const next = { ...current }; for (const entry of entries) next[ownerKey(entry.projectRoot, entry.sessionId,entry.assistantId)] = entry.state === "queued" ? `queued: ${entry.reason}` : "running"; return next; });
         return;
       }
-      const eventOwner = ownerKey(String(event.project_root || draftOwner.current.root), String(event.session_id || draftOwner.current.id));
-      const currentOwner = ownerKey(draftOwner.current.root, draftOwner.current.id);
-      const runtime = runtimeViews.current.get(eventOwner);
+      const eventOwner = ownerKey(String(event.project_root || draftOwner.current.root), String(event.session_id || draftOwner.current.id),event.assistant_id==='aio'?'aio':undefined);
+      const currentOwner = ownerKey(draftOwner.current.root, draftOwner.current.id,draftOwner.current.assistantId);
+      let runtime = runtimeViews.current.get(eventOwner);
+      if(type==='run.started' && !runtime){
+        runtime={running:true,approval:null,hostOwned:true,live:{userText:String(event.prompt || ''),assistantText:'',reasoningText:'',events:[],segments:[],error:'',startedAt:Date.now()}};
+        runtimeViews.current.set(eventOwner,runtime);
+        setSessionStates(current=>({...current,[eventOwner]:'running'}));
+        if(eventOwner===currentOwner){setRunning(true);setLiveTurn(runtime.live);acceptLiveEvents.current=true;}
+      }
+      if(type==='conversation.saved'){
+        if(runtime?.hostOwned){
+          const retained=sessionCache.current.get(String(event.session_id),String(event.project_root),event.assistant_id==='aio'?'aio':undefined);
+          runtimeViews.current.delete(eventOwner);
+          sessionCache.current.delete(String(event.session_id),event.assistant_id==='aio'?'assistant:aio':String(event.project_root));
+          setSessionStates(current=>({...current,[eventOwner]:event.state==='completed'?'unread':event.state==='cancelled'?'':'failed'}));
+          if(eventOwner===currentOwner){
+            setRunning(false);setApproval(null);setLiveTurn(null);acceptLiveEvents.current=false;
+            const sequence=++sessionRequestSequence.current;
+            void window.reverie.request('getSession',{projectRoot:String(event.project_root),sessionId:String(event.session_id),select:false,markRead:true,...(event.assistant_id==='aio'?{assistantId:'aio' as const}:{})}).then(async response=>{
+              const refreshed=await refreshSessionWindow(retained,response.session,async before=>(await window.reverie.request('getSession',{projectRoot:String(event.project_root),sessionId:String(event.session_id),before,select:false,...(event.assistant_id==='aio'?{assistantId:'aio' as const}:{})})).session);
+              sessionCache.current.set(refreshed,String(event.project_root));
+              if(sequence!==sessionRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==eventOwner)return;
+              setSession(refreshed);setSessionStates(current=>({...current,[eventOwner]:''}));
+            }).catch(error=>setComposerError(String(error)));
+          }
+        }
+        return;
+      }
       if (type === "view.run") {
         const active = event.state === "running";
         if (active) runtimeViews.current.set(eventOwner, { running: true, live: null, approval: null });
@@ -5503,7 +5573,7 @@ export default function App() {
       }
       if (type === "approval.request") {
         setApproval(event);
-        setSessionStates(current => ({ ...current, [ownerKey(draftOwner.current.root, draftOwner.current.id)]: "approval" }));
+        setSessionStates(current => ({ ...current, [ownerKey(draftOwner.current.root, draftOwner.current.id,draftOwner.current.assistantId)]: "approval" }));
         // Raise a background-only OS toast in Reverie's name so a user who has
         // tabbed away still learns the kernel is paused waiting on them. When the
         // window is focused, main.ts drops it -- the in-app panel is enough.
@@ -5600,7 +5670,7 @@ export default function App() {
   });
 
   const contextSnapshot = useRef<Record<string, unknown>>({});
-  const contextOwner = ownerKey(projectRoot, session?.id || NEW_SESSION_DRAFT_ID);
+  const contextOwner = ownerKey(projectRoot, session?.id || NEW_SESSION_DRAFT_ID,assistantId);
   const contextModel = JSON.stringify([state?.models.active_source, state?.models.active_model, state?.models.sources.find(source => source.id === "custom")?.custom_providers?.find(provider => provider.active)?.id]);
   useEffect(() => {
     contextBaselines.current.clear();
@@ -5644,35 +5714,34 @@ export default function App() {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [workspaceReady, projectRoot, session?.id, sessionBusy, state?.workspace.active_model]);
 
-  const openSession = useCallback(async (id: string) => {
+  const openSession = useCallback(async (id: string,ownerAssistantId?:'aio') => {
     // Re-selecting the conversation already in view is just a jump back to its
     // chat content, so honour it even mid-run: without this, clicking (or
     // double-clicking) the active conversation while parked on Settings or any
     // other view did nothing. Switching to a different session still waits for
     // the current turn, whose live output belongs to the session on screen.
-    if ((id === session?.id && !pendingSessionId.current) || id === pendingSessionId.current) {
+    if ((id === session?.id && ownerAssistantId===assistantId && !pendingSessionId.current) || id === pendingSessionId.current) {
       setView("chat");
       return;
     }
     pendingSessionId.current = id;
     resetLiveBatch();
-    if (session) drafts.current[session.id] = prompt;
+    if (session) drafts.current[ownerKey(projectRoot,session.id,assistantId)] = prompt;
     const requestSequence = ++sessionRequestSequence.current;
     // A transcript already read in this window cannot have changed unless this
     // window changed it, so paint it now and let the core reconcile behind us.
     // Without this the chat area shows a spinner on every switch, including the
     // trip back to a session the user just left.
-    const cached = sessionCache.current.get(id);
+    const cached = sessionCache.current.get(id, projectRoot,ownerAssistantId);
     if (cached) {
       // `activeSessionId` prefers the rendered session, so this alone moves the
       // sidebar highlight -- patching `state.sessions` too would re-render every
       // consumer of `state` for a value the arriving response overwrites anyway.
       setSession(cached);
       setView("chat");
-      setLiveTurn(runtimeViews.current.get(ownerKey(projectRoot, id))?.live ?? null);
-      setPrompt(drafts.current[id] ?? "");
-      const restoredDraft = loadStructuredDraft(projectRoot, id);
-      setPrompt(restoredDraft.text);
+      setLiveTurn(runtimeViews.current.get(ownerKey(projectRoot, id,ownerAssistantId))?.live ?? null);
+      const restoredDraft = loadStructuredDraft(projectRoot, id,ownerAssistantId);
+      setPrompt(drafts.current[ownerKey(projectRoot,id,ownerAssistantId)] ?? restoredDraft.text);
       setAttachments(restoredDraft.attachments);
       setMentionOpen(false);
       setSessionBusy(false);
@@ -5680,21 +5749,21 @@ export default function App() {
       setSessionBusy(true);
     }
     try {
-      const response = await window.reverie.request("getSession", { sessionId: id });
+      const response = await window.reverie.request("getSession", { sessionId: id, projectRoot,...(ownerAssistantId==='aio'?{assistantId:'aio' as const}:{}) });
       if (requestSequence !== sessionRequestSequence.current) return;
       const nextSession = cached?.revision && cached.revision === response.session.revision
         ? cached
-        : response.session;
+        : await refreshSessionWindow(cached,response.session,async before=>(await window.reverie.request('getSession',{projectRoot,sessionId:id,before,select:false,...(ownerAssistantId==='aio'?{assistantId:'aio' as const}:{})})).session);
+      if (requestSequence !== sessionRequestSequence.current) return;
       setSession(nextSession);
       setState((current) => current ? { ...current, sessions: response.sessions, skills: response.skills ?? current.skills } : current);
       setView("chat");
-      setLiveTurn(runtimeViews.current.get(ownerKey(projectRoot, id))?.live ?? null);
+      setLiveTurn(runtimeViews.current.get(ownerKey(projectRoot, id,ownerAssistantId))?.live ?? null);
       // The draft was already restored for the optimistic paint; re-applying it
       // here would discard anything typed while the request was in flight.
       if (!cached) {
-        setPrompt(drafts.current[nextSession.id] ?? "");
-        const restoredDraft = loadStructuredDraft(projectRoot, nextSession.id);
-        setPrompt(restoredDraft.text);
+        const restoredDraft = loadStructuredDraft(projectRoot, nextSession.id,nextSession.metadata.assistant_id==='aio'?'aio':undefined);
+        setPrompt(drafts.current[ownerKey(projectRoot,nextSession.id,nextSession.metadata.assistant_id==='aio'?'aio':undefined)] ?? restoredDraft.text);
         setAttachments(restoredDraft.attachments);
         setMentionOpen(false);
       }
@@ -5714,20 +5783,19 @@ export default function App() {
       setView("chat");
       return;
     }
-    if (session) drafts.current[session.id] = prompt;
+    if (session) drafts.current[ownerKey(projectRoot,session.id,assistantId)] = prompt;
     const requestSequence = ++sessionRequestSequence.current;
     setSessionBusy(true);
     try {
-      const response = await window.reverie.request("createSession", {});
+      const response = await window.reverie.request("createSession", {projectRoot});
       if (requestSequence !== sessionRequestSequence.current) return;
       const nextSession = response.session;
       setSession(nextSession);
       setState((current) => current ? { ...current, sessions: response.sessions, skills: response.skills ?? current.skills } : current);
       setView("chat");
       setLiveTurn(null);
-      setPrompt(drafts.current[nextSession.id] ?? "");
-      const restoredDraft = loadStructuredDraft(projectRoot, nextSession.id);
-      setPrompt(restoredDraft.text);
+      const restoredDraft = loadStructuredDraft(projectRoot, nextSession.id,nextSession.metadata.assistant_id==='aio'?'aio':undefined);
+      setPrompt(drafts.current[ownerKey(projectRoot,nextSession.id,nextSession.metadata.assistant_id==='aio'?'aio':undefined)] ?? restoredDraft.text);
       setAttachments(restoredDraft.attachments);
       setMentionOpen(false);
     } catch (error) {
@@ -5735,17 +5803,35 @@ export default function App() {
     } finally {
       if (requestSequence === sessionRequestSequence.current) setSessionBusy(false);
     }
-  }, [prompt, attachments.length, running, session, sessionBusy, projectRoot, toast]);
+  }, [prompt, attachments.length, running, session, sessionBusy, projectRoot, toast,assistantId]);
+
+  const historyLoading = useRef(new Set<string>());
+  const loadHistoryPage = useCallback(async () => {
+    if (!session?.before) return;
+    const key = ownerKey(projectRoot,session.id,assistantId);
+    if (historyLoading.current.has(key)) return;
+    historyLoading.current.add(key);
+    try {
+      const response = await window.reverie.request("getSession",{projectRoot,sessionId:session.id,before:session.before,select:false,...(session.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{})});
+      if (ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId) !== key) return;
+      if (response.session.revision !== session.revision) {
+        const current = await window.reverie.request("getSession",{projectRoot,sessionId:session.id,select:false,...(assistantId==='aio'?{assistantId:'aio' as const}:{})});
+        const refreshed=await refreshSessionWindow(session,current.session,async before=>(await window.reverie.request('getSession',{projectRoot,sessionId:session.id,before,select:false,...(assistantId==='aio'?{assistantId:'aio' as const}:{})})).session);
+        if (ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId) === key) setSession(refreshed);
+      } else setSession(current => current?.id === session.id && current.before === session.before ? {...current,before:response.session.before,messages:[...response.session.messages,...current.messages]} : current);
+    } catch (error) { toast(String(error),"error"); }
+    finally { historyLoading.current.delete(key); }
+  }, [projectRoot,session,toast]);
 
   useEffect(() => {
-    const runtime = runtimeViews.current.get(ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID));
+    const runtime = runtimeViews.current.get(ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID,assistantId));
     setRunning(runtime?.running ?? false);
     setLiveTurn(runtime?.live ?? null);
     setApproval(runtime?.approval ?? null);
     acceptLiveEvents.current = runtime?.running ?? false;
     setControlStatus("");
     setComposerError("");
-    if (session) setSessionStates(current => ({ ...current, [ownerKey(projectRoot, session.id)]: runtime?.running ? current[ownerKey(projectRoot,session.id)] || "running" : "" }));
+    if (session) setSessionStates(current => ({ ...current, [ownerKey(projectRoot, session.id,assistantId)]: runtime?.running ? current[ownerKey(projectRoot,session.id,assistantId)] || "running" : "" }));
   }, [projectRoot, session?.id]);
 
   const compactContext = useCallback(async (focus = "") => {
@@ -5762,7 +5848,7 @@ export default function App() {
         setState((current) => current ? { ...current, sessions: created.sessions, skills: created.skills ?? current.skills } : current);
       }
       const response = await window.reverie.request("compactContext", {
-        sessionId: activeSession.id,
+        sessionId: activeSession.id,...(activeSession.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}),
         focus: focus || undefined,
         projectRoot: state.workspace.project_root,
       });
@@ -5801,7 +5887,7 @@ export default function App() {
   const pinSkill = useCallback(async (name: string) => {
     const owner = { ...draftOwner.current };
     try {
-      const response = await window.reverie.request("pinSkill", { skill: name });
+      const response = await window.reverie.request("pinSkill", { skill: name,projectRoot:owner.root,...(owner.id===NEW_SESSION_DRAFT_ID?{draft:true}:{sessionId:owner.id}),...(owner.assistantId==='aio'?{assistantId:'aio' as const}:{}) });
       if (owner.root !== draftOwner.current.root || owner.id !== draftOwner.current.id) return false;
       setState((current) => current ? { ...current, skills: response.skills } : current);
       if (response.status === "full") {
@@ -5818,8 +5904,10 @@ export default function App() {
   }, [t, toast]);
 
   const unpinSkill = useCallback(async (name: string) => {
+    const owner={...draftOwner.current};
     try {
-      const response = await window.reverie.request("unpinSkill", { skill: name });
+      const response = await window.reverie.request("unpinSkill", { skill: name,projectRoot:owner.root,...(owner.id===NEW_SESSION_DRAFT_ID?{draft:true}:{sessionId:owner.id}),...(owner.assistantId==='aio'?{assistantId:'aio' as const}:{}) });
+      if(ownerKey(owner.root,owner.id,owner.assistantId)!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
       setState((current) => current ? { ...current, skills: response.skills } : current);
       if (response.status === "missing") toast(t("skill.pin.missing", { name }), "error");
       else toast(t("skill.unpin.done", { name: response.name }), "success");
@@ -5827,8 +5915,10 @@ export default function App() {
   }, [t, toast]);
 
   const clearPinnedSkills = useCallback(async () => {
+    const owner={...draftOwner.current};
     try {
-      const response = await window.reverie.request("clearPinnedSkills", {});
+      const response = await window.reverie.request("clearPinnedSkills", {projectRoot:owner.root,...(owner.id===NEW_SESSION_DRAFT_ID?{draft:true}:{sessionId:owner.id}),...(owner.assistantId==='aio'?{assistantId:'aio' as const}:{}) });
+      if(ownerKey(owner.root,owner.id,owner.assistantId)!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
       setState((current) => current ? { ...current, skills: response.skills } : current);
       toast(t("skill.pin.cleared"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
@@ -5843,7 +5933,12 @@ export default function App() {
       setState(current => current ? { ...current, settings: { ...current.settings, items: current.settings.items.map(item => item.key === key ? { ...item, value } : item) } } : current);
     }
     try {
-      const response = await window.reverie.request("setSetting", { key, value });
+      if(key==='mode' && value==='aio'){
+        const response=await window.reverie.request('aioControl',{assistantId:'aio',enable:true});
+        const mainline=await window.reverie.request('getSession',{projectRoot,sessionId:response.aio.mainline_id,assistantId:'aio'});
+        setSession(mainline.session);setView('chat');return true;
+      }
+      const response = await window.reverie.request("setSetting", { key, value, projectRoot, sessionId: configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) });
       if (response.success === false) throw new Error(String(response.message ?? t("设置未保存")));
       setState((current) => current ? { ...current, settings: response.settings, models: response.models ?? current.models, workspace: response.workspace ?? current.workspace } : current);
       if (!outputMode) toast(t("设置已保存"), "success");
@@ -5853,37 +5948,38 @@ export default function App() {
       toast(error instanceof Error ? error.message : String(error), "error"); return false;
     }
     finally { if (outputMode) { streamSettingPending.current = false; setStreamSettingBusy(false); } }
-  }, [state?.settings, t, toast]);
+  }, [state?.settings, t, toast,projectRoot,session?.id,configurationSessionId]);
 
   // Runs one turn end to end. Split out of sendPrompt so a mid-stream interrupt
   // can reuse the exact same path after cancelling the in-flight turn. Assumes
   // the composer control commands (/skill, /compact) have already been handled
   // and the prompt slot cleared by the caller.
-  const runPromptText = useCallback(async (text: string, resume = false, inputAttachments: ComposerAttachment[] = [], runType = "prompt", queuedOwner?: {projectRoot:string;sessionId:string}, onResult?: (output:string)=>void) => {
+  const runPromptText = useCallback(async (text: string, resume = false, inputAttachments: ComposerAttachment[] = [], runType = "prompt", queuedOwner?: {projectRoot:string;sessionId:string;assistantId?:'aio';configuration?:Record<string,unknown>}, onResult?: (output:string)=>void) => {
     const activeState = state;
-    const runRoot = queuedOwner?.projectRoot || projectRoot;
+    const runRoot = queuedOwner?.projectRoot || (session?.metadata.assistant_id==='aio' && session.metadata.task_id?String(session.metadata.workspace_path || projectRoot):projectRoot);
     const runSessionId = queuedOwner?.sessionId || session?.id || NEW_SESSION_DRAFT_ID;
-    const startsInView = ownerKey(draftOwner.current.root,draftOwner.current.id)===ownerKey(runRoot,runSessionId);
+    const runAssistantId = queuedOwner ? queuedOwner.assistantId : assistantId;
+    const startsInView = ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)===ownerKey(runRoot,runSessionId,runAssistantId);
     if (!activeState || streamSettingPending.current || (resume && !session)) return false;
     // A cached transcript is usable while its read reconciles. Once a turn
     // starts, an older read must not clear that turn's live output.
     if (startsInView) sessionRequestSequence.current += 1;
     if (startsInView) pendingSessionId.current = "";
     if (startsInView) setRunning(true);
-    setSessionStates(current => ({ ...current, [ownerKey(runRoot, runSessionId)]: "running" }));
+    setSessionStates(current => ({ ...current, [ownerKey(runRoot, runSessionId,runAssistantId)]: "running" }));
     if (startsInView) { setComposerError(""); setControlStatus(""); resetLiveBatch(); acceptLiveEvents.current = true; }
     const runtime = { live: { userText: resume ? "" : text, historyMessageCount: startsInView ? session?.messages.length ?? 0 : undefined, attachments: resume ? [] : inputAttachments.map(item => ({ ...item })), resumed: resume, assistantText: "", reasoningText: "", events: [], segments: [], error: "", startedAt: Date.now() } as LiveTurn | null, running: true, approval: null as Record<string, unknown> | null };
-    let runtimeKey = ownerKey(runRoot, runSessionId);
+    let runtimeKey = ownerKey(runRoot, runSessionId,runAssistantId);
     runtimeViews.current.set(runtimeKey, runtime);
     if (startsInView) setLiveTurn(runtime.live);
-    const ownsView = () => ownerKey(draftOwner.current.root, draftOwner.current.id) === runtimeKey && runtimeViews.current.get(runtimeKey) === runtime;
+    const ownsView = () => ownerKey(draftOwner.current.root, draftOwner.current.id,draftOwner.current.assistantId) === runtimeKey && runtimeViews.current.get(runtimeKey) === runtime;
     try {
       let activeSession = queuedOwner ? {id:queuedOwner.sessionId} as SessionState : session;
       if (!activeSession && !resume) {
-        const created = await window.reverie.request("createSession", {});
+        const created = await window.reverie.request("createSession", {projectRoot:runRoot});
         activeSession = created.session;
         runtimeViews.current.delete(runtimeKey);
-        runtimeKey = ownerKey(runRoot, activeSession.id);
+        runtimeKey = ownerKey(runRoot, activeSession.id,runAssistantId);
         runtimeViews.current.set(runtimeKey, runtime);
         setSession(activeSession);
         setState((current) => current ? { ...current, sessions: created.sessions, skills: created.skills ?? current.skills } : current);
@@ -5895,10 +5991,10 @@ export default function App() {
       const response = await window.reverie.request(resume ? "resumePrompt" : "runPrompt", {
         ...(!resume ? { prompt: text } : {}),
         sessionId: activeSession.id,
-        mode: activeState.workspace.mode,
-        source: activeState.models.active_source,
-        model: activeState.models.active_model?.id,
-        ...(!resume ? { attachments: inputAttachments, projectRoot: runRoot } : {}),
+        ...(runAssistantId==='aio'?{assistantId:'aio' as const}:{}),
+        projectRoot: runRoot,
+        ...(queuedOwner?.configuration ? {configuration:queuedOwner.configuration} : {}),
+        ...(!resume ? { attachments: inputAttachments } : {}),
         ...(runType === "review" ? { runType } : {}),
       });
       const result = response.result;
@@ -5927,25 +6023,23 @@ export default function App() {
         sessions: response.sessions,
         recovery: response.recovery,
       } : current);
-      const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id });
+      const refreshed = await window.reverie.request("getSession", { sessionId: result.session_id || activeSession.id, projectRoot:runRoot, select:false,markRead:true,...(runAssistantId==='aio'?{assistantId:'aio' as const}:{}) });
+      const refreshedWindow=await refreshSessionWindow(sessionCache.current.get(activeSession.id,runRoot,runAssistantId),refreshed.session,async before=>(await window.reverie.request('getSession',{projectRoot:runRoot,sessionId:refreshed.session.id,before,select:false,...(runAssistantId==='aio'?{assistantId:'aio' as const}:{})})).session);
       if (!ownsView()) return result.success;
       // A JSON snapshot recreates every object even when only the new turn was
       // appended. Keep unchanged message identities so memoized history does
       // not parse and render the entire loaded conversation again at completion.
-      setSession(previous => previous?.id === refreshed.session.id ? {
-        ...refreshed.session,
-        messages: reuseSessionMessages(previous.messages, refreshed.session.messages),
-      } : refreshed.session);
+      setSession(refreshedWindow);
       setState((current) => current ? { ...current, sessions: refreshed.sessions } : current);
       if (!result.success) {
-        setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id)]: stopped ? "" : "failed" }));
+        setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id,runAssistantId)]: stopped ? "" : "failed" }));
         setQueuePaused(true);
         // The in-body error block carries the full humanized detail (e.g. the
         // 403 guidance) under the model output, and main.ts raises a native OS
         // toast when the window is in the background. That covers both the
         // focused and unfocused cases, so no in-app toast is needed here.
       } else {
-        setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id)]: document.hasFocus() ? "" : "unread" }));
+        setSessionStates(current => ({ ...current, [ownerKey(runRoot, activeSession.id,runAssistantId)]: document.hasFocus() ? "" : "unread" }));
         setLiveTurn(null);
       }
       return result.success;
@@ -5971,6 +6065,9 @@ export default function App() {
       return false;
     } finally {
       if (ownsView()) { setRunning(false); setControlStatus(""); }
+      if(!runtime.live)runtimeViews.current.delete(runtimeKey);
+      const inactive=[...runtimeViews.current].filter(([,value])=>!value.running);
+      for(const [key] of inactive.slice(0,Math.max(0,inactive.length-12)))runtimeViews.current.delete(key);
     }
   }, [flushLiveBatch, projectRoot, resetLiveBatch, session, state, t]);
 
@@ -6044,17 +6141,21 @@ export default function App() {
       if (!session) return;
       if ((behaviorOverride ?? sendBehavior) === "steer") {
         try {
-          await window.reverie.request("steerPrompt", { projectRoot, sessionId: session.id, prompt: text, attachments });
+          await window.reverie.request("steerPrompt", { projectRoot, sessionId: session.id, prompt: text, attachments,...(assistantId==='aio'?{assistantId:'aio' as const}:{}) });
           setControlStatus(t("等待安全点接收补充"));
         } catch (error) { setComposerError(error instanceof Error ? error.message : String(error)); return; }
       } else {
-        const next = [...queue, { id: crypto.randomUUID(), projectRoot, sessionId: session.id, text, attachments: [...attachments], createdAt: Date.now() }];
+        let fixed;
+        try{fixed = await window.reverie.request("getConversationConfig", {projectRoot,sessionId:session.id,...(session.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{})});}
+        catch(error){setComposerError(String(error));return;}
+        if (fixed.error) { setComposerError(fixed.error); return; }
+        const next = [...queue, { id: crypto.randomUUID(), projectRoot, sessionId: session.id, assistantId, text, attachments: [...attachments], createdAt: Date.now(), configuration:fixed.configuration, configurationRevision:fixed.revision }];
         if (!updateQueue(next)) return;
-        authorizedQueues.current.set(ownerKey(projectRoot,session.id),{projectRoot,sessionId:session.id});
+        authorizedQueues.current.set(ownerKey(projectRoot,session.id,assistantId),{projectRoot,sessionId:session.id,assistantId});
         setQueuePaused(false);
       }
     }
-    clearDraft(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID);
+    clearDraft(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID,assistantId);
     setPrompt("");
     // The sent turn owns the current chips. Files added while it streams belong
     // to the next draft and must survive this turn's completion.
@@ -6074,16 +6175,16 @@ export default function App() {
       if (sessionBusy || streamSettingBusy) return;
       for (const [key, owner] of authorizedQueues.current) {
         if (runtimeViews.current.get(key)?.running || queueStarting.current.has(key)) continue;
-        const item = loadQueue(owner.projectRoot, owner.sessionId)[0];
+        const item = loadQueue(owner.projectRoot, owner.sessionId,owner.assistantId)[0];
         if (!item) { authorizedQueues.current.delete(key); continue; }
         queueStarting.current.add(key);
-        void runPromptText(item.text, false, item.attachments, "prompt", owner).then(success => {
+        void runPromptText(item.text, false, item.attachments, "prompt", {...owner,configuration:item.configuration}).then(success => {
           if (success) {
-            const next = loadQueue(owner.projectRoot,owner.sessionId).filter(message=>message.id!==item.id);
-            const error = saveQueue(owner.projectRoot,owner.sessionId,next);
-            if (ownerKey(draftOwner.current.root,draftOwner.current.id)===key) { setQueue(next); if(error)setComposerError(error); }
+            const next = loadQueue(owner.projectRoot,owner.sessionId,owner.assistantId).filter(message=>message.id!==item.id);
+            const error = saveQueue(owner.projectRoot,owner.sessionId,next,owner.assistantId);
+            if (ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)===key) { setQueue(next); if(error)setComposerError(error); }
             if(error)authorizedQueues.current.delete(key);
-          } else { authorizedQueues.current.delete(key); if(ownerKey(draftOwner.current.root,draftOwner.current.id)===key)setQueuePaused(true); }
+          } else { authorizedQueues.current.delete(key); if(ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)===key)setQueuePaused(true); }
         }).finally(()=>queueStarting.current.delete(key));
       }
     };
@@ -6092,12 +6193,12 @@ export default function App() {
 
   const cancelPrompt = useCallback(async () => {
     if (!session || !running) return;
-    authorizedQueues.current.delete(ownerKey(projectRoot,session.id));
+    authorizedQueues.current.delete(ownerKey(projectRoot,session.id,assistantId));
     setQueuePaused(true);
     setControlStatus(t("正在停止，等待当前操作结束"));
     setApproval(null);
     try {
-      await window.reverie.request("stopPrompt", { projectRoot, sessionId: session.id });
+      await window.reverie.request("stopPrompt", { projectRoot, sessionId: session.id,...(assistantId==='aio'?{assistantId:'aio' as const}:{}) });
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : String(error));
     }
@@ -6105,41 +6206,41 @@ export default function App() {
 
   const renameSession = useCallback(async (name: string) => {
     if (!renameSessionTarget || running || sessionBusy) return;
+    const viewedOwner=ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId);
     try {
-      const response = await window.reverie.request("renameSession", { sessionId: renameSessionTarget.id, name });
-      const activeSession = response.session ?? null;
-      if (activeSession) setSession(activeSession);
-      setState((current) => current ? { ...current, sessions: response.sessions } : current);
-      setRenameSessionTarget(null);
+      const targetRoot=renameSessionTarget.projectRoot || state?.sessions.owners?.[renameSessionTarget.id]?.workspace || projectRoot;
+      const targetAssistant='assistantId' in renameSessionTarget?renameSessionTarget.assistantId:assistantId;
+      const response = await window.reverie.request("renameSession", { sessionId: renameSessionTarget.id, name,projectRoot:targetRoot,...(targetAssistant==='aio'?{assistantId:'aio' as const}:{}) });
+      if(viewedOwner===ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId) && (targetAssistant==='aio'?draftOwner.current.assistantId==='aio':ownerKey(targetRoot,'')===ownerKey(draftOwner.current.root,''))){
+        setSession(current=>ownerKey(targetRoot,renameSessionTarget.id,targetAssistant)===viewedOwner && current?{...current,name}:current);
+        setState((current) => current ? { ...current, sessions: response.sessions } : current);
+      }
+      setRenameSessionTarget(current=>current?.id===renameSessionTarget.id?null:current);
       toast(t("会话标题已更新"), "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), "error");
     }
-  }, [renameSessionTarget, running, sessionBusy, t, toast]);
+  }, [renameSessionTarget, running, sessionBusy, t, toast,state,projectRoot,assistantId]);
 
-  const toggleSessionArchive = useCallback((target: SessionInfo, archived: boolean) => {
+  const toggleSessionArchive = useCallback(async (target: SessionInfo, archived: boolean) => {
     if (!state) return;
-    const projectRoot = state.workspace.project_root;
-    const currentIds = uiPreferences.archivedSessions[projectRoot] ?? [];
-    const nextIds = archived
-      ? currentIds.filter((id) => id !== target.id)
-      : [...new Set([...currentIds, target.id])];
-    updateUiPreferences({
-      archivedSessions: {
-        ...uiPreferences.archivedSessions,
-        [projectRoot]: nextIds,
-      },
-    });
-    toast(t(archived ? "会话已移出归档" : "会话已归档"), "success");
-  }, [state, t, toast, uiPreferences.archivedSessions, updateUiPreferences]);
+    const projectRoot = state.sessions.owners?.[target.id]?.workspace || state.workspace.project_root;
+    const viewedOwner=ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId);
+    try{
+      const header=await window.reverie.request('getSession',{projectRoot,assistantId,sessionId:target.id,select:false,limit:1});
+      const response=await window.reverie.request('archiveSession',{projectRoot,assistantId,sessionId:target.id,revision:Number(header.session.revision),archived:!archived});
+      if(viewedOwner===ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))setState(current=>current?{...current,sessions:response.sessions}:current);
+      toast(t(archived ? "会话已移出归档" : "会话已归档"), "success");
+    }catch(error){toast(error instanceof Error?error.message:String(error),'error');}
+  }, [state, t, toast, assistantId]);
 
   const forkActiveSession = useCallback(async () => {
     if (!session || running || sessionBusy) return;
-    drafts.current[session.id] = prompt;
+    drafts.current[ownerKey(projectRoot,session.id,assistantId)] = prompt;
     const requestSequence = ++sessionRequestSequence.current;
     setSessionBusy(true);
     try {
-      const response = await window.reverie.request("forkSession", { sessionId: session.id, messageCount: session.messages.length });
+      const response = await window.reverie.request("forkSession", { sessionId: session.id, projectRoot,...(assistantId==='aio'?{assistantId:'aio' as const}:{}), messageCount: session.total ?? session.messages.length });
       if (requestSequence !== sessionRequestSequence.current) return;
       const forked = response.session;
       setSession(forked);
@@ -6153,7 +6254,7 @@ export default function App() {
     } finally {
       if (requestSequence === sessionRequestSequence.current) setSessionBusy(false);
     }
-  }, [prompt, running, session, sessionBusy, t, toast]);
+  }, [prompt, running, session, sessionBusy, t, toast,projectRoot,assistantId]);
 
   const rewindActiveSession = useCallback(() => {
     if (!session || running || sessionBusy) return;
@@ -6167,7 +6268,7 @@ export default function App() {
       action: () => { void (async () => {
         setSessionBusy(true);
         try {
-          const response = await window.reverie.request("rewindSession", { sessionId: session.id, messageCount, confirmed: true });
+          const response = await window.reverie.request("rewindSession", { sessionId: session.id, projectRoot,...(assistantId==='aio'?{assistantId:'aio' as const}:{}), messageCount: (session.total ?? session.messages.length) - session.messages.length + messageCount, confirmed: true });
           setSession(response.session);
           setState((current) => current ? { ...current, sessions: response.sessions } : current);
           setLiveTurn(null);
@@ -6182,24 +6283,30 @@ export default function App() {
   }, [running, session, sessionBusy, t, toast]);
 
   const deleteSession = useCallback((target: { id: string; name: string }) => {
-    if (running || sessionBusy) return;
+    if (running || sessionBusy || target.id==='aio-mainline') return;
+    const viewedOwner=ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId);
     setConfirmation({
       title: t("删除这个会话？"),
       message: t("delete.sessionMessage", { name: target.name }),
       label: t("删除会话"),
       danger: true,
       action: () => { void (async () => {
-        setSessionBusy(true);
+        const startsInView=viewedOwner===ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId);
+        const sequence=startsInView?++sessionRequestSequence.current:sessionRequestSequence.current;
+        if(startsInView)setSessionBusy(true);
         try {
-          const response = await window.reverie.request("deleteSession", { sessionId: target.id, confirmed: true });
-          delete drafts.current[target.id];
-          if (projectRoot) clearDraft(projectRoot, target.id);
-          sessionCache.current.delete(target.id);
-          const nextSession = response.session ?? null;
-          setSession(nextSession);
+          const targetRoot=state?.sessions.owners?.[target.id]?.workspace || projectRoot;
+          const response = await window.reverie.request("deleteSession", { sessionId: target.id, confirmed: true,projectRoot:targetRoot,...((assistantId==='aio' || ('metadata' in target && (target.metadata as SessionState['metadata'])?.assistant_id==='aio'))?{assistantId:'aio' as const}:{}) });
+          delete drafts.current[ownerKey(targetRoot,target.id,assistantId)];
+          if (targetRoot) clearDraft(targetRoot, target.id,assistantId);
+          sessionCache.current.delete(target.id,targetRoot,assistantId);
+          if(sequence!==sessionRequestSequence.current || viewedOwner!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
+          const removesViewed=ownerKey(targetRoot,target.id,assistantId)===viewedOwner;
+          const nextSession = removesViewed && assistantId==='aio' ? (await window.reverie.request('getSession',{projectRoot,assistantId,sessionId:'aio-mainline'})).session : response.session ?? null;
+          if(sequence!==sessionRequestSequence.current || viewedOwner!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
+          if(removesViewed)setSession(nextSession);
           setState((current) => current ? { ...current, sessions: response.sessions } : current);
-          setPrompt(nextSession ? drafts.current[nextSession.id] ?? "" : "");
-          setLiveTurn(null);
+          if(removesViewed){const draft=nextSession?loadStructuredDraft(projectRoot,nextSession.id,assistantId):{text:'',attachments:[]};setPrompt(draft.text);setAttachments(draft.attachments);setLiveTurn(null);}
           if (state) {
             const projectRoot = state.workspace.project_root;
             const archived = uiPreferences.archivedSessions[projectRoot] ?? [];
@@ -6216,54 +6323,62 @@ export default function App() {
         } catch (error) {
           toast(error instanceof Error ? error.message : String(error), "error");
         } finally {
-          setSessionBusy(false);
+          if(startsInView && sequence===sessionRequestSequence.current)setSessionBusy(false);
         }
       })(); },
     });
-  }, [running, sessionBusy, state, t, toast, uiPreferences.archivedSessions, updateUiPreferences]);
+  }, [running, sessionBusy, state, t, toast, uiPreferences.archivedSessions, updateUiPreferences,projectRoot,assistantId]);
 
   const deleteArchivedSessions = useCallback((targets: SessionInfo[]) => {
     if (running || sessionBusy || !state || targets.length === 0) return;
     const projectRoot = state.workspace.project_root;
-    const targetIds = [...new Set(targets.map((target) => target.id).filter(Boolean))];
+    const targetIds = [...new Set(targets.map((target) => target.id).filter(id=>id && id!=='aio-mainline'))];
     if (targetIds.length === 0) return;
+    const viewedOwner=ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId);
     setConfirmation({
       title: t("清空全部归档会话？"),
       message: t("delete.archiveMessage", { count: targetIds.length }),
       label: t("清空归档"),
       danger: true,
       action: () => { void (async () => {
-        setSessionBusy(true);
+        const startsInView=viewedOwner===ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId);
+        const sequence=startsInView?++sessionRequestSequence.current:sessionRequestSequence.current;
+        if(startsInView)setSessionBusy(true);
         try {
-          const response = await window.reverie.request("deleteSessions", { sessionIds: targetIds, confirmed: true });
-          const deletedIds = Array.isArray(response.deleted_session_ids)
-            ? response.deleted_session_ids.map((value) => String(value))
-            : targetIds;
+          const groups=new Map<string,string[]>();
+          for(const id of targetIds){const root=state.sessions.owners?.[id]?.workspace || projectRoot;groups.set(root,[...(groups.get(root) || []),id]);}
+          const responses=[];
+          for(const [root,ids] of groups)responses.push(await window.reverie.request("deleteSessions", { sessionIds: ids, confirmed: true,projectRoot:root,...(assistantId==='aio'?{assistantId:'aio' as const}:{}) }));
+          const response=responses.at(-1)!;
+          const deletedIds=responses.flatMap(item=>item.deleted_session_ids.map(String));
           deletedIds.forEach((sessionId) => {
-            delete drafts.current[sessionId];
-            clearDraft(projectRoot, sessionId);
-            sessionCache.current.delete(sessionId);
+            const root=state.sessions.owners?.[sessionId]?.workspace || projectRoot;
+            delete drafts.current[ownerKey(root,sessionId,assistantId)];
+            clearDraft(root, sessionId,assistantId);
+            sessionCache.current.delete(sessionId,root,assistantId);
           });
-          const nextSession = response.session ?? null;
-          setSession(nextSession);
+          if(sequence!==sessionRequestSequence.current || viewedOwner!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
+          const removesViewed=deletedIds.some(id=>ownerKey(state.sessions.owners?.[id]?.workspace || projectRoot,id,assistantId)===viewedOwner);
+          const nextSession = removesViewed && assistantId==='aio' ? (await window.reverie.request('getSession',{projectRoot,assistantId,sessionId:'aio-mainline'})).session : response.session ?? null;
+          if(sequence!==sessionRequestSequence.current || viewedOwner!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
+          if(removesViewed)setSession(nextSession);
           setState((current) => current ? { ...current, sessions: response.sessions } : current);
-          setPrompt(nextSession ? drafts.current[nextSession.id] ?? "" : "");
-          setLiveTurn(null);
+          if(removesViewed){const draft=nextSession?loadStructuredDraft(projectRoot,nextSession.id,assistantId):{text:'',attachments:[]};setPrompt(draft.text);setAttachments(draft.attachments);setLiveTurn(null);}
           updateUiPreferences({
             archivedSessions: {
               ...uiPreferences.archivedSessions,
-              [projectRoot]: [],
+              [projectRoot]: (uiPreferences.archivedSessions[projectRoot] || []).filter(id=>!deletedIds.includes(id)),
             },
           });
           toast(t("archive.deleted", { count: deletedIds.length }), "success");
         } catch (error) {
           toast(error instanceof Error ? error.message : String(error), "error");
         } finally {
-          setSessionBusy(false);
+          if(startsInView && sequence===sessionRequestSequence.current)setSessionBusy(false);
         }
       })(); },
     });
-  }, [running, sessionBusy, state, t, toast, uiPreferences.archivedSessions, updateUiPreferences]);
+  }, [running, sessionBusy, state, t, toast, uiPreferences.archivedSessions, updateUiPreferences,assistantId]);
 
   const resolveApproval = useCallback(async (decision: ApprovalDecision, message?: string) => {
     if (!approval) return;
@@ -6271,6 +6386,7 @@ export default function App() {
       await window.reverie.request("resolveApproval", {
         approvalId: approval.approval_id,
         projectRoot: String(approval.project_root || projectRoot), sessionId: String(approval.session_id || session?.id || ""),
+        ...(approval.assistant_id==='aio'?{assistantId:'aio' as const}:{}),
         decision,
         ...(decision === "message" && message ? { message } : {}),
       });
@@ -6287,13 +6403,15 @@ export default function App() {
 
   const openModelPicker = useCallback(() => {
     setModelPickerOpen(true);
-    void window.reverie.request("refreshModelSources", {}).then((response) => {
+    const owner=ownerKey(projectRoot,session?.id || '',assistantId);
+    void window.reverie.request("refreshModelSources", {projectRoot,sessionId:session?.id,...(session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{})}).then((response) => {
+      if(ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       if (!response.models) return;
       setState((current) => current ? { ...current, models: response.models } : current);
     }).catch(() => {
       // Keep the initialized fallback catalog available when live discovery fails.
     });
-  }, [state?.workspace.mode]);
+  }, [state?.workspace.mode,projectRoot,session?.id]);
 
   const selectReasoning = useCallback(async (reasoning: string) => {
     if (!state) return;
@@ -6301,12 +6419,18 @@ export default function App() {
     // provider's reasoning is stored against the aggregate `custom` source.
     const source = expandModelSources(state.models.sources).find((item) => item.active);
     if (!source) return;
+    const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
+    const sequence=++configurationRequestSequence.current;
     try {
-      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, reasoning });
+      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, reasoning, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) });
+      conversationViews.current.delete(owner);
+      if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setSession(current=>current?{...current,config_error:''}:current);
+      setComposerError('');
       toast(t("思考设置已更新"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [state, t, toast]);
+  }, [state, t, toast,projectRoot,session?.id,configurationSessionId]);
 
   const revealSecret = useCallback<RevealSecret>(async (params) => {
     const response = await window.reverie.request("revealProviderSecret", {
@@ -6417,18 +6541,26 @@ export default function App() {
       setContextLimitModal({ provider, model, reasoning });
       return;
     }
+    const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
+    const sequence=++configurationRequestSequence.current;
     try {
       const response = await window.reverie.request("selectCustomProviderModel", {
+        projectRoot, sessionId:configurationSessionId,
+        ...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}),
         providerId: provider.id,
         modelId: model.id,
         ...(contextLimit === undefined ? {} : { contextLimit }),
         ...(reasoning === undefined ? {} : { reasoning }),
       });
+      conversationViews.current.delete(owner);
+      if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
+      setSession(current=>current?{...current,config_error:''}:current);
+      setComposerError('');
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setContextLimitModal(null);
       toast(t("model.switched", { name: model.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
+  }, [t, toast,projectRoot,session?.id,configurationSessionId]);
 
   /** The stored record behind a synthetic `custom:<id>` picker entry. */
   const customProviderById = useCallback((providerId: string): CustomProviderRecord | null => {
@@ -6451,18 +6583,24 @@ export default function App() {
       await selectCustomProviderModel(provider, model as CustomProviderModel, undefined, selectedReasoning);
       return;
     }
+    const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
+    const sequence=++configurationRequestSequence.current;
     try {
       const reasoning = selectedReasoning ?? (
         model.reasoning.options.some((option) => option.id === model.reasoning.value)
           ? model.reasoning.value
           : model.reasoning.options[0]?.id
       );
-      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, ...(reasoning ? { reasoning } : {}) });
+      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}), ...(reasoning ? { reasoning } : {}) });
+      conversationViews.current.delete(owner);
+      if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
+      setSession(current=>current?{...current,config_error:''}:current);
+      setComposerError('');
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setModelPickerOpen(false);
       toast(t("model.switched", { name: model.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [customProviderById, selectCustomProviderModel, t, toast]);
+  }, [customProviderById, selectCustomProviderModel, t, toast,projectRoot,session?.id,configurationSessionId]);
 
   const refreshImageModels = useCallback(async () => {
     try {
@@ -6487,18 +6625,25 @@ export default function App() {
   ) => {
     // Reuse the selection call: it both stores the limit and pins the model, so
     // confirming a limit can never leave the two out of step.
+    const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
+    const sequence=++configurationRequestSequence.current;
     try {
       const response = await window.reverie.request("selectCustomProviderModel", {
+        projectRoot,sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}),
         providerId: provider.id,
         modelId: model.id,
         contextLimit: limit,
         ...(reasoning === undefined ? {} : { reasoning }),
       });
+      conversationViews.current.delete(owner);
+      if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
+      setSession(current=>current?{...current,config_error:''}:current);
+      setComposerError('');
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       setContextLimitModal(null);
       toast(t("provider.contextSaved", { name: model.display_name, tokens: limit.toLocaleString() }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
+  }, [t, toast,projectRoot,session?.id,configurationSessionId]);
 
   const setCustomProviderThinking = useCallback(async (provider: CustomProviderRecord, enabled: boolean) => {
     try {
@@ -6540,15 +6685,18 @@ export default function App() {
   }), [providerProbes, providerProbing, deleteCustomProvider, patchCustomProvider, setCustomProviderThinking, refreshCustomProvider, probeProviders, selectCustomProviderModel]);
 
   const updatePlugin = useCallback(async (action: "setPluginEnabled" | "setPluginTrust", plugin: PluginRecord, value: boolean) => {
+    const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
     try {
       const response = action === "setPluginEnabled"
-        ? await window.reverie.request("setPluginEnabled", { pluginId: plugin.id, enabled: value })
+        ? await window.reverie.request("setPluginEnabled", { pluginId: plugin.id, enabled: value,projectRoot,sessionId:session?.id,...(session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) })
         : await window.reverie.request("setPluginTrust", { pluginId: plugin.id, trusted: value });
+      conversationViews.current.delete(owner);
+      if(ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       const plugins = response.plugins;
       setState((current) => current ? { ...current, plugins, settings: response.settings } : current);
       toast(t("plugin.updated", { name: plugin.name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
+  }, [t, toast,projectRoot,session?.id]);
 
   const refreshPlugins = useCallback(async () => {
     try {
@@ -6614,11 +6762,11 @@ export default function App() {
   }, [mentionOpen, projectRoot, prompt, t, toast]);
 
 
-  const updateOwnedAttachments = useCallback((owner: { root: string; id: string }, change: (items: ComposerAttachment[]) => ComposerAttachment[]) => {
-    if (owner.root === draftOwner.current.root && owner.id === draftOwner.current.id) setAttachments(change);
+  const updateOwnedAttachments = useCallback((owner: { root: string; id: string;assistantId?:'aio' }, change: (items: ComposerAttachment[]) => ComposerAttachment[]) => {
+    if (ownerKey(owner.root,owner.id,owner.assistantId)===ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)) setAttachments(change);
     else {
-      const draft = loadStructuredDraft(owner.root, owner.id);
-      saveStructuredDraft(owner.root, owner.id, { ...draft, attachments: change(draft.attachments) });
+      const draft = loadStructuredDraft(owner.root, owner.id,owner.assistantId);
+      saveStructuredDraft(owner.root, owner.id, { ...draft, attachments: change(draft.attachments) },owner.assistantId);
     }
   }, []);
   const addAttachments = useCallback((added: ComposerAttachment[], owner = { ...draftOwner.current }) => {
@@ -6690,32 +6838,31 @@ export default function App() {
     if (sessionBusy) return;
     setSessionBusy(true);
     try {
-      if (session) drafts.current[session.id] = prompt;
-      const projectRoot = await window.reverie.selectWorkspace();
-      if (projectRoot) {
+      if (session) drafts.current[ownerKey(projectRoot,session.id,assistantId)] = prompt;
+      const selectedRoot = await window.reverie.selectWorkspace();
+      if (selectedRoot) {
         sessionRequestSequence.current += 1;
-        drafts.current = {};
         setPrompt("");
         setAttachments([]);
         setMentionOpen(false);
-        await initialize(projectRoot);
+        await initialize(selectedRoot);
       }
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setSessionBusy(false);
     }
-  }, [initialize, prompt, running, session, sessionBusy, toast]);
+  }, [initialize, prompt, running, session, sessionBusy, toast,projectRoot,assistantId]);
 
   const switchWorkspace = useCallback(async (projectRoot: string): Promise<boolean> => {
     if (sessionBusy || projectRoot.toLowerCase() === state?.workspace.project_root.toLowerCase()) return false;
     try {
-      if (session) drafts.current[session.id] = prompt;
+      if (session) drafts.current[ownerKey(draftOwner.current.root,session.id,assistantId)] = prompt;
       setSessionBusy(true);
+      sessionRequestSequence.current += 1;
       const selectedRoot = await window.reverie.switchWorkspace(projectRoot);
       if (!selectedRoot) return false;
       sessionRequestSequence.current += 1;
-      drafts.current = {};
       setPrompt("");
       setAttachments([]);
       setMentionOpen(false);
@@ -6727,7 +6874,7 @@ export default function App() {
     } finally {
       setSessionBusy(false);
     }
-  }, [initialize, prompt, running, session, sessionBusy, state?.workspace.project_root, toast]);
+  }, [initialize, prompt, running, session, sessionBusy, state?.workspace.project_root, toast,assistantId]);
 
   const createSessionForProject = useCallback(async (projectRoot: string) => {
     if (sessionBusy) return;
@@ -6736,23 +6883,32 @@ export default function App() {
       await createSession(true);
       return;
     }
-    if (await switchWorkspace(projectRoot)) { const response=await window.reverie.request("createSession",{}); setSession(response.session); setState(current=>current?{...current,sessions:response.sessions,skills:response.skills??current.skills}:current); const draft=loadStructuredDraft(projectRoot,response.session.id);setPrompt(draft.text);setAttachments(draft.attachments);setView("chat"); }
+    if (await switchWorkspace(projectRoot)) { const response=await window.reverie.request("createSession",{projectRoot}); setSession(response.session); setState(current=>current?{...current,sessions:response.sessions,skills:response.skills??current.skills}:current); const draft=loadStructuredDraft(projectRoot,response.session.id);setPrompt(draft.text);setAttachments(draft.attachments);setView("chat"); }
   }, [createSession, running, sessionBusy, state?.workspace.project_root, switchWorkspace]);
 
-  const navigateToSession = useCallback(async (root: string, id: string) => {
-    if (root.toLowerCase() === projectRoot.toLowerCase()) { if (id) await openSession(id); else await createSession(true); return; }
+  const navigateToSession = useCallback(async (root: string, id: string,ownerAssistantId?:'aio') => {
+    if (root.toLowerCase() === projectRoot.toLowerCase()) { if (id) await openSession(id,ownerAssistantId); else await createSession(true); return; }
     if (!await switchWorkspace(root)) return;
-    const response = id ? await window.reverie.request("getSession", { sessionId: id }) : await window.reverie.request("createSession", {});
+    const sequence=++sessionRequestSequence.current;
+    const response = id ? await window.reverie.request("getSession", { sessionId: id, projectRoot:root, ...(ownerAssistantId==='aio'?{assistantId:'aio' as const}:{}) }) : await window.reverie.request("createSession", {projectRoot:root});
+    if(sequence!==sessionRequestSequence.current)return;
     setSession(response.session);
     setState(current => current ? { ...current, sessions: response.sessions, skills: response.skills ?? current.skills } : current);
-    const draft = loadStructuredDraft(root, response.session.id);
+    const draft = loadStructuredDraft(root, response.session.id,ownerAssistantId);
     setPrompt(draft.text); setAttachments(draft.attachments); setView("chat");
   }, [projectRoot, openSession, createSession, switchWorkspace]);
+
+  const openOwnedSession = useCallback((id:string)=>{
+    const owner=state?.sessions.owners?.[id];
+    return owner?navigateToSession(owner.workspace || projectRoot,id,owner.assistant_id):openSession(id);
+  },[state?.sessions.owners,projectRoot,navigateToSession,openSession]);
 
   useEffect(()=>{const open=(event:Event)=>void navigateToSession(String((event as CustomEvent).detail.root),"").catch(error=>toast(String(error),"error"));window.addEventListener("reverie:workspace-open",open);return()=>window.removeEventListener("reverie:workspace-open",open);},[navigateToSession,toast]);
 
   useEffect(() => window.reverie.onEvent(message => {
-    if (message.type === "notification.open") { const item = asRecord(message.notification); void navigateToSession(String(item.projectRoot), String(item.sessionId)).catch(error => toast(String(error), "error")); }
+    if (message.type === 'aio.error') toast(`AiO: ${String(message.error || '')}`, 'error');
+    if (message.type === "notification.open") { const item = asRecord(message.notification); void navigateToSession(String(item.projectRoot), String(item.sessionId),item.assistantId==='aio'?'aio':undefined).catch(error => toast(String(error), "error")); }
+    if (message.type === 'aio.open') void navigateToSession(String(message.project_root || projectRoot),String(message.session_id),'aio').catch(error=>toast(String(error),'error'));
   }), [navigateToSession, toast]);
 
   const deleteProject = useCallback((target: { root: string; name: string; active: boolean }) => {
@@ -6859,7 +7015,7 @@ export default function App() {
       mode: state.workspace.mode, setMode: mode => void updateSetting("mode", mode),
       closeMentions: () => { mentionRequestSequence.current += 1; setMentionOpen(false); setMentionLoading(false); }, error: [draftError, composerError].filter(Boolean).join(" · "), status: controlStatus,
       moveAttachment: (index, direction) => setAttachments(current => { const next = [...current]; const target = Math.max(0, Math.min(next.length - 1, index + direction)); const [item] = next.splice(index, 1); next.splice(target, 0, item); return next; }),
-      queue, queuePaused, resumeQueue: () => { if(session)authorizedQueues.current.set(ownerKey(projectRoot,session.id),{projectRoot,sessionId:session.id}); setQueuePaused(false); },
+      queue, queuePaused, resumeQueue: () => { if(session)authorizedQueues.current.set(ownerKey(projectRoot,session.id,assistantId),{projectRoot,sessionId:session.id,assistantId}); setQueuePaused(false); },
       editQueue: (index, text, items) => { updateQueue(queue.map((item, i) => i === index ? { ...item, text, attachments: items } : item)); },
       moveQueue: (index, direction) => { const next = [...queue]; const [item] = next.splice(index, 1); next.splice(index + direction, 0, item); updateQueue(next); },
       deleteQueue: index => { updateQueue(queue.filter((_, i) => i !== index)); },
@@ -6878,10 +7034,10 @@ export default function App() {
     if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
     if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
-    if (view === "settings") return <SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} />;
-    return <ChatView controls={inputControls} session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
-        updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} />;
-  }, [inputControls, state, view, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
+    if (view === "settings") return <><AiOPanel open={(id,root)=>void (root?navigateToSession(root,id,'aio'):openSession(id,'aio'))}/><label className="settings-card">配置范围 <select aria-label="配置范围" value={settingsTarget} onChange={event=>setSettingsTarget(event.target.value as 'conversation'|'workspace')}><option value="conversation">当前对话配置</option><option value="workspace">工作区默认配置（用于新对话）</option></select></label><SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} /></>;
+    return <ChatView controls={inputControls} session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name, projectRoot, assistantId }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
+        updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} contextUsage={contextUsage} loadHistoryPage={loadHistoryPage} />;
+  }, [inputControls, state, view, settingsTarget, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, contextUsage]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
@@ -6897,7 +7053,7 @@ export default function App() {
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
     >
       <InputContext.Provider value={inputControls}>
-      <Sidebar collapsed={sidebarCollapsed} state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
+      <Sidebar collapsed={sidebarCollapsed} state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openOwnedSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name, projectRoot:state.sessions.owners?.[target.id]?.workspace || projectRoot, assistantId:state.sessions.owners?.[target.id]?state.sessions.owners[target.id].assistant_id:assistantId })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       </InputContext.Provider>
       <main className={`main-area ${gitStatus ? "with-git-status" : ""}`}>
         <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} uiVariant={uiPreferences.uiVariant} setUiVariant={uiVariant => updateUiPreferences({ uiVariant })} />
@@ -6910,7 +7066,7 @@ export default function App() {
         changesPanel={<FileChanges sessionId={activeSessionId} running={running} revision={state.recovery} />}
         contextPanel={<InspectorContent state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} tab="context" />}
         activityPanel={<InspectorContent state={state} liveTurn={liveTurn} indexWorkspace={() => void indexWorkspace()} compactContext={() => void compactContext()} compactDisabled={running || sessionBusy} tab="activity" />}>
-        <SessionWorkbench root={projectRoot} sessionId={activeSessionId} running={running} state={state} onDraft={value => setPrompt(current => current ? `${current}\n\n${value}` : value)} onNavigate={(root, id) => void navigateToSession(root, id).catch(error => toast(String(error), "error"))} />
+        <SessionWorkbench root={projectRoot} sessionId={activeSessionId} running={running} state={state} onDraft={value => setPrompt(current => current ? `${current}\n\n${value}` : value)} onNavigate={(root, id,ownerAssistantId) => void navigateToSession(root, id,ownerAssistantId).catch(error => toast(String(error), "error"))} />
       </Workbench>
       {/* Handles live on the shell, not inside the panes: both panes clip their
           overflow, so a child handle could not straddle the seam it drags. */}
@@ -6943,7 +7099,7 @@ export default function App() {
       />
       {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
-      {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openSession(id)} />}
+      {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openOwnedSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}
       {standardModelForm && <StandardModelModal target={standardModelForm.target} close={() => setStandardModelForm(null)} save={(model, clearApiKey) => void saveStandard(model, clearApiKey)} reveal={standardModelForm.target ? () => revealSecret({ kind: "standard", index: standardModelForm.target!.index }) : undefined} />}
       {providerModal && (

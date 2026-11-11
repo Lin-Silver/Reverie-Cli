@@ -22,6 +22,15 @@ it("a view callback holds the ordinary writer lease and rejects busy callbacks w
   coordinator.release((await prompt).id);
 });
 afterEach(async()=>{for(const root of roots.splice(0)){if(!path.resolve(root).startsWith(path.resolve(tmpdir())+path.sep))throw new Error("Unsafe cleanup");await rm(root,{recursive:true,force:true});}});
+it('keeps the AiO conversation identity across workspaces and separate from ordinary IDs',async()=>{
+  const first=await fixture(),second=await fixture();const manager=new ExecutionCoordinator(()=>{});
+  const main=await manager.acquire(first,'aio-mainline',true,true,false,'aio');
+  await expect(manager.acquire(second,'aio-mainline',true,true,false,'aio')).rejects.toThrow('already');
+  const ordinary=await manager.acquire(second,'aio-mainline',true);
+  expect(manager.find(second,'aio-mainline','aio')?.id).toBe(main.id);
+  expect(manager.find(second,'aio-mainline')?.id).toBe(ordinary.id);
+  manager.release(main.id);manager.release(ordinary.id);
+});
 it("serializes writers in one checkout and cancels queued tasks without disturbing the active owner",async()=>{const root=await fixture();const manager=new ExecutionCoordinator(()=>{});const first=await manager.acquire(root,"first");const secondPromise=manager.acquire(root,"second");const thirdPromise=manager.acquire(root,"third");const rejected=thirdPromise.catch(error=>error);await vi.waitFor(()=>expect(manager.list()).toHaveLength(3));expect(manager.list().filter(item=>item.state==="running")).toHaveLength(1);expect(manager.cancelQueued(root,"third")).toBe(true);expect((await rejected).message).toContain("No tools ran");manager.release(first.id);const second=await secondPromise;expect(second.state).toBe("running");expect(manager.list().map(item=>item.sessionId)).toEqual(["second"]);manager.release(second.id);});
 it("runs independent directories up to four cores and grants the fifth only after release",async()=>{const manager=new ExecutionCoordinator(()=>{});const entries=[];for(let i=0;i<4;i++)entries.push(await manager.acquire(await fixture(),String(i)));const fifthPromise=manager.acquire(await fixture(),"fifth");await vi.waitFor(()=>expect(manager.list()).toHaveLength(5));expect(manager.list().filter(item=>item.state==="running")).toHaveLength(4);expect(manager.list().find(item=>item.sessionId==="fifth")?.reason).toContain("4 maximum");manager.release(entries[0].id);const fifth=await fifthPromise;expect(fifth.state).toBe("running");for(const item of [...entries.slice(1),fifth])manager.release(item.id);expect(manager.list()).toEqual([]);});
 it("coordinates parent, child and junction aliases while allowing a distinct managed Git worktree",async()=>{

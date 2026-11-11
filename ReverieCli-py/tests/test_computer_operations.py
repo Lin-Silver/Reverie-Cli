@@ -19,6 +19,9 @@ REF = "@captured:e2"
 
 
 class _Runtime:
+    def check_cancel(self, command):
+        pass
+
     def __init__(self, root: Path, *, error: NativeDesktopError | None = None) -> None:
         self.root = root
         self.images = {}

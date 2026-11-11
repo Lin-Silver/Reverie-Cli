@@ -109,7 +109,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
     "subagent": {
         "command": "/subagent",
         "section": "Models & Modes",
-        "summary": "Create, inspect, and run isolated SubAgents from Reverie or Computer Controller.",
+        "summary": "Create, inspect, and run isolated SubAgents from Reverie or AiO.",
         "detail": "SubAgents use a selected model and non-desktop workflow mode. They support scoped synchronous or background work, cooperative cancellation, and selectively retained context without inheriting the main session.",
         "overview": "selector, create, list, model <id>, run <id> <task>, delete <id>",
         "aliases": ["/subagents"],
@@ -128,16 +128,16 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "section": "Models & Modes",
         "summary": "Show or switch Reverie operating modes.",
         "detail": "All modes share Context Engine. The selected mode changes the workflow, specialized tools, and delivery style.",
-        "overview": "show, reverie|reverie-atlas|reverie-gamer|writer|computer-controller",
+        "overview": "show, reverie|reverie-atlas|reverie-gamer|writer|aio",
         "subcommands": [
             {"usage": "/mode", "description": "Show the current mode and the full mode table."},
             {"usage": "/mode reverie", "description": "Switch to the general-purpose coding, automation, and long-running execution mode."},
             {"usage": "/mode reverie-atlas", "description": "Switch to the document-driven spec development mode for complex systems."},
             {"usage": "/mode reverie-gamer", "description": "Switch to the game-development mode."},
             {"usage": "/mode writer", "description": "Switch to the writing and narrative continuity mode."},
-            {"usage": "/mode computer-controller", "description": "Switch to desktop orchestration with the currently selected model."},
+            {"usage": "/mode aio", "description": "Open the persistent autonomous assistant with independent conversations and task branches."},
         ],
-        "examples": ["/mode", "/mode reverie-atlas", "/mode computer-controller"],
+        "examples": ["/mode", "/mode reverie-atlas", "/mode aio"],
     },
     "codex": {
         "command": "/codex",
@@ -276,7 +276,7 @@ HELP_TOPICS: Dict[str, Dict[str, object]] = {
         "command": "/nvidia",
         "section": "Providers",
         "summary": "Configure the NVIDIA source, including mixed-transport models and the API key used by Reverie.",
-        "detail": "Use this to save the NVIDIA API key, inspect the active NVIDIA setup, switch between supported models, choose model-specific thinking options, or override the endpoint for reverse proxies. Reverie also reads `NVIDIA_API_KEY` automatically when present, and Computer Controller mode pins the runtime to `meta/muse-glimmer-30b`. Vision models can also accept inline `@image.png` attachments in chat.",
+        "detail": "Use this to save the NVIDIA API key, inspect the active NVIDIA setup, switch between supported models, choose model-specific thinking options, or override the endpoint for reverse proxies. Reverie also reads `NVIDIA_API_KEY` automatically when present. AiO keeps its independently selected model. Vision models can also accept inline `@image.png` attachments in chat.",
         "overview": "status, key, activate, model [id], thinking, endpoint [value]",
         "subcommands": [
             {"usage": "/nvidia", "description": "Show the current NVIDIA source configuration."},

@@ -34,10 +34,10 @@ MODE_METADATA: Dict[str, Dict[str, object]] = {
         "description": "Creative writing mode for autonomous, persistent long-form fiction planning, serialized drafting, continuity control, and verified completion.",
         "switchable": True,
     },
-    "computer-controller": {
-        "display_name": "Computer Controller",
-        "description": "Desktop orchestrator using shared native Computer Use tools and the selected text or vision model.",
-        "switchable": False,
+    "aio": {
+        "display_name": "AiO",
+        "description": "Persistent autonomous assistant with event judgment, independently configured task branches, long-term memory and shared native desktop tools.",
+        "switchable": True,
     },
 }
 
@@ -53,17 +53,19 @@ MODE_ALIASES = {
     "reverie-gamer": "reverie-gamer",
     "gamer": "reverie-gamer",
     "writer": "writer",
-    "computer-controller": "computer-controller",
-    "computer controller": "computer-controller",
-    "computer-control": "computer-controller",
-    "computer control": "computer-controller",
-    "computer": "computer-controller",
+    "aio": "aio",
+    "all in one": "aio",
+    "computer-controller": "aio",
+    "computer controller": "aio",
+    "computer-control": "aio",
+    "computer control": "aio",
+    "computer": "aio",
 }
 
 LEGACY_MODE_ALIASES = {
     # Backward compatibility for historical typo variants.
-    "computer-controler": "computer-controller",
-    "computer controler": "computer-controller",
+    "computer-controler": "aio",
+    "computer controler": "aio",
 }
 
 MODE_ALIASES.update(LEGACY_MODE_ALIASES)
@@ -341,7 +343,7 @@ MODE_TOOL_DISCOVERY_PROFILES: Dict[str, Dict[str, tuple[str, ...]]] = {
         ),
         "deemphasize_categories": ("game-design", "game-runtime", "atlas", "desktop"),
     },
-    "computer-controller": {
+    "aio": {
         "focus_categories": ("desktop", "vision", "coordination"),
         "boost_tools": (
             "list_apps",
@@ -425,7 +427,7 @@ def list_modes(include_computer: bool = True, switchable_only: bool = False) -> 
     """List supported modes in the preferred display order."""
     result: List[str] = []
     for mode_name, meta in MODE_METADATA.items():
-        if not include_computer and mode_name == "computer-controller":
+        if not include_computer and mode_name == "aio":
             continue
         if switchable_only and not bool(meta.get("switchable", False)):
             continue

@@ -1,5 +1,7 @@
 # Computer Controller
 
+> Historical implementation notes: AiO replaces this mode entry. Current assistant usage and migration are documented in [AiO and conversations](AIO_CONVERSATIONS.md); the current desktop tool runtime is documented in [Computer Use](COMPUTER_USE.md). The embedded runtime described below belongs to the earlier implementation.
+
 Computer Controller uses an embedded Python implementation of the
 Open Computer Use MCP contract. It does not start an MCP child process, and the
 legacy single-surface `computer_control` tool it replaced has been removed.

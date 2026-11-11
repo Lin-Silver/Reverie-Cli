@@ -112,7 +112,9 @@ Reverie ships with specialized modes that change tooling, system prompt rules, a
 | `reverie-atlas`       | Reverie-Atlas       | Document-driven spec development. Deep research paired with Context Engine, spec packages (requirements/design/tasks), and Atlas delivery artifacts.                                                               |
 | `reverie-gamer`       | Reverie-Gamer       | ⚠️**Work in Progress** — Full game production pipeline (blueprints, system packets, vertical slices, playtest loops, modeling pipelines). Not yet complete.                                                    |
 | `writer`              | Writer              | Creative writing: persistent long-form fiction planning, serialized drafting, continuity control, and verified completion.                                                                                        |
-| `computer-controller` | Computer Controller | Accessibility-first desktop orchestration with the selected model and 29 built-in tools shared with Reverie mode. Screenshots and physical input are explicit optional capabilities. |
+| `aio` | AiO | Autonomous assistant with a persistent mainline, workspace-owned task branches, proactive messages, and desktop tools using the selected model. |
+
+All modes save independent conversation configuration. The desktop host keeps tasks running when you switch conversations or workspaces. See [AiO and conversations](docs/AIO_CONVERSATIONS.md) and [implementation status](docs/AIO_IMPLEMENTATION_STATUS.md) for usage and the remaining performance and endurance qualification.
 
 ### Context Engine
 
@@ -497,9 +499,9 @@ Creative writing mode with:
 - One TXT export per committed chapter plus merged `manuscript.txt`
 - Completion audits that verify the persisted novel state before finishing
 
-### Computer Controller
+### AiO and computer use
 
-Desktop orchestration through the bundled agent-desktop 1.2.0 engine. The default loop uses the OS accessibility tree, snapshot refs, semantic actions and property verification, without screenshots or pixel matching. Both Reverie and Computer Controller expose the same 29 built-in desktop tools and use the selected model. Only the main agent controls the desktop; screenshots and physical input are explicit optional paths. See [Computer Use](docs/COMPUTER_USE.md) for interfaces, permissions, packaging and verification limits.
+AiO replaces the former Computer Controller mode with a persistent assistant, independent task branches, scoped memory, and a full-text reply window. Desktop orchestration uses the bundled agent-desktop 1.2.0 engine. The default loop uses the OS accessibility tree, snapshot refs, semantic actions and property verification. Reverie and AiO share the built-in desktop tools and use the selected model. Only the main agent controls the desktop; screenshots and physical input are explicit optional paths. See [AiO and conversations](docs/AIO_CONVERSATIONS.md) and [Computer Use](docs/COMPUTER_USE.md) for usage, permissions and verification limits.
 
 ---
 

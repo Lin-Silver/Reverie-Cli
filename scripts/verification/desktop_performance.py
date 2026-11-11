@@ -24,7 +24,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ReverieCli-py"))
-from desktop_process import launch_options, stop_process, wait_for_packaged_page
+from desktop_process import keep_windows_awake, launch_options, native_window_state, stop_process, wait_for_native_foreground, wait_for_packaged_page
 
 
 def summary(values):
@@ -125,6 +125,11 @@ MONITOR = """() => {
 
 
 def measure(page, seconds, *, scrolling=False, typing=False):
+    root_pid = getattr(page, '_qualification_process_id', None)
+    native_before = wait_for_native_foreground(page, root_pid, page._qualification_output,
+                                               'typing' if typing else 'scrolling' if scrolling else 'idle') if root_pid is not None else {'required': False}
+    if native_before['required'] and not native_before['visible']:
+        raise RuntimeError('The measured Windows package has no visible native window.')
     profiler = page.context.new_cdp_session(page)
     profiler.send('Performance.enable')
     before = {v['name']: v['value'] for v in profiler.send('Performance.getMetrics')['metrics']}
@@ -159,6 +164,8 @@ def measure(page, seconds, *, scrolling=False, typing=False):
     }
     data['cpu_seconds'] = {key: round(after.get(key, 0) - before.get(key, 0), 4)
                            for key in ['LayoutDuration', 'RecalcStyleDuration', 'ScriptDuration', 'TaskDuration']}
+    data['native_windows'] = {'before': native_before,
+                             'after': native_window_state(root_pid) if root_pid is not None else {'required': False}}
     profiler.detach()
     return data
 
@@ -172,6 +179,19 @@ def resource_snapshot():
         except OSError:
             values[name] = None
     return values
+
+
+def capture_failure_state(page, output, report):
+    try:
+        report['failure_state']=page.evaluate('''() => ({
+            header:document.querySelector('.conversation-header')?.innerText,
+            transcriptTail:document.querySelector('.transcript')?.innerText.slice(-1200),
+            liveMessages:document.querySelectorAll('.live-message').length,
+            stopButtons:document.querySelectorAll('.stop-button').length,
+            events:window.__performanceEvents || []})''')
+        page.screenshot(path=str(output / 'desktop-failure.png'))
+    except Exception as capture_error:
+        report['failure_capture_error']=str(capture_error)
 
 
 def main():
@@ -197,6 +217,14 @@ def main():
     workspace, app_root, home = [output / name for name in ("workspace", "app-root", "desktop-home")]
     for directory in (workspace, app_root, home):
         directory.mkdir()
+    # Own the fixture repository so write-task isolation cannot snapshot the
+    # surrounding development checkout and its unrelated uncommitted work.
+    (workspace / '.gitignore').write_text('.reverie/\n', encoding='utf-8')
+    subprocess.run(['git', 'init', '-b', 'main', str(workspace)], check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(workspace), 'add', '.gitignore'], check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(workspace), '-c', 'user.name=Qualification',
+                    '-c', 'user.email=qualification@example.invalid', 'commit', '-m', 'Fixture'],
+                   check=True, capture_output=True)
     os.environ["REVERIE_APP_ROOT"] = str(app_root)
     os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
     server = ThreadingHTTPServer(("127.0.0.1", 0), StreamFixture)
@@ -219,6 +247,8 @@ def main():
     settings.write_text(json.dumps({"coreAppRoot": str(app_root), "projectRoot": str(workspace), "theme": args.theme,
                                    "ui": {"language": "zh-CN", "backgroundPreset": "none"}}))
     env = {**os.environ, "HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "PORTABLE_EXECUTABLE_DIR": str(home)}
+    git_entries = int(env.get("GIT_CONFIG_COUNT", "0"))
+    env.update({"GIT_CONFIG_COUNT":str(git_entries+1), f"GIT_CONFIG_KEY_{git_entries}":"safe.directory", f"GIT_CONFIG_VALUE_{git_entries}":str(ROOT).replace("\\", "/")})
     env.pop("ELECTRON_RUN_AS_NODE", None)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -230,20 +260,35 @@ def main():
               "experimental_css": str(args.experiment_css.resolve()) if args.experiment_css else None,
               "method": __doc__, "checks": [], "scenarios": {}, "switches": [], "browser_errors": [],
               "resource_limits_before": resource_snapshot()}
-    app = browser = None
+    report['harness_sha256']=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    report['support_harness_sha256']={'desktop_process.py':hashlib.sha256(Path(__file__).with_name('desktop_process.py').read_bytes()).hexdigest()}
+    app = browser = page = None
 
     def check(name, passed, detail=None):
         report["checks"].append({"name": name, "passed": bool(passed), "detail": detail})
 
     try:
-        with (output / "desktop.log").open("x") as log, sync_playwright() as pw:
+        with keep_windows_awake() as power_request, (output / "desktop.log").open("x") as log, sync_playwright() as pw:
+            report['power_request']=power_request
             app = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace),
-                                    f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
+                                    f"--remote-debugging-port={port}", "--user-data-dir="+str(home / "electron-profile")], env=env, stdout=log, stderr=log, **launch_options(visible=True))
             browser, page = wait_for_packaged_page(pw, app, port)
+            page._qualification_process_id = app.pid
+            page._qualification_output = output
             page.on("pageerror", lambda error: report["browser_errors"].append(str(error)))
             page.wait_for_selector(".composer textarea", timeout=90000)
+            page.evaluate('''() => {
+                window.__performanceEvents=[];
+                window.reverie.onEvent(message => {
+                    const event=message.event || {};
+                    window.__performanceEvents.push({at:performance.now(),type:message.type,root:message.projectRoot,
+                        event:event.type,session:event.session_id,run:event.run_id});
+                    if(window.__performanceEvents.length>500)window.__performanceEvents.shift();
+                });
+            }''')
             page.set_viewport_size({"width": args.width, "height": 960})
             page.wait_for_function("theme=>document.documentElement.dataset.theme===theme", arg=args.theme)
+            report['native_initial_window'] = wait_for_native_foreground(page, app.pid, output, 'initial')
             if args.experiment_css:
                 css = args.experiment_css.read_text()
                 report['experimental_css_sha256'] = hashlib.sha256(css.encode()).hexdigest()
@@ -301,11 +346,15 @@ def main():
             report["scenarios"]["expanded_scroll"] = measure(page, args.seconds, scrolling=True)
             page.locator('.composer textarea').fill('只根据给出的数字做静态展示：待处理6、进行中3、已完成2、暂停1，列出项目总览表。')
             page.get_by_role('button', name='发送', exact=True).click()
-            page.wait_for_selector('.live-message', timeout=15000)
+            try:
+                page.wait_for_selector('.live-message', timeout=15000)
+            except Exception:
+                capture_failure_state(page, output, report)
+                raise
             live_node = page.locator('.live-message').element_handle()
             report['live_message_in_history_slot'] = live_node.evaluate('element => Boolean(element.closest(".history-render-chunk"))')
             report["scenarios"]["streaming_typing"] = measure(page, args.seconds, typing=True)
-            page.wait_for_function("document.querySelector('.transcript')?.textContent.includes('PERF_STREAM_COMPLETE')", timeout=60000)
+            page.wait_for_function("() => document.querySelector('.transcript')?.textContent.includes('PERF_STREAM_COMPLETE')", timeout=60000)
             page.wait_for_selector('.stop-button', state='hidden', timeout=30000)
             page.wait_for_timeout(400)
             check("stream_completed", 'PERF_STREAM_COMPLETE' in page.locator('.transcript').inner_text())
@@ -350,6 +399,9 @@ def main():
             report['requests'] = [{"stream": p.get('stream'), "tools": len(p.get('tools', []))} for p in StreamFixture.requests]
             check('no_browser_errors', not report['browser_errors'], report['browser_errors'])
             for label, data in report['scenarios'].items():
+                if os.name == 'nt':
+                    check(label + '_native_window_visible', all(state['visible'] for state in data['native_windows'].values()))
+                    check(label + '_native_window_foreground', all(state['foreground'] for state in data['native_windows'].values()))
                 check(label + '_raf_at_least_50', data['raf_frames_per_second'] >= 50, data['raf_frames_per_second'])
                 check(label + '_frame_p95_under_34ms', data['frame_intervals'].get('p95_ms', float('inf')) <= 34,
                       data['frame_intervals'])
@@ -361,6 +413,9 @@ def main():
     except Exception as error:
         report['error'] = type(error).__name__ + ': ' + str(error)
         report['passed'] = False
+        report['requests'] = [{"stream": p.get('stream'), "tools": len(p.get('tools', []))} for p in StreamFixture.requests]
+        if page is not None and not page.is_closed():
+            capture_failure_state(page, output, report)
     finally:
         if browser:
             try:
@@ -375,7 +430,7 @@ def main():
         server.shutdown()
         server.server_close()
         report['resource_limits_after'] = resource_snapshot()
-        (output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+        (output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({"passed": report['passed'], "error": report.get('error'), "scenarios": {
         name: {k: {subkey: value for subkey, value in v.items() if subkey not in {'samples_ms', 'entries'}} if isinstance(v, dict) else v
                for k, v in data.items() if k != 'longTasks'} for name, data in report['scenarios'].items()

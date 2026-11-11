@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — AiO and independent conversations
+
+- Replaced the Computer Controller mode entry with AiO: a persistent assistant mainline, task branches, proactive messages, a full-text reply window, lifecycle controls, and memory correction/deletion.
+- Added independent configuration for every conversation, stable model references, workspace ownership, and background execution across conversation/workspace switches.
+- Added SQLite conversation history, configuration revisions, paged reads, durable stream fragments, resumable legacy JSON migration, and AiO exports with companion event records.
+- Added shared execution slots, isolated Git write tasks and conflict-preserving incorporation; fixed linked-checkout ownership and explicit AiO control routing.
+- Preserved exact saved message/file bytes, retained expanded history, made memory-cache publication atomic, and added persistence failure diagnostics.
+- Kept proxy credentials in shared configuration and removed them from conversation snapshots and configuration exports, including legacy AiO event records. Malformed legacy files are reported without blocking healthy listings.
+- See [implementation status](AIO_IMPLEMENTATION_STATUS.md) for verified checks and the still-open performance, native preflight, and eight-hour endurance qualification. This source update does not create a new tagged release; package metadata remains 2.5.3.
+
 <a id="v2-5-3"></a>
 
 ## v2.5.3 — Liquid Glass, RIU, and Desktop

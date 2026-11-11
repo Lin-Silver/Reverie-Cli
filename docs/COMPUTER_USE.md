@@ -1,8 +1,8 @@
 # Computer Use 内置工具
 
-Reverie 在 `reverie` 和 `computer-controller` 模式中提供相同的 29 个 `computer_*` 内置工具。Windows x64 包内置 agent-desktop 1.2.0；运行时不安装依赖、不查询 PATH、不通过 PowerShell 或 MCP 转发桌面操作。
+Reverie 在 `reverie` 和 `aio` 模式中提供相同的 29 个 `computer_*` 内置工具。Windows x64 包内置 agent-desktop 1.2.0；运行时不安装依赖、不查询 PATH、不通过 PowerShell 或 MCP 转发桌面操作。
 
-Computer 模式保留专用桌面编排提示词和原来的会话归档位置。它使用当前选择的模型、提供方和推理设置，不再绑定 NVIDIA。NVIDIA 仍是正常可选的模型来源。
+旧 Computer 模式入口现迁移为 AiO，使用独立助手主线和任务分支，历史迁移保留原文件与旧模式来源。AiO 使用当前选择的模型、提供方和推理设置，不绑定 NVIDIA。NVIDIA 仍是正常可选的模型来源。助手使用、迁移与后台调度范围见 [AiO 与独立对话](AIO_CONVERSATIONS.md)。
 
 核心路线是不依赖截图和像素匹配的无障碍语义控制。截图和物理鼠键是显式补充能力；普通观察、语义点击和语义输入不会为了执行操作而接管指针或前台焦点。
 

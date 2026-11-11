@@ -40,9 +40,9 @@ Notes:
 | `/mode reverie-atlas` | Switch to the document-driven spec development and spec-authoring mode |
 | `/mode reverie-gamer` | Switch to the work-in-progress game-development mode |
 | `/mode writer` | Switch to the writing and narrative continuity mode |
-| `/mode computer-controller` | Switch to the pinned NVIDIA desktop orchestrator with an embedded Open Computer Use-compatible desktop runtime |
+| `/mode aio` | Switch to AiO with its persistent assistant mainline, task branches and selected model |
 
-SubAgents are enabled in `reverie` and `computer-controller` modes, including NVIDIA-backed Controller sessions. Children have isolated sessions and selective context; the main Computer Controller remains the only desktop actor. Computer Controller is entered explicitly, but once active it may hand off to another mode with `switch_mode` when desktop control is no longer the primary job.
+SubAgents are enabled in `reverie` and `aio` modes. Children have isolated sessions and selective context; only the main agent controls the desktop. Legacy `computer-controller` mode names resolve to AiO. See [AiO and conversations](AIO_CONVERSATIONS.md) for independent configuration, background execution and migration.
 
 ## Providers
 
@@ -90,7 +90,7 @@ SubAgents are enabled in `reverie` and `computer-controller` modes, including NV
 | `/provider <name> remove` | Delete a custom provider and its saved key |
 
 Request-based NVIDIA vision models can also consume inline chat attachments like `@image.png`.
-Reverie also reads `NVIDIA_API_KEY` automatically when it is present, and Computer Controller mode pins the runtime to `meta/muse-glimmer-30b`.
+Reverie also reads `NVIDIA_API_KEY` automatically when it is present. AiO uses its selected model and does not pin a NVIDIA model.
 ModelScope is called through OpenAI Chat Completions and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its live-verified default model is `stepfun-ai/Step-3.7-Flash`. Model and reasoning selectors are generated from the core capability catalog.
 
 `/provider` is the one surface over every source. `/provider list` mixes the built-in sources above with the providers you added yourself, shows which ones have an API key, and probes each reachable endpoint in parallel to report online state, latency, and how many models it publishes. Sources without a catalog endpoint (Codex, WebGemini) are marked "not probed"; use `/provider <name> test` for those.

@@ -16,7 +16,8 @@ Reverie CLI 是一个面向大型代码仓库的上下文引擎驱动 AI 助手�
 - `Reverie-Atlas`：文档驱动的规格、设计和交付流程。
 - `Reverie-Gamer`：仍在完善中的游戏规划、项目生成、垂直切片和运行证据验证。
 - `Writer`：磁盘持久化的长篇写作、连续性检查和完成审计。
-- `Computer Controller`：Windows 桌面控制与受管子代理。
+- `AiO`：长期助手主线、独立任务分支、主动发言、记忆管理与 Windows 桌面工具，替换旧 Computer Controller 入口。使用方法见 [AiO 与独立对话](AIO_CONVERSATIONS.md)，当前测试及未完成验收见 [实现状态](AIO_IMPLEMENTATION_STATUS.md)。
+- 全模式独立对话配置。桌面端切换对话和工作区后，后台任务继续在原工作区执行；最多四任务并行，普通 Git 写任务成功完成后汇入，带验收条件的任务通过额外验证后汇入。
 - Context Engine：符号、依赖、语义、提交历史和项目记忆检索。
 - 图片生成：可在桌面端「设置 → 生图模型」选择本地或远程模型。Pollinations 生图需要 API 密钥；SenseNova 图片编辑默认由服务决定输出尺寸，可通过 `size` 指定尺寸。
 - Skills：渐进式 `SKILL.md` 发现；`/skill <名称>` 固定必须使用的 Skill，每轮完整读取主正文并注入请求，缺失时阻止执行。内置 `photo-to-3d` 与 Emil Kowalski 的全部 14 个设计 Skill（含 Apple Design）。CLI / Desktop 重启、同任务分叉 / 轮换可恢复 pin；普通新会话独立。模型实际遵循和引用资源的边界见 [Skills 指南](SKILLS.md)。

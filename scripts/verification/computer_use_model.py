@@ -29,6 +29,10 @@ def run():
     elif model_name != 'active':
         config.active_model_source = 'standard'
         config.active_model_index = next(i for i, model in enumerate(config.models) if model.model == model_name)
+    selected = next((argument.split('=',1)[1] for argument in sys.argv if argument.startswith('--provider-model=')),None)
+    if selected:
+        from reverie.desktop_catalog import apply_model_selection
+        apply_model_selection(config,config.active_model_source,selected)
     model = config.active_model
     if '--vision' in sys.argv:
         model.supports_vision = True
@@ -78,7 +82,7 @@ def run():
                     if time.monotonic() >= focus_deadline:
                         raise TimeoutError('Owned fixture did not acquire foreground within 90 seconds')
                     time.sleep(.25)
-        agent = ReverieAgent(model.base_url, model.api_key, model.model, project_root=work,
+        agent = ReverieAgent(model.base_url, model.resolve_api_key(), model.model, project_root=work,
                              provider=model.provider, config=config, mode=mode,
                              thinking_mode=model.thinking_mode, endpoint=model.endpoint,
                              custom_headers=model.custom_headers)

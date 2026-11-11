@@ -1,10 +1,35 @@
 """Own only the isolated Desktop process tree launched by a verifier."""
 import os
+import ctypes
+from contextlib import contextmanager
 from pathlib import Path
+import json
 import signal
 import subprocess
 import sys
 import time
+
+
+@contextmanager
+def keep_windows_awake():
+    """Hold a temporary test-thread power request, restoring its prior state on exit."""
+    record={'required':os.name=='nt','acquired':False,'released':False}
+    previous=None
+    if os.name=='nt':
+        execution_state=ctypes.windll.kernel32.SetThreadExecutionState
+        execution_state.argtypes=[ctypes.c_uint]
+        execution_state.restype=ctypes.c_uint
+        previous=execution_state(0x80000003)
+        if not previous:
+            raise RuntimeError('Windows did not acquire the temporary verification power request.')
+        record['acquired']=True
+    try:
+        yield record
+    finally:
+        if previous is not None:
+            record['released']=bool(execution_state(previous | 0x80000000))
+            if not record['released']:
+                raise RuntimeError('Windows did not release the temporary verification power request.')
 
 
 def packaged_kernel_path(executable):
@@ -21,6 +46,72 @@ def launch_options(*, visible=False):
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = int(visible)
     return {'startupinfo': startup}
+
+
+def native_window_state(root_pid):
+    """Read owned native window visibility without changing focus or window state."""
+    if os.name != 'nt':
+        return {'required': False}
+    from ctypes import wintypes
+    import psutil
+
+    process = psutil.Process(root_pid)
+    owned = {root_pid, *(child.pid for child in process.children(recursive=True))}
+    user32 = ctypes.windll.user32
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    foreground = user32.GetForegroundWindow()
+    left, top = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+    right, bottom = left + user32.GetSystemMetrics(78), top + user32.GetSystemMetrics(79)
+    windows = []
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def observe(hwnd, _data):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value not in owned or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+            return True
+        bounds = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(bounds)):
+            return True
+        if min(bounds.right, right) <= max(bounds.left, left) or min(bounds.bottom, bottom) <= max(bounds.top, top):
+            return True
+        windows.append({'pid': pid.value, 'handle': int(hwnd),
+                        'bounds': [bounds.left, bounds.top, bounds.right, bounds.bottom],
+                        'foreground': hwnd == foreground})
+        return True
+
+    callback = callback_type(observe)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    if not user32.EnumWindows(callback, 0):
+        raise ctypes.WinError()
+    return {'required': True, 'visible': bool(windows),
+            'foreground': any(window['foreground'] for window in windows), 'windows': windows}
+
+
+def wait_for_native_foreground(page, root_pid, output, phase):
+    """Request native test focus; the observer itself never activates a window."""
+    if os.name != 'nt':
+        return {'required': False}
+    started = time.monotonic()
+    destination = Path(output) / 'native-foreground.json'
+    while True:
+        state = native_window_state(root_pid)
+        ready = state['visible'] and state['foreground']
+        destination.write_text(json.dumps({
+            'phase': phase, 'pid': root_pid, 'status': 'ready' if ready else 'waiting',
+            'wait_seconds': time.monotonic() - started, 'native': state,
+        }, indent=2), encoding='utf-8')
+        if ready:
+            return state
+        if time.monotonic() - started >= 120:
+            raise RuntimeError('Native qualification requires the owned window to be visible and in the foreground.')
+        page.wait_for_timeout(100)
 
 
 def stop_process(process):

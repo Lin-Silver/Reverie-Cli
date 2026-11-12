@@ -30,6 +30,7 @@ export interface InputControls {
   closeMentions: () => void;
   error: string;
   status: string;
+  wstyle?: { output: string; busy: boolean; close: () => void };
   queue: QueuedMessage[];
   queuePaused: boolean;
   editQueue: (index: number, text: string, attachments: ComposerAttachment[]) => void;

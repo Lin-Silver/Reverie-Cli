@@ -173,7 +173,7 @@ class InputHandler:
         text = str(buffer or "")
         if "\n" in text or not text.startswith("/"):
             return []
-        return self.get_command_completions(text.rstrip())
+        return self.get_command_completions(text.rstrip('\r\n') if text.lower().startswith('/wstyle ') else text.rstrip())
 
     def _inline_completion_text(self, buffer: str, selected: int = 0) -> str:
         completions = self._completion_candidates(buffer)
@@ -716,7 +716,7 @@ class InputHandler:
                 text = document.text_before_cursor
                 if not text.startswith("/") or "\n" in text:
                     return
-                for command, description in owner.get_command_completions(text.rstrip()):
+                for command, description in owner.get_command_completions(text.rstrip('\r\n') if text.lower().startswith('/wstyle ') else text.rstrip()):
                     yield Completion(command, start_position=-len(text), display_meta=description)
 
         history = InMemoryHistory()
@@ -780,6 +780,16 @@ class InputHandler:
                 commands.update(self.command_provider() or {})
             except Exception:
                 report_suppressed_exception("load dynamic command completions")
+        if partial.lower().startswith('/wstyle use '):
+            parts = partial[len('/wstyle use '):].split()
+            selected = parts if partial[-1:].isspace() else parts[:-1]
+            query = '' if partial[-1:].isspace() or not parts else parts[-1].casefold()
+            prefix = '/wstyle use ' + (' '.join(selected) + ' ' if selected else '')
+            return [(prefix + command[len('/wstyle use '):], description)
+                    for command, description in commands.items()
+                    if command.startswith('/wstyle use ') and len(command.split()) == 3
+                    and command[len('/wstyle use '):].casefold().startswith(query)
+                    and command[len('/wstyle use '):].casefold() not in {value.casefold() for value in selected}]
         for cmd, desc in commands.items():
             if cmd.lower().startswith(partial_lower):
                 completions.append((cmd, desc))

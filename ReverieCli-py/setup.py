@@ -70,6 +70,7 @@ setup(
             "computer_use/native/windows-x64/*",
         ],
         "reverie.agent": ["tool_manifest.json"],
+        "reverie.writer": ["wstyle_cards/*.md"],
     },
     exclude_package_data={
         "reverie": [
@@ -93,6 +94,7 @@ setup(
         "anyio==4.15.1",
         "openai==2.44.0",
         "anthropic==0.112.0",
+        "google-genai==2.33.0",
 
         # Git integration
         "GitPython==3.1.50",

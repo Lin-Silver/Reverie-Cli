@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import re
 from enum import Enum
+from collections import Counter
 
 
 class ToneType(Enum):
@@ -105,7 +106,7 @@ class NarrativeAnalyzer:
             
             if matches > 0:
                 # Confidence based on keyword density
-                total_words = len(text.split())
+                total_words = len(re.findall(r"[\u3400-\u9fff]|[A-Za-z0-9]+", text))
                 tone_scores[tone] = min(1.0, matches / max(1, total_words / 100))
         
         # Find dominant tone
@@ -114,7 +115,7 @@ class NarrativeAnalyzer:
             dominant_confidence = tone_scores[dominant_tone]
         else:
             dominant_tone = "neutral"
-            dominant_confidence = 0.5
+            dominant_confidence = 0.0
         
         # Calculate emotional intensity
         emotional_intensity = sum(tone_scores.values()) / max(1, len(tone_scores))
@@ -136,10 +137,13 @@ class NarrativeAnalyzer:
         
         Based on sentence length, dialogue, and action words.
         """
-        sentences = re.split(r'[.!?]+', text)
+        sentences = [sentence for sentence in re.split(r'[.!?。！？]+', text) if sentence.strip()]
         if not sentences:
             return "moderate"
         
+        if re.search(r'[\u3400-\u9fff]', text):
+            average = sum(sum(not char.isspace() for char in sentence) for sentence in sentences) / len(sentences)
+            return "fast" if average < 18 else "slow" if average > 45 else "moderate"
         avg_sentence_length = sum(len(s.split()) for s in sentences) / len(sentences)
         
         # Fast pacing: short sentences (< 10 words)
@@ -157,21 +161,23 @@ class NarrativeAnalyzer:
         
         Returns list of repetitive phrases found.
         """
-        words = text.lower().split()
-        repetitions = []
-        
-        # Check for repeated phrases of various lengths
-        for phrase_length in range(min_length, min(15, len(words))):
-            for i in range(len(words) - phrase_length):
-                phrase = " ".join(words[i:i+phrase_length])
-                
-                # Check if this phrase appears again later
-                rest_text = " ".join(words[i+phrase_length:])
-                if phrase in rest_text:
-                    if phrase not in repetitions:
-                        repetitions.append(phrase)
-        
-        return repetitions[:10]  # Return top 10 repetitions
+        candidates = set()
+        # Count across separate Chinese clauses too, without stripping punctuation.
+        runs = re.findall(r'[\u3400-\u9fff]+', text)
+        for size in range(max(8, min_length), 33):
+            counts = Counter(run[index:index + size] for run in runs for index in range(max(0, len(run) - size + 1)))
+            candidates.update(phrase for phrase, count in counts.items() if count >= 3)
+        words = re.findall(r'[A-Za-z0-9]+(?:\'[A-Za-z]+)?', text.lower())
+        for size in range(max(1, min_length), min(14, len(words)) + 1):
+            counts = Counter(" ".join(words[index:index + size]) for index in range(len(words) - size + 1))
+            candidates.update(phrase for phrase, count in counts.items() if count >= 2)
+        result = []
+        for phrase in sorted(candidates, key=lambda value: (-len(value), value)):
+            if not any(phrase in prior for prior in result):
+                result.append(phrase)
+                if len(result) == 10:
+                    break
+        return result
     
     def analyze_character_consistency(self, character_name: str, dialogues: List[str]) -> Dict[str, Any]:
         """
@@ -179,17 +185,12 @@ class NarrativeAnalyzer:
         
         Returns analysis of character speech patterns.
         """
-        if not dialogues:
-            return {"consistency_score": 0.0, "speech_patterns": []}
-        
         # Extract key characteristics
         patterns = {
-            "formal_words": 0,
             "contractions": 0,
             "exclamations": 0,
             "questions": 0,
             "average_sentence_length": 0,
-            "vocabulary_complexity": 0,
         }
         
         total_words = 0
@@ -197,31 +198,30 @@ class NarrativeAnalyzer:
         
         for dialogue in dialogues:
             # Count word types
-            words = dialogue.split()
-            total_words += len(words)
+            total_words += sum(not char.isspace() for char in dialogue)
             
             # Contractions
             patterns["contractions"] += len(re.findall(r"\b\w+n't\b|\b\w+\'[a-z]{1,2}\b", dialogue))
             
             # Exclamations
-            patterns["exclamations"] += dialogue.count("!")
+            patterns["exclamations"] += dialogue.count("!") + dialogue.count("！")
             
             # Questions
-            patterns["questions"] += dialogue.count("?")
+            patterns["questions"] += dialogue.count("?") + dialogue.count("？")
             
             # Sentences
-            sentences = re.split(r'[.!?]+', dialogue)
+            sentences = re.split(r'[.!?。！？]+', dialogue)
             total_sentences += len([s for s in sentences if s.strip()])
         
         if total_sentences > 0:
             patterns["average_sentence_length"] = total_words / total_sentences
         
-        # Calculate consistency score
-        # Characters should have somewhat consistent patterns
-        consistency_score = 0.7  # Default moderate consistency
-        
         return {
-            "consistency_score": consistency_score,
+            "consistency_score": None,
+            "assessment": "descriptive_only",
+            "sentence_length_unit": "non-whitespace characters",
+            "dialogue_count": len(dialogues),
+            "limitations": "Punctuation and length describe surface habits; they do not prove character voice or motivation consistency.",
             "speech_patterns": patterns,
             "character_name": character_name,
         }

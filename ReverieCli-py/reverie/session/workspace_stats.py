@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import hashlib
@@ -19,6 +19,7 @@ import json
 import os
 import sqlite3
 import time
+import uuid
 
 from ..diagnostics import report_suppressed_exception
 
@@ -31,6 +32,10 @@ WORKSPACE_STATS_FILENAME = "workspace_stats.json"
 
 def _now_iso() -> str:
     return datetime.now().replace(microsecond=0).isoformat()
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalize_path(path_value: Any) -> str:
@@ -293,6 +298,7 @@ class WorkspaceStatsManager:
         self._dirty = False
         self._last_save_monotonic = 0.0
         self._pending_since_monotonic = 0.0
+        self._pending_requests: List[Dict[str, Any]] = []
 
         workspace_path = _normalize_path(self.project_root or self.project_data_dir)
         workspace_name = (
@@ -408,9 +414,12 @@ class WorkspaceStatsManager:
             get_value = lambda key, default=None: getattr(usage, key, default)
         result: Dict[str, int] = {}
         for field, aliases in (
-            ("input_tokens", ("prompt_tokens", "input_tokens")),
-            ("output_tokens", ("completion_tokens", "output_tokens")),
-            ("total_tokens", ("total_tokens",)),
+            ("input_tokens", ("prompt_tokens", "input_tokens", "prompt_token_count", "total_input_tokens")),
+            ("output_tokens", ("completion_tokens", "output_tokens", "candidates_token_count", "total_output_tokens")),
+            ("total_tokens", ("total_tokens", "total_token_count")),
+            ("cached_input_tokens", ("cached_input_tokens", "cache_read_input_tokens", "cached_content_token_count", "total_cached_tokens")),
+            ("cache_creation_tokens", ("cache_creation_tokens", "cache_creation_input_tokens")),
+            ("reasoning_tokens", ("reasoning_tokens", "thoughts_token_count", "total_thought_tokens")),
         ):
             for alias in aliases:
                 value = get_value(alias)
@@ -427,6 +436,20 @@ class WorkspaceStatsManager:
         if "input_tokens" in result and get_value("prompt_tokens") is None:
             for field in ("cache_creation_input_tokens", "cache_read_input_tokens"):
                 result["input_tokens"] += _coerce_nonnegative_int(get_value(field))
+        for field, parents, child in (
+            ("cached_input_tokens", ("prompt_tokens_details", "input_tokens_details"), "cached_tokens"),
+            ("reasoning_tokens", ("completion_tokens_details", "output_tokens_details"), "reasoning_tokens"),
+        ):
+            if field in result:
+                continue
+            for parent in parents:
+                nested = get_value(parent)
+                value = nested.get(child) if isinstance(nested, dict) else getattr(nested, child, None)
+                if type(value) is int and value >= 0:
+                    result[field] = value
+                    break
+        if get_value("candidates_token_count") is not None and "output_tokens" in result:
+            result["output_tokens"] += result.get("reasoning_tokens", 0)
         return result
 
     @staticmethod
@@ -452,12 +475,27 @@ class WorkspaceStatsManager:
         with self._connect() as database:
             database.execute("CREATE TABLE IF NOT EXISTS statistics (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
             row = database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()
-            if row:
-                return WorkspaceStatsState.from_dict(json.loads(row[0]))
-            state = self._load_legacy_state()
-            database.execute("INSERT OR IGNORE INTO statistics VALUES (1, ?)", (json.dumps(state.to_dict()),))
-            row = database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()
-            return WorkspaceStatsState.from_dict(json.loads(row[0]))
+            if not row:
+                state = self._load_legacy_state()
+                database.execute("INSERT OR IGNORE INTO statistics VALUES (1, ?)", (json.dumps(state.to_dict()),))
+                row = database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()
+            state = WorkspaceStatsState.from_dict(json.loads(row[0]))
+            database.execute("CREATE TABLE IF NOT EXISTS model_requests (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            database.execute("CREATE TABLE IF NOT EXISTS usage_metadata (key TEXT PRIMARY KEY)")
+            claimed = database.execute("INSERT OR IGNORE INTO usage_metadata VALUES ('legacy-import')").rowcount
+            if claimed:
+                for summary in state.model_usage.values():
+                    record = {**summary.to_dict(), 'id': 'legacy::' + summary.usage_key, 'calls': summary.calls,
+                              'occurred_at': None, 'session_id': '', 'session_name': '', 'interaction_type': 'historical',
+                              'cached_input_tokens': None, 'cache_creation_tokens': None, 'reasoning_tokens': None,
+                              'usage_source': 'historical', 'input_source': 'unknown', 'output_source': 'unknown', 'total_source': 'unknown'}
+                    database.execute("INSERT OR IGNORE INTO model_requests VALUES (?, ?)", (record['id'], json.dumps(record, ensure_ascii=False)))
+            return state
+
+    def model_requests(self) -> List[Dict[str, Any]]:
+        """Read durable request metadata; prompt text and credentials are never stored."""
+        with self._connect() as database:
+            return [json.loads(row[0]) for row in database.execute("SELECT payload FROM model_requests ORDER BY rowid")]
 
     @contextmanager
     def _connect(self):
@@ -516,6 +554,9 @@ class WorkspaceStatsManager:
             latest = json.loads(database.execute("SELECT payload FROM statistics WHERE id=1").fetchone()[0])
             merged = merge(latest, self._saved_state, current)
             database.execute("UPDATE statistics SET payload=? WHERE id=1", (json.dumps(merged, ensure_ascii=False),))
+            database.executemany("INSERT OR IGNORE INTO model_requests VALUES (?, ?)",
+                                 [(record['id'], json.dumps(record, ensure_ascii=False)) for record in self._pending_requests])
+        self._pending_requests.clear()
         self.state = WorkspaceStatsState.from_dict(merged)
         self._saved_state = merged
         self._dirty = False
@@ -587,6 +628,7 @@ class WorkspaceStatsManager:
         input_tokens = usage_payload.get("input_tokens")
         output_tokens = usage_payload.get("output_tokens")
         total_tokens = usage_payload.get("total_tokens")
+        measured_input, measured_output, measured_total = input_tokens, output_tokens, total_tokens
 
         if total_tokens is not None:
             if input_tokens is not None and output_tokens is None:
@@ -653,7 +695,21 @@ class WorkspaceStatsManager:
             session_summary.updated_at = _now_iso()
             self.state.session_usage[cleaned_session_id] = session_summary
 
-        self.save(force=force)
+        input_source = 'api' if measured_input is not None else 'derived_api' if measured_total is not None and measured_output is not None else 'local'
+        output_source = 'api' if measured_output is not None else 'derived_api' if measured_total is not None and measured_input is not None else 'local'
+        api_main = any(value is not None for value in (measured_input, measured_output, measured_total))
+        usage_source = 'api' if api_main and 'local' not in (input_source, output_source) else 'mixed' if api_main else 'local'
+        self._pending_requests.append({
+            'id': uuid.uuid4().hex, 'occurred_at': _now_utc_iso(), 'calls': 1,
+            'provider': summary.provider, 'source': summary.source, 'model': summary.model, 'model_display_name': summary.model_display_name,
+            'session_id': cleaned_session_id, 'session_name': _clean_text(session_name), 'interaction_type': interaction_type,
+            'input_tokens': input_tokens, 'output_tokens': output_tokens, 'total_tokens': total_tokens,
+            'cached_input_tokens': usage_payload.get('cached_input_tokens'), 'cache_creation_tokens': usage_payload.get('cache_creation_tokens'),
+            'reasoning_tokens': usage_payload.get('reasoning_tokens'), 'usage_source': usage_source,
+            'input_source': input_source, 'output_source': output_source,
+            'total_source': 'api' if measured_total is not None or usage_source == 'api' else usage_source,
+        })
+        self.save(force=True)
 
     def record_operation(
         self,

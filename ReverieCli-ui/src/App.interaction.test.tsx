@@ -873,6 +873,49 @@ afterEach(() => {
 });
 
 describe("desktop GUI interactions", () => {
+  it("executes WStyle controls for the selected session and displays long results without a model turn", async () => {
+    const {request}=installDesktopApi();const original=request.getMockImplementation()!;
+    request.mockImplementation(async (action,payload)=>action==='wstyleCommand'?{type:'wstyle.result',success:true,output:'WStyle scope: novel:harbor\nSaved: delicate-prose → dual-heroines',error:'',data:{},session_id:baseSession.id} as never:original(action,payload));
+    const user=userEvent.setup();render(<App/>);
+    const composer=await screen.findByRole('textbox',{name:/向 Test Model 提问/});
+    fireEvent.change(composer,{target:{value:'/wstyle use delicate-prose dual-heroines'}});
+    await user.click(screen.getByRole('button',{name:'发送'}));
+    await waitFor(()=>expect(request).toHaveBeenCalledWith('wstyleCommand',{args:'use delicate-prose dual-heroines',projectRoot:'C:/workspace',sessionId:baseSession.id}));
+    const panel=await screen.findByRole('region',{name:'WStyle 命令结果'});
+    expect(panel.textContent).toContain('delicate-prose → dual-heroines');
+    expect((composer as HTMLTextAreaElement).value).toBe('');
+    expect(request.mock.calls.some(([action])=>action==='runPrompt')).toBe(false);
+    await user.click(within(panel).getByRole('button',{name:'关闭'}));
+    expect(screen.queryByRole('region',{name:'WStyle 命令结果'})).toBeNull();
+  });
+  it('preserves the next draft typed while a WStyle command is pending', async () => {
+    const {request}=installDesktopApi();const original=request.getMockImplementation()!;
+    let release!: (value: unknown) => void;
+    const pending=new Promise(resolve=>{release=resolve;});
+    request.mockImplementation(async (action,payload)=>action==='wstyleCommand'?await pending as never:original(action,payload));
+    const user=userEvent.setup();render(<App/>);
+    const composer=await screen.findByRole('textbox',{name:/向 Test Model 提问/});
+    fireEvent.change(composer,{target:{value:'/wstyle review --chapter 1'}});
+    await user.click(screen.getByRole('button',{name:'发送'}));
+    await waitFor(()=>expect(request).toHaveBeenCalledWith('wstyleCommand',expect.objectContaining({args:'review --chapter 1'})));
+    fireEvent.change(composer,{target:{value:'依据审稿建议继续写下一场'}});
+    await act(async ()=>release({type:'wstyle.result',success:true,output:'Saved review\n'+'具体建议\n'.repeat(2000),error:'',data:{},session_id:baseSession.id}));
+    const panel=await screen.findByRole('region',{name:'WStyle 命令结果'});
+    expect(panel.textContent).toContain('Saved review');
+    expect((composer as HTMLTextAreaElement).value).toBe('依据审稿建议继续写下一场');
+    expect(request.mock.calls.some(([action])=>action==='runPrompt')).toBe(false);
+  });
+  it('keeps a failed WStyle command available for correction', async () => {
+    const {request}=installDesktopApi();const original=request.getMockImplementation()!;
+    request.mockImplementation(async (action,payload)=>action==='wstyleCommand'?{type:'wstyle.result',success:false,output:'',error:'Card missing: removed-card',data:{},session_id:baseSession.id} as never:original(action,payload));
+    const user=userEvent.setup();render(<App/>);
+    const composer=await screen.findByRole('textbox',{name:/向 Test Model 提问/});
+    fireEvent.change(composer,{target:{value:'/wstyle use removed-card'}});
+    await user.click(screen.getByRole('button',{name:'发送'}));
+    expect((await screen.findByRole('region',{name:'WStyle 命令结果'})).textContent).toContain('Card missing: removed-card');
+    expect((composer as HTMLTextAreaElement).value).toBe('/wstyle use removed-card');
+    expect(request.mock.calls.some(([action])=>action==='runPrompt')).toBe(false);
+  });
   it('shows AiO background failures while keeping the current conversation visible', async () => {
     const { emitDesktopEvent } = installDesktopApi();
     render(<App />);

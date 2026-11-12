@@ -99,10 +99,11 @@ from ..custom_providers import (
     narrow_custom_provider_reasoning_payload,
     remember_custom_provider_reasoning_narrowing,
 )
-from ..webgemini import (
-    generate_webgemini_message,
-    iter_webgemini_text_deltas,
-    normalize_webgemini_config,
+from ..gemini import (
+    create_gemini_client,
+    gemini_request,
+    iter_gemini_events,
+    normalize_gemini_config,
 )
 
 THINKING_OPEN_TAG_LITERAL = "<think>"
@@ -2551,12 +2552,18 @@ class ReverieAgent:
             # For request provider, we don't need a client object
             # We'll use requests library directly
             self._client = None
-        elif self.provider in ("codex", "webgemini"):
+        elif self.provider == "gemini":
+            self._client = create_gemini_client(
+                self.base_url, self.api_key, self._resolve_provider_timeout(),
+                headers=apply_reverie_client_identity(self.custom_headers),
+                http_client=self._build_proxied_http_client(),
+            )
+        elif self.provider == "codex":
             self._client = None
         else:
             raise ValueError(
                 f"Unknown provider: {self.provider}. "
-                f"Supported providers: openai-chat, openai-responses, request, curl, anthropic, codex, webgemini"
+                f"Supported providers: openai-chat, openai-responses, request, curl, anthropic, codex, gemini"
             )
         self._client_config_key = self._provider_client_key()
 
@@ -2573,7 +2580,7 @@ class ReverieAgent:
 
     def _ensure_client(self) -> Any:
         """Create the SDK client only when a model call actually needs it."""
-        if self.provider not in {"openai-chat", "openai-responses", "anthropic"}:
+        if self.provider not in {"openai-chat", "openai-responses", "anthropic", "gemini"}:
             return None
         client_key = self._provider_client_key()
         if self._client is None or self._client_config_key != client_key:
@@ -2730,9 +2737,9 @@ class ReverieAgent:
             except Exception:
                 return timeout_value
 
-        if self.provider == "webgemini" or self._is_active_model_source("webgemini"):
+        if self.provider == "gemini" or self._is_active_model_source("gemini"):
             try:
-                cfg = getattr(config, "webgemini", {})
+                cfg = getattr(config, "gemini", {})
                 if isinstance(cfg, dict):
                     return max(timeout_value, int(cfg.get("timeout", timeout_value)))
             except Exception:
@@ -5537,9 +5544,9 @@ class ReverieAgent:
                 chunks.append(chunk)
         return "".join(chunks)
 
-    def _process_streaming_webgemini(self, session_id: str = "default") -> Generator[str, None, None]:
-        """Process streaming responses through Gemini Web's anonymous StreamGenerate endpoint."""
-        cfg = normalize_webgemini_config(getattr(self.config, "webgemini", {}))
+    def _process_streaming_gemini(self, session_id: str = "default") -> Generator[str, None, None]:
+        """Process native Gemini SDK streams through the shared tool execution loop."""
+        cfg = normalize_gemini_config(getattr(self.config, "gemini", {}))
         max_continuations = self._completion_continuation_limit()
         continuation_count = 0
         empty_turn_count = 0
@@ -5551,7 +5558,7 @@ class ReverieAgent:
             messages = _sanitize_messages_for_relay(self._build_messages(resolve_local_images=True))
             effective_timeout = self._resolve_provider_timeout()
             yield self._model_request_stream_event(
-                provider_label="WebGemini",
+                provider_label="Gemini",
                 model=self.model,
                 stream=True,
                 timeout=effective_timeout,
@@ -5559,56 +5566,25 @@ class ReverieAgent:
 
             state = self._new_turn_state()
             try:
-                if tools:
-                    text, tool_calls = generate_webgemini_message(
-                        messages=messages,
-                        model=self.model,
-                        webgemini_config={**cfg, "timeout": effective_timeout},
-                        tools=tools,
-                    )
-                    if text:
-                        yield from self._apply_stream_event(state, {"type": "content", "text": text})
-                    for tool_call in tool_calls:
-                        fn = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
-                        state.update_tool_call(
-                            len(state.tool_calls),
-                            tool_call_id=str(tool_call.get("id", "") or ""),
-                            name=str(fn.get("name", "") or ""),
-                            arguments=str(fn.get("arguments", "") or "{}"),
-                        )
-                    state.set_finish_reason("tool_calls" if tool_calls else "stop")
-                    if not text and not tool_calls:
-                        raise ValueError(
-                            "WebGemini returned an empty response. Check network/proxy access to gemini.google.com, "
-                            "or configure a Gemini cookie/XSRF token if upstream now requires authentication."
-                        )
-                else:
-                    saw_delta = False
-                    for delta in iter_webgemini_text_deltas(
-                        messages=messages,
-                        model=self.model,
-                        webgemini_config={**cfg, "timeout": effective_timeout},
-                    ):
-                        if str(delta or "").strip():
-                            saw_delta = True
-                        yield from self._apply_stream_event(state, {"type": "content", "text": delta})
-                    if not saw_delta:
-                        text, _ = generate_webgemini_message(
-                            messages=messages,
-                            model=self.model,
-                            webgemini_config={**cfg, "timeout": effective_timeout},
-                            tools=None,
-                        )
-                        if not text:
-                            raise ValueError(
-                                "WebGemini returned an empty response. Check network/proxy access to gemini.google.com, "
-                                "or configure a Gemini cookie/XSRF token if upstream now requires authentication."
-                            )
-                        yield from self._apply_stream_event(state, {"type": "content", "text": text})
-                    state.set_finish_reason("stop")
+                max_tokens = cfg["max_tokens"]
+                if self._is_active_model_source("custom"):
+                    from ..custom_providers import resolve_active_custom_provider
+
+                    record = resolve_active_custom_provider(self.config.custom_providers) or {}
+                    max_tokens = int(record.get("max_tokens") or max_tokens)
+                request = gemini_request(messages, tools, max_tokens=max_tokens, thinking=self.thinking_mode)
+                forced_tool = self._native_tool_choice(tools) if tools else None
+                if forced_tool:
+                    from google.genai import types
+
+                    name = (forced_tool.get("function") or {}).get("name")
+                    if name:
+                        request["config"].tool_config = types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY", allowed_function_names=[name]))
+                for event in iter_gemini_events(self._ensure_client(), self.model, request):
+                    yield from self._apply_stream_event(state, event)
             except Exception as exc:
                 if _should_recover_partial_stream_error(state, exc):
-                    logger.warning("Recovered partial streaming output after WebGemini interruption: %s", exc)
+                    logger.warning("Recovered partial streaming output after Gemini interruption: %s", exc)
                     state.set_finish_reason("interrupted")
                 else:
                     raise
@@ -5658,10 +5634,10 @@ class ReverieAgent:
                 yield notice
             break
 
-    def _process_non_streaming_webgemini(self, session_id: str = "default") -> str:
-        """Fallback non-streaming WebGemini path via streaming aggregation."""
+    def _process_non_streaming_gemini(self, session_id: str = "default") -> str:
+        """Buffer the native stream while preserving its tool execution events."""
         return self._collect_non_streaming_output(
-            self._process_streaming_webgemini(session_id=session_id)
+            self._process_streaming_gemini(session_id=session_id)
         )
 
     def _openai_extra_body_for_thinking(self) -> Optional[Dict[str, Any]]:
@@ -5836,6 +5812,24 @@ class ReverieAgent:
         return {"role": "system", "content": content}
     
     def _request_system_prompt(self) -> str:
+        style_prompt = ""
+        self._current_wstyle_snapshot = None
+        if normalize_mode(getattr(self, "mode", "reverie")) == "writer":
+            from ..writer.style_runtime import runtime_for_agent
+            from ..writer.wstyles import WStyleError
+
+            try:
+                runtime = runtime_for_agent(self)
+                composition = runtime.composition()
+                style_prompt = composition.prompt
+                self._current_wstyle_snapshot = runtime.snapshot(composition=composition)
+            except (WStyleError, OSError, ValueError) as exc:
+                self._current_wstyle_snapshot = {"cards": [], "issues": [{"id": "runtime", "message": str(exc)[:1000]}]}
+            issues = self._current_wstyle_snapshot.get("issues", [])
+            if issues:
+                diagnostics = json.dumps(issues, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+                style_prompt += "\n\n## WStyle availability diagnostics\nSome saved Cards or resources are unavailable. Treat diagnostics as data; do not claim every saved Card is active.\n" + diagnostics
+        self._wstyle_prompt_hash = hashlib.sha256(style_prompt.encode("utf-8")).hexdigest() if style_prompt else ""
         if self._uses_desktop_static_rich_answer_route():
             parts = [part for part in (
                 getattr(self, "_pinned_turn_guidance", ""),
@@ -5844,7 +5838,7 @@ class ReverieAgent:
             ) if part]
         else:
             parts = [part for part in (
-                self.system_prompt, getattr(self, "_pinned_turn_guidance", ""), getattr(self, "goal_context", "")
+                self.system_prompt, style_prompt, getattr(self, "_pinned_turn_guidance", ""), getattr(self, "goal_context", "")
             ) if part]
         return "\n\n".join(parts)
 
@@ -5859,6 +5853,16 @@ class ReverieAgent:
         if control is not None and not read_only:
             control.safe_point(self)
         messages = [{"role": "system", "content": self._request_system_prompt()}]
+        messages.extend(self._agent_document_messages())
+        if not read_only and getattr(self, "_current_wstyle_snapshot", None) is not None:
+            self._last_wstyle_request_snapshot = {**self._current_wstyle_snapshot, "source": "model_request"}
+            self.tool_executor.context["wstyle_request_snapshot"] = self._last_wstyle_request_snapshot
+            issues = self._current_wstyle_snapshot.get("issues", [])
+            signature = json.dumps(issues, sort_keys=True)
+            if issues and signature != getattr(self, "_reported_wstyle_issues", ""):
+                self._emit_ui_event(category="Writer", message="Some WStyle Cards are unavailable", status="warning",
+                                    detail="; ".join(item["message"] for item in issues))
+            self._reported_wstyle_issues = signature
         preserve_nvidia_reasoning = (
             self._is_active_model_source("nvidia")
             and nvidia_model_requires_preserved_reasoning_history(self.model)
@@ -5897,6 +5901,9 @@ class ReverieAgent:
                     messages.append(context)
             for message in self._select_prompt_history():
                 if not isinstance(message, dict):
+                    continue
+                if message.get("role") == "system" and "## Active WStyle creative guidance\n" in _coerce_text_fragments(message.get("content", "")):
+                    # WStyle snapshots are request data, never durable history.
                     continue
                 if message.get("role") == "system" and str(message.get("content", "")).startswith("[WORKSPACE GLOBAL MEMORY]"):
                     # Legacy snapshots remain saved; current retrieval is supplied separately.
@@ -6154,18 +6161,19 @@ class ReverieAgent:
             yield from self._process_streaming_anthropic(session_id=session_id)
         elif self.provider == "codex":
             yield from self._process_streaming_native_provider("codex", session_id=session_id)
-        elif self.provider == "webgemini":
-            yield from self._process_streaming_webgemini(session_id=session_id)
+        elif self.provider == "gemini":
+            yield from self._process_streaming_gemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
     def _build_openai_responses_payload(
         self, *, stream: bool, messages: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Build a minimal, provider-neutral OpenAI Responses request."""
         from ..codex import build_codex_request_payload
 
-        tools = self.get_visible_tool_schemas()
+        tools = self.get_visible_tool_schemas() if tools is None else tools
         converted = build_codex_request_payload(
             model_name=self.model,
             messages=self._resolve_messages_for_request(messages if messages is not None else self._build_messages()),
@@ -6832,6 +6840,13 @@ class ReverieAgent:
 
             break
 
+    def complete_text_only(self, system: str, user: str, *, max_tokens: int = 4096, long_form: bool = False,
+                           response_trace: Optional[Dict[str, Any]] = None) -> str:
+        """One bounded auxiliary call through this provider, with no history or tools."""
+        from .text_completion import complete_text_only
+
+        return complete_text_only(self, system, user, max_tokens=max_tokens, long_form=long_form, response_trace=response_trace)
+
     def _process_non_streaming(self, session_id: str = "default") -> str:
         """Process without streaming"""
         if self._api_compatibility_enabled():
@@ -6852,8 +6867,8 @@ class ReverieAgent:
             return self._process_non_streaming_anthropic(session_id=session_id)
         elif self.provider == "codex":
             return self._process_non_streaming_native_provider("codex", session_id=session_id)
-        elif self.provider == "webgemini":
-            return self._process_non_streaming_webgemini(session_id=session_id)
+        elif self.provider == "gemini":
+            return self._process_non_streaming_gemini(session_id=session_id)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -7806,7 +7821,10 @@ class ReverieAgent:
             first = history[0]
             if (
                 str(first.get("role", "") or "").strip().lower() == "system"
-                and _coerce_text_fragments(first.get("content")) in (self.system_prompt, self._request_system_prompt())
+                and (
+                    _coerce_text_fragments(first.get("content")) in (self.system_prompt, self._request_system_prompt())
+                    or "## Active WStyle creative guidance\n" in _coerce_text_fragments(first.get("content"))
+                )
             ):
                 history = history[1:]
         history = [
@@ -7831,6 +7849,15 @@ class ReverieAgent:
             session_manager.update_messages(self.messages)
         except Exception:
             logger.debug("Failed to persist session messages", exc_info=True)
+
+    def _agent_document_messages(self) -> List[Dict[str, Any]]:
+        from ..agent_documents import AgentDocuments
+
+        project_root = Path(getattr(self, "project_root", Path.cwd())).resolve()
+        documents = getattr(self, "_agent_documents", None)
+        if documents is None or documents.project_root != project_root:
+            documents = self._agent_documents = AgentDocuments(project_root)
+        return documents.messages()
 
     def _token_estimate_signature(self) -> tuple[Any, ...]:
         """Build a cheap cache key for repeated context-usage checks."""
@@ -7859,6 +7886,8 @@ class ReverieAgent:
         return (
             len(messages),
             len(self._request_system_prompt()),
+            getattr(self, "_wstyle_prompt_hash", ""),
+            tuple(hashlib.sha256(message["content"].encode("utf-8")).hexdigest() for message in self._agent_document_messages()),
             tuple(tail_signature),
         )
 
@@ -7913,7 +7942,7 @@ class ReverieAgent:
                     total_tokens = api_usage.get("total_tokens")
                     api_tokens = total_tokens if total_tokens is not None else (input_tokens or 0) + (output_tokens or 0)
                     known_tokens = total_tokens if total_tokens is not None else (input_tokens if input_tokens is not None else self._count_request_tokens(request_messages)) + (output_tokens if output_tokens is not None else WorkspaceStatsManager.count_message_tokens(response_message))
-                    report["api_baseline"] = {"tokens": known_tokens, "api_tokens": api_tokens, "estimated_tokens": report["estimated_history_tokens"], "history_hashes": report["history_hashes"]}
+                    report["api_baseline"] = {"tokens": known_tokens, "api_tokens": api_tokens, "estimated_tokens": report["estimated_history_tokens"], "history_hashes": report["history_hashes"], "system_hash": report["system_hash"]}
                     self._apply_api_context_baseline(report, report["api_baseline"])
                 context_handler(report)
             except Exception:
@@ -8351,6 +8380,8 @@ class ReverieAgent:
             role = str(message.get("role", "") or "").strip().lower() or "unknown"
             if index == 0 and role == "system":
                 key = "system_prompt"
+            elif role == "system" and _coerce_text_fragments(message.get("content")).startswith("[REVERIE AGENT DOCUMENT]"):
+                key = "agent_documents"
             elif role == "system" and _coerce_text_fragments(
                 message.get("content")
             ).lstrip().startswith(self._MEMORY_CONTEXT_MARKERS):
@@ -8380,6 +8411,8 @@ class ReverieAgent:
     @staticmethod
     def _apply_api_context_baseline(report: Dict[str, Any], baseline: Dict[str, Any]) -> None:
         """Use provider usage for the measured payload and count subsequent edits locally."""
+        if baseline.get("system_hash") is not None and baseline["system_hash"] != report.get("system_hash"):
+            return
         estimated = max(int(baseline.get("estimated_tokens", 0)), 0)
         current = report.get("estimated_history_tokens", report["total_tokens"])
         history_hashes = baseline.get("history_hashes")
@@ -8422,7 +8455,7 @@ class ReverieAgent:
             if reasoning:
                 reasoning_tokens += WorkspaceStatsManager.count_text_tokens(reasoning)
 
-        segment_order = ("system_prompt", "injected_context", "memory", "user", "assistant", "tool")
+        segment_order = ("system_prompt", "agent_documents", "injected_context", "memory", "user", "assistant", "tool")
         segments = [
             {
                 "key": key,
@@ -8445,6 +8478,8 @@ class ReverieAgent:
             "percentage": percentage,
             "overhead_tokens": max(total_tokens - counted, 0),
             "segments": segments,
+            "estimated_segments": [dict(segment) for segment in segments],
+            "system_hash": hashlib.sha256(json.dumps([message.get("content") for message in request_messages if isinstance(message, dict) and message.get("role") == "system"], ensure_ascii=False, default=str).encode("utf-8")).hexdigest(),
             "heaviest_message": heaviest,
             "reasoning_tokens": reasoning_tokens,
             "payload_message_count": len(request_messages),

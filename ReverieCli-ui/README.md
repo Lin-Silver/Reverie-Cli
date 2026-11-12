@@ -5,6 +5,8 @@ Reverie Desktop is the Electron GUI for the existing Reverie CLI. It does not re
 
 The current user flow is documented in the [Desktop guide](../docs/DESKTOP_GUIDE.md).
 
+Writer's `/wstyle` commands execute through the native kernel for the selected conversation. The composer provides live Card completion and a scrollable result panel, preserving draft text entered while a command is pending. Management stays offline; explicit review and sample extraction use the configured model. See [WStyle](../docs/WSTYLE.md).
+
 
 
 One completed worker can be reused for 30 seconds, then is released; up to four active runs remain isolated. Desktop's internal `ui-onedir` kernel is separate from the public one-file CLI/TUI download, which runs without Electron or a companion runtime directory. See the [CLI/TUI/GUI relationship](../README.md#cli-tui-and-desktop-gui).

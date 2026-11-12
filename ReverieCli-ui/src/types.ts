@@ -711,6 +711,42 @@ export interface TaskListEntry {
 }
 
 /** One category of the next request's token budget (system prompt, history, etc.). */
+export interface TokenFilters { start?: string; end?: string; project?: string; session?: string; model?: string }
+export interface TokenPrice { currency: "USD" | "CNY"; input: number; cached_input: number; output: number; per_tokens?: number; updated_at?: string }
+export interface TokenTotals {
+  calls: number;
+  input_tokens: number;
+  uncached_input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  api_calls: number;
+  mixed_calls: number;
+  local_calls: number;
+  historical_calls: number;
+  unknown_cache_calls: number;
+  unpriced_calls: number;
+  costs: Record<string, number>;
+}
+export interface TokenModelTotals extends TokenTotals { model_key: string; model: string; name: string; provider: string; price: TokenPrice | null }
+export interface TokenDailyTotals extends TokenTotals { date: string }
+export interface TokenModelOption { id: string; name: string; provider: string }
+export interface TokenStatisticsData {
+  filters: TokenFilters;
+  totals: TokenTotals;
+  models: TokenModelTotals[];
+  daily: TokenDailyTotals[];
+  prices: Record<string, TokenPrice>;
+  options: {
+    projects: Array<{ id: string; name: string; path: string }>;
+    sessions: Array<{ id: string; session_id: string; name: string; project_id: string; project_name: string }>;
+    models: TokenModelOption[];
+  };
+  excluded_historical_calls: number;
+  warnings: string[];
+  timezone: "UTC";
+}
+
 export interface ContextUsageSegment {
   key: string;
   tokens: number;
@@ -722,7 +758,7 @@ export interface ContextUsageSegment {
  *  next-request payload. Mirrors ReverieAgent.describe_context_usage(). */
 export interface ContextUsage {
   usage_source?: "api" | "mixed";
-  api_baseline?: { tokens: number; estimated_tokens: number; api_tokens?: number; history_hashes?: string[] };
+  api_baseline?: { tokens: number; estimated_tokens: number; api_tokens?: number; history_hashes?: string[]; system_hash?: string };
   tokenizer: { name: string; label: string; exact: boolean; detail: string };
   total_tokens: number;
   max_tokens: number;
@@ -730,6 +766,8 @@ export interface ContextUsage {
   percentage: number;
   overhead_tokens: number;
   segments: ContextUsageSegment[];
+  estimated_segments?: ContextUsageSegment[];
+  system_hash?: string;
   heaviest_message?: { role: string; index: number; tokens: number; preview: string };
   reasoning_tokens: number;
   payload_message_count: number;

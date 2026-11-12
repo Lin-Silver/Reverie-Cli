@@ -700,6 +700,13 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
 
 async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,payload:JsonRecord):Promise<JsonRecord> {
   if(!bridge)throw new Error('Reverie core bridge is not initialized.');
+  if (action === "wstyleCommand") {
+    const root=path.resolve(String(payload.projectRoot || bridge.getProjectRoot()));
+    if (coordinator.list().some(item=>samePath(item.projectRoot,root))) throw new Error("Stop this workspace's active runs before executing WStyle commands.");
+    const lease=await coordinator.acquire(root,String(payload.sessionId || "wstyle-default"),false,false,false,payload.assistantId==='aio'?'aio':undefined);
+    try { return assertCoreResponse(action,await bridge.request(action,{...payload,projectRoot:root})); }
+    finally { coordinator.release(lease.id); }
+  }
   if (action === "getContextUsage" && payload.sessionId) {
     const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot()));
     const entry = coordinator.find(root, String(payload.sessionId),payload.assistantId==='aio'?'aio':undefined);

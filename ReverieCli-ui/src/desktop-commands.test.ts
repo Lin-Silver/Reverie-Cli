@@ -3,6 +3,8 @@ import { desktopCommand } from "./desktop-commands";
 import { parseReviewFindings, reviewLocations } from "./Workbench";
 
 it("maps settings and preserves quoted review paths, scope and base",()=>{
+  expect(desktopCommand('/wstyle extract 克制 --sample "C:\\文稿\\two words.md"')).toEqual({kind:"wstyle",args:'extract 克制 --sample "C:\\文稿\\two words.md"'});
+  expect(desktopCommand('/wstyle')).toEqual({kind:"wstyle",args:""});
   expect(desktopCommand("/mode writer")).toEqual({kind:"setting",key:"mode",value:"writer"});
   expect(desktopCommand("/permission mode strict")).toEqual({kind:"setting",key:"permission_mode",value:"strict"});
   expect(desktopCommand('/review "src/中文 file.ts" --scope branch --base "origin/main"')).toEqual({kind:"review",file:"src/中文 file.ts",scope:"branch",base:"origin/main"});

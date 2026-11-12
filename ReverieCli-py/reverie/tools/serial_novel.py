@@ -17,6 +17,8 @@ from .base import BaseTool, ToolResult
 STATE_SCHEMA = "reverie.writer.project.v1"
 DEFAULT_OUTPUT_DIR = "novels"
 READER_OUTPUT_DIR = "novel"
+DEFAULT_CHAPTER_TARGET_CHARS = 10_000
+DEFAULT_CHAPTER_MINIMUM_CHARS = 5_000
 MAX_QUALITY_GATE_RETRY_ATTEMPTS = 3
 STYLE_TICS = (
     "微微",
@@ -47,6 +49,11 @@ DATA_PAYLOAD_KEYS = (
     "relationship_progression",
     "opening_hook",
     "ending_hook",
+    "narrative_function",
+    "character_goal",
+    "causal_change",
+    "emotional_change",
+    "reader_expectation",
     "key_events",
     "character_updates",
     "relationship_updates",
@@ -251,6 +258,11 @@ def _salvage_jsonish_data_payload(raw: str) -> Dict[str, Any]:
         "outline",
         "opening_hook",
         "ending_hook",
+        "narrative_function",
+        "character_goal",
+        "causal_change",
+        "emotional_change",
+        "reader_expectation",
     ):
         value = _extract_jsonish_string_field(raw, key, next_keys)
         if value:
@@ -401,8 +413,8 @@ class SerialNovelTool(BaseTool):
             },
             "chapter_target_chars": {
                 "type": "integer",
-                "description": "Default non-whitespace character target for each chapter.",
-                "default": 4000,
+                "description": "Chapter drafting target. The new-novel default of 10,000 characters has a 5,000-character hard minimum; explicit short targets retain the existing length policy.",
+                "default": DEFAULT_CHAPTER_TARGET_CHARS,
             },
             "output_dir": {
                 "type": "string",
@@ -414,7 +426,8 @@ class SerialNovelTool(BaseTool):
                 "description": (
                     "Action payload. configure accepts world_bible, cast_bible, story_architecture, style_guide, "
                     "and roadmap. prepare_chapter accepts outline, scene_beats, continuity_requirements, "
-                    "relationship_progression, opening_hook, ending_hook, and target_chars. commit_chapter accepts "
+                    "relationship_progression, opening_hook, ending_hook, target_chars, and optional narrative_function, "
+                    "character_goal, causal_change, emotional_change, reader_expectation. commit_chapter accepts "
                     "content, summary, key_events, character_updates, relationship_updates, timeline_updates, "
                     "opened_threads, advanced_threads, resolved_threads, foreshadowing_opened, and "
                     "foreshadowing_resolved."
@@ -469,6 +482,11 @@ class SerialNovelTool(BaseTool):
                         "type": "string",
                         "description": "For prepare_chapter: the complete scene-level chapter plan.",
                     },
+                    "narrative_function": {"type": "string", "description": "Optional chapter purpose; use only when relevant to this story."},
+                    "character_goal": {"type": "string", "description": "Optional concrete character goal driving the chapter's actions."},
+                    "causal_change": {"type": "string", "description": "Optional consequence of the chapter's choices or discoveries."},
+                    "emotional_change": {"type": "string", "description": "Optional earned emotional or relationship change."},
+                    "reader_expectation": {"type": "string", "description": "Optional reading expectation established or paid off by actual events."},
                     "target_chars": {
                         "type": "integer",
                         "description": "For prepare_chapter: desired non-whitespace chapter character count.",
@@ -492,6 +510,7 @@ class SerialNovelTool(BaseTool):
     }
 
     def execute(self, **kwargs: Any) -> ToolResult:
+        self.archived_draft_removals: set[str] = set()
         try:
             action = _text(kwargs.get("action")).lower()
             if action == "list_projects":
@@ -585,10 +604,13 @@ class SerialNovelTool(BaseTool):
         return project_dir / "tracking" / "state.json"
 
     @staticmethod
-    def _atomic_write(path: Path, content: str) -> None:
+    def _atomic_write(path: Path, content: str | bytes) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
-        temporary.write_text(content, encoding="utf-8")
+        if isinstance(content, bytes):
+            temporary.write_bytes(content)
+        else:
+            temporary.write_text(content, encoding="utf-8", newline="\n")
         temporary.replace(path)
 
     def _write_json(self, path: Path, value: Any) -> None:
@@ -602,7 +624,29 @@ class SerialNovelTool(BaseTool):
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("schema") != STATE_SCHEMA or state.get("novel_id") != novel_id:
             raise ValueError(f"Invalid state file for novel project '{novel_id}'")
+        self._bind_wstyle_project(novel_id, project_dir)
         return project_dir, state
+
+    def _bind_wstyle_project(self, novel_id: str, project_dir: Path) -> None:
+        runtime = self.context.get("wstyle_runtime")
+        agent = self.context.get("agent")
+        if runtime is None and agent is not None:
+            from ..writer.style_runtime import runtime_for_agent
+
+            runtime = runtime_for_agent(agent)
+        if runtime is not None:
+            runtime.bind_project(novel_id, project_dir)
+
+    def _wstyle_snapshot(self) -> Dict[str, Any]:
+        agent = self.context.get("agent")
+        snapshot = getattr(agent, "_last_wstyle_request_snapshot", None)
+        if not isinstance(snapshot, dict):
+            runtime = self.context.get("wstyle_runtime")
+            snapshot = runtime.snapshot() if runtime is not None else {"cards": [], "saved_ids": []}
+            snapshot = {**snapshot, "source": "current_selection_unverified"}
+        result = {key: value for key, value in snapshot.items() if key != "repository"}
+        result["cards"] = [{key: item.get(key, "") for key in ("id", "layer", "version", "sha256")} for item in snapshot.get("cards", [])]
+        return result
 
     def _save_state(self, project_dir: Path, state: Dict[str, Any]) -> None:
         state["updated_at"] = _now()
@@ -647,7 +691,8 @@ class SerialNovelTool(BaseTool):
         target_chars = max(1000, int(kwargs.get("target_chars") or 100000))
         if self._should_enforce_longform_floor(title, brief) and _parse_explicit_length_request(f"{title}\n{brief}") is None:
             target_chars = max(target_chars, 100000)
-        chapter_target = max(500, int(kwargs.get("chapter_target_chars") or 4000))
+        explicit_chapter_target = kwargs.get("chapter_target_chars")
+        chapter_target = max(500, int(explicit_chapter_target or DEFAULT_CHAPTER_TARGET_CHARS))
         project_dir = self._project_dir(novel_id, kwargs)
         state_path = self._state_path(project_dir)
         if state_path.exists():
@@ -677,6 +722,8 @@ class SerialNovelTool(BaseTool):
             "created_at": created_at,
             "updated_at": created_at,
         }
+        if not explicit_chapter_target or chapter_target == DEFAULT_CHAPTER_TARGET_CHARS:
+            state["chapter_minimum_chars"] = DEFAULT_CHAPTER_MINIMUM_CHARS
 
         for folder in ("chapters", "control-cards", "drafts", "tracking"):
             (project_dir / folder).mkdir(parents=True, exist_ok=True)
@@ -685,7 +732,8 @@ class SerialNovelTool(BaseTool):
             project_dir / "00-project-brief.md",
             f"# {title}\n\n## Original brief\n\n{brief}\n\n"
             f"## Delivery contract\n\n- Minimum characters: {target_chars}\n"
-            f"- Planned chapters: {planned_chapters}\n- Default chapter target: {chapter_target}\n",
+            f"- Planned chapters: {planned_chapters}\n- Default chapter target: {chapter_target}\n"
+            + (f"- Minimum chapter characters: {state['chapter_minimum_chars']}\n" if "chapter_minimum_chars" in state else ""),
         )
         skeletons = {
             "01-world-bible.md": "World Bible",
@@ -700,6 +748,8 @@ class SerialNovelTool(BaseTool):
         for relative_path, heading in skeletons.items():
             self._atomic_write(project_dir / relative_path, f"# {heading}\n\n")
         self._save_state(project_dir, state)
+
+        self._bind_wstyle_project(novel_id, project_dir)
 
         return ToolResult.ok(
             f"Bootstrapped '{title}' at {project_dir}. Configure the five project bibles before preparing chapter 1.",
@@ -802,7 +852,9 @@ class SerialNovelTool(BaseTool):
             int(data.get("target_chars") or baseline_target_chars),
         )
         delivery_minimum = self._delivery_minimum_chars(state)
-        minimum_chars_to_commit = max(350, math.floor(target_chars * 0.7), delivery_minimum)
+        minimum_chars_to_commit = max(
+            350, int(state.get("chapter_minimum_chars") or math.floor(target_chars * 0.7)), delivery_minimum
+        )
         card = {
             "chapter": chapter,
             "title": title,
@@ -817,9 +869,14 @@ class SerialNovelTool(BaseTool):
             "recommended_draft_chars": max(
                 minimum_chars_to_commit,
                 math.ceil(minimum_chars_to_commit * 1.15),
+                target_chars if state.get("chapter_minimum_chars") else 0,
             ),
             "prepared_at": _now(),
+            "wstyle": self._wstyle_snapshot(),
         }
+        quality_intent = {key: _text(data[key]) for key in ("narrative_function", "character_goal", "causal_change", "emotional_change", "reader_expectation") if data.get(key)}
+        if quality_intent:
+            card["quality_intent"] = quality_intent
         forbidden_terms = self._control_card_forbidden_terms(card)
         if forbidden_terms:
             return ToolResult.fail(
@@ -910,12 +967,23 @@ class SerialNovelTool(BaseTool):
         if not content or not title:
             return ToolResult.fail("title and data.content are required to commit a chapter")
 
+        if append_content and pending_draft:
+            preserved_chars = len(str((pending_draft.get("data") or {}).get("content") or ""))
+            wstyle_segments = list(pending_draft.get("wstyle_segments") or [
+                {"start": 0, "end": preserved_chars, "wstyle": {"cards": [], "source": "legacy_untracked"}}
+            ])
+            wstyle_segments.append({"start": max(preserved_chars, len(content) - len(append_content)),
+                                    "end": len(content), "wstyle": self._wstyle_snapshot()})
+        else:
+            wstyle_segments = [{"start": 0, "end": len(content), "wstyle": self._wstyle_snapshot()}]
+
         delivery_minimum = self._delivery_minimum_chars(state)
         quality = self._quality_report(
             content,
             int(card.get("target_chars") or state["chapter_target_chars"]),
             delivery_minimum_chars=delivery_minimum,
-            prior_content=self._committed_prose(project_dir, state),
+            chapter_minimum_chars=int(state.get("chapter_minimum_chars") or 0),
+            prior_content=self._committed_prose(project_dir, state, exclude_chapter=chapter),
         )
         if quality["blocking_issues"]:
             retry_count = int((pending_draft or {}).get("quality_retry_count") or 0) + 1
@@ -938,6 +1006,7 @@ class SerialNovelTool(BaseTool):
                         PENDING_RECOVERY_REPREPARE if exhausted else PENDING_RECOVERY_APPEND_ONLY
                     ),
                     requires_reprepare=exhausted,
+                    wstyle_segments=wstyle_segments,
                 )
                 if exhausted:
                     return ToolResult.fail(
@@ -968,6 +1037,7 @@ class SerialNovelTool(BaseTool):
                     PENDING_RECOVERY_REPREPARE if exhausted else PENDING_RECOVERY_FULL_REWRITE
                 ),
                 requires_reprepare=exhausted,
+                wstyle_segments=wstyle_segments,
             )
             if exhausted:
                 return ToolResult.fail(
@@ -988,8 +1058,18 @@ class SerialNovelTool(BaseTool):
                 + " The latest rejected draft was preserved locally."
             )
 
+        self._archive_pending_draft(project_dir, chapter)
         chapter_path = project_dir / "chapters" / f"chapter-{chapter:04d}.md"
         chapter_text = f"# Chapter {chapter}: {title}\n\n{content}\n"
+        if chapter_path.is_file() and chapter_path.read_bytes() != chapter_text.encode("utf-8"):
+            original = chapter_path.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            archive = project_dir / "chapters" / "revisions" / f"chapter-{chapter:04d}-{digest}.md"
+            if not archive.exists():
+                self._atomic_write(archive, original)
+                previous_record = state.get("chapters", {}).get(str(chapter))
+                if previous_record:
+                    self._write_json(archive.with_suffix('.json'), previous_record)
         self._atomic_write(chapter_path, chapter_text)
         content_hash = hashlib.sha256(chapter_text.encode("utf-8")).hexdigest()
 
@@ -1012,6 +1092,7 @@ class SerialNovelTool(BaseTool):
             "foreshadowing_opened": _as_list(data.get("foreshadowing_opened")),
             "foreshadowing_resolved": _as_list(data.get("foreshadowing_resolved")),
             "quality": quality,
+            "wstyle_segments": wstyle_segments,
             "committed_at": _now(),
         }
         state["chapters"][str(chapter)] = record
@@ -1118,6 +1199,9 @@ class SerialNovelTool(BaseTool):
 
     @staticmethod
     def _delivery_minimum_chars(state: Dict[str, Any]) -> int:
+        if state.get("chapter_minimum_chars"):
+            # The default 10k target is aspirational. Final audit still enforces the novel total.
+            return int(state["chapter_minimum_chars"])
         remaining_chars = max(0, int(state["target_chars"]) - int(state["total_chars"]))
         remaining_planned_chapters = max(
             1,
@@ -1201,7 +1285,9 @@ class SerialNovelTool(BaseTool):
         blocking_issues: list[str],
         recovery_mode: str,
         requires_reprepare: bool,
+        wstyle_segments: list[Dict[str, Any]],
     ) -> None:
+        self._archive_pending_draft(project_dir, chapter)
         self._write_json(
             self._pending_draft_path(project_dir, chapter),
             {
@@ -1215,6 +1301,7 @@ class SerialNovelTool(BaseTool):
                 "blocking_issues": [str(item).strip() for item in blocking_issues if str(item).strip()],
                 "recovery_mode": str(recovery_mode or "").strip() or PENDING_RECOVERY_FULL_REWRITE,
                 "requires_reprepare": bool(requires_reprepare),
+                "wstyle_segments": wstyle_segments,
                 "saved_at": _now(),
             },
         )
@@ -1257,7 +1344,20 @@ class SerialNovelTool(BaseTool):
     def _discard_pending_draft(self, project_dir: Path, chapter: int) -> None:
         path = self._pending_draft_path(project_dir, chapter)
         if path.is_file():
+            self._archive_pending_draft(project_dir, chapter)
             path.unlink()
+            self.archived_draft_removals.add(path.relative_to(self.get_project_root()).as_posix())
+
+    def _archive_pending_draft(self, project_dir: Path, chapter: int) -> None:
+        path = self._pending_draft_path(project_dir, chapter)
+        if path.is_file():
+            original = path.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            archive = project_dir / "drafts" / "history" / f"chapter-{chapter:04d}-{digest}.json"
+            if not archive.exists():
+                self._atomic_write(archive, original)
+            if archive.read_bytes() != original:
+                raise ValueError("Archived draft was modified; the pending original was preserved.")
 
     @staticmethod
     def _normalize_leading_commit_heading(content: str, title: str, chapter: int) -> str:
@@ -1339,6 +1439,7 @@ class SerialNovelTool(BaseTool):
         target_chars: int,
         *,
         delivery_minimum_chars: int = 0,
+        chapter_minimum_chars: int = 0,
         prior_content: str = "",
     ) -> Dict[str, Any]:
         chars = sum(1 for char in content if not char.isspace())
@@ -1346,7 +1447,13 @@ class SerialNovelTool(BaseTool):
         paragraphs = [line.strip() for line in content.splitlines() if len(line.strip()) >= 20]
         duplicate_count = max(0, len(paragraphs) - len(set(paragraphs)))
         duplicate_ratio = duplicate_count / max(1, len(paragraphs))
-        placeholders = sorted(set(re.findall(r"(?i)\b(?:TODO|TBD|PLACEHOLDER)\b|\[(?:to be written|pending)\]|待补|省略", content)))
+        placeholders = sorted(set(re.findall(
+            r"\b(?:TODO|TBD|PLACEHOLDER)\b|\[(?:to be written|pending)\]"
+            r"|[\[【（(][^\[\]【】（）()\n]*(?:待补|省略)[^\[\]【】（）()\n]*[\]】）)]"
+            r"|^[ \t]*(?:待补|省略)[ \t\r。.!！…]*$"
+            r"|(?:此处|下文|后文|正文)(?:内容|场景|情节|描写)?(?:待补|省略)",
+            content, flags=re.IGNORECASE | re.MULTILINE,
+        )))
         tic_counts = {tic: content.count(tic) for tic in STYLE_TICS if content.count(tic)}
         tic_limit = max(2, math.ceil(chars / 1000) * 2)
         overused_tics = {tic: count for tic, count in tic_counts.items() if count > tic_limit}
@@ -1365,7 +1472,7 @@ class SerialNovelTool(BaseTool):
                 if candidate in prior_passages:
                     duplicate_passage = candidate
                     break
-        control_card_minimum = max(350, math.floor(target_chars * 0.7))
+        control_card_minimum = max(350, int(chapter_minimum_chars or math.floor(target_chars * 0.7)))
         minimum = max(control_card_minimum, int(delivery_minimum_chars or 0))
         issues = []
         if chars < minimum:
@@ -1383,7 +1490,7 @@ class SerialNovelTool(BaseTool):
             issues.append(f"generated-prose tic density is {tic_density:.1f} per 1000 characters")
         if duplicate_passage:
             issues.append("reuses a 64-character passage from an earlier chapter")
-        return {
+        report = {
             "chars": chars,
             "han_chars": han_chars,
             "target_chars": target_chars,
@@ -1400,11 +1507,19 @@ class SerialNovelTool(BaseTool):
             "blocking_issues": issues,
             "passed": not issues,
         }
+        from ..writer.quality_findings import localized_quality_findings
+
+        report["assessment"] = "deterministic_checks_only"
+        report["limitations"] = "Text matches and length gates do not rate prose, character depth, emotional credibility or commercial appeal."
+        report["findings"] = localized_quality_findings(content, report)
+        return report
 
     @staticmethod
-    def _committed_prose(project_dir: Path, state: Dict[str, Any]) -> str:
+    def _committed_prose(project_dir: Path, state: Dict[str, Any], *, exclude_chapter: int | None = None) -> str:
         prose_parts = []
-        for record in state.get("chapters", {}).values():
+        for number, record in state.get("chapters", {}).items():
+            if exclude_chapter is not None and str(number) == str(exclude_chapter):
+                continue
             relative_path = str(record.get("path", "") or "").strip()
             if not relative_path:
                 continue
@@ -1493,6 +1608,8 @@ class SerialNovelTool(BaseTool):
             "reader_project_dir": str(reader_dir),
             "reader_manuscript_path": str(reader_manuscript),
             "target_chars": int(state["target_chars"]),
+            "chapter_target_chars": int(state["chapter_target_chars"]),
+            **({"chapter_minimum_chars": int(state["chapter_minimum_chars"])} if state.get("chapter_minimum_chars") else {}),
             "total_chars": int(state["total_chars"]),
             "total_han_chars": int(state.get("total_han_chars", 0)),
             "remaining_chars": remaining,
@@ -1501,6 +1618,7 @@ class SerialNovelTool(BaseTool):
             "active_chapter": state.get("active_chapter"),
             "next_chapter": next_chapter,
             "open_threads": list(state.get("open_threads", [])),
+            "active_wstyles": state.get("active_wstyles"),
             "updated_at": state["updated_at"],
         }
 
@@ -1526,13 +1644,22 @@ class SerialNovelTool(BaseTool):
         recommended_draft_chars = max(
             int((card or {}).get("recommended_draft_chars") or 0),
             math.ceil(minimum_chars_to_commit * 1.15),
+            int(state.get("chapter_target_chars") or 0) if state.get("chapter_minimum_chars") else 0,
         )
         pending_draft = self._load_pending_draft(project_dir, chapter)
         pending_content = str(((pending_draft or {}).get("data") or {}).get("content") or "")
+        from ..writer.style_models import latest_chapter_review
+
+        review_content = pending_content
+        chapter_path = project_dir / "chapters" / f"chapter-{chapter:04d}.md"
+        if not review_content and chapter_path.is_file():
+            review_content = self._chapter_prose_from_markdown(chapter_path.read_text(encoding="utf-8"))
+        editorial_review = latest_chapter_review(project_dir, chapter, review_content)
         return {
             "project": self._public_state(project_dir, state),
             "chapter": chapter,
             "control_card": card,
+            "editorial_review": editorial_review,
             "minimum_chars_to_commit": minimum_chars_to_commit,
             "recommended_draft_chars": recommended_draft_chars,
             "pending_draft": (
@@ -1554,6 +1681,8 @@ class SerialNovelTool(BaseTool):
                     "recovery_mode": str(pending_draft.get("recovery_mode") or "").strip(),
                     "requires_reprepare": bool(pending_draft.get("requires_reprepare")),
                     "content_tail": pending_content[-1600:],
+                    "wstyle_segments": pending_draft.get("wstyle_segments", []),
+                    "quality_findings": (pending_draft.get("quality") or {}).get("findings", []),
                 }
                 if pending_draft
                 else None
@@ -1613,6 +1742,8 @@ class SerialNovelTool(BaseTool):
         ]
         card = payload.get("control_card")
         if card:
+            if card.get('quality_intent'):
+                lines.append("Chapter purpose (use only applicable goals, never fill prose to satisfy a checklist): " + json.dumps(card['quality_intent'], ensure_ascii=False))
             lines.extend(
                 [
                     f"Control card: Chapter {card['chapter']} - {card['title']}",
@@ -1632,6 +1763,15 @@ class SerialNovelTool(BaseTool):
                     ),
                 ]
             )
+        editorial_review = payload.get("editorial_review")
+        if editorial_review:
+            lines.append("Saved subjective editorial advice for explicit revision only: " + editorial_review['path'])
+            if editorial_review['source_matches_current']:
+                lines.append(editorial_review['summary'])
+                for issue in editorial_review['issues']:
+                    lines.append(f"- Prose lines {issue['line_start']}–{issue['line_end']} [{issue['category']}]: {issue['quote']} — {issue['suggestion']}")
+            else:
+                lines.append("Review source differs from current prose; recheck evidence before applying any suggestion.")
         pending = payload.get("pending_draft")
         if pending:
             if pending["requires_reprepare"]:
@@ -1655,6 +1795,8 @@ class SerialNovelTool(BaseTool):
             if pending["blocking_issues"]:
                 lines.append("Latest blocking issues:")
                 lines.extend(f"- {item}" for item in pending["blocking_issues"])
+            for finding in pending.get('quality_findings', [])[:8]:
+                lines.append(f"- Mechanical evidence at prose lines {finding['locations']}: {finding['quote']} — {finding['suggestion']}")
             lines.extend(
                 [
                     "Boundary excerpt from the preserved tail for continuity only; continue after it and do not copy it:",

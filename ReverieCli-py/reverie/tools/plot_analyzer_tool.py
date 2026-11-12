@@ -71,9 +71,9 @@ class PlotAnalyzerTool(BaseTool):
                 tone_report = f"""
 TONE ANALYSIS:
 - Dominant Tone: {tone.dominant_tone}
-- Confidence: {tone.tone_confidence:.1%}
+- Lexical match index (not confidence): {tone.tone_confidence:.1%}
 - Emotional Intensity: {tone.emotional_intensity:.1%}
-- Pacing: {tone.pacing}
+- Sentence-length pacing proxy: {tone.pacing}
 - Detected Tones: {', '.join(f'{t}: {c:.0%}' for t, c in tone.tones_present.items() if c > 0.1)}
 """
                 return ToolResult.ok(tone_report, data={
@@ -82,6 +82,8 @@ TONE ANALYSIS:
                     "intensity": tone.emotional_intensity,
                     "pacing": tone.pacing,
                     "all_tones": tone.tones_present,
+                    "assessment": "lexical_heuristics_only",
+                    "limitations": "Keyword matches and sentence length do not establish emotional or narrative quality.",
                 })
             
             elif action == "detect_repetitions":
@@ -93,7 +95,7 @@ TONE ANALYSIS:
                 else:
                     rep_report = "No significant repetitions detected."
                 
-                return ToolResult.ok(rep_report, data={"repetitions": repetitions})
+                return ToolResult.ok(rep_report + "\nRepeated text may be intentional; inspect its context before revising.", data={"repetitions": repetitions})
             
             elif action == "check_character_voice":
                 character = kwargs.get("character", "Unknown")
@@ -106,13 +108,13 @@ TONE ANALYSIS:
                 
                 report = f"""
 CHARACTER VOICE ANALYSIS FOR: {character}
-- Consistency Score: {consistency['consistency_score']:.1%}
+- Assessment: descriptive only; semantic consistency is not scored.
 - Speech Patterns:
-  - Formal Words: {consistency['speech_patterns'].get('formal_words', 0)}
   - Contractions: {consistency['speech_patterns'].get('contractions', 0)}
   - Exclamations: {consistency['speech_patterns'].get('exclamations', 0)}
   - Questions: {consistency['speech_patterns'].get('questions', 0)}
-  - Average Sentence Length: {consistency['speech_patterns'].get('average_sentence_length', 0):.1f} words
+  - Average Sentence Length: {consistency['speech_patterns'].get('average_sentence_length', 0):.1f} non-whitespace characters
+  - Limitation: {consistency['limitations']}
 """
                 return ToolResult.ok(report, data=consistency)
             

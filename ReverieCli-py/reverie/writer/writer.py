@@ -12,6 +12,7 @@ Coordinates:
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from datetime import datetime
+import re
 
 from .novel_memory import NovelMemorySystem, Character, Location, PlotEvent, EmotionalArc, Theme, ContentSummary
 from .narrative_analyzer import NarrativeAnalyzer
@@ -127,6 +128,8 @@ class WriterMode:
         
         return {
             "word_count": word_count,
+            "characters": sum(not char.isspace() for char in content),
+            "han_characters": len(re.findall(r'[\u3400-\u9fff]', content)),
             "tone_analysis": {
                 "dominant_tone": tone_analysis.dominant_tone,
                 "confidence": tone_analysis.tone_confidence,
@@ -137,30 +140,10 @@ class WriterMode:
             "repetitions_found": repetitions,
             "consistency_issues": consistency_issues,
             "consistency_report": self.consistency_checker.generate_consistency_report(consistency_issues),
-            "quality_score": self._calculate_quality_score(repetitions, consistency_issues, tone_analysis),
+            "quality_score": None,
+            "assessment": "descriptive_checks_only",
+            "limitations": "Lexical patterns and rule findings do not establish overall literary quality.",
         }
-    
-    def _calculate_quality_score(self, repetitions: List[str], issues: List[Any], tone_analysis: Any) -> float:
-        """Calculate overall quality score (0-100)"""
-        score = 100.0
-        
-        # Penalize repetitions
-        score -= len(repetitions) * 2
-        
-        # Penalize consistency issues by severity
-        critical_count = sum(1 for i in issues if i.severity == "critical")
-        warning_count = sum(1 for i in issues if i.severity == "warning")
-        info_count = sum(1 for i in issues if i.severity == "info")
-        
-        score -= critical_count * 10
-        score -= warning_count * 3
-        score -= info_count * 0.5
-        
-        # Boost for good tone consistency
-        if tone_analysis.tone_confidence > 0.8:
-            score += 5
-        
-        return max(0, score)
     
     def finalize_chapter(
         self,

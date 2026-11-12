@@ -17,6 +17,7 @@
 - [AiO 与独立对话](AIO_CONVERSATIONS.md) / [当前实现与验收状态](AIO_IMPLEMENTATION_STATUS.md)
 - [电脑工具](COMPUTER_USE.md) / [旧 Controller 说明](COMPUTER_CONTROLLER.md)
 - [Writer 写作模式](writer_mode.md)
+- [WStyle 风格卡](WSTYLE.md) / [Writer 质量与评测](WRITER_QUALITY.md)
 - [权限与安全](SECURITY_PERMISSIONS.md)
 - [NVIDIA 模型目录](NVIDIA_CATALOG.md)
 - [内置 Engine](engine/reverie_engine_user_guide.md)

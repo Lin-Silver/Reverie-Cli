@@ -32,14 +32,12 @@ _PROVIDER_CONFIG_FIELDS: Dict[str, List[Dict[str, Any]]] = {
         {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
     ],
-    "webgemini": [
-        {"key": "cookie", "label": "Google cookie", "kind": "secret", "multiline": True},
-        {"key": "cookie_file", "label": "Cookie file", "kind": "path"},
-        {"key": "auth_user", "label": "Auth user", "kind": "text"},
-        {"key": "xsrf_token", "label": "XSRF token", "kind": "secret"},
-        {"key": "proxy", "label": "Proxy", "kind": "url"},
+    "gemini": [
+        {"key": "api_key", "label": "API key", "kind": "secret"},
+        {"key": "api_key_env", "label": "API key environment variable", "kind": "text"},
+        {"key": "api_url", "label": "API URL", "kind": "url"},
         {"key": "timeout", "label": "Timeout (seconds)", "kind": "int", "min": 10, "max": 3600},
-        {"key": "retry_attempts", "label": "Retry attempts", "kind": "int", "min": 0, "max": 12},
+        {"key": "max_tokens", "label": "Max output tokens", "kind": "int", "min": 1, "max": 1000000},
     ],
     "opencode": [
         {"key": "api_key", "label": "API key", "kind": "secret", "optional": True},
@@ -117,10 +115,10 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
         from .codex import get_codex_model_catalog
 
         return get_codex_model_catalog()
-    if source == "webgemini":
-        from .webgemini import get_webgemini_model_catalog
+    if source == "gemini":
+        from .gemini import get_gemini_model_catalog
 
-        return get_webgemini_model_catalog()
+        return get_gemini_model_catalog(config.gemini, fetch_live=fetch_live, force_refresh=fetch_live, proxy=config.api_proxy)
     if source == "opencode":
         from .opencode import get_opencode_model_catalog, resolve_opencode_api_key
 
@@ -186,7 +184,7 @@ def _standard_catalog(config: Config) -> List[Dict[str, Any]]:
                 "thinking_options": [],
                 "base_url": model.base_url,
                 "endpoint": model.endpoint,
-                "configured": bool(model.resolve_api_key() or model.provider in {"webgemini", "codex"}),
+                "configured": bool(model.resolve_api_key() or model.provider == "codex"),
                 # Enough to prefill the desktop's edit form without ever sending
                 # the key itself: `configured` also covers keyless transports, so
                 # the form needs to know whether a key is actually stored.
@@ -614,8 +612,8 @@ def apply_model_selection(
         provider_config = normalize_modelscope_config(provider_config)
     else:
         normalizer: Optional[Callable[[Any], Dict[str, Any]]] = None
-        if normalized_source == "webgemini":
-            from .webgemini import normalize_webgemini_config as normalizer
+        if normalized_source == "gemini":
+            from .gemini import normalize_gemini_config as normalizer
         elif normalized_source == "aihubmix":
             from .aihubmix import normalize_aihubmix_config as normalizer
         if normalizer:

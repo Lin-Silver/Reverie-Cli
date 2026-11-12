@@ -149,7 +149,7 @@ def test_source_display_table_covers_every_supported_source() -> None:
         ("sensenova", "build_sensenova_runtime_model_data"),
         ("nvidia", "build_nvidia_runtime_model_data"),
         ("modelscope", "build_modelscope_runtime_model_data"),
-        ("webgemini", "build_webgemini_runtime_model_data"),
+        ("gemini", "build_gemini_runtime_model_data"),
     ],
 )
 def test_unavailable_external_source_never_falls_back_to_standard_model(monkeypatch, source: str, builder_name: str) -> None:

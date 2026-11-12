@@ -1150,6 +1150,13 @@ class ToolExecutor:
             )
         return ToolResult.fail(denial or f"The user denied this {tool.name} call. {reason}".strip())
 
+    @staticmethod
+    def _blocked_deleted_paths(tool: BaseTool, paths: List[str]) -> List[str]:
+        from ..tools.serial_novel import SerialNovelTool
+
+        archived = getattr(tool, "archived_draft_removals", set()) if isinstance(tool, SerialNovelTool) else set()
+        return [path for path in paths if path not in archived]
+
     def execute(self, tool_name: str, arguments: Dict[str, Any], tool_call_id: str = "") -> ToolResult:
         """
         Execute a tool with given arguments.
@@ -1384,7 +1391,7 @@ class ToolExecutor:
                     raise WorkspaceGuardError(f"Workspace checkpoint unavailable; tool execution refused: {exc}") from exc
             result = tool.execute(**normalized_arguments)
             if isinstance(shadow_guard, ShadowGitManager) and before_checkpoint is not None:
-                deleted_paths = shadow_guard.deleted_paths_since(before_checkpoint.commit)
+                deleted_paths = self._blocked_deleted_paths(tool, shadow_guard.deleted_paths_since(before_checkpoint.commit))
                 if deleted_paths and tool.name != "delete_file":
                     restored = shadow_guard.restore_paths(before_checkpoint.commit, deleted_paths)
                     result = ToolResult.fail(
@@ -1447,7 +1454,7 @@ class ToolExecutor:
         except Exception as e:
             if isinstance(shadow_guard, ShadowGitManager) and before_checkpoint is not None:
                 try:
-                    deleted_paths = shadow_guard.deleted_paths_since(before_checkpoint.commit)
+                    deleted_paths = self._blocked_deleted_paths(tool, shadow_guard.deleted_paths_since(before_checkpoint.commit))
                     if deleted_paths:
                         shadow_guard.restore_paths(before_checkpoint.commit, deleted_paths)
                     shadow_guard.checkpoint(f"Failed tool {tool.name}")

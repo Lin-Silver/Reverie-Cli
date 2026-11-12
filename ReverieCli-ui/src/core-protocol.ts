@@ -2,6 +2,10 @@ import type { CoreActionName } from "../electron/core-actions";
 import type { ComposerAttachment } from "../electron/attachments";
 import type {
   ContextUsage,
+  TokenFilters,
+  TokenPrice,
+  TokenStatisticsData,
+  CommandsState,
   CustomProviderRecord,
   DesktopState,
   FileChange,
@@ -58,6 +62,8 @@ export interface WorkspaceMention extends Record<string, unknown> {
 }
 
 interface CoreRequestMap {
+  wstyleCommand: {payload:{args:string;projectRoot?:string;sessionId?:string};response:Envelope<'wstyle.result',{success:boolean;output:string;error:string;data:Record<string,unknown>;session_id:string}>};
+  listCommands: {payload:EmptyPayload;response:Envelope<'commands',{commands:CommandsState}>};
   archiveSession: {payload:{projectRoot:string;assistantId?:'aio';sessionId:string;revision:number;archived:boolean};response:Envelope<'sessions',{sessions:SessionListState}>};
   getWorkspaceConfig: {payload:{projectRoot:string};response:Envelope<'workspace.config',{models:ModelSourcesState;workspace:WorkspaceState;settings:SettingsState}>};
   queueConversationRun: {payload:{projectRoot:string;sessionId:string;assistantId?:'aio';runId:string;configuration:Record<string,unknown>;configurationRevision:number;executionRoot?:string};response:Envelope<'conversation.run',{revision:number}>};
@@ -133,6 +139,9 @@ interface CoreRequestMap {
   deleteSessions: { payload: { sessionIds: string[]; confirmed: true }; response: Envelope<"sessions.deleted", { deleted_session_ids: string[]; session: SessionState | null; sessions: SessionListState }> };
   resolveApproval: { payload: { approvalId: unknown; sessionId?: string; projectRoot?: string; decision: ApprovalDecision; message?: string }; response: Envelope<"approval.resolved", { approval_id: string; decision: ApprovalDecision }> };
   getModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
+  getTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.statistics", { statistics: TokenStatisticsData }> };
+  exportTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.csv", { filename: string; content: string }> };
+  setTokenPrice: { payload: { modelKey: string; price: TokenPrice }; response: Envelope<"token.price", { model_key: string; price: TokenPrice }> };
   refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   selectModel: { payload: { source: string; modelId: string; reasoning?: string }; response: Envelope<"model.selected", { selected: Record<string, unknown>; models: ModelSourcesState; workspace: WorkspaceState }> };
   getImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };

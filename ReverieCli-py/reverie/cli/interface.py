@@ -1243,7 +1243,7 @@ class ReverieInterface:
             "sensenova": "/sensenova key or /sensenova activate",
             "nvidia": "/nvidia key or /nvidia activate",
             "modelscope": "/modelscope key or /modelscope activate",
-            "webgemini": "/webgemini activate",
+            "gemini": "/gemini activate",
             "custom": "/provider list or /provider add",
         }
         command_hint = source_commands.get(source, "/model")
@@ -1341,7 +1341,7 @@ class ReverieInterface:
             "sensenova": "SenseNova",
             "nvidia": "NVIDIA",
             "modelscope": "ModelScope",
-            "webgemini": "WebGemini",
+            "gemini": "Gemini (Google Gen AI SDK)",
         }
         if source_name == "standard":
             return provider_labels.get(provider_name, model_source_display_name(source_name))
@@ -3059,6 +3059,16 @@ class ReverieInterface:
             )
         except Exception:
             report_suppressed_exception("load custom provider command completions")
+        try:
+            if normalize_mode(self._load_active_runtime_config().mode) == 'writer':
+                runtime = self._get_wstyle_runtime()
+                runtime.ensure_resources()
+                for card in runtime.repository.list_cards():
+                    if card['valid']:
+                        for action in ('use', 'show', 'add', 'remove'):
+                            completions[f"/wstyle {action} {card['id']}"] = f"{card['name']} [{card['layer']}]"
+        except Exception:
+            report_suppressed_exception("load WStyle Card completions")
         return completions
     
     def _process_message(self, message: str) -> bool:
@@ -3769,6 +3779,9 @@ class ReverieInterface:
         if not self.agent:
             return
         self.agent.config = config
+        if normalize_mode(config.mode) == 'writer':
+            self.agent.wstyle_runtime = self._get_wstyle_runtime()
+            self.agent.tool_executor.update_context('wstyle_runtime', self.agent.wstyle_runtime)
         self.agent.tool_executor.update_context('config_manager', self.config_manager)
         self.agent.tool_executor.update_context('refresh_agent_prompt_guidance', self._refresh_agent_prompt_guidance)
         self.agent.tool_executor.update_context('mcp_config_manager', self.mcp_config_manager)
@@ -4673,6 +4686,23 @@ class ReverieInterface:
         self.skills_manager.restore_pinned_skills(names if isinstance(names, list) else [])
         self._refresh_agent_prompt_guidance()
 
+    def _get_wstyle_runtime(self):
+        from ..writer.style_runtime import WStyleRuntime
+
+        runtime = getattr(self, '_wstyle_runtime', None)
+        if runtime is None or runtime.project_root != self.project_root:
+            runtime = WStyleRuntime(self.project_root, app_root=self.config_manager.app_root,
+                                    session_manager=self.session_manager)
+            self._wstyle_runtime = runtime
+        runtime.config = self._load_active_runtime_config()
+        runtime.session_manager = self.session_manager
+        return runtime
+
+    def _call_wstyle_model(self, system: str, user: str, max_tokens: int) -> str:
+        from ..agent.text_completion import complete_configured_text
+
+        return complete_configured_text(self._load_active_runtime_config(), self.project_root, system, user, max_tokens)
+
     def _get_app_context(self) -> dict:
         config_manager = self.config_manager
         if self.runtime_surface == 'terminal':
@@ -4680,6 +4710,8 @@ class ReverieInterface:
             config_manager = ConversationConfigView(self.config_manager,self.session_manager,lambda config:setattr(self,'_conversation_config',config))
         return {
             'config_manager': config_manager, 'rules_manager': self.rules_manager,
+            'get_wstyle_runtime': self._get_wstyle_runtime,
+            'wstyle_model_call': self._call_wstyle_model,
             'mcp_config_manager': self.mcp_config_manager, 'mcp_runtime': self.mcp_runtime,
             # Both the instance and the accessor: a command that only reports
             # state should not force the runtime into existence, while one that

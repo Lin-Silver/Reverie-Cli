@@ -1,13 +1,18 @@
 import type { CommandRecord, SkillRecord } from "./types";
 import { desktopCommandAvailable } from "./desktop-commands";
 
-export type ComposerToken = { kind: "mention" | "command" | "skill"; query: string; start: number; end: number };
+export type ComposerToken = { kind: "mention" | "command" | "skill" | "wstyle"; query: string; start: number; end: number; selected?: string[] };
 export type CompletionOption = { id: string; kind: "file" | "command" | "skill" | "skills"; label: string; description: string; value: string; disabled?: boolean; badge?: string };
 
 export function composerToken(value: string, caret: number): ComposerToken | null {
   const before = value.slice(0, caret);
   const mention = /(?:^|\s)@([^\s@]*)$/.exec(before);
   if (mention) return { kind: "mention", query: mention[1], start: caret - mention[1].length - 1, end: caret };
+  const wstyle = /^\s*\/wstyle\s+(?:use|add|remove|show)\s+([^\n]*)$/i.exec(before);
+  if (wstyle) {
+    const query = /[^\s]*$/.exec(wstyle[1])![0];
+    return {kind:"wstyle",query,start:caret-query.length,end:caret,selected:wstyle[1].slice(0,-query.length || undefined).trim().split(/\s+/).filter(Boolean)};
+  }
   const skill = /^\s*\/skills?\s+(?:pin\s+|use\s+|add\s+)?([^\n]*)$/i.exec(before);
   if (skill) return { kind: "skill", query: skill[1].replace(/^\$/, ""), start: value.indexOf("/"), end: caret };
   const command = /^\s*\/([^\s/]*)$/.exec(before);
@@ -17,6 +22,11 @@ export function composerToken(value: string, caret: number): ComposerToken | nul
 export function slashOptions(token: ComposerToken, commands: CommandRecord[], skills: SkillRecord[], full: boolean, translate: (key: string) => string): CompletionOption[] {
   const query = token.query.trim().toLocaleLowerCase();
   const matches = (...values: string[]) => values.some(value => value.toLocaleLowerCase().includes(query));
+  if (token.kind === "wstyle") return commands.filter(command => command.command.startsWith("/wstyle use ")).flatMap(command => {
+    const id=command.command.slice("/wstyle use ".length);
+    return (token.selected ?? []).some(value => value.toLocaleLowerCase() === id.toLocaleLowerCase()) || !matches(id,command.summary) ? [] :
+      [{id:`card:${command.id}`,kind:"command" as const,label:id,description:command.summary,value:id+" "}];
+  });
   const skillOptions: CompletionOption[] = skills.filter(skill => !skill.shadowed && matches(skill.name, skill.description)).map(skill => ({
     id: `skill:${skill.key}`, kind: "skill", label: skill.name, description: skill.description, value: skill.name,
     disabled: skill.pinned || full, badge: translate(skill.pinned ? "已固定" : full ? "固定数量已满" : "必须使用"),

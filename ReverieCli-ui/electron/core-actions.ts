@@ -1,6 +1,8 @@
 export type JsonRecord = Record<string, unknown>;
 
 export const CORE_RESPONSE_CONTRACT = {
+  wstyleCommand: { type: "wstyle.result", required: ["success", "output", "error", "data", "session_id"] },
+  listCommands: { type: "commands", required: ["commands"] },
   listTools: { type: "tools", required: ["tools"] },
   listSkills: { type: "skills", required: ["skills"] },
   listPlugins: { type: "plugins", required: ["plugins"] },
@@ -47,6 +49,9 @@ export const CORE_RESPONSE_CONTRACT = {
   getFileChanges: { type: "file.changes", required: ["session_id", "changes"] },
   getContextStatus: { type: "context.status", required: ["context_engine"] },
   getContextUsage: { type: "context.usage", required: ["usage"] },
+  getTokenStatistics: { type: "token.statistics", required: ["statistics"] },
+  exportTokenStatistics: { type: "token.csv", required: ["filename", "content"] },
+  setTokenPrice: { type: "token.price", required: ["model_key", "price"] },
   revealProviderSecret: { type: "provider.secret", required: ["value"] },
   listApiKeyEnvironmentVariables: { type: "provider.environment", required: ["names"] },
   getSubagents: { type: "subagents", required: ["subagents"] },

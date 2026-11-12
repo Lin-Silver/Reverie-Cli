@@ -11,10 +11,11 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from .config import get_app_root
 from typing import Any, Callable, Dict, List, Optional
 
 
-_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "resumePrompt", "compactContext", "workspaceMentions", "indexWorkspace", "callViewTool"})
+_BACKGROUND_DISPATCH_ACTIONS = frozenset({"runPrompt", "resumePrompt", "compactContext", "workspaceMentions", "indexWorkspace", "callViewTool", "wstyleCommand"})
 
 
 def _interactive_context_worker_limit(cpu_count: Optional[int] = None) -> int:
@@ -548,7 +549,7 @@ class ReverieSdkBridge:
             self.interface.agent.set_history(session.messages)
         return _json_safe(session.to_wire_dict())
 
-    def commands_payload(self) -> Dict[str, Any]:
+    def commands_payload(self, session_id: str = "") -> Dict[str, Any]:
         from .cli.help_catalog import HELP_SECTION_ORDER, HELP_TOPICS
 
         items = [dict(item, id=topic_id) for topic_id, item in HELP_TOPICS.items()]
@@ -558,6 +559,21 @@ class ReverieSdkBridge:
         provider_commands = self._custom_provider_command_items()
         if provider_commands:
             items.extend(provider_commands)
+        interface = self.ensure_interface()
+        mode = str(self._view_config(interface).mode)
+        if session_id:
+            metadata = interface.session_manager.get_page(session_id, limit=1)['metadata']
+            mode = (metadata.get('runtime_config', {}).get('settings') or {}).get('mode', mode)
+        if mode == 'writer':
+            from .writer.style_runtime import WStyleRuntime
+
+            runtime = WStyleRuntime(interface.project_root, app_root=interface.config_manager.app_root)
+            runtime.ensure_resources()
+            for card in runtime.repository.list_cards():
+                if card['valid']:
+                    items.append({'id':f"wstyle:{card['id']}", 'command':f"/wstyle use {card['id']}",
+                                  'section':'Writer', 'summary':f"{card['name']} [{card['layer']}]: {card['description']}",
+                                  'overview':'', 'detail':''})
         return {
             "sections": list(HELP_SECTION_ORDER),
             "items": items,
@@ -929,6 +945,20 @@ class ReverieSdkBridge:
                 "type": "context.status",
                 "context_engine": self.context_status_payload(),
             }
+        if action == "setTokenPrice":
+            from .usage_statistics import set_model_token_price
+
+            model_key = str(payload.get("modelKey") or "").strip()
+            price = set_model_token_price(get_app_root(), model_key, payload.get("price") or {})
+            return {"id": request_id, "type": "token.price", "model_key": model_key, "price": price}
+        if action in {"getTokenStatistics", "exportTokenStatistics"}:
+            from .usage_statistics import build_usage_report, usage_csv
+
+            interface = self.ensure_interface()
+            report = build_usage_report(get_app_root(), current=interface.workspace_stats_manager, filters=payload.get("filters") or {})
+            if action == "exportTokenStatistics":
+                return {"id": request_id, "type": "token.csv", "filename": "Reverie-Tokens.csv", "content": usage_csv(report)}
+            return {"id": request_id, "type": "token.statistics", "statistics": {key: value for key, value in report.items() if key != "records"}}
         if action == "getContextUsage":
             interface = self.ensure_interface()
             session_id = str(payload.get("sessionId") or "").strip()
@@ -1554,7 +1584,36 @@ class ReverieSdkBridge:
                 "deleted": _json_safe(result.get("deleted", [])),
             }
         if action == "listCommands":
-            return {"id": request_id, "type": "commands", "commands": self.commands_payload()}
+            return {"id": request_id, "type": "commands", "commands": self.commands_payload(str(payload.get('sessionId') or ''))}
+        if action == "wstyleCommand":
+            from copy import deepcopy
+            from .agent.text_completion import complete_configured_text
+            from .session.runtime_config import resolve_runtime_config
+            from .writer.style_commands import run_wstyle_command
+            from .writer.style_runtime import WStyleRuntime
+
+            if not self._run_lock.acquire(blocking=False):
+                raise ValueError("Stop the active run before executing a WStyle command.")
+            try:
+                interface = self.ensure_interface()
+                session_id = str(payload.get('sessionId') or '')
+                defaults = interface.config_manager.load()
+                snapshot = interface.session_manager.get_page(session_id, limit=1)['metadata'].get('runtime_config') if session_id else None
+                config = deepcopy(defaults)
+                if snapshot:
+                    # Offline style management must survive an unavailable saved model.
+                    config.mode = (snapshot.get('settings') or {}).get('mode', config.mode)
+                    config.max_context_tokens = (snapshot.get('settings') or {}).get('max_context_tokens', config.max_context_tokens)
+                runtime = WStyleRuntime(interface.project_root, app_root=interface.config_manager.app_root, config=config,
+                                        session_manager=interface.session_manager if session_id else None, session_id=session_id or None)
+                def model_call(system, user, max_tokens):
+                    resolved = resolve_runtime_config(defaults, snapshot) if snapshot else defaults
+                    return complete_configured_text(resolved, runtime.project_root, system, user, max_tokens)
+                result = run_wstyle_command(str(payload.get('args') or ''), runtime, mode=config.mode, model_call=model_call)
+                return {'id':request_id, 'type':'wstyle.result', 'success':result.success,
+                        'output':result.output, 'error':result.error or '', 'data':_json_safe(result.data), 'session_id':session_id}
+            finally:
+                self._run_lock.release()
         if action == "workspaceMentions":
             query = str(payload.get("query") or "").strip()
             limit = max(1, min(100, int(payload.get("limit", 24) or 24)))

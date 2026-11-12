@@ -75,7 +75,7 @@ _PERMISSION_MODE_INPUTS = {
 # Model sources the Auto Check reviewer can be pinned to.
 _REVIEW_MODEL_SOURCES = {
     "standard", "nvidia", "codex", "modelscope", "sensenova",
-    "aihubmix", "agnes", "webgemini", "opencode", "custom",
+    "aihubmix", "agnes", "gemini", "opencode", "custom",
 }
 
 # Windows delivers extended keys as a two-byte handshake: a `\x00`/`\xe0` lead
@@ -138,8 +138,7 @@ class CommandHandler:
             'subagent': self.cmd_subagent,
             'subagents': self.cmd_subagent,
             'codex': self.cmd_codex,
-            'webgemini': self.cmd_webgemini,
-            'wgemini': self.cmd_webgemini,
+            'gemini': self.cmd_gemini,
             'opencode': self.cmd_opencode,
             'oc': self.cmd_opencode,
             'aihubmix': self.cmd_aihubmix,
@@ -153,6 +152,7 @@ class CommandHandler:
             'provider': self.cmd_provider,
             'providers': self.cmd_provider,
             'mode': self.cmd_mode,
+            'wstyle': self.cmd_wstyle,
             'status': self.cmd_status,
             'doctor': self.cmd_doctor,
             'harness': self.cmd_doctor,
@@ -1201,6 +1201,26 @@ class CommandHandler:
             )
             return True
     
+    def cmd_wstyle(self, args: str) -> bool:
+        """Run Writer's offline Card controls or explicitly requested model analysis."""
+        from ..writer.style_commands import run_wstyle_command
+        from ..writer.style_runtime import WStyleRuntime
+
+        config = self.app['config_manager'].load()
+        if normalize_mode(config.mode) != 'writer':
+            self.console.print(Text('/wstyle is available only in Writer mode. Switch with /mode writer.', style=self.theme.CORAL_SOFT))
+            return True
+        factory = self.app.get('get_wstyle_runtime')
+        runtime = factory() if callable(factory) else self.app.get('wstyle_runtime')
+        if runtime is None:
+            runtime = WStyleRuntime(self.app['project_root'], app_root=self.app['config_manager'].app_root,
+                                    config=config, session_manager=self.app.get('session_manager'))
+            self.app['wstyle_runtime'] = runtime
+        result = run_wstyle_command(args, runtime, mode=config.mode, model_call=self.app.get('wstyle_model_call'))
+        self.console.print(Text(result.output if result.success else result.error or 'WStyle command failed.',
+                                style=None if result.success else self.theme.CORAL_SOFT))
+        return True
+
     def cmd_help(self, args: str) -> bool:
         """Show the full command guide or detailed help for a specific command."""
         query = args.strip()
@@ -8026,152 +8046,93 @@ class CommandHandler:
 
         return True
 
-    def cmd_webgemini(self, args: str) -> bool:
-        """Manage WebGemini anonymous Gemini Web source settings."""
-        raw = args.strip()
-        if not raw:
-            return self._cmd_webgemini_status()
-
-        lowered = raw.lower()
-        if lowered in ("status", "check"):
-            return self._cmd_webgemini_status()
-        if lowered in ("activate", "use"):
-            return self._cmd_webgemini_activate()
-        if lowered == "model":
-            return self._cmd_webgemini_model("")
-        if lowered.startswith("model "):
-            return self._cmd_webgemini_model(raw[6:].strip())
-        if lowered in ("proxy",):
-            return self._cmd_webgemini_proxy("")
-        if lowered.startswith("proxy "):
-            return self._cmd_webgemini_proxy(raw[6:].strip())
-
-        self.console.print(
-            f"[{self.theme.AMBER_GLOW}]{self.deco.DOT_MEDIUM} Usage: /webgemini [status|activate|model|proxy][/{self.theme.AMBER_GLOW}]"
-        )
+    def cmd_gemini(self, args: str) -> bool:
+        """Manage the official Gemini API Source."""
+        action, _, value = str(args or '').strip().partition(' ')
+        action = action.lower()
+        if action in ('', 'status', 'info'):
+            return self._cmd_gemini_status()
+        if action in ('activate', 'use'):
+            return self._cmd_gemini_activate()
+        if action in ('model', 'models'):
+            return self._cmd_gemini_model(value)
+        if action in ('key', 'api-key'):
+            return self._cmd_gemini_key(value)
+        if action in ('url', 'base-url'):
+            return self._cmd_gemini_url(value)
+        self.console.print('Usage: /gemini [status|activate|model|key|url]')
         return True
 
-    def _cmd_webgemini_status(self) -> bool:
-        from ..webgemini import (
-            WEBGEMINI_ORIGIN,
-            mask_webgemini_cookie,
-            normalize_webgemini_config,
-            resolve_webgemini_selected_model,
-        )
-        from ..proxy import proxy_display
+    def _cmd_gemini_status(self) -> bool:
+        from ..provider_probe import collect_provider_rows, find_provider_row
 
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        webgemini_cfg = normalize_webgemini_config(getattr(config, "webgemini", {}))
-        selected = resolve_webgemini_selected_model(webgemini_cfg)
-        model_source = str(getattr(config, "active_model_source", "standard") or "standard").strip().lower()
-        cookie_state = mask_webgemini_cookie(webgemini_cfg.get("cookie", "")) if webgemini_cfg.get("cookie") else "(anonymous)"
-        if webgemini_cfg.get("cookie_file"):
-            cookie_state = f"file: {escape(str(webgemini_cfg.get('cookie_file')))}"
-
-        lines = [
-            f"[{self.theme.BLUE_SOFT}]Active model source:[/{self.theme.BLUE_SOFT}] {self._format_model_source_label(model_source)}",
-            f"[{self.theme.BLUE_SOFT}]Transport:[/{self.theme.BLUE_SOFT}] Gemini Web StreamGenerate",
-            f"[{self.theme.BLUE_SOFT}]Gemini origin:[/{self.theme.BLUE_SOFT}] {WEBGEMINI_ORIGIN}",
-            f"[{self.theme.BLUE_SOFT}]Cookie:[/{self.theme.BLUE_SOFT}] {cookie_state}",
-            f"[{self.theme.BLUE_SOFT}]Proxy:[/{self.theme.BLUE_SOFT}] {escape(proxy_display(webgemini_cfg.get('proxy', ''), prefer_system=True))}",
-            f"[{self.theme.BLUE_SOFT}]Timeout:[/{self.theme.BLUE_SOFT}] {webgemini_cfg.get('timeout')}s",
-        ]
-        if selected:
-            lines.insert(1, f"[{self.theme.BLUE_SOFT}]Selected model:[/{self.theme.BLUE_SOFT}] {escape(selected['display_name'])} ({escape(selected['id'])})")
-            lines.insert(3, f"[{self.theme.BLUE_SOFT}]Anonymous mode:[/{self.theme.BLUE_SOFT}] YES")
-            if selected.get("requires_cookie_for_real_routing"):
-                lines.append(
-                    f"[{self.theme.AMBER_GLOW}]Pro routing requires a paid Gemini Advanced cookie; anonymous upstream may fall back to Flash.[/{self.theme.AMBER_GLOW}]"
-                )
-
-        self.console.print()
-        self.console.print(
-            Panel(
-                Text.from_markup("\n".join(lines)),
-                title=f"[bold {self.theme.PINK_SOFT}]{self.deco.SPARKLE} WebGemini Source {self.deco.SPARKLE}[/bold {self.theme.PINK_SOFT}]",
-                border_style=self.theme.BORDER_PRIMARY,
-                box=box.ROUNDED,
-                padding=(1, 2),
-            )
-        )
-        self.console.print()
+        manager = self.app.get('config_manager')
+        if manager:
+            row = find_provider_row(collect_provider_rows(manager.load()), 'gemini')
+            self.console.print(self._build_key_value_table([
+                ('Source', 'Gemini (Google Gen AI SDK)'), ('API URL', row.base_url),
+                ('API Key', row.key_hint), ('Model', row.selected_model_id),
+                ('Active', 'yes' if row.active else 'no'),
+            ]))
+            self.console.print('Configure with /gemini key (or env:VARIABLE_NAME), /gemini url, /gemini model, then /gemini activate.')
         return True
 
-    def _cmd_webgemini_activate(self) -> bool:
-        from ..webgemini import normalize_webgemini_config
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
+    def _cmd_gemini_key(self, value: str = '') -> bool:
+        manager = self.app.get('config_manager')
+        if not manager:
             return True
-
-        config = config_manager.load()
-        config.webgemini = normalize_webgemini_config(getattr(config, "webgemini", {}))
-        config.active_model_source = "webgemini"
-        config_manager.save(config)
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-        self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} WebGemini source activated.[/{self.theme.MINT_VIBRANT}]"
-        )
-        return True
-
-    def _cmd_webgemini_model(self, model_query: str) -> bool:
-        from ..webgemini import get_webgemini_model_catalog, normalize_webgemini_config
-
-        return self._select_external_provider_model(
-            config_attr="webgemini",
-            normalize_config=normalize_webgemini_config,
-            catalog=get_webgemini_model_catalog(),
-            provider_label="WebGemini",
-            active_source="webgemini",
-            model_query=model_query,
-        )
-
-    def _cmd_webgemini_proxy(self, proxy_value: str) -> bool:
-        from ..webgemini import normalize_webgemini_config
-
-        config_manager = self.app.get('config_manager')
-        if not config_manager:
-            self.console.print(
-                f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} Config manager not available[/{self.theme.CORAL_SOFT}]"
-            )
-            return True
-
-        config = config_manager.load()
-        webgemini_cfg = normalize_webgemini_config(getattr(config, "webgemini", {}))
-        candidate = str(proxy_value or "").strip()
+        candidate = str(value or '').strip()
         if not candidate:
-            current_proxy = str(webgemini_cfg.get("proxy", "") or "").strip()
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Current WebGemini proxy override: {current_proxy or '(auto/system/env)'}[/{self.theme.TEXT_DIM}]"
-            )
-            self.console.print(
-                f"[{self.theme.TEXT_DIM}]Use 'clear' to force Windows system proxy first, then HTTPS_PROXY/HTTP_PROXY.[/{self.theme.TEXT_DIM}]"
-            )
-            candidate = Prompt.ask("WebGemini proxy", default=current_proxy).strip()
-
-        if candidate.lower() in ("clear", "default", "none", "off"):
-            candidate = ""
-        webgemini_cfg["proxy"] = candidate
-        config.webgemini = normalize_webgemini_config(webgemini_cfg)
-        config_manager.save(config)
-        if self.app.get('reinit_agent'):
-            self.app['reinit_agent']()
-
-        self.console.print(
-            f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} WebGemini proxy {'set to: ' + escape(candidate) if candidate else 'cleared.'}[/{self.theme.MINT_VIBRANT}]"
-        )
+            candidate = Prompt.ask('Gemini API Key (or env:VARIABLE_NAME)', password=True).strip()
+        if not candidate:
+            return True
+        config = manager.load()
+        config.gemini.update(api_key_settings(candidate))
+        self._save_provider_config(config, manager)
+        self.console.print('Gemini API key setting saved. Use /gemini model to refresh the catalog.')
         return True
+
+    def _cmd_gemini_url(self, value: str = '') -> bool:
+        from ..gemini import normalize_gemini_config
+
+        manager = self.app.get('config_manager')
+        if not manager:
+            return True
+        config = manager.load()
+        candidate = str(value or '').strip() or Prompt.ask('Gemini Base URL', default=config.gemini['api_url']).strip()
+        config.gemini = normalize_gemini_config({**config.gemini, 'api_url': candidate})
+        self._save_provider_config(config, manager)
+        self.console.print('Gemini Base URL saved.')
+        return True
+
+    def _cmd_gemini_activate(self) -> bool:
+        from ..gemini import build_gemini_runtime_model_data
+
+        manager = self.app.get('config_manager')
+        if not manager:
+            return True
+        config = manager.load()
+        if not build_gemini_runtime_model_data(config.gemini):
+            self.console.print('Configure a Gemini API key first: /gemini key, GOOGLE_API_KEY or GEMINI_API_KEY.')
+            return True
+        config.active_model_source = 'gemini'
+        self._save_provider_config(config, manager)
+        self.console.print('Gemini Source activated.')
+        return True
+
+    def _cmd_gemini_model(self, model_query: str) -> bool:
+        from ..gemini import get_gemini_model_catalog, normalize_gemini_config
+
+        manager = self.app.get('config_manager')
+        if not manager:
+            return True
+        config = manager.load()
+        return self._select_external_provider_model(
+            config_attr='gemini', normalize_config=normalize_gemini_config,
+            catalog=get_gemini_model_catalog(config.gemini, fetch_live=True, force_refresh=True, proxy=config.api_proxy),
+            provider_label='Gemini', active_source='gemini', model_query=model_query,
+        )
+
 
     def cmd_opencode(self, args: str) -> bool:
         """Manage OpenCode Zen free-model source settings."""
@@ -10042,7 +10003,7 @@ class CommandHandler:
         delegates: Dict[str, Dict[str, Callable[..., bool]]] = {
             "models": {
                 "codex": self._cmd_codex_model,
-                "webgemini": self._cmd_webgemini_model,
+                "gemini": self._cmd_gemini_model,
                 "opencode": self._cmd_opencode_model,
                 "aihubmix": self._cmd_aihubmix_model,
                 "agnes": self._cmd_agnes_model,
@@ -10052,7 +10013,7 @@ class CommandHandler:
             },
             "status": {
                 "codex": self._cmd_codex_status,
-                "webgemini": self._cmd_webgemini_status,
+                "gemini": self._cmd_gemini_status,
                 "opencode": self._cmd_opencode_status,
                 "aihubmix": self._cmd_aihubmix_status,
                 "agnes": self._cmd_agnes_status,
@@ -10062,7 +10023,7 @@ class CommandHandler:
             },
             "activate": {
                 "codex": self._cmd_codex_activate,
-                "webgemini": self._cmd_webgemini_activate,
+                "gemini": self._cmd_gemini_activate,
                 "opencode": self._cmd_opencode_activate,
                 "aihubmix": self._cmd_aihubmix_activate,
                 "agnes": self._cmd_agnes_activate,
@@ -10828,8 +10789,6 @@ class CommandHandler:
         if value == "--env" or value.startswith("--env "):
             value = "env:" + value[5:].strip()
         if row.kind == "builtin" and value.lower().startswith("env:"):
-            if row.source == "webgemini":
-                return self._provider_builtin_only(row, "API key environment variables")
             config_manager = self.app.get("config_manager")
             if not config_manager:
                 return True
@@ -10841,6 +10800,8 @@ class CommandHandler:
             self.console.print(f"API key environment variable saved for {escape(row.name)}.")
             return True
         if row.kind == "builtin":
+            if row.source == "gemini":
+                return self._cmd_gemini_key(value)
             delegate = self._provider_builtin_delegate(row.source, "key")
             if delegate is None:
                 return self._provider_builtin_only(row, "credentials")
@@ -10878,6 +10839,8 @@ class CommandHandler:
     def _cmd_provider_url(self, row: Any, value: str) -> bool:
         """Change the base URL of a custom provider."""
         if row.kind == "builtin":
+            if row.source == "gemini":
+                return self._cmd_gemini_url(value)
             return self._provider_builtin_only(row, "the base URL")
 
         from ..custom_providers import (

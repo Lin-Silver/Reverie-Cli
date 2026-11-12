@@ -96,6 +96,7 @@ import { AnswerMarkdown as Markdown } from "./AnswerMarkdown";
 import { Workbench } from "./Workbench";
 import { SessionWorkbench } from "./SessionWorkbench";
 import { ConversationDisplay, DisplayPresets } from "./ConversationDisplay";
+import TokenStatistics from "./TokenStatistics";
 import { ComposerSuggestions } from "./ComposerSuggestions";
 import { composerToken, slashOptions, type CompletionOption } from "./composer-completion";
 import { FileChanges } from "./FileChanges";
@@ -1898,6 +1899,10 @@ function Composer({
           </div>
         )}
         <AttachmentCards items={attachments} remove={removeAttachment} />
+        {controls?.wstyle && <section className="wstyle-result" aria-label={t("WStyle 命令结果")} aria-busy={controls.wstyle.busy}>
+          <header><strong>WStyle</strong><button type="button" onClick={controls.wstyle.close} disabled={controls.wstyle.busy}>{t("关闭")}</button></header>
+          {controls.wstyle.busy ? <p role="status">{t("正在执行 WStyle 命令")}</p> : <pre tabIndex={0}>{controls.wstyle.output}</pre>}
+        </section>}
         {controls?.error && <p className="persistent-error" role="alert">{controls.error}</p>}
         {running && controls?.status && <p className="composer-status" role="status">{controls.status}</p>}
         {running && forceAvailable && <button type="button" onClick={controls?.forceStop}>{t("强制停止")}</button>}
@@ -3253,7 +3258,7 @@ function SettingsView({
   selectImageModel: (source: string, model: ImageModelRecord) => void;
 }) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<"general" | "appearance" | "conversation" | "models" | "images" | "about">("general");
+  const [tab, setTab] = useState<"general" | "appearance" | "conversation" | "models" | "images" | "statistics" | "about">("general");
   const [displayNameDraft, setDisplayNameDraft] = useState(preferences.userDisplayName);
   useEffect(() => setDisplayNameDraft(preferences.userDisplayName), [preferences.userDisplayName]);
   const items = state.settings.items.filter((item) => !item.key.startsWith("plugin_enabled:") && !["active_model_source", "active_model_index"].includes(item.key));
@@ -3270,6 +3275,7 @@ function SettingsView({
         <button type="button" className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}><MessageSquare size={15} />{t("对话显示")}</button>
         <button type="button" className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><Brain size={15} />{t("模型与提供商")}</button>
         <button type="button" className={tab === "images" ? "active" : ""} onClick={() => setTab("images")}><Image size={15} />{t("生图模型")}</button>
+        <button type="button" className={tab === "statistics" ? "active" : ""} onClick={() => setTab("statistics")}><Activity size={15} />{t("统计")}</button>
         <button type="button" className={tab === "about" ? "active" : ""} onClick={() => setTab("about")}><Info size={15} />{t("关于")}</button>
       </div>
       <div className="settings-content">
@@ -3463,6 +3469,7 @@ function SettingsView({
             <ImageProviderSettings imageModels={imageModels} refresh={refreshImageModels} selectImageModel={selectImageModel} />
           </>
         )}
+        {tab === "statistics" && <TokenStatistics key={state.workspace.project_root} projectRoot={state.workspace.project_root} />}
         {tab === "about" && (
           <>
             <PageHeader icon={<Info size={20} />} title={t("关于 Reverie")} description={t("Electron 仅承载界面；所有 AI、工具和会话逻辑都由嵌入的 Reverie CLI exe 执行。")} />
@@ -3638,13 +3645,14 @@ function StandardModelModal({
     setVisible((shown) => !shown);
   };
   const headerCount = Object.keys((model.custom_headers ?? {}) as Record<string, string>).length;
-  // A stored transport the picker never offered (codex, webgemini) must stay
+  // A stored transport the picker never offered (codex) must stay
   // selectable, otherwise editing anything else would silently rewrite it.
   const providerId = String(model.provider ?? "openai-chat");
   const providerOptions: Array<[string, string]> = [
      ["openai-chat", "OpenAI Chat Completions"],
      ["openai-responses", "OpenAI Responses"],
      ["anthropic", "Anthropic"],
+     ["gemini", "Gemini (Google Gen AI SDK)"],
      ["request", "Generic Request"],
      ["curl", "cURL"],
   ];
@@ -5096,6 +5104,8 @@ export default function App() {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [draftError, setDraftError] = useState("");
   const [composerError, setComposerError] = useState("");
+  const [wstyleResult, setWstyleResult] = useState<{owner:string;output:string} | null>(null);
+  const [wstyleBusy, setWstyleBusy] = useState(false);
   const [controlStatus, setControlStatus] = useState("");
   const [streamSettingBusy, setStreamSettingBusy] = useState(false);
   const streamSettingPending = useRef(false);
@@ -5149,6 +5159,15 @@ export default function App() {
   const projectRoot = state?.workspace.project_root ?? "";
   const configurationSessionId=view==='settings' && settingsTarget==='workspace'?undefined:session?.id;
   const assistantId:'aio'|undefined = session?.metadata.assistant_id==='aio'?'aio':undefined;
+  const editingWstyle=/^\/wstyle(?:\s|$)/i.test(prompt);
+  useEffect(()=>{
+    if (!projectRoot || state?.workspace.mode!=='writer' || !editingWstyle || wstyleBusy) return;
+    let cancelled=false;
+    void window.reverie.request('listCommands',{projectRoot,sessionId:session?.id,...(assistantId==='aio'?{assistantId:'aio' as const}:{})}).then(response=>{
+      if(!cancelled)setState(current=>current?{...current,commands:response.commands}:current);
+    }).catch(error=>{if(!cancelled)setComposerError(String(error));});
+    return()=>{cancelled=true;};
+  },[projectRoot,session?.id,state?.workspace.mode,editingWstyle,wstyleBusy,assistantId]);
   draftOwner.current = { root: projectRoot, id: session?.id ?? NEW_SESSION_DRAFT_ID,assistantId };
   useEffect(() => {
     if (!projectRoot || !session?.id) return;
@@ -6087,10 +6106,24 @@ export default function App() {
 
   const sendPrompt = useCallback(async (behaviorOverride?: "queue" | "steer") => {
     const text = prompt.trim();
-    if ((!text && !attachments.length) || sessionBusy || streamSettingPending.current || !state) return;
+    if ((!text && !attachments.length) || sessionBusy || wstyleBusy || streamSettingPending.current || !state) return;
     const targetView = COMMAND_VIEWS[text.toLowerCase()];
     if (targetView && !/^\/skills?$/i.test(text)) { setView(targetView); setPrompt(""); return; }
     const command = desktopCommand(text);
+    if (command?.kind === "wstyle") {
+      if (running) { setComposerError(t("请先停止当前任务再修改运行设置")); return; }
+      const owner=ownerKey(projectRoot,session?.id ?? NEW_SESSION_DRAFT_ID,assistantId);
+      setComposerError("");setWstyleBusy(true);setWstyleResult({owner,output:""});
+      try {
+        const response=await window.reverie.request("wstyleCommand",{args:command.args,projectRoot,sessionId:session?.id,...(assistantId==='aio'?{assistantId:'aio' as const}:{})});
+        if (ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner) return;
+        setWstyleResult({owner,output:response.success?response.output:response.error});
+        if (response.success) {setPrompt(current=>current.trim()===text?"":current);setMentionItems([]);setMentionOpen(false);}
+      } catch(error) {
+        if (ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)===owner) setWstyleResult({owner,output:String(error)});
+      } finally {setWstyleBusy(false);}
+      return;
+    }
     if (command?.kind === "setting") {
       if (running) { setComposerError(t("请先停止当前任务再修改运行设置")); return; }
       if (await updateSetting(command.key, command.value)) setPrompt("");
@@ -6168,7 +6201,7 @@ export default function App() {
       setPrompt(current => current || text);
       setAttachments(current => current.length ? current : attachments);
     }
-  }, [clearPinnedSkills, compactContext, pinSkill, prompt, attachments, queue, sendBehavior, running, runPromptText, sessionBusy, session, projectRoot, state, unpinSkill, updateQueue, updateSetting, t]);
+  }, [clearPinnedSkills, compactContext, pinSkill, prompt, attachments, queue, sendBehavior, running, runPromptText, sessionBusy, wstyleBusy, session, projectRoot, state, unpinSkill, updateQueue, updateSetting, t, assistantId]);
 
   useEffect(() => {
     const pump = () => {
@@ -7014,6 +7047,7 @@ export default function App() {
       commands: state.commands.items, skills: state.skills, pinSkill, mentionError,
       mode: state.workspace.mode, setMode: mode => void updateSetting("mode", mode),
       closeMentions: () => { mentionRequestSequence.current += 1; setMentionOpen(false); setMentionLoading(false); }, error: [draftError, composerError].filter(Boolean).join(" · "), status: controlStatus,
+      wstyle: wstyleResult?.owner===ownerKey(projectRoot,session?.id ?? NEW_SESSION_DRAFT_ID,assistantId)?{output:wstyleResult.output,busy:wstyleBusy,close:()=>setWstyleResult(null)}:undefined,
       moveAttachment: (index, direction) => setAttachments(current => { const next = [...current]; const target = Math.max(0, Math.min(next.length - 1, index + direction)); const [item] = next.splice(index, 1); next.splice(target, 0, item); return next; }),
       queue, queuePaused, resumeQueue: () => { if(session)authorizedQueues.current.set(ownerKey(projectRoot,session.id,assistantId),{projectRoot,sessionId:session.id,assistantId}); setQueuePaused(false); },
       editQueue: (index, text, items) => { updateQueue(queue.map((item, i) => i === index ? { ...item, text, attachments: items } : item)); },

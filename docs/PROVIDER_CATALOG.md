@@ -18,8 +18,8 @@ Ordinary desktop reads and model selections reuse them without refreshing over
 the network. If a selected model disappears from a successful inventory, the
 source uses an available model from that inventory; an empty inventory has no
 usable runtime model. A newly added custom provider still requires a model choice.
-Codex and WebGemini retain their own discovery mechanisms rather than being sent
-to a generic `/models` endpoint.
+Codex retains its own discovery mechanism. The Gemini source and compatible
+Gemini providers list models through the Google Gen AI SDK.
 OpenCode and Agnes can load their initial live catalogs when a key is configured.
 Those initial inventories are saved as well. OpenCode's built-in setting only
 applies before the first successful refresh; it never overrides an already

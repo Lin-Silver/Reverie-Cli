@@ -44,6 +44,22 @@ Notes:
 
 SubAgents are enabled in `reverie` and `aio` modes. Children have isolated sessions and selective context; only the main agent controls the desktop. Legacy `computer-controller` mode names resolve to AiO. See [AiO and conversations](AIO_CONVERSATIONS.md) for independent configuration, background execution and migration.
 
+## Writer Styles
+
+`/wstyle` is available in Writer mode in both terminal and Desktop. Cards are offline Markdown resources; `review` and `extract` explicitly call the current model and can incur usage.
+
+| Command | Description |
+| --- | --- |
+| `/wstyle list`, `/wstyle show <id>`, `/wstyle current` | List, inspect and report saved/effective Cards and hashes |
+| `/wstyle use <id...>` | Replace the ordered combination |
+| `/wstyle add <id>`, `/wstyle remove <id>`, `/wstyle off` | Change the selection without deleting Cards or manuscript |
+| `/wstyle new <id> [--from <id>]` | Create or clone without overwriting existing files |
+| `/wstyle inherit` | Restore a novel's inheritance of application defaults |
+| `/wstyle review [<novel-id>] --chapter <n>` | Save source-checked editorial advice without rewriting |
+| `/wstyle extract <id> --sample <path> [--sample <path>...]` | Derive a disabled Card from explicitly supplied UTF-8 excerpts |
+
+Selection commands accept `--global` or `--novel <id>`; absent flags target the selected novel or application defaults when no novel is bound. Review/extraction accept explicit line ranges. See [WStyle](WSTYLE.md) for format, conflicts, safety, budgets and complete examples.
+
 ## Providers
 
 | Command | Description |
@@ -93,9 +109,9 @@ Request-based NVIDIA vision models can also consume inline chat attachments like
 Reverie also reads `NVIDIA_API_KEY` automatically when it is present. AiO uses its selected model and does not pin a NVIDIA model.
 ModelScope is called through OpenAI Chat Completions and reads `MODELSCOPE_API_KEY`, `MODELSCOPE_TOKEN`, or `MODELSCOPE_ACCESS_TOKEN` automatically when present. Its live-verified default model is `stepfun-ai/Step-3.7-Flash`. Model and reasoning selectors are generated from the core capability catalog.
 
-`/provider` is the one surface over every source. `/provider list` mixes the built-in sources above with the providers you added yourself, shows which ones have an API key, and probes each reachable endpoint in parallel to report online state, latency, and how many models it publishes. Sources without a catalog endpoint (Codex, WebGemini) are marked "not probed"; use `/provider <name> test` for those.
+`/provider` is the one surface over every source. `/provider list` mixes the built-in sources above with the providers you added yourself, shows which ones have an API key, and probes each reachable endpoint in parallel to report online state, latency, and how many models it publishes. Sources without a catalog endpoint, such as Codex, are marked "not probed"; use `/provider <name> test` for those.
 
-`/provider add` asks for exactly four things - provider name, base URL, API key, and API request format (OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages) - then calls the provider's model-list endpoint and opens the model selector. The provider, its key, its cached catalog, and the model you picked are written to `custom_providers` in the shared `config.json`, so the next session starts on the same model. `/provider <name> models` calls the endpoint again to pick up new models.
+`/provider add` asks for the provider name, Base URL, API key or environment variable, and request format (OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, or Gemini). It then fetches the provider's catalog and opens the model selector. `/provider <name> models` refreshes the catalog later.
 
 The first time you select one of a custom provider's models, Reverie asks for that model's context limit and saves it under that provider's `model_context_limits`. Selecting the same model again reuses the saved limit silently, and models you never select are never asked about; a saved limit outranks whatever window the gateway published. `/provider <name> context 256k` changes it later. Thinking mode is on by default for custom providers and can be turned off per provider with `/provider <name> thinking off`; a gateway that rejects the thinking flags degrades to a plain request for that turn instead of failing it.
 

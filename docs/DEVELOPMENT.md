@@ -125,6 +125,18 @@ The Python suite's pass/skip totals are host-specific. Eleven `skipif` gates req
 
 Provider cancellation tests use real loopback HTTP sockets, SDK clients and curl, including requests stalled before headers and inside body/stream reads. They assert that both the caller and upstream connection stop; cancelling a future alone is insufficient. Keep SSE keepalive, bounded early-close, retry interruption and preflight compression/auth requests covered when changing transport code. Packaged Electron tests must also exercise renderer CSP, actual file upload/crop, persistence and IPC; jsdom image/canvas mocks cannot verify those paths.
 
+## Writer And WStyle Verification
+
+WStyle request construction is tested through real loopback HTTP and the existing OpenAI Chat, Responses, Anthropic, requests and curl transports. Do not replace those checks with renderer state or composer snapshots alone. The native tests cover novel overrides, preserved drafts, style segments, revision archives and the new 5000/10000-character default, while explicit short settings keep their previous gates.
+
+```bash
+python -m pytest -q -c ReverieCli-py/pytest.ini ReverieCli-py/tests/test_wstyles.py ReverieCli-py/tests/test_wstyle_requests.py ReverieCli-py/tests/test_wstyle_novel.py ReverieCli-py/tests/test_writer_chapter_lengths.py ReverieCli-py/tests/test_wstyle_model_transport.py
+```
+
+Model-assisted review and sample extraction use stateless text-only requests; integration tests verify source preservation, validated quotes and the configured Desktop transport. Literary comparisons are separate, opt-in runs of `scripts/verification/evaluate_wstyles.py`; see [Writer quality](WRITER_QUALITY.md). Keep raw responses separate from prose and never count embedded reasoning toward a chapter's length.
+
+Both setuptools package data and `reverie.spec` include `reverie/writer/wstyle_cards/*.md`. Exercise the standalone EXE, Desktop kernel, portable app and installer against isolated app roots. Verify that `.bundled.json` prevents replacement of edited or deliberately deleted Cards, and that the NSIS removal macro preserves executable-root `.reverie` during update/uninstall. Installer verification should use a distinct test app ID and project-local installation path, without touching an existing user installation.
+
 ## Packaging
 
 Run the following inside `ReverieCli-py` to build the platform-native core. Windows and Unix default to standalone single-file cores:

@@ -6,7 +6,7 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 - **Context Engine** - shared by every mode for symbol lookup, dependency tracking, semantic retrieval, commit-history learning, and project-isolated persistent memory
 - **Multiple Workflow Modes** - `Reverie`, `Reverie-Atlas`, `Reverie-Gamer` (work in progress), `Writer`, `Computer Controller`
-- **Multi-Provider** - standard OpenAI-compatible presets plus built-in `Codex`, `AIHubMix`, `Agnes`, `SenseNova`, `unlimited.surf`, `NVIDIA`, `ModelScope`, and `WebGemini`
+- **Multi-Provider** - OpenAI, Anthropic and Gemini-compatible presets plus built-in sources, including Gemini through the Google Gen AI SDK
 - **Rich TUI** - selectors, streaming output, help browser, status panels, session browsing, checkpoint rollback, command discovery
 - **Workspace Safety** - workspace-only mutation paths, internal shadow-Git checkpoints, delete backups, audited command execution, archive extraction hardening
 - **Game Tooling** - built-in `Reverie Engine` runtime, work-in-progress Reverie-Gamer prompt-to-vertical-slice workflow, Blender plugin-assisted authoring, Godot/O3DE migration patterns inside the unified engine, and a built-in Ashfox MCP bridge for optional Blockbench sessions
@@ -173,6 +173,7 @@ The packaged `dist/reverie.exe` includes the unified Reverie Engine, work-in-pro
 - [Harness Engineering Notes](../docs/HARNESS_ENGINEERING.md)
 - [Configuration Guide](../docs/CONFIGURATION.md)
 - [CLI Command Reference](../docs/CLI_COMMANDS.md)
+- [Writer Style Cards](../docs/WSTYLE.md) / [Writer Quality](../docs/WRITER_QUALITY.md)
 - [Context Engine Project Memory](../docs/CONTEXT_ENGINE_MEMORY.md)
 - [Development Guide](../docs/DEVELOPMENT.md)
 - [Reverie Engine User Guide](../docs/engine/reverie_engine_user_guide.md)

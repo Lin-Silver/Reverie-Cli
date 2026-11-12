@@ -76,6 +76,22 @@ Older builds stored configuration and some workspace state in `.reverie/` and `.
 - Workspace writes go to `<app_root>/.reverie/projects/<project-path-key>/config.json`.
 - `/clean` removes the active project's cache and also cleans legacy workspace-local `.reverie/context_cache` or `.reverie/security` folders if they still exist.
 
+## Writer Styles And Novel Lengths
+
+WStyle application defaults are saved in `<app_root>/.reverie/config.json` under `writer_mode.active_wstyles`, even when workspace configuration is enabled. Cards themselves live in `<app_root>/.reverie/wstyles/`. The current native novel overrides this list in its existing `novels/<novel-id>/tracking/state.json`; an absent field inherits defaults and `[]` explicitly disables styles. The conversation's `writer_project` metadata binds that native project, without storing a second copy of novel facts.
+
+```json
+{
+  "writer_mode": {
+    "active_wstyles": ["delicate-prose", "dual-heroines", "gl-romance-beats"]
+  }
+}
+```
+
+`/wstyle use ... --global` changes application defaults; unflagged selection targets the bound novel, or defaults if there is no active novel. Legacy single strings migrate to ordered lists, duplicate IDs are removed, and unavailable IDs remain visible for correction. Atomic saves preserve other configuration fields. Invalid configuration is reported and unsafe overwrite is refused.
+
+New native novels default to a `chapter_target_chars` of 10000 and a separate `chapter_minimum_chars` of 5000. These are persisted in the native project state, not duplicated in application preferences. Existing projects and explicitly supplied short-chapter settings keep their original gates. See [WStyle](WSTYLE.md) and [Writer quality](WRITER_QUALITY.md) for command, storage, budget and recovery details.
+
 ## Top-Level Config Structure
 
 Common top-level keys:
@@ -100,7 +116,7 @@ Common top-level keys:
   "sensenova": {},
   "nvidia": {},
   "modelscope": {},
-  "webgemini": {},
+  "gemini": {},
   "opencode": {},
   "custom_providers": {},
   "atlas_mode": {},
@@ -177,7 +193,7 @@ Stop interrupts connect, response-header / body waits and retry delays without w
 
 ## Custom Compatibility Providers
 
-`models` stores manually configured OpenAI-compatible or Anthropic-compatible model presets. This compatibility layer is for user-provided third-party services; built-in Codex, AIHubMix, Agnes, SenseNova, NVIDIA, ModelScope, WebGemini, and Opencode sources use their own first-party runtime paths instead.
+`models` stores manually configured OpenAI-compatible, Anthropic-compatible or Gemini-compatible model presets. The built-in sources have separate configuration sections.
 
 - `model`
 - `model_display_name`
@@ -197,7 +213,7 @@ For third-party gateways, prefer `/provider add`: it stores the endpoint under `
 
 Prompt caching is enabled automatically and does not require a configuration key. Reverie sends stable hashed cache-routing keys through OpenAI Chat Completions and Responses transports, tries `cache_prompt` on raw OpenAI-compatible/local requests, and enables Anthropic's automatic ephemeral cache. The same policy is used for streaming, non-streaming, Context Engine compression, and session-handoff calls.
 
-Third-party compatibility endpoints may not implement their upstream provider's cache fields. Reverie first attempts the cache-enabled request and retries once without only those fields when the endpoint explicitly reports them as unsupported. WebGemini and image/video generation transports are unchanged because they do not expose the same prompt-prefix cache API.
+Third-party compatibility endpoints may not implement their upstream provider's cache fields. Reverie first attempts the cache-enabled request and retries once without only those fields when the endpoint explicitly reports them as unsupported.
 
 ## Gamer Modeling
 
@@ -249,11 +265,10 @@ Supported values for `active_model_source`:
 - `sensenova`
 - `nvidia`
 - `modelscope`
-- `webgemini`
+- `gemini`
 - `opencode`
 - `custom` - one of the providers you added with `/provider add`
 
-Older configs may still contain a `geminicli` block. That legacy section is not a current `active_model_source`; Gemini Web routing now uses `webgemini`.
 
 ### AIHubMix
 
@@ -307,11 +322,13 @@ Authentication modes:
 
 Use `/codex auth api_key MY_PROXY_KEY` to select an environment variable without placing the secret in command history. Third-party proxy requests do not receive `ChatGPT-Account-Id`, `Originator`, or other ChatGPT-only identity headers unless you explicitly add equivalent custom headers.
 
-### WebGemini
+### Gemini
 
-The `webgemini` section stores the selected Gemini Web mode, optional proxy override, optional cookie path, timeout, and context/output defaults used by the anonymous WebGemini transport.
+The built-in `gemini` source uses the Google Gen AI SDK with the Gemini Developer API. Set `GOOGLE_API_KEY` or `GEMINI_API_KEY` before launch; if both are available for automatic detection, Google specifies that `GOOGLE_API_KEY` takes precedence. You can also select a named environment variable or save a key under **Settings → Models and providers → Gemini**.
 
-It does not require a direct API key for anonymous text routing. When no explicit proxy is configured, Reverie tries the Windows system proxy first and then `HTTPS_PROXY`/`HTTP_PROXY`.
+The `gemini` section stores `api_key` or `api_key_env`, the optional `api_url`, the selected model and request limits. Use `/provider gemini models` to fetch models and `/provider gemini use` to activate the source. For a compatible gateway, use the Gemini format and supply its Base URL, including any API version suffix such as `/v1beta`.
+
+The retired WebGemini configuration is removed on migration. If it was selected, Reverie prompts you to set up the official Gemini source and leaves other configured sources available.
 
 ### NVIDIA
 
@@ -402,7 +419,7 @@ The `custom_providers` section stores the providers you added with `/provider ad
 ```
 
 - `id` is derived from the provider name and is what you type in `/provider <name> ...`. Renaming a provider changes `name` only.
-- `format` is one of `openai-chat` (POST `/chat/completions`), `openai-responses` (POST `/responses`), or `anthropic` (POST `/messages` with `x-api-key`). It decides both how the model list is read and which transport runs the chat request. Type `base_url` as the gateway documents it, including any `/v1`: Reverie trims a pasted request path and, for `anthropic`, hands the SDK the root URL so the request does not land on `/v1/v1/messages`.
+- `format` is one of `openai-chat`, `openai-responses`, `anthropic`, or `gemini`. It determines model discovery and request transport. Enter the API Base URL as the gateway documents it. For Gemini, use the Gemini Developer API base, with an optional version suffix.
 - The thinking trace is read from whichever surface the transport uses: `reasoning_content` (or `reasoning`/`thinking`) on Chat Completions deltas, `thinking` content blocks on `/messages`, and both `response.reasoning_text` and `response.reasoning_summary_text` events on `/responses` — a gateway that streams the raw trace rather than a summary is understood either way. Inline `<think>` tags are parsed as well.
 - `api_key_env` names an environment variable to read the key from instead of storing it; a stored `api_key` wins when both are set.
 - `models` is the catalog cached from the provider's own model-list endpoint, refreshed by `/provider <name> models`. `models_synced_at` is the epoch seconds of the last successful refresh. Alongside each model's context window, the catalog keeps whatever the gateway published about reasoning: whether the model supports it, the effort names it accepts, and its own default. Refresh the catalog after upgrading Reverie so a provider stored before this metadata existed picks it up.

@@ -2537,6 +2537,10 @@ Turn a short story premise into a coherent, emotionally specific, resumable fict
 - Do not use gender, sexuality, ethnicity, class, disability, or other identity categories as shortcuts for temperament, talent, emotional sensitivity, or social worth.
 - Treat style as a controlled system: viewpoint distance, tense, diction, image families, dialogue texture, paragraph rhythm, and prohibited habits.
 - Never claim that prose is perfect, human-indistinguishable, or contradiction-free. Report what was actually checked.
+- For an opening, establish a concrete situation, a recognizable desire or question, and a reason to continue reading. Attraction may come from quiet emotional uncertainty, comedy or a fair mystery; do not force a battle or exposition dump.
+- Give each chapter a purpose appropriate to its role: a choice and consequence, new understanding, earned trust, emotional recovery or a planted clue. Optional prepare_chapter fields narrative_function, character_goal, causal_change, emotional_change and reader_expectation can record the relevant goals; never pad prose to fill every field.
+- Let earlier choices constrain later actions. Keep character knowledge, promises, resources, relationship boundaries and timelines in the native project bibles/ledgers. Distinguish these facts from adjustable WStyle preferences.
+- Exact repetition, placeholders and integrity errors are mechanical evidence. Keyword/tone/voice heuristics are descriptive signals, not literary scores. Use saved editorial review only for explicit revision, verify its source hash/quotes and preserve earlier versions; do not trigger extra review model calls automatically.
 
 # Automatic Novel Trigger
 When the user asks for a novel, long story, serial, chaptered fiction, continuation, or a 100k-character work:
@@ -2560,7 +2564,7 @@ For a new project:
 2. `configure` all five project documents with specific, mutually compatible content.
 3. Plan enough chapter runway to meet the requested target. A nominal target is not evidence of delivery.
 4. Before every chapter, call `prepare_chapter` with its outline, scene beats, continuity constraints, relationship movement, opening pressure, ending hook, and target characters. Pass an explicit top-level `title` whenever you have one; outline-derived fallback titles are only a recovery path.
-5. Draft the complete chapter from the returned bibles, recent summaries, open threads, and control card. Keep raw chapter prose out of assistant chat; it belongs only inside `serial_novel(action="commit_chapter")` or append-only recovery payloads. Treat `recommended_draft_chars` as the drafting floor; do not aim at the lower hard gate.
+5. Draft the complete chapter from the returned bibles, recent summaries, open threads, and control card. New novels default to at least 5,000 non-whitespace characters per chapter, aiming for 10,000 through substantial scenes and consequences. Omit `chapter_target_chars` at bootstrap to use this default; preserve a user's explicit short-chapter target and existing project settings. Keep raw chapter prose out of assistant chat; it belongs only inside `serial_novel(action="commit_chapter")` or append-only recovery payloads. Treat `recommended_draft_chars` as the drafting floor; do not aim at the lower hard gate or pad with repetition.
 6. Run `consistency_checker` and `plot_analyzer` where their checks are relevant. Revise blocking defects rather than narrating around them.
 7. Call `commit_chapter` with the full accepted prose, a useful summary, events, character/relationship changes, timeline changes, and thread/foreshadowing updates. If rejection says the short draft was preserved, call it again with only `data.append_content` at or above the returned safe append amount; never regenerate or resend the full chapter for a length-only failure.
 8. Repeat without asking for routine confirmation while the user's requested deliverable remains incomplete.

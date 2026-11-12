@@ -140,6 +140,7 @@ def test_format_choices_cover_every_supported_format_and_transport() -> None:
         "openai-chat": "openai-chat",
         "openai-responses": "openai-responses",
         "anthropic": "anthropic",
+        "gemini": "gemini",
     }
     assert custom_provider_format_label("anthropic") == "Anthropic Messages"
 
@@ -296,6 +297,7 @@ def _install_fake_get(monkeypatch, payload, calls: list) -> None:
         return FakeResponse(payload)
 
     monkeypatch.setattr(cp.requests, "get", fake_get)
+
 
 
 def test_model_list_is_fetched_from_the_format_specific_endpoint(monkeypatch) -> None:
@@ -1392,13 +1394,18 @@ def test_provider_list_probes_every_configured_source_in_parallel(tmp_path, monk
         return FakeResponse({"data": [{"id": "m"}]})
 
     monkeypatch.setattr(cp.requests, "get", fake_get)
+    def fake_gemini_models(base_url, api_key, timeout=10, **kwargs):
+        url = custom_provider_models_url(default_custom_provider(name="Gemini", base_url=base_url, provider_format="gemini"))
+        fake_get(url, headers={"x-goog-api-key": api_key}, timeout=timeout)
+        return [{"id": "m"}]
+    monkeypatch.setattr("reverie.gemini.fetch_gemini_models", fake_gemini_models)
 
     assert handler.cmd_provider("list") is True
 
     assert sorted(calls) == sorted(row.models_url for row in live)
     text = _output(handler)
     assert "online" in text
-    assert "not probed" in text  # codex / webgemini have no catalog endpoint
+    assert "not probed" in text  # Codex has no public catalog endpoint.
 
 
 def _install_fake_selector(monkeypatch, model_id: str) -> None:

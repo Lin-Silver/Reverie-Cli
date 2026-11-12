@@ -128,9 +128,18 @@ CUSTOM_PROVIDER_FORMATS: Tuple[str, ...] = (
     "openai-chat",
     "openai-responses",
     "anthropic",
+    "gemini",
 )
 
 _FORMAT_SPECS: Dict[str, Dict[str, str]] = {
+    "gemini": {
+        "label": "Gemini (Google Gen AI SDK)",
+        "description": "Google Gemini generateContent protocol through the official SDK.",
+        "transport": "gemini",
+        "chat_path": "",
+        "models_path": "/models",
+        "auth": "x-goog-api-key",
+    },
     "openai-chat": {
         "label": "OpenAI Chat Completions",
         "description": "POST /chat/completions - the format used by OpenAI and most relay gateways.",
@@ -265,6 +274,11 @@ def custom_provider_models_url(provider: Any) -> str:
     if not base:
         return ""
     spec = _FORMAT_SPECS[normalize_custom_provider_format(record.get("format"))]
+    if spec["transport"] == "gemini":
+        from .gemini import gemini_http_options
+
+        options = gemini_http_options(base, 10)
+        return f"{options.base_url}/{options.api_version}/models"
     return f"{base}{spec['models_path']}"
 
 
@@ -325,7 +339,10 @@ def custom_provider_auth_headers(provider: Any) -> Dict[str, str]:
     api_key = resolve_custom_provider_api_key(record)
     fmt = normalize_custom_provider_format(record.get("format"))
     headers: Dict[str, str] = {"Accept": "application/json"}
-    if _FORMAT_SPECS[fmt]["auth"] == "x-api-key":
+    if _FORMAT_SPECS[fmt]["auth"] == "x-goog-api-key":
+        if api_key:
+            headers["x-goog-api-key"] = api_key
+    elif _FORMAT_SPECS[fmt]["auth"] == "x-api-key":
         if api_key:
             headers["x-api-key"] = api_key
         headers["anthropic-version"] = CUSTOM_PROVIDER_ANTHROPIC_VERSION
@@ -1035,13 +1052,18 @@ def fetch_custom_provider_models(
         remember_model_catalog(provider, cache_key, models)
         return models
 
-    response = requests.get(
-        models_url,
-        headers=custom_provider_auth_headers(record),
-        timeout=max(1, int(timeout or 10)),
-    )
-    response.raise_for_status()
-    models = _parse_model_list_payload(response.json())
+    if record["format"] == "gemini":
+        from .gemini import fetch_gemini_models
+
+        models = fetch_gemini_models(record["base_url"], api_key, timeout, headers=custom_provider_auth_headers(record))
+    else:
+        response = requests.get(
+            models_url,
+            headers=custom_provider_auth_headers(record),
+            timeout=max(1, int(timeout or 10)),
+        )
+        response.raise_for_status()
+        models = _parse_model_list_payload(response.json())
     _MODEL_CACHE[cache_key] = {
         "expires_at": now + CUSTOM_PROVIDER_MODEL_CACHE_TTL_SECONDS,
         "models": models,

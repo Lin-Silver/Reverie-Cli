@@ -6,6 +6,15 @@ const command: CommandRecord = { id: "compact", command: "/compact", section: "S
 const skill: SkillRecord = { key: "apple-design", name: "apple-design", description: "Typography and fluid interfaces", summary: "", path: "", scope: "Built-in", root: "builtin", plugin_id: "", pinned: false, shadowed: false, allow_implicit_invocation: true };
 
 describe("composer token boundaries", () => {
+  it("completes live WStyle IDs after multiple choices without replacing the existing order", () => {
+    const cards=[{...command,id:"wstyle:a",command:"/wstyle use a",summary:"细腻文笔"},{...command,id:"wstyle:b",command:"/wstyle use b",summary:"叙事"}];
+    const text="/wstyle use a b";
+    const token=composerToken(text,text.length)!;
+    expect(token).toEqual({kind:"wstyle",query:"b",start:14,end:15,selected:["a"]});
+    expect(slashOptions(token,cards,[],false,k=>k).map(item=>item.value)).toEqual(["b "]);
+    const empty=composerToken("/wstyle use a ",14)!;
+    expect(slashOptions(empty,cards,[],false,k=>k).map(item=>item.value)).toEqual(["b "]);
+  });
   it("finds the token at the caret without consuming the rest of a draft", () => {
     expect(composerToken("Compare @read and explain", 13)).toEqual({ kind: "mention", query: "read", start: 8, end: 13 });
     expect(composerToken("Compare @read and explain", 24)).toBeNull();

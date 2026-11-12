@@ -988,10 +988,10 @@ def test_desktop_probe_marks_unprobeable_builtins_without_calling(monkeypatch) -
 
     calls = _install_fake_catalog(monkeypatch)
 
-    probes = probe_provider_availability(_custom_provider_config(), ["codex", "webgemini"])
+    probes = probe_provider_availability(_custom_provider_config(), ["codex"])
 
-    assert [item["key"] for item in probes] == ["codex", "webgemini"]
-    assert [item["status"] for item in probes] == ["not-probed", "not-probed"]
+    assert [item["key"] for item in probes] == ["codex"]
+    assert [item["status"] for item in probes] == ["not-probed"]
     assert all(item["probeable"] is False for item in probes)
     assert all("/provider" in item["detail"] for item in probes)
     assert calls == []
@@ -1929,14 +1929,14 @@ def test_standard_catalog_exposes_enough_to_prefill_the_desktop_edit_form() -> N
     add_standard_model(
         keyless,
         {
-            "model": "gemini-web",
-            "model_display_name": "Gemini Web",
+            "model": "gemini-native",
+            "model_display_name": "Gemini Native",
             "base_url": "https://gemini.example.com",
-            "provider": "webgemini",
+            "provider": "gemini",
         },
     )
     keyless_entry = _source(build_model_sources_payload(keyless), "standard")["models"][0]
-    assert keyless_entry["configured"] is True
+    assert keyless_entry["configured"] is False
     assert keyless_entry["api_key_configured"] is False
     assert keyless_entry["custom_headers"] == {}
 

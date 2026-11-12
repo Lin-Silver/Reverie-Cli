@@ -2,9 +2,12 @@ export type DesktopCommand =
   | { kind: "setting"; key: string; value: string }
   | { kind: "review"; file: string; scope?: "working" | "staged" | "commit" | "branch" | "round"; base?: string }
   | { kind: "provider"; name: string }
+  | { kind: "wstyle"; args: string }
   | { kind: "unsupported" };
 
 export function desktopCommand(text: string): DesktopCommand | null {
+  const wstyle = /^\/wstyle(?:\s+([\s\S]*))?$/i.exec(text);
+  if (wstyle) return {kind:"wstyle",args:wstyle[1] || ""};
   const mode = /^\/mode\s+(\S+)\s*$/i.exec(text);
   if (mode) return {kind:"setting",key:"mode",value:mode[1]};
   const permission = /^\/permission\s+mode\s+(default|auto_check|strict)\s*$/i.exec(text);
@@ -33,5 +36,5 @@ export function desktopCommand(text: string): DesktopCommand | null {
 }
 
 export function desktopCommandAvailable(command:string):boolean {
-  return /^\/(?:mode|permission|provider|review|compact|skills?|model|settings?|tools|rats|tasks|operations|plugins|checkpoints|rollback)$/.test(command);
+  return /^\/wstyle(?:\s|$)/.test(command) || /^\/(?:mode|permission|provider|review|compact|skills?|model|settings?|tools|rats|tasks|operations|plugins|checkpoints|rollback)$/.test(command);
 }

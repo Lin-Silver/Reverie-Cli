@@ -2052,6 +2052,11 @@ input[type="range"] { width: 100%; accent-color: var(--accent-2); }
 .queue-summary small { display: block; color: var(--muted); }
 .persistent-error { color: var(--red); padding: 6px 10px; font-size: var(--font-small); white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer-status { padding: 4px 12px; color: var(--muted); font-size: var(--font-small); }
+.wstyle-result { margin: 8px 12px; color: var(--text); }
+.wstyle-result header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wstyle-result pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--font-small); line-height: 1.6; }
+.wstyle-result button { color: var(--muted); background: transparent; border: 0; cursor: pointer; }
+.wstyle-result :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mention-picker button.selected { background: var(--hover); outline: 1px solid var(--accent); }
 .approval-scope { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
 .approval-scope dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }

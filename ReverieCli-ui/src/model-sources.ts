@@ -12,7 +12,7 @@
 import type { CustomProviderRecord, ModelSource } from "./types";
 
 /** Sources retired from the product but possibly still present in old configs. */
-const RETIRED_MODEL_SOURCE_IDS = new Set(["unlimitedsurf", "unlimited_surf", "unlimited.surf", "us", "ue"]);
+const RETIRED_MODEL_SOURCE_IDS = new Set(["unlimitedsurf", "unlimited_surf", "unlimited.surf", "us", "ue", "webgemini", "wgemini"]);
 
 /** The aggregate source id that holds every user-defined provider. */
 export const CUSTOM_SOURCE_ID = "custom";

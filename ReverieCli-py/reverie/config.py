@@ -76,10 +76,10 @@ from .modelscope import (
     default_modelscope_config,
     normalize_modelscope_config,
 )
-from .webgemini import (
-    build_webgemini_runtime_model_data,
-    default_webgemini_config,
-    normalize_webgemini_config,
+from .gemini import (
+    build_gemini_runtime_model_data,
+    default_gemini_config,
+    normalize_gemini_config,
 )
 from .custom_providers import (
     build_custom_provider_runtime_model_data,
@@ -89,7 +89,7 @@ from .custom_providers import (
 from .modes import normalize_mode
 from .version import CONFIG_VERSION, __version__
 
-EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
+EXTERNAL_MODEL_SOURCES = ("codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "gemini", "opencode")
 SUPPORTED_ACTIVE_MODEL_SOURCES = ("standard", "custom") + EXTERNAL_MODEL_SOURCES
 MODEL_SOURCE_DISPLAY_NAMES = {
     "standard": "Manual Model",
@@ -100,7 +100,7 @@ MODEL_SOURCE_DISPLAY_NAMES = {
     "sensenova": "SenseNova",
     "nvidia": "NVIDIA",
     "modelscope": "ModelScope",
-    "webgemini": "WebGemini",
+    "gemini": "Gemini",
     "opencode": "Opencode",
 }
 SUPPORTED_TOOL_OUTPUT_STYLES = ("minimal", "compact", "condensed", "full")
@@ -114,7 +114,7 @@ SUPPORTED_MODEL_PROVIDERS = (
     "openai-responses",
     "curl",
     "codex",
-    "webgemini",
+    "gemini",
 )
 
 
@@ -386,6 +386,7 @@ def default_writer_mode_config() -> Dict[str, Any]:
         "narrative_analysis_enabled": True,
         "emotion_tracking_enabled": True,
         "plot_tracking_enabled": True,
+        "active_wstyles": [],
     }
 
 
@@ -532,7 +533,16 @@ def _merge_dict_defaults(raw: Any, defaults: Dict[str, Any]) -> Dict[str, Any]:
 
 def normalize_writer_mode_config(raw: Any) -> Dict[str, Any]:
     """Normalize writer-mode config into the canonical shape."""
-    return _merge_dict_defaults(raw, default_writer_mode_config())
+    merged = _merge_dict_defaults(raw, default_writer_mode_config())
+    value = raw.get("active_wstyles", raw.get("active_wstyle", [])) if isinstance(raw, dict) else []
+    values = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    seen = set()
+    merged["active_wstyles"] = []
+    for item in values:
+        if isinstance(item, str) and item and item.casefold() not in seen:
+            seen.add(item.casefold())
+            merged["active_wstyles"].append(item)
+    return merged
 
 
 def normalize_gamer_mode_config(raw: Any) -> Dict[str, Any]:
@@ -915,7 +925,7 @@ class Config:
     """Main configuration"""
     models: List[ModelConfig] = field(default_factory=list)
     active_model_index: int = 0
-    active_model_source: str = "standard"  # standard | custom | codex | aihubmix | agnes | sensenova | nvidia | modelscope | webgemini | opencode
+    active_model_source: str = "standard"  # standard | custom | codex | aihubmix | agnes | sensenova | nvidia | modelscope | gemini | opencode
     mode: str = "reverie"
     theme: str = "default"
     max_context_tokens: int = 128000
@@ -950,7 +960,7 @@ class Config:
     sensenova: Dict[str, Any] = field(default_factory=default_sensenova_config)
     nvidia: Dict[str, Any] = field(default_factory=default_nvidia_config)
     modelscope: Dict[str, Any] = field(default_factory=default_modelscope_config)
-    webgemini: Dict[str, Any] = field(default_factory=default_webgemini_config)
+    gemini: Dict[str, Any] = field(default_factory=default_gemini_config)
     opencode: Dict[str, Any] = field(default_factory=default_opencode_config)
     custom_providers: Dict[str, Any] = field(default_factory=default_custom_providers_config)
     atlas_mode: Dict[str, Any] = field(default_factory=default_atlas_mode_config)
@@ -1046,9 +1056,9 @@ class Config:
             runtime_modelscope_model = build_modelscope_runtime_model_data(self.modelscope)
             return ModelConfig.from_dict(runtime_modelscope_model) if runtime_modelscope_model else None
 
-        if source == "webgemini":
-            runtime_webgemini_model = build_webgemini_runtime_model_data(self.webgemini)
-            return ModelConfig.from_dict(runtime_webgemini_model) if runtime_webgemini_model else None
+        if source == "gemini":
+            runtime_gemini_model = build_gemini_runtime_model_data(self.gemini)
+            return ModelConfig.from_dict(runtime_gemini_model) if runtime_gemini_model else None
 
         if source == "opencode":
             runtime_opencode_model = build_opencode_runtime_model_data(self.opencode)
@@ -1120,7 +1130,7 @@ class Config:
         sensenova = normalize_sensenova_config(self.sensenova)
         nvidia = normalize_nvidia_config(self.nvidia)
         modelscope = normalize_modelscope_config(self.modelscope)
-        webgemini = normalize_webgemini_config(self.webgemini)
+        gemini = normalize_gemini_config(self.gemini)
         opencode = normalize_opencode_config(self.opencode)
         custom_providers = normalize_custom_providers_config(self.custom_providers)
         atlas_mode = normalize_atlas_mode_config(self.atlas_mode)
@@ -1159,7 +1169,7 @@ class Config:
             'sensenova': sensenova,
             'nvidia': nvidia,
             'modelscope': modelscope,
-            'webgemini': webgemini,
+            'gemini': gemini,
             'opencode': opencode,
             'custom_providers': custom_providers,
             'atlas_mode': atlas_mode,
@@ -1168,10 +1178,11 @@ class Config:
     
     @classmethod
     def from_dict(cls, data: dict) -> 'Config':
-        models = [
-            ModelConfig.from_dict(m) 
-            for m in data.get('models', [])
-        ]
+        raw_models = data.get('models', [])
+        retained_indices = [index for index, model in enumerate(raw_models) if str(model.get('provider', '')).lower() != 'webgemini']
+        models = [ModelConfig.from_dict(raw_models[index]) for index in retained_indices]
+        original_index = data.get('active_model_index', 0)
+        active_model_index = retained_indices.index(original_index) if original_index in retained_indices else 0
         text_to_image = default_text_to_image_config()
         loaded_t2i = data.get('text_to_image', data.get('tti', {}))
         if isinstance(loaded_t2i, dict):
@@ -1236,8 +1247,7 @@ class Config:
         nvidia = normalize_nvidia_config(raw_nvidia)
         raw_modelscope = data.get('modelscope', {})
         modelscope = normalize_modelscope_config(raw_modelscope)
-        raw_webgemini = data.get('webgemini', {})
-        webgemini = normalize_webgemini_config(raw_webgemini)
+        gemini = normalize_gemini_config(data.get('gemini', {}))
         raw_opencode = data.get('opencode', data.get('oc', {}))
         opencode = normalize_opencode_config(raw_opencode)
         raw_custom_providers = data.get('custom_providers', data.get('customProviders', {}))
@@ -1247,10 +1257,12 @@ class Config:
         raw_subagents = data.get('subagents', {})
         subagents = normalize_subagent_config(raw_subagents)
         active_model_source = normalize_active_model_source(data.get('active_model_source', 'standard'))
+        if str(data.get('active_model_source', '')).lower() in {'webgemini', 'wgemini'}:
+            active_model_source = 'gemini' if build_gemini_runtime_model_data(gemini) else 'standard'
 
         return cls(
             models=models,
-            active_model_index=data.get('active_model_index', 0),
+            active_model_index=active_model_index,
             active_model_source=active_model_source,
             mode=data.get('mode', 'reverie'),
             theme=data.get('theme', 'default'),
@@ -1280,7 +1292,7 @@ class Config:
             sensenova=sensenova,
             nvidia=nvidia,
             modelscope=modelscope,
-            webgemini=webgemini,
+            gemini=gemini,
             opencode=opencode,
             custom_providers=custom_providers,
             atlas_mode=atlas_mode,
@@ -1758,6 +1770,13 @@ class ConfigManager:
                     )
                     data = self._provider_profiles.hydrate(data)
                     self._config = Config.from_dict(data)
+                    if 'webgemini' in data or str(data.get('active_model_source', '')).lower() in {'webgemini', 'wgemini'} or any(str(model.get('provider', '')).lower() == 'webgemini' for model in data.get('models', []) if isinstance(model, dict)):
+                        self._set_load_notice(
+                            key=(str(source_path), 'webgemini-retired'),
+                            title="WebGemini Source removed",
+                            detail="WebGemini has been removed. Use the official Gemini Source with a Gemini API key, GOOGLE_API_KEY or GEMINI_API_KEY. Other configured sources remain available.",
+                            status="warning",
+                        )
                     try:
                         self._last_mtime = os.path.getmtime(source_path)
                     except OSError:
@@ -1885,7 +1904,7 @@ class ConfigManager:
             needs_update = True
 
         # Gemini CLI reverse-proxy settings are legacy and are removed on the next save.
-        if 'geminicli' in data:
+        if 'geminicli' in data or 'webgemini' in data or 'gemini' not in data:
             needs_update = True
 
         # Check if codex section is missing
@@ -2166,7 +2185,7 @@ class ConfigManager:
         nvidia = normalize_nvidia_config(getattr(config, "nvidia", {}))
         if build_nvidia_runtime_model_data(nvidia):
             return True
-        if build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
+        if build_gemini_runtime_model_data(getattr(config, "gemini", {})):
             return True
         if build_opencode_runtime_model_data(getattr(config, "opencode", {})):
             return True
@@ -2202,8 +2221,8 @@ class ConfigManager:
                     config.active_model_source = "nvidia"
                 elif build_modelscope_runtime_model_data(getattr(config, "modelscope", {})):
                     config.active_model_source = "modelscope"
-                elif build_webgemini_runtime_model_data(getattr(config, "webgemini", {})):
-                    config.active_model_source = "webgemini"
+                elif build_gemini_runtime_model_data(getattr(config, "gemini", {})):
+                    config.active_model_source = "gemini"
                 elif build_opencode_runtime_model_data(getattr(config, "opencode", {})):
                     config.active_model_source = "opencode"
                 elif build_custom_provider_runtime_model_data(getattr(config, "custom_providers", {})):

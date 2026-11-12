@@ -1830,14 +1830,15 @@ def test_nvidia_help_matches_supported_commands():
     assert "thinking" in nvidia_help["overview"]
 
 
-def test_webgemini_help_matches_supported_commands():
-    webgemini_help = HELP_TOPICS["webgemini"]
-    subcommand_usages = [item["usage"] for item in webgemini_help["subcommands"]]
+def test_gemini_help_matches_supported_commands():
+    gemini_help = HELP_TOPICS["gemini"]
+    subcommand_usages = [item["usage"] for item in gemini_help["subcommands"]]
 
-    assert "/webgemini activate" in subcommand_usages
-    assert "/webgemini model <model-id>" in subcommand_usages
-    assert "/webgemini proxy <url|clear>" in subcommand_usages
-    assert "/wgemini" in subcommand_usages
+    assert "/gemini activate" in subcommand_usages
+    assert "/gemini model [id]" in subcommand_usages
+    assert "/gemini key [key|env:VARIABLE_NAME]" in subcommand_usages
+    assert "/gemini url [url]" in subcommand_usages
+    assert "webgemini" not in HELP_TOPICS
 
 
 @pytest.mark.parametrize("correction", [False, True])

@@ -15,7 +15,7 @@ Current source version: **v2.5.3**.
 - **Native desktop**: Electron workspace host using the same Python core, with project/session management, full-window backgrounds, Context Engine file recommendations, arbitrary attachments, settings, tools, plugins, and recovery views
 - **RATS / RTP**: opt-in, executable-local allowlisted Reverie/Rilance provider discovery with Python-core session ownership, exact permissions, compact catalogs, and progressive native tool schemas; Reverie Engine is currently the only implemented provider
 - **Optional workflows**: spec-package authoring, creative writing, browser automation, computer control, and game/3D asset authoring
-- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, WebGemini, Opencode, plus any endpoint you add with `/provider add`
+- **Multi-provider LLM** support: NVIDIA, ModelScope, Codex (ChatGPT), SenseNova, AIHubMix, Agnes, Gemini, Opencode, plus any endpoint you add with `/provider add`
 - **Context Engine**: Augment-style codebase retrieval, LSP integration, git history analysis
 - **Session management**: Conversation persistence, rotation, working memory injection, handoff packets
 - **Approval policy**: Three tool-call approval modes — Default (software policy only), Auto Check (a stateless model review rates each call's risk and pauses only on risky ones), and Strict (every call waits for you); answer allow, deny, or reply in your own words to redirect the model. See [SECURITY_PERMISSIONS.md](docs/SECURITY_PERMISSIONS.md)
@@ -64,7 +64,7 @@ Reverie supports a wide range of LLM providers out of the box. Each provider has
 | **SenseNova**      | SenseTime SenseNova API with live model discovery and Anthropic Messages transport                             | Live account catalog; fallback includes DeepSeek V4 Flash, GLM-5.3, and SenseNova 6.8 Flash / Flash Lite                                                                                       |
 | **AIHubMix**       | Third-party API gateway (OpenAI-compatible)                                                                     | GPT-5.5 Free (with/without reasoning), GPT-4o Free, GPT-4.1 Free                                                                                                                            |
 | **Agnes**          | Agnes AI OpenAI-compatible API (text, image, video)                                                             | Agnes 3.0 Flash (default), 3.0 Flash Max, stable 2.5 Pro; separate image/video profiles |
-| **WebGemini**      | Anonymous Gemini Web access via`gemini.google.com`                                                              | Gemini 3.5 Flash, Gemini 3.5 Flash Thinking, Gemini 3.5 Flash Thinking Lite, Gemini 3.1 Pro, Gemini Auto, Gemini Flash Lite                                                                 |
+| **Gemini** | Google Gen AI SDK for the Gemini Developer API | Models discovered from the configured endpoint |
 | **Custom**         | Any endpoint you add with `/provider add` - OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages     | Read live from the provider's own model-list endpoint                                                                                                                                        |
 
 Provider transports support streaming where their model and endpoint implement the required protocol. A listed model, HTTP 200, or availability probe does not prove working content, complete SSE, tool calls or vision.
@@ -100,7 +100,7 @@ Reverie prefers provider-side prompt-prefix caching for every production text-mo
 - Anthropic requests use automatic five-minute caching through `cache_control: {"type": "ephemeral"}`.
 - If a compatible gateway explicitly rejects a cache field, Reverie removes only the cache hints and retries the same request once. Other provider errors keep their existing retry and error behavior.
 
-Cache keys contain hashes of the model, stable system prefix, and tool schema rather than prompt text. Actual cache hits still depend on provider/model support and a sufficiently long identical prefix; WebGemini and media-generation calls do not expose a compatible prompt-cache control.
+Cache keys contain hashes of the model, stable system prefix, and tool schema rather than prompt text. Actual cache hits still depend on provider/model support and a sufficiently long identical prefix.
 
 ### Operating Modes
 
@@ -223,7 +223,7 @@ Reverie-Cli/
 │   │   ├── aihubmix.py        ← AIHubMix OpenAI-compatible provider
 │   │   ├── agnes.py           ← Agnes AI provider (text/image/video)
 │   │   ├── prompt_cache.py    ← prompt-prefix cache hints and compatibility fallback
-│   │   ├── webgemini.py       ← WebGemini anonymous Gemini Web provider
+│   │   ├── gemini.py          ← Google Gen AI SDK transport
 │   │   ├── builtin_skills/    ← Bundled skills
 │   │   └── ...
 │   ├── requirements.txt
@@ -298,7 +298,7 @@ Download `reverie.exe` and run it in your terminal. You can copy this one file t
 
 On first launch, Reverie guides you through a setup wizard:
 
-1. **Select an LLM provider** — choose from NVIDIA, ModelScope, Codex, SenseNova, AIHubMix, Agnes, WebGemini, or Standard
+1. **Select an LLM provider** — choose from NVIDIA, ModelScope, Codex, SenseNova, AIHubMix, Agnes, Gemini, or Standard
 2. **Configure API keys** — enter your provider API key (file-stored keys are saved in `config.json`; supported environment variables avoid storing those values there)
 3. **Select a default model** — pick from the provider's catalog
 4. **Choose a workspace** — set your project root directory
@@ -428,14 +428,10 @@ Reverie uses the shared or project profile under the selected app root, as descr
     "top_p": 1.0,
     "thinking_mode": "low"
   },
-  "webgemini": {
-    "enabled": true,
-    "selected_model_id": "gemini-3.5-flash-thinking",
-    "selected_model_display_name": "Gemini 3.5 Flash Thinking",
-    "timeout": 180,
-    "retry_attempts": 2,
-    "retry_delay": 1,
-    "max_context_tokens": 128000
+  "gemini": {
+    "api_key_env": "GEMINI_API_KEY",
+    "api_url": "https://generativelanguage.googleapis.com",
+    "selected_model_id": "gemini-3.8-flash"
   },
   "tool_output_style": "compact",
   "thinking_output_style": "full",
@@ -448,7 +444,7 @@ Reverie uses the shared or project profile under the selected app root, as descr
 
 | Key                       | Type   | Default      | Description                                                                                                                 |
 | ------------------------- | ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `aihubmix`, `agnes`, `webgemini`, `opencode`, `custom` |
+| `active_model_source`     | string | `"standard"` | Active provider:`standard`, `nvidia`, `codex`, `modelscope`, `sensenova`, `aihubmix`, `agnes`, `gemini`, `opencode`, `custom` |
 | `tool_output_style`       | string | `"compact"`  | Tool result display:`compact`, `condensed`, `full`                                                                          |
 | `thinking_output_style`   | string | `"full"`     | Reasoning display:`hidden`, `compact`, `full`                                                                               |
 | `nvidia.enable_thinking`  | bool   | `true`       | Enable provider-side thinking for NVIDIA models                                                                             |
@@ -495,9 +491,13 @@ Full game production pipeline:
 Creative writing mode with:
 
 - `serial_novel` disk-backed project control
+- [WStyle Cards](docs/WSTYLE.md) with ordered combinations, novel overrides, live System Prompt updates, editorial review and sample extraction
+- New novels default to at least 5,000 non-whitespace characters per chapter, aiming for 10,000; explicit short projects retain their settings
 - Chapter control cards, continuity ledgers, and resumable drafting
 - One TXT export per committed chapter plus merged `manuscript.txt`
 - Completion audits that verify the persisted novel state before finishing
+
+Use `/mode writer`, `/wstyle list`, and `/wstyle use delicate-prose dual-heroines gl-romance-beats --global`. Switching preserves existing manuscript and drafts. [Writer quality and evaluation](docs/WRITER_QUALITY.md) distinguishes mechanical evidence from literary judgments.
 
 ### AiO and computer use
 
@@ -616,24 +616,13 @@ New configurations default to `agnes-2.5-flash`; existing explicit selections su
 
 If live discovery is unavailable, Reverie falls back to this verified built-in catalog. Agnes image and video generation run through the `text_to_image` and `text_to_video` subsystems.
 
-### WebGemini
+### Gemini
 
-Anonymous Gemini Web access via `gemini.google.com`. Models are selected by mode and thinking parameters:
-
-| Model ID                         | Display Name                   | Mode | Think | Max Output |
-| -------------------------------- | ------------------------------ | ---- | ----- | ---------- |
-| `gemini-3.5-flash`               | Gemini 3.5 Flash               | 1    | 4     | 12,000     |
-| `gemini-3.5-flash-thinking`      | Gemini 3.5 Flash Thinking      | 2    | 0     | 20,000     |
-| `gemini-3.5-flash-thinking-lite` | Gemini 3.5 Flash Thinking Lite | 5    | 0     | 15,000     |
-| `gemini-3.1-pro`                 | Gemini 3.1 Pro                 | 3    | 4     | 12,000     |
-| `gemini-auto`                    | Gemini Auto                    | 4    | 4     | 12,000     |
-| `gemini-flash-lite`              | Gemini Flash Lite              | 6    | 4     | 10,000     |
-
-> **Note:** `gemini-3.1-pro` requires cookies for proper routing. Default model: `gemini-3.5-flash-thinking`.
+Set `GOOGLE_API_KEY` or `GEMINI_API_KEY` before launching Reverie, or configure a key in **Settings → Models and providers → Gemini**. Run `/provider gemini models` to refresh the catalog. For a compatible gateway, select the **Gemini** format when adding a custom provider. See [Gemini configuration](docs/CONFIGURATION.md#gemini).
 
 ### Standard (OpenAI-Compatible Presets)
 
-The `standard` source uses user-defined model presets stored in the `models` array of `config.json`. Each entry specifies a `base_url`, `api_key`, `model`, and `provider` call method. Canonical methods are `openai-chat`, `openai-responses`, `anthropic`, `request`, and `curl`. For `curl`, URLs ending in `/responses` use the Responses format; URLs ending in `/chat/completions` use Chat Completions, while a bare API root defaults to Chat Completions. Legacy names such as `openai`, `openai-sdk`, `openai-old`, and `openai-res` are accepted on load and rewritten to the canonical names when the configuration is saved.
+The `standard` source uses user-defined model presets stored in the `models` array of `config.json`. Each entry specifies a `base_url`, `api_key`, `model`, and `provider` call method. Canonical methods are `openai-chat`, `openai-responses`, `anthropic`, `gemini`, `request`, and `curl`. For `curl`, URLs ending in `/responses` use the Responses format; URLs ending in `/chat/completions` use Chat Completions, while a bare API root defaults to Chat Completions. Legacy names such as `openai`, `openai-sdk`, `openai-old`, and `openai-res` are accepted on load and rewritten to the canonical names when the configuration is saved.
 
 ---
 
@@ -959,13 +948,8 @@ from reverie.sensenova import (
     get_sensenova_model_catalog,
 )
 
-# WebGemini
-from reverie.webgemini import (
-    build_webgemini_runtime_model_data,
-    default_webgemini_config,
-    normalize_webgemini_config,
-    get_webgemini_model_catalog,
-)
+# Gemini
+from reverie.gemini import default_gemini_config, get_gemini_model_catalog
 ```
 
 ### External Model Sources Registry
@@ -975,11 +959,9 @@ from reverie.config import EXTERNAL_MODEL_SOURCES, SUPPORTED_ACTIVE_MODEL_SOURCE
 
 # All external (non-standard) model sources
 print(EXTERNAL_MODEL_SOURCES)
-# ("codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
 
 # All supported active model source values (includes "standard")
 print(SUPPORTED_ACTIVE_MODEL_SOURCES)
-# ("standard", "codex", "aihubmix", "agnes", "sensenova", "nvidia", "modelscope", "webgemini", "opencode")
 ```
 
 ### Mode Normalization
@@ -1010,7 +992,7 @@ profile = get_mode_tool_discovery_profile("reverie-gamer")
 - Check network connectivity to the provider endpoint
 - For NVIDIA: verify key at `https://build.nvidia.com/settings/api-keys`
 - For ModelScope: verify token at `https://www.modelscope.cn/my/access/token`
-- For WebGemini: ensure proxy/cookie settings are correct if needed
+- For Gemini: check that the configured key is available and the Base URL serves the Gemini Developer API.
 
 **Context Engine not returning results**
 

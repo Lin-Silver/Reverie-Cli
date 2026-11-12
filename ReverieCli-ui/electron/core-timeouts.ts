@@ -10,6 +10,7 @@ export function coreRequestTimeoutMs(action: string): number {
   if (action === "callViewTool") return 0;
   if (action === "initialize") return CORE_INITIALIZE_TIMEOUT_MS;
   if (action === "compactContext") return 180_000;
+  if (action === "wstyleCommand") return 90_000;
   if (action === "refreshModelSources") return 120_000;
   if (action === "getSession") return 15_000;
   return 60_000;

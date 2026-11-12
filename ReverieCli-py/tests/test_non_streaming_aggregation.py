@@ -12,7 +12,7 @@ from reverie.stream_protocol import (
 )
 
 
-@pytest.fixture(params=["codex", "webgemini"])
+@pytest.fixture(params=["codex", "gemini"])
 def buffered_agent(request):
     agent = ReverieAgent.__new__(ReverieAgent)
     agent.provider = request.param
@@ -25,7 +25,7 @@ def install_stream(monkeypatch, agent, generate):
     if agent.provider == "codex":
         monkeypatch.setattr(agent, "_process_streaming_native_provider", lambda **kwargs: generate())
     else:
-        monkeypatch.setattr(agent, "_process_streaming_webgemini", lambda **kwargs: generate())
+        monkeypatch.setattr(agent, "_process_streaming_gemini", lambda **kwargs: generate())
 
 
 def test_buffered_output_keeps_reasoning_and_tool_events_out_of_answer(buffered_agent, monkeypatch):
@@ -130,9 +130,12 @@ def test_codex_non_streaming_decodes_sse_and_preserves_reasoning_history(tmp_pat
     assert agent.messages[-1]["reasoning_content"] == "独立的思考内容"
 
 
-def test_webgemini_non_streaming_preserves_model_activity_and_reasoning_history(tmp_path, monkeypatch):
-    monkeypatch.setattr("reverie.agent.agent.iter_webgemini_text_deltas", lambda **kwargs: iter(["<think>独立的", "思考内容</think>", "最终答复"]))
-    agent = ReverieAgent(base_url="https://example.test", api_key="", model="test-model", provider="webgemini", project_root=tmp_path, config=Config())
+def test_gemini_non_streaming_preserves_model_activity_and_reasoning_history(tmp_path, monkeypatch):
+    monkeypatch.setattr("reverie.agent.agent.iter_gemini_events", lambda *args, **kwargs: iter([
+        {"type": "reasoning", "text": "独立的思考内容"}, {"type": "content", "text": "最终答复"}, {"type": "finish", "reason": "stop"},
+    ]))
+    agent = ReverieAgent(base_url="https://example.test", api_key="test-key", model="test-model", provider="gemini", project_root=tmp_path, config=Config())
+    monkeypatch.setattr(agent, "_ensure_client", lambda: object())
     agent.get_visible_tool_schemas = lambda: []
     agent.messages = [{"role": "user", "content": "请回答"}]
     events = []

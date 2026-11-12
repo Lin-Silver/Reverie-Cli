@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 from pathlib import Path
 import os
 import runpy
@@ -18,6 +18,8 @@ hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.synta
                  'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
 # tiktoken discovers encodings dynamically; include the default encoding plugin.
 hiddenimports.append('tiktoken_ext.openai_public')
+hiddenimports.extend(collect_submodules('google.genai'))
+datas.extend(collect_data_files('google.genai'))
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -98,6 +100,7 @@ if build_mode != 'ui-onedir':
 add_data_if_exists(repo_root / "reverie" / "agent" / "tool_manifest.json", "reverie/agent")
 add_data_if_exists(repo_root / "reverie" / "engine" / "vendor" / "live2d" / "live2dcubismcore.min.js", "reverie/engine/vendor/live2d")
 add_tree_if_exists(repo_root / "reverie" / "builtin_skills", "reverie/builtin_skills", exclude_skill_artifacts=True)
+add_tree_if_exists(repo_root / "reverie" / "writer" / "wstyle_cards", "reverie/writer/wstyle_cards")
 add_data_if_exists(repo_root / "reverie" / "computer_use" / "ATTRIBUTION.md", "reverie/computer_use")
 add_data_if_exists(repo_root / "reverie" / "computer_use" / "native_manifest.json", "reverie/computer_use")
 if os.name == 'nt':

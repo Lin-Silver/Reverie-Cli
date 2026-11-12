@@ -38,9 +38,10 @@ PROBEABLE_BUILTIN_SOURCES: Tuple[str, ...] = (
     "modelscope",
     "nvidia",
     "opencode",
+    "gemini",
 )
 # Sources with no public catalog endpoint; only a real call can verify them.
-UNPROBEABLE_BUILTIN_SOURCES: Tuple[str, ...] = ("codex", "webgemini")
+UNPROBEABLE_BUILTIN_SOURCES: Tuple[str, ...] = ("codex",)
 
 # Sources whose gateway may legitimately accept anonymous requests.
 _KEYLESS_SOURCES: Tuple[str, ...] = ("opencode",)
@@ -48,7 +49,6 @@ _KEYLESS_SOURCES: Tuple[str, ...] = ("opencode",)
 # Credential help text for sources that do not use a plain API key field.
 _CREDENTIAL_NOTES: Dict[str, str] = {
     "codex": "ChatGPT OAuth credentials",
-    "webgemini": "browser session cookies",
 }
 
 
@@ -169,11 +169,11 @@ def _builtin_endpoint(source: str, config: Config) -> Tuple[str, str, str, str, 
         credentials = resolve_codex_credentials(cfg, request_url=request_url)
         api_key = str(credentials.get("api_key", "") or "") if credentials.get("found") else ""
         return str(cfg.get("api_url", "") or ""), api_key, "openai-responses", str(cfg.get("selected_model_id", "") or ""), str(cfg.get("selected_model_display_name", "") or "")
-    if source == "webgemini":
-        from .webgemini import normalize_webgemini_config
+    if source == "gemini":
+        from .gemini import normalize_gemini_config, resolve_gemini_api_key
 
-        cfg = normalize_webgemini_config(raw)
-        return str(cfg.get("api_url", "") or ""), "", "openai-chat", str(cfg.get("selected_model_id", "") or ""), str(cfg.get("selected_model_display_name", "") or "")
+        cfg = normalize_gemini_config(raw)
+        return cfg["api_url"], resolve_gemini_api_key(cfg), "gemini", cfg["selected_model_id"], cfg["selected_model_display_name"]
     return "", "", "openai-chat", str(raw.get("selected_model_id", "") or ""), str(raw.get("selected_model_display_name", "") or "")
 
 
@@ -299,7 +299,9 @@ def probe_provider_rows(
 
             module = import_module(f".{row.source}", __package__)
             provider_config = getattr(row.config, row.source)
-            if row.source in {"sensenova", "opencode"}:
+            if row.source == "gemini":
+                fetch_catalog = lambda: module.fetch_gemini_models(row.base_url, row.record["api_key"], timeout, proxy=row.config.api_proxy)
+            elif row.source in {"sensenova", "opencode"}:
                 fetch = getattr(module, f"fetch_{row.source}_model_catalog")
                 fetch_catalog = lambda: fetch(provider_config, timeout=timeout, force_refresh=True, proxy=row.config.api_proxy)
             elif row.source == "agnes":

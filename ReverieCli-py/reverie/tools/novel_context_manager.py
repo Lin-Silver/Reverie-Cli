@@ -212,11 +212,11 @@ Novel Memory Statistics:
         
         report = f"""
 Chapter {chapter} Analysis:
-- Word Count: {analysis['word_count']}
+- Non-whitespace Characters: {analysis['characters']} (Han: {analysis['han_characters']})
 - Tone: {analysis['tone_analysis']['dominant_tone']}
 - Emotional Intensity: {analysis['tone_analysis']['emotional_intensity']:.2f}
 - Pacing: {analysis['tone_analysis']['pacing']}
-- Quality Score: {analysis['quality_score']:.1f}/100
+- Assessment: descriptive checks only; literary quality is not scored.
 
 Consistency Report:
 {analysis['consistency_report']}

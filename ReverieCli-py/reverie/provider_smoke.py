@@ -56,10 +56,12 @@ from .nvidia import (
     normalize_nvidia_config,
     resolve_nvidia_request_url,
 )
-from .webgemini import (
-    build_webgemini_runtime_model_data,
-    iter_webgemini_text_deltas,
-    normalize_webgemini_config,
+from .gemini import (
+    build_gemini_runtime_model_data,
+    create_gemini_client,
+    gemini_request,
+    iter_gemini_events,
+    normalize_gemini_config,
 )
 
 
@@ -70,7 +72,7 @@ BUILTIN_PROVIDER_NAMES = (
     "modelscope",
     "nvidia",
     "codex",
-    "webgemini",
+    "gemini",
     "opencode",
 )
 
@@ -580,30 +582,31 @@ def smoke_codex(config: Config, timeout_seconds: int = 60, model_id: str = "") -
             response.close()
 
 
-def smoke_webgemini(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:
-    provider = "webgemini"
-    cfg = normalize_webgemini_config(config.webgemini)
+def smoke_gemini(config: Config, timeout_seconds: int = 60, model_id: str = "") -> ProviderSmokeResult:
+    provider = "gemini"
+    cfg = normalize_gemini_config(config.gemini)
     if model_id:
         cfg["selected_model_id"] = str(model_id or "").strip()
-        cfg = normalize_webgemini_config(cfg)
-    runtime = build_webgemini_runtime_model_data(cfg)
+        cfg = normalize_gemini_config(cfg)
+    runtime = build_gemini_runtime_model_data(cfg)
     model = str((runtime or {}).get("model") or cfg.get("selected_model_id") or "")
     if not runtime:
-        return _skipped(provider, model, "disabled")
+        return _skipped(provider, model, "missing_credentials_or_disabled")
 
     start = time.perf_counter()
     try:
         saw_text = False
-        for text in iter_webgemini_text_deltas(
-            messages=[{"role": "user", "content": "Reply with OK."}],
-            model=model,
-            webgemini_config={**cfg, "timeout": timeout_seconds},
-        ):
-            if str(text or "").strip():
-                saw_text = True
-                break
+        from .provider_transport import provider_client
+        from .proxy import resolve_proxy_url
+
+        with create_gemini_client(runtime["base_url"], runtime["api_key"], timeout_seconds,
+                http_client=provider_client(proxy=resolve_proxy_url(config.api_proxy))) as client:
+            request = gemini_request([{"role": "user", "content": "Reply with OK."}], max_tokens=128)
+            for event in iter_gemini_events(client, model, request):
+                if event.get("type") == "content" and str(event.get("text") or "").strip():
+                    saw_text = True
         if not saw_text:
-            raise RuntimeError("WebGemini returned no text delta")
+            raise RuntimeError("Gemini returned no text delta")
         return ProviderSmokeResult(provider=provider, model=model, status="ok", latency_ms=int((time.perf_counter() - start) * 1000))
     except Exception as exc:
         return _result_from_error(provider, model, start, exc)
@@ -617,7 +620,7 @@ SMOKE_RUNNERS: Dict[str, Callable[[Config, int, str], ProviderSmokeResult]] = {
     "modelscope": smoke_modelscope,
     "nvidia": smoke_nvidia,
     "codex": smoke_codex,
-    "webgemini": smoke_webgemini,
+    "gemini": smoke_gemini,
 }
 
 

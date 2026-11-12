@@ -44,7 +44,8 @@ function findMakeNsis(root) {
   ) ?? null;
 }
 
-if (!existsSync(path.join(unpackedRoot, "ReverieUI.exe")) || !existsSync(path.join(unpackedRoot, "reverie.exe"))) {
+const runtimeFiles = ["ReverieUI.exe", "reverie.exe", "resources/app.asar"];
+if (!runtimeFiles.every((file) => existsSync(path.join(unpackedRoot, file)))) {
   throw new Error(`The unpacked GUI and CLI kernel must be built first: ${unpackedRoot}`);
 }
 
@@ -73,6 +74,9 @@ const extraction = walkFiles(unpackedRoot).sort().map((file) => {
   IfErrors extract_failed`;
 }).join("\n");
 const numericVersion = `${packageJson.version}.0`.split(".").slice(0, 4).join(".");
+const cacheChecks = [`.reverie-build-${buildId}`, ...runtimeFiles].map((file) =>
+  `  IfFileExists "$INSTDIR\\${file.replaceAll("/", "\\")}" 0 \${miss}`,
+).join("\n");
 try {
   rmSync(output, { force: true });
 } catch (error) {
@@ -82,14 +86,16 @@ try {
 }
 const script = `Unicode true
 RequestExecutionLevel user
-SilentInstall silent
+SilentInstall normal
 AutoCloseWindow true
+ShowInstDetails nevershow
 WindowIcon off
 CRCCheck off
 SetDatablockOptimize on
-SetCompressor /SOLID /FINAL lzma
-SetCompressorDictSize 32
+; Independent blocks let a cached launch skip the entire application payload.
+SetCompressor /FINAL zlib
 Name "Reverie"
+Caption "Reverie Portable"
 OutFile "${nsisPath(output)}"
 Icon "${nsisPath(path.join(repositoryRoot, "ReverieCli-py", "reverie.ico"))}"
 VIProductVersion "${numericVersion}"
@@ -100,9 +106,24 @@ VIAddVersionKey /LANG=1033 "FileVersion" "${packageJson.version}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Reverie"
 !include "FileFunc.nsh"
 
-Section
+!macro CheckRuntimeCache miss
+${cacheChecks}
+!macroend
+
+Page instfiles
+
+Function .onInit
   StrCpy $INSTDIR "$EXEDIR\\.reverie\\desktop\\app-runtime"
-  IfFileExists "$INSTDIR\\.reverie-build-${buildId}" launch
+  !insertmacro CheckRuntimeCache done
+  SetSilent silent
+done:
+FunctionEnd
+
+Section
+  !insertmacro CheckRuntimeCache extract
+  Goto launch
+
+extract:
   RMDir /r "$INSTDIR"
   CreateDirectory "$INSTDIR"
 ${extraction}
@@ -117,6 +138,8 @@ extract_failed:
   Quit
 
 launch:
+  IfSilent +2
+  HideWindow
   CreateDirectory "$EXEDIR\\.reverie\\desktop\\temp"
   System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("PORTABLE_EXECUTABLE_DIR", "$EXEDIR").r0'
   System::Call 'Kernel32::SetEnvironmentVariable(t, t)i ("PORTABLE_EXECUTABLE_FILE", "$EXEPATH").r0'

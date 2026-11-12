@@ -23,6 +23,7 @@ describe("portable launcher startup", () => {
 
   it("reuses its extracted runtime without scanning the full payload on every launch", () => {
     expect(buildScript).toContain("CRCCheck off");
+    expect(buildScript).not.toMatch(/^SetCompressor\b.*\/SOLID/im);
     expect(buildScript).toContain("IfFileExists");
     expect(buildScript).toContain('.reverie-build-${buildId}');
   });

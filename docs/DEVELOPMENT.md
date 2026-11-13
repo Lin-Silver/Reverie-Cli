@@ -60,10 +60,12 @@ the build environment with `ReverieCli-py\build.bat --recreate-venv --skip-plugi
 Virtual environments are not portable distribution artifacts.
 
 The GUI reuses the core's browser/FFmpeg archives (hard links where supported),
-and the portable payload uses solid LZMA compression. The root build removes
+and the portable payload uses independent zlib blocks. The root build removes
 disposable PyInstaller staging, `.kernel`, `release/win-unpacked`, and portable
-compiler staging after successful packaging. It retains the build venv, browser,
-resource archives and download caches to avoid downloading them on every build.
+compiler staging before starting and after successful packaging. After the initial
+cleanup, the checkout drive needs at least 8 GiB free for the Windows build. The
+cleanup retains the build venv, browser, resource archives, download caches,
+finished EXEs, and portable user data.
 Direct `npm run dist:win` retains unpacked output for package verification; run
 `node ReverieCli-ui/scripts/clean-build-staging.mjs` from the repository root
 after those checks if needed. Actual EXE sizes depend on Python and bundled

@@ -20,6 +20,9 @@ where npm >nul 2>&1 || (echo [ERROR] npm is required. & exit /b 1)
 node -e "process.exit(process.platform === 'win32' && process.arch === 'x64' ? 0 : 1)"
 if errorlevel 1 (echo [ERROR] Windows x64 Node.js is required. & exit /b 1)
 
+node "%UI_ROOT%\scripts\clean-build-staging.mjs" --prepare
+if errorlevel 1 exit /b 1
+
 call "%REPO_ROOT%\ReverieCli-py\build.bat" --reuse-venv --test-exe --skip-plugins --no-pause
 if not "%ERRORLEVEL%"=="0" exit /b 1
 

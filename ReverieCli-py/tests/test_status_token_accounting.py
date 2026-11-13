@@ -29,6 +29,7 @@ from rich.console import Console
 
 from reverie.agent.agent import ReverieAgent
 from reverie.cli.commands import CommandHandler
+from reverie.config import Config, ModelConfig
 from reverie.session.workspace_stats import WorkspaceStatsManager
 
 
@@ -88,6 +89,18 @@ def test_per_message_costs_sum_to_the_conversation_total() -> None:
     per_message = sum(WorkspaceStatsManager.count_message_tokens(item) for item in messages)
 
     assert per_message + 2 == WorkspaceStatsManager.count_messages_tokens(messages)
+
+
+def test_context_window_uses_the_conversation_model_before_workspace_defaults() -> None:
+    defaults = Config(models=[ModelConfig("first", "First", "http://localhost/v1", max_context_tokens=16000)])
+    runtime = Config(models=[ModelConfig("second", "Second", "http://localhost/v1", max_context_tokens=32000)])
+    agent = ReverieAgent.__new__(ReverieAgent)
+    agent.config = runtime
+    agent.tool_executor = SimpleNamespace(context={
+        "config_manager": SimpleNamespace(get_active_model=lambda: defaults.active_model, load=lambda: defaults),
+    })
+
+    assert agent._resolve_max_context_tokens() == 32000
 
 
 def test_api_context_measurement_keeps_live_edits_local_and_ignores_system_prompt_drift() -> None:

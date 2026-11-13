@@ -1509,7 +1509,9 @@ def test_get_context_usage_initializes_the_agent_before_reading(tmp_path: Path) 
         {"id": "usage-1", "action": "getContextUsage", "payload": {"sessionId": session.id}}
     )
 
-    assert captured["init"] == {"persist_config_changes": False, "defer_runtime_enrichment": True}
+    assert captured["init"]["config_override"].active_model is not None
+    assert captured["init"]["persist_config_changes"] is False
+    assert captured["init"]["defer_runtime_enrichment"] is True
     assert "synced" not in captured
     assert response["type"] == "context.usage"
     assert response["usage"] == {"total_tokens": 6400, "max_tokens": 128000, "percentage": 5.0}

@@ -7986,6 +7986,13 @@ class ReverieAgent:
     def _resolve_max_context_tokens(self) -> int:
         """Resolve the active model context window from runtime configuration."""
         max_tokens = 128000
+        config = getattr(self, 'config', None)
+        if config is not None:
+            model_config = getattr(config, 'active_model', None)
+            if model_config and model_config.max_context_tokens:
+                return model_config.max_context_tokens
+            return getattr(config, 'max_context_tokens', max_tokens)
+
         config_manager = self.tool_executor.context.get('config_manager')
 
         if config_manager:
@@ -7994,9 +8001,6 @@ class ReverieAgent:
                 return model_config.max_context_tokens
             config = config_manager.load()
             return getattr(config, 'max_context_tokens', max_tokens)
-
-        if hasattr(self, 'config'):
-            return getattr(self.config, 'max_context_tokens', max_tokens)
 
         return max_tokens
 

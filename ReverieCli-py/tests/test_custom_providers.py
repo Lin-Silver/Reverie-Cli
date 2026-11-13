@@ -1547,7 +1547,8 @@ def test_a_models_context_limit_is_asked_once_and_reused_afterwards(tmp_path, mo
     )
     config_manager.save(config)
 
-    _install_fake_get(monkeypatch, {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini"}]}, [])
+    catalog_requests = []
+    _install_fake_get(monkeypatch, {"data": [{"id": "kiro-pro"}, {"id": "kiro-mini"}]}, catalog_requests)
     asked = _install_fake_prompts(monkeypatch, "64k")
 
     assert handler.cmd_provider("xkiro models kiro-mini") is True
@@ -1574,7 +1575,8 @@ def test_a_models_context_limit_is_asked_once_and_reused_afterwards(tmp_path, mo
     limits = find_custom_provider(config_manager.load().custom_providers, "xkiro")[
         "model_context_limits"
     ]
-    assert limits == {"kiro-mini": 64000, "kiro-pro": CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS}
+    assert limits == {"kiro-mini": 64000, "kiro-pro": 200000}
+    assert catalog_requests == []
 
 
 def test_the_saved_limit_drives_the_runtime_model_after_a_catalog_refresh(

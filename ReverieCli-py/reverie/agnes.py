@@ -483,7 +483,7 @@ def resolve_agnes_selected_model(agnes_config: Any, model_id: Optional[str] = No
         return matched
     key = _live_cache_key(cfg, resolve_agnes_api_key(cfg))
     if remembered_model_catalog(cfg, key, _MODEL_CACHE) is not None:
-        catalog = get_agnes_model_catalog(cfg)
+        catalog = get_agnes_model_catalog(cfg, fetch_live=False)
         return catalog[0] if catalog else None
     if wanted and _is_text_model_id(wanted):
         return _agnes_model(
@@ -491,7 +491,7 @@ def resolve_agnes_selected_model(agnes_config: Any, model_id: Optional[str] = No
             _display_name_from_model_id(wanted) or wanted,
             "Agnes text model selected from config.",
         )
-    catalog = get_agnes_model_catalog(cfg)
+    catalog = get_agnes_model_catalog(cfg, fetch_live=False)
     return catalog[0] if catalog else None
 
 

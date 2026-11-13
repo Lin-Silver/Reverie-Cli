@@ -877,10 +877,14 @@ function Sidebar({
 function ModelPicker({
   state,
   onSelect,
+  refresh,
+  refreshing,
   close,
 }: {
   state: DesktopState;
-  onSelect: (source: ModelSource, model: ModelRecord, reasoning?: string) => void;
+  onSelect: (source: ModelSource, model: ModelRecord, reasoning?: string) => Promise<void>;
+  refresh: () => void;
+  refreshing: boolean;
   close: () => void;
 }) {
   const { t } = useI18n();
@@ -890,6 +894,15 @@ function ModelPicker({
   const [sourceId, setSourceId] = useState(() => activeSourceId(sources, state.models.active_source));
   const [query, setQuery] = useState("");
   const [pendingSelection, setPendingSelection] = useState<{ source: ModelSource; model: ModelRecord } | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const commitSelection = async (source: ModelSource, model: ModelRecord, reasoning?: string) => {
+    setSelecting(true);
+    try {
+      await onSelect(source, model, reasoning);
+    } finally {
+      setSelecting(false);
+    }
+  };
   const source = sources.find((item) => item.id === sourceId) ?? sources[0];
   const models = useMemo(() => (source?.models ?? []).filter((model) =>
     `${model.display_name} ${model.id}`.toLowerCase().includes(query.toLowerCase()),
@@ -902,7 +915,7 @@ function ModelPicker({
   useEffect(() => {
     setFirstModel(0);
     if (modelListRef.current) modelListRef.current.scrollTop = 0;
-  }, [source?.id, query]);
+  }, [source?.id, query, models.length]);
   if (!source) return null;
   const pendingReasoning = pendingSelection?.model.reasoning;
   return (
@@ -910,6 +923,10 @@ function ModelPicker({
       <div ref={dialogRef} className="model-picker" role="dialog" aria-modal="true" aria-label={t("模型来源")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <div className="model-picker-sources">
           <div className="popover-title">{t("模型来源")}</div>
+          <button type="button" onClick={refresh} disabled={refreshing || selecting} aria-busy={refreshing}>
+            <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
+            <span>{t("刷新目录")}</span>
+          </button>
           {sources.map((item) => (
             <button
               type="button"
@@ -944,7 +961,8 @@ function ModelPicker({
                     type="button"
                     key={option.id}
                     className={option.id === pendingReasoning.value ? "active" : ""}
-                    onClick={() => onSelect(pendingSelection.source, pendingSelection.model, option.id)}
+                    disabled={selecting || refreshing}
+                    onClick={() => void commitSelection(pendingSelection.source, pendingSelection.model, option.id)}
                   >
                     <div className="model-option-icon"><Brain size={15} /></div>
                     <div>
@@ -977,6 +995,7 @@ function ModelPicker({
               <button
                 type="button"
                 key={model.id}
+                disabled={selecting || refreshing}
                 className={source.active && source.selected_model_id === model.id ? "active" : ""}
                 style={virtualized ? { position: "absolute", top: (firstModel + index) * rowHeight + 10, left: 10, width: "calc(100% - 20px)", height: rowHeight } : undefined}
                 onClick={() => {
@@ -984,7 +1003,7 @@ function ModelPicker({
                     setPendingSelection({ source, model });
                     return;
                   }
-                  onSelect(source, model);
+                  void commitSelection(source, model);
                 }}
               >
                 <div className="model-option-icon">{model.vision ? <Eye size={15} /> : <Brain size={15} />}</div>
@@ -5075,6 +5094,7 @@ export default function App() {
   const [paneWidthDraft, setPaneWidthDraft] = useState<{ sidebar?: number; inspector?: number }>({});
   const paneResizing = paneWidthDraft.sidebar !== undefined || paneWidthDraft.inspector !== undefined;
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelCatalogRefreshing, setModelCatalogRefreshing] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => {
     const open = () => setCommandOpen(true);
@@ -5697,7 +5717,9 @@ export default function App() {
     contextDirty.current = true;
   }, [contextModel]);
   contextSnapshot.current = {
+    projectRoot,
     ...(session?.id ? { sessionId: session.id } : {}),
+    ...(assistantId === "aio" ? { assistantId } : {}),
     draftText: prompt,
     attachments: attachments.filter(item => !item.status || item.status === "ready"),
     liveAssistantText: running ? liveTurn?.assistantText || "" : "",
@@ -5707,7 +5729,7 @@ export default function App() {
     setContextUsage(null);
     contextRevision.current += 1;
     contextDirty.current = true;
-  }, [projectRoot, session?.id, state?.workspace.active_model]);
+  }, [contextOwner, contextModel]);
   useEffect(() => {
     contextDirty.current = true;
   }, [session?.messages, prompt, attachments, liveTurn?.assistantText, liveTurn?.events, running]);
@@ -5731,7 +5753,7 @@ export default function App() {
       }
     }, 250);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [workspaceReady, projectRoot, session?.id, sessionBusy, state?.workspace.active_model]);
+  }, [workspaceReady, contextOwner, sessionBusy, contextModel]);
 
   const openSession = useCallback(async (id: string,ownerAssistantId?:'aio') => {
     // Re-selecting the conversation already in view is just a jump back to its
@@ -6436,15 +6458,27 @@ export default function App() {
 
   const openModelPicker = useCallback(() => {
     setModelPickerOpen(true);
-    const owner=ownerKey(projectRoot,session?.id || '',assistantId);
-    void window.reverie.request("refreshModelSources", {projectRoot,sessionId:session?.id,...(session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{})}).then((response) => {
-      if(ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
-      if (!response.models) return;
+  }, []);
+
+  const refreshModelCatalog = useCallback(async () => {
+    const owner = ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID, assistantId);
+    const sequence = configurationRequestSequence.current;
+    setModelCatalogRefreshing(true);
+    try {
+      const response = await window.reverie.request("refreshModelSources", {
+        projectRoot, sessionId: configurationSessionId,
+        ...(configurationSessionId && assistantId === "aio" ? { assistantId } : {}),
+      });
+      conversationViews.current.clear();
+      if (sequence !== configurationRequestSequence.current ||
+          ownerKey(draftOwner.current.root, draftOwner.current.id, draftOwner.current.assistantId) !== owner) return;
       setState((current) => current ? { ...current, models: response.models } : current);
-    }).catch(() => {
-      // Keep the initialized fallback catalog available when live discovery fails.
-    });
-  }, [state?.workspace.mode,projectRoot,session?.id]);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setModelCatalogRefreshing(false);
+    }
+  }, [projectRoot, session?.id, assistantId, configurationSessionId, toast]);
 
   const selectReasoning = useCallback(async (reasoning: string) => {
     if (!state) return;
@@ -7131,7 +7165,7 @@ export default function App() {
         preview={previewInspectorWidth}
         commit={commitInspectorWidth}
       />
-      {modelPickerOpen && <ModelPicker state={state} onSelect={(source, model, reasoning) => void selectModel(source, model, reasoning)} close={() => setModelPickerOpen(false)} />}
+      {modelPickerOpen && <ModelPicker state={state} onSelect={selectModel} refresh={() => void refreshModelCatalog()} refreshing={modelCatalogRefreshing} close={() => setModelPickerOpen(false)} />}
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openOwnedSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}

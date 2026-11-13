@@ -120,19 +120,11 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
 
         return get_gemini_model_catalog(config.gemini, fetch_live=fetch_live, force_refresh=fetch_live, proxy=config.api_proxy)
     if source == "opencode":
-        from .opencode import get_opencode_model_catalog, resolve_opencode_api_key
+        from .opencode import get_opencode_model_catalog
 
-        opencode_config = getattr(config, "opencode", {})
-        cached_catalog = get_opencode_model_catalog(opencode_config)
-        has_live_catalog = all(item.get("catalog_source") == "api" for item in cached_catalog)
-        load_live = fetch_live or (
-            not has_live_catalog
-            and not opencode_config.get("use_builtin_model_catalog", False)
-            and bool(resolve_opencode_api_key(opencode_config))
-        )
         return get_opencode_model_catalog(
-            opencode_config,
-            fetch_live=load_live,
+            config.opencode,
+            fetch_live=fetch_live,
             force_refresh=fetch_live,
             proxy=getattr(config, "api_proxy", ""),
         )
@@ -143,7 +135,7 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
     if source == "agnes":
         from .agnes import get_agnes_model_catalog
 
-        return get_agnes_model_catalog(getattr(config, "agnes", {}), fetch_live=True if fetch_live else None, force_refresh=fetch_live)
+        return get_agnes_model_catalog(getattr(config, "agnes", {}), fetch_live=fetch_live, force_refresh=fetch_live)
     if source == "sensenova":
         from .sensenova import get_sensenova_model_catalog
 

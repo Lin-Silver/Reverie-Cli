@@ -146,6 +146,9 @@ def test_background_prompt_loading_does_not_replace_the_last_viewed_conversation
 def test_selecting_a_conversation_model_does_not_change_workspace_defaults(tmp_path, monkeypatch):
     sessions = SessionManager(tmp_path / "state", project_root=tmp_path)
     conversation = sessions.create_session("Uses a different model")
+    conversation.messages = [{"role": "user", "content": "Existing transcript"}]
+    sessions.save_session(conversation)
+    selected = sessions.create_session("Still selected")
     defaults = Config(models=[
         ModelConfig("first", "First", "http://127.0.0.1:9/v1"),
         ModelConfig("second", "Second", "http://127.0.0.1:9/v1"),
@@ -167,8 +170,19 @@ def test_selecting_a_conversation_model_does_not_change_workspace_defaults(tmp_p
     monkeypatch.setattr(bridge, "model_sources_payload", lambda **_kwargs: {})
     monkeypatch.setattr(bridge, "workspace_payload", lambda: {})
 
-    bridge.dispatch({"action": "selectModel", "payload": {
-        "sessionId": conversation.id, "source": "standard", "modelId": "1"
-    }})
+    def unexpected_history_io(*args, **kwargs):
+        raise AssertionError("Changing models must only update conversation metadata")
 
+    with monkeypatch.context() as metadata_only:
+        metadata_only.setattr(sessions, "load_session", unexpected_history_io)
+        metadata_only.setattr(sessions, "save_session", unexpected_history_io)
+        response = bridge.dispatch({"action": "selectModel", "payload": {
+            "sessionId": conversation.id, "source": "standard", "modelId": "1"
+        }})
+
+    assert response["selected"]["model"] == "second"
     assert persisted["config"].active_model.model == "first"
+    assert sessions.selected_session_id() == selected.id
+    page = sessions.get_page(conversation.id)
+    assert page["metadata"]["runtime_config"]["model_ref"]["model"] == "second"
+    assert page["messages"] == conversation.messages

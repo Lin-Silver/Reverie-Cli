@@ -2000,7 +2000,7 @@ describe("desktop GUI interactions", () => {
     }));
   });
 
-  it("refreshes the provider catalog when the model picker opens", async () => {
+  it("opens the local model catalog immediately and refreshes only when requested", async () => {
     const refreshedModels: ModelSourcesState = {
       ...desktopState.models,
       sources: [...desktopState.models.sources, {
@@ -2028,6 +2028,9 @@ describe("desktop GUI interactions", () => {
 
     await user.click(await screen.findByRole("button", { name: /Test Model/ }));
     const dialog = await screen.findByRole("dialog", { name: "模型来源" });
+    expect((within(dialog).getByRole("button", { name: /Test Model/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect(request).not.toHaveBeenCalledWith("refreshModelSources", expect.anything());
+    await user.click(within(dialog).getByRole("button", { name: "刷新目录" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith("refreshModelSources", {projectRoot:'C:/workspace',sessionId:baseSession.id}));
     await user.click(await within(dialog).findByRole("button", { name: /SenseNova/ }));
 

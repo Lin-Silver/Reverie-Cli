@@ -1030,7 +1030,6 @@ class Config:
     @property
     def active_model(self) -> Optional[ModelConfig]:
         source = str(self.active_model_source).lower()
-        runtime_nvidia_config = self._resolved_nvidia_config()
 
         if source == "codex":
             runtime_codex_model = build_codex_runtime_model_data(self.codex)
@@ -1049,7 +1048,7 @@ class Config:
             return ModelConfig.from_dict(runtime_sensenova_model) if runtime_sensenova_model else None
 
         if source == "nvidia":
-            runtime_nvidia_model = build_nvidia_runtime_model_data(runtime_nvidia_config)
+            runtime_nvidia_model = build_nvidia_runtime_model_data(self._resolved_nvidia_config())
             return ModelConfig.from_dict(runtime_nvidia_model) if runtime_nvidia_model else None
 
         if source == "modelscope":

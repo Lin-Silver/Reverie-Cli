@@ -13,18 +13,19 @@ also include their API format. Changing the endpoint or credential prevents reus
 of another connection's saved inventory. Credentials are not stored in this key.
 Custom model context limits entered by the user still override API context limits.
 
-Desktop refresh and provider availability probes save successful inventories.
-Ordinary desktop reads and model selections reuse them without refreshing over
-the network. If a selected model disappears from a successful inventory, the
+Use **Refresh catalog** in the desktop model picker to discover new models.
+Explicit refreshes and provider availability probes save successful inventories.
+Opening the picker and selecting a model use the saved inventory or built-in
+fallback. If a selected model disappears from a successful inventory, the
 source uses an available model from that inventory; an empty inventory has no
 usable runtime model. A newly added custom provider still requires a model choice.
 Codex retains its own discovery mechanism. The Gemini source and compatible
 Gemini providers list models through the Google Gen AI SDK.
-OpenCode and Agnes can load their initial live catalogs when a key is configured.
-Those initial inventories are saved as well. OpenCode's built-in setting only
-applies before the first successful refresh; it never overrides an already
-successful API inventory. Agnes classifies live chat models by their declared
-output modalities rather than requiring a legacy model-name prefix.
+OpenCode, SenseNova, Gemini and custom provider commands use the local catalog
+when a supplied model query matches. Opening their full CLI selector or entering
+an unfamiliar model query can refresh that provider. A successful OpenCode
+inventory takes precedence over its built-in catalog setting. Agnes classifies
+live chat models by their declared output modalities.
 
 ## SenseNova Messages API
 

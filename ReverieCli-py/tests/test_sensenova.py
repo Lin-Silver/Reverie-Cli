@@ -185,12 +185,15 @@ def test_sensenova_model_command_fetches_live_catalog_before_selection(tmp_path,
         def save(self, config):
             self.config = config
 
-    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False):
+    def fake_catalog(provider_config, *, fetch_live=False, force_refresh=False, proxy=""):
         captured.update(
             provider_config=dict(provider_config),
             fetch_live=fetch_live,
             force_refresh=force_refresh,
         )
+        if not fetch_live and not captured.get("discovered"):
+            return []
+        captured["discovered"] = True
         return [sensenova_module._sensenova_model(
             "future-chat-model",
             "Future Chat Model",
@@ -210,6 +213,8 @@ def test_sensenova_model_command_fetches_live_catalog_before_selection(tmp_path,
     assert captured["force_refresh"] is True
     assert manager.config.active_model_source == "sensenova"
     assert manager.config.sensenova["selected_model_id"] == "future-chat-model"
+    assert handler._cmd_sensenova_model("future-chat-model") is True
+    assert captured["fetch_live"] is False
 
 
 def test_sensenova_is_registered_for_provider_smoke():

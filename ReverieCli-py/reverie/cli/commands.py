@@ -7435,6 +7435,7 @@ class CommandHandler:
         normalize_query: Optional[Callable[[str], str]] = None,
         post_select_config: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
         catalog_config: Optional[Dict[str, Any]] = None,
+        refresh_catalog: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     ) -> bool:
         """Persist model selection for an external provider."""
         config_manager = self.app.get('config_manager')
@@ -7444,18 +7445,24 @@ class CommandHandler:
             )
             return True
 
-        if catalog_config is not None:
-            config = config_manager.load()
-            setattr(config, config_attr, normalize_config(catalog_config))
-            config_manager.save(config)
+        config = config_manager.load()
+        refreshed = False
+        if refresh_catalog is not None:
+            from ..desktop_catalog import _catalog_match
+
+            if not model_query or _catalog_match(catalog, model_query) is None:
+                catalog = refresh_catalog()
+                refreshed = True
+        provider_cfg = normalize_config(catalog_config if catalog_config is not None else getattr(config, config_attr, {}))
         if not catalog:
+            if refreshed and catalog_config is not None:
+                setattr(config, config_attr, provider_cfg)
+                config_manager.save(config)
             self.console.print(
                 f"[{self.theme.CORAL_SOFT}]{self.deco.CROSS} {provider_label} model catalog is empty.[/{self.theme.CORAL_SOFT}]"
             )
             return True
 
-        config = config_manager.load()
-        provider_cfg = normalize_config(getattr(config, config_attr, {}))
         selected_model = self._resolve_catalog_selection(
             catalog=catalog,
             current_selected_id=str(provider_cfg.get("selected_model_id", "")),
@@ -7465,6 +7472,9 @@ class CommandHandler:
             normalize_query=normalize_query,
         )
         if not selected_model:
+            if catalog_config is not None:
+                setattr(config, config_attr, provider_cfg)
+                config_manager.save(config)
             return True
 
         provider_cfg["selected_model_id"] = selected_model["id"]
@@ -8129,7 +8139,9 @@ class CommandHandler:
         config = manager.load()
         return self._select_external_provider_model(
             config_attr='gemini', normalize_config=normalize_gemini_config,
-            catalog=get_gemini_model_catalog(config.gemini, fetch_live=True, force_refresh=True, proxy=config.api_proxy),
+            catalog_config=config.gemini,
+            catalog=get_gemini_model_catalog(config.gemini),
+            refresh_catalog=lambda: get_gemini_model_catalog(config.gemini, fetch_live=True, force_refresh=True, proxy=config.api_proxy),
             provider_label='Gemini', active_source='gemini', model_query=model_query,
         )
 
@@ -8284,21 +8296,18 @@ class CommandHandler:
         from ..opencode import get_opencode_model_catalog, normalize_opencode_config
 
         config_manager = self.app.get('config_manager')
-        if config_manager:
-            config = config_manager.load()
-            if not self._ensure_opencode_configuration(config):
-                return True
-
-        catalog = get_opencode_model_catalog(
-            getattr(config, "opencode", {}) if config_manager else {},
-            fetch_live=True,
-            force_refresh=True,
-        )
+        if not config_manager:
+            return True
+        config = config_manager.load()
+        if not self._ensure_opencode_configuration(config):
+            return True
+        provider_config = config.opencode
         return self._select_external_provider_model(
             config_attr="opencode",
             normalize_config=normalize_opencode_config,
-            catalog_config=getattr(config, "opencode", {}) if config_manager else None,
-            catalog=catalog,
+            catalog_config=provider_config,
+            catalog=get_opencode_model_catalog(provider_config),
+            refresh_catalog=lambda: get_opencode_model_catalog(provider_config, fetch_live=True, force_refresh=True, proxy=config.api_proxy),
             provider_label="Opencode",
             active_source="opencode",
             model_query=model_query,
@@ -9125,15 +9134,20 @@ class CommandHandler:
         from ..sensenova import get_sensenova_model_catalog, normalize_sensenova_config
 
         config_manager = self.app.get('config_manager')
-        provider_config = getattr(config_manager.load(), "sensenova", {}) if config_manager else {}
+        if not config_manager:
+            return True
+        config = config_manager.load()
+        provider_config = config.sensenova
         return self._select_external_provider_model(
             config_attr="sensenova",
             normalize_config=normalize_sensenova_config,
             catalog_config=provider_config,
-            catalog=get_sensenova_model_catalog(
+            catalog=get_sensenova_model_catalog(provider_config),
+            refresh_catalog=lambda: get_sensenova_model_catalog(
                 provider_config,
                 fetch_live=True,
                 force_refresh=True,
+                proxy=config.api_proxy,
             ),
             provider_label="SenseNova",
             active_source="sensenova",
@@ -10240,24 +10254,27 @@ class CommandHandler:
         config = config_manager.load()
         record = dict(provider)
         timeout = max(5, int(record.get("timeout") or 30))
-        models: List[Dict[str, Any]] = []
-        fetch_error = ""
-        with self.console.status(
-            f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Fetching model list from {escape(str(record.get('name') or record.get('id')))}...[/{self.theme.PURPLE_SOFT}]"
-        ):
-            try:
-                models = fetch_custom_provider_models(record, timeout=min(20, timeout), force_refresh=True)
-            except Exception as exc:
-                report_suppressed_exception("fetch custom provider model list")
-                fetch_error = str(exc)
+        from ..desktop_catalog import _catalog_match
 
-        if models:
+        models = None
+        fetch_error = ""
+        if not model_query or _catalog_match(record.get("models") or [], model_query) is None:
+            with self.console.status(
+                f"[{self.theme.PURPLE_SOFT}]{self.deco.SPARKLE} Fetching model list from {escape(str(record.get('name') or record.get('id')))}...[/{self.theme.PURPLE_SOFT}]"
+            ):
+                try:
+                    models = fetch_custom_provider_models(record, timeout=min(20, timeout), force_refresh=True)
+                except Exception as exc:
+                    report_suppressed_exception("fetch custom provider model list")
+                    fetch_error = str(exc)
+
+        if models is not None:
             record["models"] = models
             record["models_synced_at"] = time.time()
             self.console.print(
                 f"[{self.theme.MINT_VIBRANT}]{self.deco.CHECK_FANCY} {len(models)} models available.[/{self.theme.MINT_VIBRANT}]"
             )
-        else:
+        elif fetch_error:
             from ..custom_providers import mask_secret, resolve_custom_provider_api_key
 
             secret = resolve_custom_provider_api_key(record)

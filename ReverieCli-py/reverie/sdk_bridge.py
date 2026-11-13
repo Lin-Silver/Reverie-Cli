@@ -193,44 +193,65 @@ class ReverieSdkBridge:
             self._aio_runtime = AiORuntime(root)
         return self._aio_runtime
 
-    def _save_conversation_config(self, interface, session, config):
+    def _save_conversation_config(self, interface, page, previous, config):
         from .session.runtime_config import capture_runtime_config, _resolve_proxy, update_shared_proxy
-        previous = session.metadata.get('runtime_config') or {}
+
         defaults = interface.config_manager.load()
         previous_proxy = _resolve_proxy(defaults,previous.get('settings',{}).get('api_proxy',defaults.api_proxy))
+        snapshot = capture_runtime_config(
+            config, rules=previous.get('rules',''), pinned_skills=previous.get('pinned_skills',[]), plugins=previous.get('plugins',{}))
+        self._write_conversation_config(interface, page, snapshot)
         if update_shared_proxy(defaults,previous_proxy,config.api_proxy):
             interface.config_manager.save(defaults)
-        session.metadata['runtime_config'] = capture_runtime_config(
-            config, rules=previous.get('rules',''), pinned_skills=previous.get('pinned_skills',[]), plugins=previous.get('plugins',{}))
-        interface.session_manager.save_session(session)
         interface._conversation_config = config
-        interface._view_snapshot = session.metadata['runtime_config']
+
+    def _write_conversation_config(self, interface, page, snapshot):
+        if snapshot != page['metadata'].get('runtime_config'):
+            interface.session_manager.update_metadata(
+                page['id'], {'runtime_config': snapshot}, expected_revision=page['revision'])
+            current = interface.session_manager.get_current_session()
+            if current is not None and current.id == page['id']:
+                current.metadata['runtime_config'] = snapshot
+        interface._view_snapshot = snapshot
+        interface._context_usage_config_dirty = True
+
+    def _capture_conversation_defaults(self, interface, defaults, metadata):
+        from .session.runtime_config import capture_runtime_config
+
+        rules = getattr(interface, 'rules_manager', None)
+        plugins = getattr(interface, 'runtime_plugin_manager', None)
+        return capture_runtime_config(
+            defaults, rules=rules.get_rules_text() if rules else '',
+            pinned_skills=metadata.get('pinned_skills', []),
+            plugins={record.plugin_id: record.enabled for record in plugins.get_snapshot().records} if plugins else {},
+        )
 
     def _conversation_config(self, interface, session):
-        from .session.runtime_config import capture_runtime_config, resolve_runtime_config
+        from .session.runtime_config import resolve_runtime_config
         defaults = interface.config_manager.load()
         snapshot = session.metadata.get('runtime_config')
         if not isinstance(snapshot, dict):
-            rules = getattr(interface, 'rules_manager', None)
-            plugins = getattr(interface,'runtime_plugin_manager',None)
-            snapshot = capture_runtime_config(defaults, rules=rules.get_rules_text() if rules else '', pinned_skills=session.metadata.get('pinned_skills', []), plugins={record.plugin_id:record.enabled for record in plugins.get_snapshot().records} if plugins else {})
+            snapshot = self._capture_conversation_defaults(interface, defaults, session.metadata)
             session.metadata['runtime_config'] = snapshot
             interface.session_manager.save_session(session)
         interface._view_snapshot = snapshot
         return resolve_runtime_config(defaults, snapshot)
 
-    def _editable_conversation_config(self,interface,session):
-        from copy import deepcopy
-        from .session.runtime_config import capture_runtime_config,resolve_runtime_config
+    def _editable_conversation_config(self, interface, page, *, replace_model=False):
+        from .session.runtime_config import capture_runtime_config, resolve_runtime_config
+
+        defaults = interface.config_manager.load()
+        snapshot = page['metadata'].get('runtime_config')
+        if not isinstance(snapshot, dict):
+            snapshot = self._capture_conversation_defaults(interface, defaults, page['metadata'])
         try:
-            return self._conversation_config(interface,session)
+            config = resolve_runtime_config(defaults, snapshot)
         except ValueError:
-            # An explicit replacement may repair a missing model; execution still rejects it.
-            defaults = interface.config_manager.load()
-            snapshot = deepcopy(session.metadata['runtime_config'])
-            snapshot['model_ref'] = capture_runtime_config(defaults)['model_ref']
-            snapshot['provider_settings'] = {}
-            return resolve_runtime_config(defaults,snapshot)
+            if not replace_model:
+                raise
+            repaired = {**snapshot, 'model_ref': capture_runtime_config(defaults)['model_ref'], 'provider_settings': {}}
+            config = resolve_runtime_config(defaults, repaired)
+        return config, snapshot
 
     def settings_payload(self) -> Dict[str, Any]:
         from .settings_catalog import get_setting_items
@@ -487,16 +508,47 @@ class ReverieSdkBridge:
             return {"decision": "message", "message": message}
         return decision if decision in {"once", "session", "deny"} else "deny"
 
-    def model_sources_payload(self, *, fetch_live: bool = False) -> Dict[str, Any]:
+    def model_sources_payload(self, *, fetch_live: bool = False, session_id: str = "") -> Dict[str, Any]:
         from .desktop_catalog import build_model_sources_payload
 
         interface = self.ensure_interface()
-        config = self._view_config(interface)
-        before = config.to_dict()
-        payload = build_model_sources_payload(config, fetch_live=fetch_live)
-        if (fetch_live or config.to_dict() != before) and getattr(interface, '_conversation_config', None) is None:
-            interface.config_manager.save(config)
-        return _json_safe(payload)
+        if fetch_live:
+            from copy import deepcopy
+
+            # Inventories belong to the shared profiles. Keep conversation
+            # settings out of the write, then reapply them over the new catalog.
+            defaults = deepcopy(interface.config_manager.load())
+            payload = build_model_sources_payload(defaults, fetch_live=True)
+            interface.config_manager.save(defaults)
+            if session_id:
+                from .session.runtime_config import resolve_runtime_config
+
+                page = interface.session_manager.get_page(session_id, limit=1)
+                snapshot = page['metadata'].get('runtime_config')
+                if not snapshot:
+                    return _json_safe(payload)
+                try:
+                    config = resolve_runtime_config(defaults, snapshot)
+                except ValueError:
+                    models = build_model_sources_payload(defaults)
+                    self._mark_unavailable_model(models, snapshot)
+                    return _json_safe(models)
+                return _json_safe(build_model_sources_payload(config))
+            return _json_safe(payload)
+        return _json_safe(build_model_sources_payload(self._view_config(interface)))
+
+    @staticmethod
+    def _mark_unavailable_model(models, snapshot):
+        reference = snapshot.get('model_ref') or {}
+        model_id = reference.get('model', '')
+        models['active_source'] = reference.get('source')
+        models['active_model'] = {
+            'id': model_id,
+            'display_name': str(model_id or reference.get('profile_id') or 'Saved model') + ' (unavailable)',
+            'provider': reference.get('source', ''),
+        }
+        for source in models.get('sources', []):
+            source['active'] = False
 
     def image_model_sources_payload(self) -> Dict[str, Any]:
         from .desktop_catalog import build_image_model_sources_payload
@@ -966,19 +1018,23 @@ class ReverieSdkBridge:
             live_read = self._run_control is not None
             # A delayed statistics request must never activate an old session.
             if session_id and (session is None or session.id != session_id):
-                return {"id": request_id, "type": "context.usage", "usage": None}
-            # The composer asks for this on session open and between turns -- often
-            # before any turn has built the agent, which is created lazily on the
-            # first runPrompt, not at initialize. Without this the ring stayed empty
-            # on a freshly launched or restored session until the user sent a
-            # message. Initialize it here exactly as compactContext does; a usage
-            # read must never break the UI, so a failure leaves the ring absent.
-            if interface.agent is None and not live_read and interface.config_manager.load().active_model is not None:
+                if live_read or getattr(interface, '_view_session_id', None) != session_id:
+                    return {"id": request_id, "type": "context.usage", "usage": None}
+                session = interface.session_manager.load_session(session_id)
+            # Model changes are persisted before preparing an advisory agent.
+            # Live executors retain their own model and history for the full turn.
+            if not live_read and (interface.agent is None or getattr(interface, '_context_usage_config_dirty', False)):
                 try:
-                    interface._init_agent(
-                        persist_config_changes=False,
-                        defer_runtime_enrichment=True,
-                    )
+                    config = self._view_config(interface)
+                    if config.active_model is not None:
+                        interface._init_agent(
+                            config_override=config,
+                            persist_config_changes=False,
+                            defer_runtime_enrichment=True,
+                        )
+                    else:
+                        interface.agent = None
+                    interface._context_usage_config_dirty = False
                 except Exception:
                     from .diagnostics import report_suppressed_exception
 
@@ -1005,7 +1061,7 @@ class ReverieSdkBridge:
                     if draft or attachments:
                         from .desktop_input import prepare_desktop_input
 
-                        content, _ = prepare_desktop_input(interface, interface.config_manager.load(), draft, attachments)
+                        content, _ = prepare_desktop_input(interface, self._view_config(interface), draft, attachments)
                         usage = agent.describe_context_usage(request_messages=[*(request_messages if request_messages is not None else agent._build_messages(read_only=True)), {"role": "user", "content": content}])
                     else:
                         usage = agent.describe_context_usage(request_messages=request_messages) if request_messages is not None else agent.describe_context_usage()
@@ -1148,26 +1204,31 @@ class ReverieSdkBridge:
             return {
                 "id": request_id,
                 "type": "models",
-                "models": self.model_sources_payload(fetch_live=action == "refreshModelSources"),
+                "models": self.model_sources_payload(
+                    fetch_live=action == "refreshModelSources",
+                    session_id=str(payload.get('sessionId') or ''),
+                ),
             }
         if action == "selectModel":
             from .desktop_catalog import apply_model_selection
 
             interface = self.ensure_interface()
             session_id = str(payload.get('sessionId') or '')
-            session = interface.session_manager.load_session(session_id) if session_id else None
-            config = self._editable_conversation_config(interface,session) if session is not None else interface.config_manager.load()
+            page = interface.session_manager.get_page(session_id, limit=1) if session_id else None
+            config, snapshot = self._editable_conversation_config(interface, page, replace_model=True) if page else (interface.config_manager.load(), None)
             selected = apply_model_selection(
                 config,
                 payload.get("source") or config.active_model_source,
                 payload.get("modelId") or payload.get("model") or "",
                 payload.get("reasoning") if "reasoning" in payload else None,
             )
-            if session is not None:
-                self._save_conversation_config(interface,session,config)
+            if page:
+                self._save_conversation_config(interface, page, snapshot, config)
             else:
                 interface.config_manager.save(config)
-            self._refresh_agent()
+                interface._conversation_config = None
+                interface._view_snapshot = None
+                interface._context_usage_config_dirty = True
             return {
                 "id": request_id,
                 "type": "model.selected",
@@ -1283,8 +1344,8 @@ class ReverieSdkBridge:
 
             interface = self.ensure_interface()
             session_id = str(payload.get('sessionId') or '') if action == 'selectCustomProviderModel' else ''
-            selected_session = interface.session_manager.load_session(session_id) if session_id else None
-            config = self._editable_conversation_config(interface,selected_session) if selected_session else interface.config_manager.load()
+            page = interface.session_manager.get_page(session_id, limit=1) if session_id else None
+            config, snapshot = self._editable_conversation_config(interface, page, replace_model=True) if page else (interface.config_manager.load(), None)
             provider_ref = payload.get("providerId") or payload.get("provider") or ""
             provider: Optional[Dict[str, Any]] = None
             if action == "addCustomProvider":
@@ -1311,11 +1372,16 @@ class ReverieSdkBridge:
                     payload.get("contextLimit"),
                     payload.get("reasoning"),
                 )
-            if selected_session:
-                self._save_conversation_config(interface,selected_session,config)
+            if page:
+                self._save_conversation_config(interface, page, snapshot, config)
             else:
                 interface.config_manager.save(config)
-            self._refresh_agent()
+                if action == "selectCustomProviderModel":
+                    interface._conversation_config = None
+                    interface._view_snapshot = None
+                    interface._context_usage_config_dirty = True
+                else:
+                    self._refresh_agent()
             return {
                 "id": request_id,
                 "type": "custom-provider.updated",
@@ -1369,16 +1435,17 @@ class ReverieSdkBridge:
             interface = self.ensure_interface()
             interface._conversation_config = None
             interface._view_snapshot = None
+            interface._context_usage_config_dirty = True
             return {'id':request_id,'type':'workspace.config','models':self.model_sources_payload(),'workspace':self.workspace_payload(),'settings':self.settings_payload()}
         if action == 'getConversationConfig':
-            from .session.runtime_config import capture_runtime_config, resolve_runtime_config
+            from .session.runtime_config import resolve_runtime_config
             interface = self.ensure_interface()
             manager = interface.session_manager
             session_id = str(payload.get('sessionId') or '')
             page = manager.get_page(session_id, limit=1)
             snapshot = page['metadata'].get('runtime_config')
             if not snapshot:
-                snapshot = capture_runtime_config(interface.config_manager.load(), rules=interface.rules_manager.get_rules_text(), pinned_skills=page['metadata'].get('pinned_skills',[]), plugins={record.plugin_id:record.enabled for record in interface.runtime_plugin_manager.get_snapshot().records})
+                snapshot = self._capture_conversation_defaults(interface, interface.config_manager.load(), page['metadata'])
                 page['revision'] = manager.update_metadata(session_id, {'runtime_config':snapshot}, expected_revision=page['revision'])
             if payload.get('configuration') is not None:
                 snapshot = payload['configuration']
@@ -1388,6 +1455,7 @@ class ReverieSdkBridge:
                 snapshot = payload['executionConfiguration']
             error = ''
             interface._view_snapshot = snapshot
+            interface._context_usage_config_dirty = True
             try:
                 interface._conversation_config = resolve_runtime_config(interface.config_manager.load(),snapshot)
             except ValueError as exception:
@@ -1395,11 +1463,7 @@ class ReverieSdkBridge:
                 interface._conversation_config = None
             models = self.model_sources_payload()
             if error:
-                reference = snapshot.get('model_ref') or {}
-                models['active_source'] = reference.get('source')
-                models['active_model'] = {'id':reference.get('model',''),'display_name':str(reference.get('model') or reference.get('profile_id') or 'Saved model') + ' (unavailable)','provider':reference.get('source','')}
-                for source in models.get('sources',[]):
-                    source['active'] = False
+                self._mark_unavailable_model(models, snapshot)
             return {'id':request_id,'type':'conversation.config','configuration':snapshot,'revision':page['revision'],'error':error,
                     'models':models,'workspace':self.workspace_payload(),'settings':self.settings_payload(),
                     'ownership':{'assistant_id':page['metadata'].get('assistant_id'),'workspace':page['metadata'].get('workspace_path'),'session_id':session_id}}
@@ -1670,15 +1734,16 @@ class ReverieSdkBridge:
 
             interface = self.ensure_interface()
             session_id = str(payload.get('sessionId') or '')
-            session = interface.session_manager.load_session(session_id) if session_id else None
-            config = self._conversation_config(interface, session) if session else interface.config_manager.load()
+            page = interface.session_manager.get_page(session_id, limit=1) if session_id else None
+            config, snapshot = self._editable_conversation_config(interface, page) if page else (interface.config_manager.load(), None)
             key = str(payload.get('key') or '')
-            if session and key == 'rules':
+            if page and key == 'rules':
                 value = payload.get('value')
                 if not isinstance(value,(str,list)):
                     raise ValueError('Rules must be text or a list.')
-                session.metadata['runtime_config']['rules'] = value if isinstance(value,str) else '\n'.join(str(line) for line in value)
-                interface.session_manager.save_session(session)
+                rules = value if isinstance(value,str) else '\n'.join(str(line) for line in value)
+                self._write_conversation_config(interface, page, {**snapshot, 'rules': rules})
+                interface._conversation_config = config
                 return {'id':request_id,'type':'setting.updated','success':True,'message':'Conversation rules updated.','settings':self.settings_payload()}
             success, detail, reinit = apply_setting_value(
                 config,
@@ -1689,10 +1754,13 @@ class ReverieSdkBridge:
                 interface.runtime_plugin_manager,
             )
             if success and not str(payload.get("key") or "").startswith("plugin_enabled:"):
-                if session:
-                    self._save_conversation_config(interface,session,config)
+                if page:
+                    self._save_conversation_config(interface, page, snapshot, config)
                 else:
                     interface.config_manager.save(config)
+                    interface._conversation_config = None
+                    interface._view_snapshot = None
+                    interface._context_usage_config_dirty = True
             if success:
                 if str(payload.get("key") or "") != "stream_responses":
                     self._refresh_plugin_dependents()

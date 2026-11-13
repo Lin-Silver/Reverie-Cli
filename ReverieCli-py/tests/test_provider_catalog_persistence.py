@@ -37,15 +37,25 @@ def ids(models):
 
 
 @pytest.mark.parametrize("source", ["opencode", "agnes"])
-def test_first_automatic_gui_catalog_fetch_is_saved_for_restart(tmp_path, monkeypatch, source):
+def test_gui_catalog_read_is_offline_and_explicit_refresh_survives_restart(tmp_path, monkeypatch, source):
     manager = ConfigManager(tmp_path)
     config = new_config(source)
     manager.ensure_dirs()
     manager.save(config)
-    serve_payload(monkeypatch, {"data": [{"id": f"{source}-fresh", "output_modalities": ["text"]}]})
-    bridge = ReverieSdkBridge(tmp_path)
+    bridge = ReverieSdkBridge()
     bridge.ensure_interface = lambda: SimpleNamespace(config_manager=manager)
-    payload = bridge.model_sources_payload()
+
+    def unexpected_request(*args, **kwargs):
+        pytest.fail("Reading the picker catalog must not contact providers")
+
+    with monkeypatch.context() as offline:
+        offline.setattr(requests, "get", unexpected_request)
+        offline.setattr(agnes, "urlopen", unexpected_request)
+        cached = bridge.model_sources_payload()
+    assert next(item for item in cached["sources"] if item["id"] == source)["models"]
+
+    serve_payload(monkeypatch, {"data": [{"id": f"{source}-fresh", "output_modalities": ["text"]}]})
+    payload = bridge.model_sources_payload(fetch_live=True)
     refreshed = next(item for item in payload["sources"] if item["id"] == source)
     assert ids(refreshed["models"]) == [f"{source}-fresh"]
     forget_process_caches()

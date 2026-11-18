@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
+from hashlib import sha256
 from pathlib import Path
+from urllib.request import urlopen
 import os
 import runpy
 
@@ -16,10 +18,9 @@ hiddenimports = ['rich', 'rich.console', 'rich.panel', 'rich.table', 'rich.synta
                  'reverie.engine', 'reverie.engine.video', 'reverie.engine.renpy_import', 'reverie.engine.migration', 'reverie.engine.procedural_assets', 'reverie.engine.blender_modeling',
                  'reverie.computer_use', 'reverie.tools.open_computer_use',
                  'reverie.tools.registry', 'reverie.tools.browser_controler', 'reverie.tools.reverie_engine', 'reverie.tools.game_modeling_workbench', 'reverie.tools.blender_modeling_workbench']
-# tiktoken discovers encodings dynamically; include the default encoding plugin.
-hiddenimports.append('tiktoken_ext.openai_public')
 hiddenimports.extend(collect_submodules('google.genai'))
 datas.extend(collect_data_files('google.genai'))
+datas.extend(copy_metadata('tiktoken'))
 
 
 def add_data_if_exists(source_path: Path, target_dir: str) -> None:
@@ -79,6 +80,20 @@ if missing_bundle_files or (build_mode == 'ui-onedir' and not embedded_browser_c
         "REVERIE_BUNDLE_RES_DIR to a prepared resource directory:\n- "
         + "\n- ".join(details)
     )
+
+# Stage the pinned vocabulary during the build so the first chat needs no download.
+tokenizer = runpy.run_path(str(repo_root / "reverie" / "offline_tokenizer.py"))
+tokenizer_file = Path(resource_root or repo_root / "build" / "bundle_resources") / "tokenizers" / tokenizer["VOCABULARY_NAME"]
+if tokenizer["read_vocabulary"](tokenizer_file) is None:
+    data = tokenizer["read_vocabulary"](tokenizer["cached_vocabulary_path"]())
+    if data is None:
+        with urlopen(tokenizer["VOCABULARY_URL"], timeout=15) as response:
+            data = response.read()
+        if sha256(data).hexdigest() != tokenizer["VOCABULARY_SHA256"]:
+            raise SystemExit("cl100k vocabulary checksum mismatch")
+    tokenizer_file.parent.mkdir(parents=True, exist_ok=True)
+    tokenizer_file.write_bytes(data)
+add_data_if_exists(tokenizer_file, "reverie/tokenizer_data")
 
 icon_path_env = os.environ.get("REVERIE_ICON_PATH", "").strip()
 resolved_icon = None

@@ -185,23 +185,51 @@ def test_non_dict_messages_cost_nothing_and_do_not_raise() -> None:
     assert WorkspaceStatsManager.count_messages_tokens([None, "x"]) == 2
 
 
-def test_tokenizer_disclosure_matches_whether_tiktoken_encoding_is_available() -> None:
-    """/status labels its own precision, so the label must track the real counter."""
+def test_tokenizer_reports_exact_counts_from_local_vocabulary(tmp_path: Path, monkeypatch) -> None:
+    from base64 import b64encode
+    from hashlib import sha256
+
+    from reverie import offline_tokenizer
+
+    ranks = [bytes([i]) for i in range(256)] + [b"ab"]
+    data = b"".join(b64encode(token) + b" " + str(rank).encode() + b"\n" for rank, token in enumerate(ranks))
+    path = tmp_path / offline_tokenizer.VOCABULARY_NAME
+    path.write_bytes(data)
+    monkeypatch.setattr(offline_tokenizer, "BUNDLED_VOCABULARY", path)
+    monkeypatch.setattr(offline_tokenizer, "VOCABULARY_SHA256", sha256(data).hexdigest())
+    monkeypatch.setattr(WorkspaceStatsManager, "_encoding_checked", False)
+    monkeypatch.setattr(WorkspaceStatsManager, "_encoding", None)
+
+    assert WorkspaceStatsManager.count_text_tokens("abc") == 2
     tokenizer = WorkspaceStatsManager.describe_tokenizer()
+    assert tokenizer["name"] == "cl100k_base"
+    assert tokenizer["exact"] is True
 
     assert tokenizer["label"]
     assert tokenizer["detail"]
-    try:
-        import tiktoken
-        # Importing the package does not prove its separately downloaded BPE
-        # data can be loaded (offline/proxy-restricted first launches).
-        tiktoken.get_encoding("cl100k_base")
-    except Exception:
-        assert tokenizer["exact"] is False
-        assert tokenizer["name"] == "heuristic"
-    else:
-        assert tokenizer["exact"] is True
-        assert tokenizer["name"] == "cl100k_base"
+
+
+def test_cold_tokenizer_uses_estimate_without_fetching_vocabulary(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import Mock
+
+    from reverie import offline_tokenizer
+
+    invalid = tmp_path / offline_tokenizer.VOCABULARY_NAME
+    invalid.write_bytes(b"damaged vocabulary")
+    monkeypatch.setattr(offline_tokenizer, "BUNDLED_VOCABULARY", invalid)
+    monkeypatch.setenv("TIKTOKEN_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(WorkspaceStatsManager, "_encoding_checked", False)
+    monkeypatch.setattr(WorkspaceStatsManager, "_encoding", None)
+    get = Mock(side_effect=AssertionError("token accounting tried to download vocabulary"))
+    monkeypatch.setattr("requests.get", get)
+
+    assert WorkspaceStatsManager.count_text_tokens("abcdefgh") == 2
+    tokenizer = WorkspaceStatsManager.describe_tokenizer()
+    assert tokenizer["name"] == "heuristic"
+    assert tokenizer["exact"] is False
+    assert tokenizer["label"]
+    assert tokenizer["detail"]
+    get.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

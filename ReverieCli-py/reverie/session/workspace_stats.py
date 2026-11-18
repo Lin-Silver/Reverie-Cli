@@ -321,13 +321,13 @@ class WorkspaceStatsManager:
     def _get_encoding(cls):
         if cls._encoding_checked:
             return cls._encoding
-        cls._encoding_checked = True
         try:
-            import tiktoken
+            from ..offline_tokenizer import load_encoding
 
-            cls._encoding = tiktoken.get_encoding("cl100k_base")
-        except Exception:
+            cls._encoding = load_encoding()
+        except (ImportError, OSError, ValueError):
             cls._encoding = None
+        cls._encoding_checked = True
         return cls._encoding
 
     @classmethod
@@ -345,7 +345,7 @@ class WorkspaceStatsManager:
             "name": "heuristic",
             "label": "heuristic (~4 chars/token)",
             "exact": False,
-            "detail": "install tiktoken for BPE-accurate counts",
+            "detail": "local cl100k vocabulary or tiktoken unavailable",
         }
 
     @classmethod

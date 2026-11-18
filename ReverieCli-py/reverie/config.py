@@ -8,6 +8,7 @@ Handles loading and saving configuration including:
 """
 
 from pathlib import Path
+from copy import deepcopy
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -972,6 +973,20 @@ class Config:
     # Gamer mode specific settings
     gamer_mode: Dict[str, Any] = field(default_factory=default_gamer_mode_config)
 
+    def copy_with_shared_catalogs(self) -> 'Config':
+        """Copy settings for a model edit or runtime that treats catalogs as read-only."""
+        catalogs = {}
+        records = [getattr(self, source) for source in EXTERNAL_MODEL_SOURCES]
+        records.extend(self.custom_providers.get('providers') or [])
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for field in ('models', 'model_catalog'):
+                value = record.get(field)
+                if isinstance(value, (dict, list)):
+                    catalogs[id(value)] = value
+        return deepcopy(self, catalogs)
+
     @property
     def permission_level(self) -> str:
         """Expose the persisted security level for shared settings renderers."""
@@ -1317,7 +1332,7 @@ class ConfigManager:
     def __init__(self, project_root: Path, force_workspace_config: bool = False):
         from .provider_profiles import ProviderProfiles
 
-        self.project_root = project_root
+        self.project_root = Path(project_root).resolve()
         self._logger = logging.getLogger(__name__)
 
         # Use app root for runtime data (next to exe file or script directory).
@@ -1337,7 +1352,8 @@ class ConfigManager:
         self.legacy_workspace_config_path = self.legacy_workspace_reverie_dir / 'config.json'
 
         self._config: Optional[Config] = None
-        self._last_mtime: float = 0
+        self._config_signature = None
+        self._workspace_flags: Dict[Path, tuple] = {}
         self._loaded_config_path: Optional[Path] = None
         self._pending_load_notice: Optional[Dict[str, str]] = None
         self._last_load_notice_key: Optional[tuple[str, str, str]] = None
@@ -1355,12 +1371,6 @@ class ConfigManager:
         else:
             self.config_path = self.global_config_path
 
-    def _get_legacy_mirror_path(self) -> Optional[Path]:
-        """Return the compatibility config path for the current storage mode."""
-        if self._use_workspace_config:
-            return None
-        return self.legacy_global_config_path
-
     def _read_json_dict(self, path: Path) -> Optional[Dict[str, Any]]:
         """Best-effort JSON object reader used for lightweight mode detection."""
         if not path.exists():
@@ -1371,6 +1381,11 @@ class ConfigManager:
         except Exception as exc:
             self._logger.debug("Failed to read JSON config candidate %s", path, exc_info=True)
             return None
+
+    def read_config_file(self, path: Path) -> Config:
+        """Load a specific config, including its provider files, without changing modes."""
+        data = self._load_json_payload(path, persist_repairs=True, record_notice=False)
+        return Config.from_dict(self._provider_profiles.hydrate(data, path))
 
     def _set_load_notice(
         self,
@@ -1467,66 +1482,46 @@ class ConfigManager:
         Older workspace configs without the flag no longer override the global
         profile by mere existence.
         """
-        workspace_found = False
-        for candidate in (self.workspace_config_path, self.legacy_workspace_config_path):
-            if not candidate.exists():
+        for candidate in self._path_candidates_for_mode(True):
+            try:
+                stat = candidate.stat()
+            except FileNotFoundError:
                 continue
-            workspace_found = True
-            data = self._read_json_dict(candidate)
-            if isinstance(data, dict) and 'use_workspace_config' in data:
-                return bool(data.get('use_workspace_config', False))
+            flag = self._workspace_flag(candidate, (stat.st_mtime_ns, stat.st_size))
+            if flag is not None:
+                return flag
         return False
 
-    def _sync_legacy_mirror(self, serialized: Dict[str, Any]) -> None:
-        """Best-effort compatibility sync for older launchers and visible legacy files."""
-        legacy_path = self._get_legacy_mirror_path()
-        if legacy_path is None:
-            return
-        if legacy_path.resolve(strict=False) == self.config_path.resolve(strict=False):
-            return
-        try:
-            write_json_secure(legacy_path, serialized)
-        except Exception as exc:
-            self._logger.warning(
-                "Failed to sync legacy config mirror at %s: %s",
-                legacy_path,
-                exc,
-            )
+    def _workspace_flag(self, path: Path, signature: tuple) -> Optional[bool]:
+        cached = self._workspace_flags.get(path)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        data = self._read_json_dict(path)
+        flag = bool(data['use_workspace_config']) if data is not None and 'use_workspace_config' in data else None
+        self._workspace_flags[path] = (signature, flag)
+        return flag
 
     def _is_workspace_candidate_path(self, path: Path) -> bool:
-        """Return True when the path is one of the workspace-profile candidates."""
-        resolved = path.resolve(strict=False)
-        return any(
-            resolved == candidate.resolve(strict=False)
-            for candidate in self._path_candidates_for_mode(True)
-        )
+        return path in self._path_candidates_for_mode(True)
 
     def _candidate_records(self) -> List[Dict[str, Any]]:
         """Inspect existing config candidates with enough metadata to choose a source."""
         records: List[Dict[str, Any]] = []
-        seen = set()
         for workspace_mode in (False, True):
             canonical = self.workspace_config_path if workspace_mode else self.global_config_path
             for candidate in self._path_candidates_for_mode(workspace_mode):
-                key = str(candidate.resolve(strict=False)).lower()
-                if key in seen or not candidate.exists():
-                    continue
-                seen.add(key)
-                data = self._read_json_dict(candidate)
-                workspace_flag = None
-                if isinstance(data, dict) and 'use_workspace_config' in data:
-                    workspace_flag = bool(data.get('use_workspace_config', False))
                 try:
-                    mtime = os.path.getmtime(candidate)
-                except OSError:
-                    mtime = 0.0
+                    stat = candidate.stat()
+                except FileNotFoundError:
+                    continue
+                signature = (stat.st_mtime_ns, stat.st_size)
                 records.append(
                     {
                         "path": candidate,
                         "workspace_mode": workspace_mode,
-                        "workspace_flag": workspace_flag,
-                        "mtime": mtime,
-                        "is_canonical": candidate.resolve(strict=False) == canonical.resolve(strict=False),
+                        "workspace_flag": self._workspace_flag(candidate, signature) if workspace_mode else None,
+                        "signature": signature,
+                        "is_canonical": candidate == canonical,
                     }
                 )
         return records
@@ -1537,8 +1532,8 @@ class ConfigManager:
         if not records:
             return None
 
-        def _rank(record: Dict[str, Any]) -> tuple[float, int]:
-            return (float(record.get("mtime", 0.0)), 1 if record.get("is_canonical") else 0)
+        def _rank(record: Dict[str, Any]) -> tuple[int, bool]:
+            return (record['signature'][0], record['is_canonical'])
 
         workspace_enabled = [
             record for record in records
@@ -1567,26 +1562,10 @@ class ConfigManager:
         """Return new + legacy config paths for one logical mode."""
         if workspace_mode:
             candidates = [self.workspace_config_path]
-            legacy_workspace = self.legacy_workspace_config_path.resolve(strict=False)
-            global_config = self.global_config_path.resolve(strict=False)
-            workspace_config = self.workspace_config_path.resolve(strict=False)
-            if legacy_workspace not in {global_config, workspace_config}:
+            if self.legacy_workspace_config_path not in {self.global_config_path, self.workspace_config_path}:
                 candidates.append(self.legacy_workspace_config_path)
             return candidates
-        candidates = [
-            self.global_config_path,
-            self.legacy_global_config_path,
-            self.legacy_project_global_config_path,
-        ]
-        unique: List[Path] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            key = str(candidate.resolve(strict=False)).lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(candidate)
-        return unique
+        return [self.global_config_path, self.legacy_project_global_config_path]
 
     def _load_path_candidates(self) -> List[Path]:
         """Return config paths in preferred load order."""
@@ -1623,7 +1602,7 @@ class ConfigManager:
             self._update_config_path()
             # Clear cached config to force reload from new location
             self._config = None
-            self._last_mtime = 0
+            self._config_signature = None
             self._loaded_config_path = None
     
     def is_workspace_mode(self) -> bool:
@@ -1645,7 +1624,7 @@ class ConfigManager:
             # Load global config
             data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
 
-            data = self._provider_profiles.hydrate(data)
+            data = self._provider_profiles.hydrate(data, source_path)
 
             # Update to workspace mode
             data['use_workspace_config'] = True
@@ -1654,11 +1633,11 @@ class ConfigManager:
             self.ensure_dirs()
 
             # Save to workspace config
-            write_json_secure(self.workspace_config_path, self._provider_profiles.store(data))
+            self._provider_profiles.store(data, self.workspace_config_path)
 
             # Clear cache and switch to workspace mode
             self._config = None
-            self._last_mtime = 0
+            self._config_signature = None
             self._loaded_config_path = None
             self.set_workspace_mode(True)
             
@@ -1692,10 +1671,8 @@ class ConfigManager:
 
         data['use_workspace_config'] = bool(enabled)
         self.ensure_dirs()
-        if source_path is not None:
-            data = self._provider_profiles.hydrate(data)
-        data = self._provider_profiles.store(data)
-        write_json_secure(self.workspace_config_path, data)
+        data = self._provider_profiles.hydrate(data, source_path)
+        self._provider_profiles.store(data, self.workspace_config_path, track=False)
         return True
     
     def copy_config_to_global(self) -> bool:
@@ -1713,7 +1690,7 @@ class ConfigManager:
             # Load workspace config
             data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
 
-            data = self._provider_profiles.hydrate(data)
+            data = self._provider_profiles.hydrate(data, source_path)
 
             # Update to global mode
             data['use_workspace_config'] = False
@@ -1722,12 +1699,12 @@ class ConfigManager:
             self.ensure_dirs()
 
             # Save to global config
-            write_json_secure(self.global_config_path, self._provider_profiles.store(data))
+            self._provider_profiles.store(data, self.global_config_path)
             self.set_workspace_config_enabled(False)
 
             # Clear cache and switch to global mode
             self._config = None
-            self._last_mtime = 0
+            self._config_signature = None
             self._loaded_config_path = None
             self.set_workspace_mode(False)
             
@@ -1751,23 +1728,33 @@ class ConfigManager:
     
     def load(self) -> Config:
         """Load configuration from file, reloading if file changed"""
+        from .provider_profiles import ProviderProfileError
+
         active_record = self._pick_active_record()
         source_path = active_record["path"] if active_record is not None else None
 
         # Check if we need to switch config mode based on loaded config
         if source_path is not None:
-            self._use_workspace_config = bool(active_record.get("workspace_mode")) if active_record else self._is_workspace_candidate_path(source_path)
+            self._use_workspace_config = active_record['workspace_mode']
             self._update_config_path()
-            current_mtime = os.path.getmtime(source_path)
+            signature = active_record['signature']
             # Reload if file changed or not loaded yet
-            if self._config is None or source_path != self._loaded_config_path or current_mtime != self._last_mtime or self._provider_profiles.changed():
+            if self._config is None or source_path != self._loaded_config_path or signature != self._config_signature or self._provider_profiles.changed():
                 try:
-                    data = self._load_json_payload(
-                        source_path,
-                        persist_repairs=True,
-                        record_notice=True,
-                    )
-                    data = self._provider_profiles.hydrate(data)
+                    for retry in (False, True):
+                        raw_data = self._load_json_payload(source_path, persist_repairs=True, record_notice=True)
+                        try:
+                            data = self._provider_profiles.hydrate(raw_data, source_path, track=True)
+                        except ProviderProfileError:
+                            # A concurrent rename removes the old file after replacing its index.
+                            stat = source_path.stat()
+                            latest_signature = (stat.st_mtime_ns, stat.st_size)
+                            if retry or latest_signature == signature:
+                                raise
+                            signature = latest_signature
+                        else:
+                            break
+                    legacy_layout = isinstance(raw_data, dict) and 'provider_files' not in raw_data
                     self._config = Config.from_dict(data)
                     if 'webgemini' in data or str(data.get('active_model_source', '')).lower() in {'webgemini', 'wgemini'} or any(str(model.get('provider', '')).lower() == 'webgemini' for model in data.get('models', []) if isinstance(model, dict)):
                         self._set_load_notice(
@@ -1776,34 +1763,29 @@ class ConfigManager:
                             detail="WebGemini has been removed. Use the official Gemini Source with a Gemini API key, GOOGLE_API_KEY or GEMINI_API_KEY. Other configured sources remain available.",
                             status="warning",
                         )
-                    try:
-                        self._last_mtime = os.path.getmtime(source_path)
-                    except OSError:
-                        self._last_mtime = current_mtime
+                    self._config_signature = signature
                     self._loaded_config_path = source_path
 
-                    # Auto-update config file if it's missing new fields or still
-                    # lives in the active canonical location.
-                    if self._needs_config_update(data):
+                    # Keep the original layout available if migration is interrupted
+                    # or the user launches an older executable later.
+                    if legacy_layout and source_path == self.config_path:
+                        backup = source_path.with_name('config.pre-providers.json.bak')
+                        if not backup.exists():
+                            write_json_secure(backup, raw_data)
+                    if legacy_layout or self._needs_config_update(data):
                         self.save(self._config)
-                        # Update mtime after saving to avoid infinite loop
-                        self._last_mtime = os.path.getmtime(self.get_active_config_path())
-                    else:
-                        if not self._is_workspace_candidate_path(source_path):
-                            self._sync_legacy_mirror(self._config.to_dict())
                 except Exception as exc:
-                    from .provider_profiles import ProviderProfileError
                     if isinstance(exc, ProviderProfileError):
+                        self._config = None
                         raise
                     self._logger.debug(
                         "Failed to load or repair config from %s",
                         source_path,
                         exc_info=True,
                     )
-                    notice_mtime = current_mtime
                     notice_key = (
                         str(source_path),
-                        f"{notice_mtime:.6f}",
+                        str(signature[0]),
                         f"{type(exc).__name__}:{exc}",
                     )
                     self._set_load_notice(
@@ -1814,7 +1796,7 @@ class ConfigManager:
                     )
                     self._config = Config()
                     self._loaded_config_path = source_path
-                    self._last_mtime = current_mtime
+                    self._config_signature = signature
         else:
             self._use_workspace_config = False
             self._update_config_path()
@@ -1988,10 +1970,6 @@ class ConfigManager:
             needs_update = True
         elif not isinstance(data.get('custom_providers'), dict):
             needs_update = True
-        elif any(not provider.get('catalog_profile') for provider in data['custom_providers'].get('providers', []) if isinstance(provider, dict)):
-            needs_update = True
-        elif normalize_custom_providers_config(data.get('custom_providers')) != data.get('custom_providers'):
-            needs_update = True
 
         # Check if atlas_mode section is missing
         if 'atlas_mode' not in data:
@@ -2150,18 +2128,32 @@ class ConfigManager:
             self._config.config_version = CONFIG_VERSION
         serialized = self._config.to_dict()
         self._config.custom_providers = serialized['custom_providers']
-        serialized = self._provider_profiles.store(serialized)
-        for provider, stored in zip(self._config.custom_providers.get('providers', []), serialized['custom_providers']['providers']):
-            provider['catalog_profile'] = stored['catalog_profile']
-
-        write_json_secure(target_path, serialized)
+        self._provider_profiles.store(serialized, target_path)
         self._loaded_config_path = target_path
         try:
-            self._last_mtime = os.path.getmtime(target_path)
+            stat = target_path.stat()
+            self._config_signature = (stat.st_mtime_ns, stat.st_size)
         except OSError:
-            self._last_mtime = 0
-        if not self._is_workspace_candidate_path(target_path):
-            self._sync_legacy_mirror(serialized)
+            self._config_signature = None
+
+    def save_model_selection(self, config: Config) -> None:
+        """Persist a validated model choice without serializing other providers."""
+        path = self._loaded_config_path
+        if path != self.config_path or self._config_signature is None:
+            self.save(config)
+            return
+        with self._provider_profiles.write_lock(path):
+            stat = path.stat()
+            if (stat.st_mtime_ns, stat.st_size) != self._config_signature or self._provider_profiles.changed():
+                raise ValueError('Configuration changed while selecting the model. Retry the selection.')
+            data = self._load_json_payload(path, persist_repairs=False, record_notice=False)
+            saved = self._provider_profiles.save_model_selection(data, path, config)
+            if saved:
+                self._config = config
+                stat = path.stat()
+                self._config_signature = (stat.st_mtime_ns, stat.st_size)
+        if not saved:
+            self.save(config)
     
     def is_configured(self) -> bool:
         """Check if initial configuration is done"""

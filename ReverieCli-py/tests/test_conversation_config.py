@@ -3,6 +3,8 @@ import copy
 import pytest
 
 from reverie.config import Config, ModelConfig
+from reverie.custom_providers import default_custom_provider
+from reverie.desktop_catalog import select_custom_provider_model
 from reverie.session.runtime_config import capture_runtime_config, resolve_runtime_config
 
 
@@ -202,3 +204,39 @@ def test_terminal_configuration_changes_only_the_owning_conversation(tmp_path):
     assert view.load().active_model.model=='a'
     assert view.load().api_timeout==60
     assert config.active_model_index==0
+
+
+def test_custom_conversation_keeps_limits_across_providers_without_saving_catalogs():
+    defaults = Config()
+    for index in (1, 2):
+        record = default_custom_provider(provider_id=f'fixture-{index}', base_url=f'https://fixture-{index}.invalid/v1', api_key='secret')
+        record['models'] = [{'id': 'chat', 'context_length': 32000}]
+        defaults.custom_providers['providers'].append(record)
+
+    config = defaults.copy_with_shared_catalogs()
+    select_custom_provider_model(config, 'fixture-1', 'chat', 96000, 'low', describe_provider=False)
+    first = capture_runtime_config(config)
+    assert set(first['provider_settings']).isdisjoint({'api_key', 'models', 'model_catalog', 'base_url'})
+    config = resolve_runtime_config(defaults, first, share_catalogs=True)
+    select_custom_provider_model(config, 'fixture-2', 'chat', 48000, describe_provider=False)
+    second = capture_runtime_config(config, previous=first)
+    config = resolve_runtime_config(defaults, second, share_catalogs=True)
+    assert config.active_model.max_context_tokens == 48000
+    select_custom_provider_model(config, 'fixture-1', 'chat', describe_provider=False)
+    assert config.active_model.max_context_tokens == 96000
+    assert defaults.custom_providers['providers'][0]['model_context_limits'] == {}
+
+
+def test_legacy_conversation_uses_current_custom_provider_connection_and_inventory():
+    record = default_custom_provider(provider_id='fixture', base_url='https://current.invalid/v1', api_key='shared-key')
+    record['models'] = [{'id': 'chat', 'context_length': 48000}]
+    defaults = Config(custom_providers={'providers': [record], 'active_provider_id': 'fixture'})
+    snapshot = {'model_ref': {'source': 'custom', 'provider_id': 'fixture', 'model': 'chat'},
+                'provider_settings': {'base_url': 'https://old.invalid/v1', 'api_key': 'old-key',
+                                      'model_catalog': {'connection_key': 'old', 'models': []},
+                                      'model_context_limits': {'chat': 96000}}}
+    model = resolve_runtime_config(defaults, snapshot).active_model
+    assert (model.base_url, model.api_key, model.max_context_tokens) == ('https://current.invalid/v1', 'shared-key', 96000)
+    snapshot['model_ref']['model'] = 'deleted'
+    with pytest.raises(ValueError, match='not in'):
+        resolve_runtime_config(defaults, snapshot)

@@ -199,7 +199,8 @@ class ReverieSdkBridge:
         defaults = interface.config_manager.load()
         previous_proxy = _resolve_proxy(defaults,previous.get('settings',{}).get('api_proxy',defaults.api_proxy))
         snapshot = capture_runtime_config(
-            config, rules=previous.get('rules',''), pinned_skills=previous.get('pinned_skills',[]), plugins=previous.get('plugins',{}))
+            config, rules=previous.get('rules',''), pinned_skills=previous.get('pinned_skills',[]),
+            plugins=previous.get('plugins',{}), previous=previous)
         self._write_conversation_config(interface, page, snapshot)
         if update_shared_proxy(defaults,previous_proxy,config.api_proxy):
             interface.config_manager.save(defaults)
@@ -245,12 +246,12 @@ class ReverieSdkBridge:
         if not isinstance(snapshot, dict):
             snapshot = self._capture_conversation_defaults(interface, defaults, page['metadata'])
         try:
-            config = resolve_runtime_config(defaults, snapshot)
+            config = resolve_runtime_config(defaults, snapshot, share_catalogs=replace_model)
         except ValueError:
             if not replace_model:
                 raise
             repaired = {**snapshot, 'model_ref': capture_runtime_config(defaults)['model_ref'], 'provider_settings': {}}
-            config = resolve_runtime_config(defaults, repaired)
+            config = resolve_runtime_config(defaults, repaired, share_catalogs=True)
         return config, snapshot
 
     def settings_payload(self) -> Dict[str, Any]:
@@ -685,10 +686,18 @@ class ReverieSdkBridge:
             "operations": [_json_safe(operation.to_dict()) for operation in operations],
         }
 
+    @staticmethod
+    def _active_model_payload(config) -> Optional[Dict[str, str]]:
+        active_model = config.active_model
+        return {
+            "id": str(getattr(active_model, "model", "") or ""),
+            "display_name": str(getattr(active_model, "model_display_name", "") or ""),
+            "provider": str(getattr(active_model, "provider", "") or ""),
+        } if active_model else None
+
     def workspace_payload(self) -> Dict[str, Any]:
         interface = self.ensure_interface()
         config = self._view_config(interface)
-        active_model = config.active_model
         context_engine = self.context_status_payload()
         return {
             "project_root": str(self.project_root),
@@ -697,13 +706,7 @@ class ReverieSdkBridge:
             "config_path": str(interface.config_manager.get_active_config_path()),
             "mode": str(config.mode),
             "active_source": str(config.active_model_source),
-            "active_model": {
-                "id": str(getattr(active_model, "model", "") or ""),
-                "display_name": str(getattr(active_model, "model_display_name", "") or ""),
-                "provider": str(getattr(active_model, "provider", "") or ""),
-            }
-            if active_model
-            else None,
+            "active_model": self._active_model_payload(config),
             "index_ready": bool(context_engine["ready"]),
             "context_engine": context_engine,
         }
@@ -1210,12 +1213,14 @@ class ReverieSdkBridge:
                 ),
             }
         if action == "selectModel":
-            from .desktop_catalog import apply_model_selection
+            from .desktop_catalog import apply_model_selection, model_selection_payload
 
             interface = self.ensure_interface()
             session_id = str(payload.get('sessionId') or '')
             page = interface.session_manager.get_page(session_id, limit=1) if session_id else None
             config, snapshot = self._editable_conversation_config(interface, page, replace_model=True) if page else (interface.config_manager.load(), None)
+            if not page:
+                config = config.copy_with_shared_catalogs()
             selected = apply_model_selection(
                 config,
                 payload.get("source") or config.active_model_source,
@@ -1225,15 +1230,15 @@ class ReverieSdkBridge:
             if page:
                 self._save_conversation_config(interface, page, snapshot, config)
             else:
-                interface.config_manager.save(config)
+                interface.config_manager.save_model_selection(config)
                 interface._conversation_config = None
                 interface._view_snapshot = None
                 interface._context_usage_config_dirty = True
             return {
                 "id": request_id,
                 "type": "model.selected",
-                "selected": _json_safe(selected),
-                "models": self.model_sources_payload(),
+                **({"selection": _json_safe(model_selection_payload(config, selected))} if payload.get("compact")
+                   else {"selected": _json_safe(selected), "models": self.model_sources_payload()}),
                 "workspace": self.workspace_payload(),
             }
         if action in {"getImageModelSources", "refreshImageModelSources"}:
@@ -1337,6 +1342,7 @@ class ReverieSdkBridge:
             from .desktop_catalog import (
                 create_custom_provider,
                 delete_custom_provider,
+                model_selection_payload,
                 refresh_custom_provider_models,
                 select_custom_provider_model,
                 update_custom_provider,
@@ -1347,6 +1353,10 @@ class ReverieSdkBridge:
             page = interface.session_manager.get_page(session_id, limit=1) if session_id else None
             config, snapshot = self._editable_conversation_config(interface, page, replace_model=True) if page else (interface.config_manager.load(), None)
             provider_ref = payload.get("providerId") or payload.get("provider") or ""
+            selecting = action == "selectCustomProviderModel"
+            compact = selecting and payload.get("compact") is True
+            if selecting and not page:
+                config = config.copy_with_shared_catalogs()
             provider: Optional[Dict[str, Any]] = None
             if action == "addCustomProvider":
                 provider = create_custom_provider(
@@ -1371,22 +1381,23 @@ class ReverieSdkBridge:
                     payload.get("modelId") or payload.get("model") or "",
                     payload.get("contextLimit"),
                     payload.get("reasoning"),
+                    describe_provider=not compact,
                 )
             if page:
                 self._save_conversation_config(interface, page, snapshot, config)
+            elif selecting:
+                interface.config_manager.save_model_selection(config)
+                interface._conversation_config = None
+                interface._view_snapshot = None
+                interface._context_usage_config_dirty = True
             else:
                 interface.config_manager.save(config)
-                if action == "selectCustomProviderModel":
-                    interface._conversation_config = None
-                    interface._view_snapshot = None
-                    interface._context_usage_config_dirty = True
-                else:
-                    self._refresh_agent()
+                self._refresh_agent()
             return {
                 "id": request_id,
                 "type": "custom-provider.updated",
-                "provider": _json_safe(provider),
-                "models": self.model_sources_payload(),
+                **({"selection": _json_safe(model_selection_payload(config, provider))} if compact
+                   else {"provider": _json_safe(provider), "models": self.model_sources_payload()}),
                 "workspace": self.workspace_payload(),
             }
         if action == "probeProviders":
@@ -1443,30 +1454,36 @@ class ReverieSdkBridge:
             manager = interface.session_manager
             session_id = str(payload.get('sessionId') or '')
             page = manager.get_page(session_id, limit=1)
+            defaults = interface.config_manager.load()
             snapshot = page['metadata'].get('runtime_config')
             if not snapshot:
-                snapshot = self._capture_conversation_defaults(interface, interface.config_manager.load(), page['metadata'])
+                snapshot = self._capture_conversation_defaults(interface, defaults, page['metadata'])
                 page['revision'] = manager.update_metadata(session_id, {'runtime_config':snapshot}, expected_revision=page['revision'])
             if payload.get('configuration') is not None:
                 snapshot = payload['configuration']
-                resolve_runtime_config(interface.config_manager.load(),snapshot)
+                resolve_runtime_config(defaults, snapshot, share_catalogs=True)
                 page['revision'] = manager.update_metadata(session_id, {'runtime_config':snapshot}, expected_revision=payload.get('revision'))
             if payload.get('executionConfiguration') is not None:
                 snapshot = payload['executionConfiguration']
             error = ''
-            interface._view_snapshot = snapshot
-            interface._context_usage_config_dirty = True
             try:
-                interface._conversation_config = resolve_runtime_config(interface.config_manager.load(),snapshot)
+                config = resolve_runtime_config(defaults, snapshot, share_catalogs=True)
             except ValueError as exception:
                 error = str(exception)
-                interface._conversation_config = None
+                config = None
+            response = {'id': request_id, 'type': 'conversation.config', 'configuration': snapshot,
+                        'revision': page['revision'], 'error': error,
+                        'ownership': {'assistant_id': page['metadata'].get('assistant_id'),
+                                      'workspace': page['metadata'].get('workspace_path'), 'session_id': session_id}}
+            if payload.get('summaryOnly') is True:
+                return {**response, 'active_model': self._active_model_payload(config) if config is not None else None}
+            interface._view_snapshot = snapshot
+            interface._context_usage_config_dirty = True
+            interface._conversation_config = config
             models = self.model_sources_payload()
             if error:
                 self._mark_unavailable_model(models, snapshot)
-            return {'id':request_id,'type':'conversation.config','configuration':snapshot,'revision':page['revision'],'error':error,
-                    'models':models,'workspace':self.workspace_payload(),'settings':self.settings_payload(),
-                    'ownership':{'assistant_id':page['metadata'].get('assistant_id'),'workspace':page['metadata'].get('workspace_path'),'session_id':session_id}}
+            return {**response, 'models': models, 'workspace': self.workspace_payload(), 'settings': self.settings_payload()}
         if action in {'queueConversationRun','updateConversationRun','listConversationRuns','recoverConversationRuns'}:
             from .session.runtime_config import resolve_runtime_config
             interface = self.ensure_interface()
@@ -1481,7 +1498,7 @@ class ReverieSdkBridge:
                 raise ValueError('Task identity is required.')
             if action == 'queueConversationRun':
                 configuration = payload['configuration']
-                resolve_runtime_config(interface.config_manager.load(),configuration)
+                resolve_runtime_config(interface.config_manager.load(), configuration, share_catalogs=True)
                 revision = manager.register_run(session_id,run_id,configuration,int(payload['configurationRevision']),str(payload.get('executionRoot') or self.project_root),request=payload.get('request'))
             else:
                 revision = manager.update_run(session_id,run_id,str(payload['state']),expected_revision=int(payload['revision']),execution_root=payload.get('executionRoot'),result=payload.get('result'))

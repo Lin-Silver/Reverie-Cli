@@ -85,8 +85,8 @@ def test_config_manager_repairs_invalid_control_chars_and_emits_notice(tmp_path:
     assert notice["title"] == "Recovered malformed config"
     assert "Recovered malformed config at" in notice["detail"]
 
-    repaired_text = config_path.read_text(encoding="utf-8")
-    assert '"api_key": "line1\\nline2"' in repaired_text
+    repaired_text = (config_path.parent / 'Providers' / 'Manual Models.json').read_text(encoding="utf-8")
+    assert '"api_key":"line1\\nline2"' in repaired_text
 
     backups = sorted(config_path.parent.glob("config.json.invalid-*.bak"))
     assert backups
@@ -195,6 +195,7 @@ def test_project_storage_resolver_refuses_unwritable_launcher_root(tmp_path: Pat
 
 
 def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr('reverie.opencode._OPENCODE_MODEL_CACHE', {})
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
     project_root.mkdir(parents=True, exist_ok=True)
@@ -224,7 +225,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
     assert config.sensenova["reasoning_effort"] == "medium"
     assert config.modelscope["selected_model_id"] == "Qwen/Qwen3.8-27B"
     assert config.opencode["selected_model_id"] == "deepseek-v4-flash-free"
-    saved_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    saved_payload = manager.read_config_file(config_path).to_dict()
     assert saved_payload["tool_output_style"] == "compact"
     assert saved_payload["thinking_output_style"] == "full"
     assert saved_payload["text_to_image"]["active_source"] == "local"
@@ -245,6 +246,7 @@ def test_config_manager_creates_default_config_file_for_manual_editing(tmp_path:
 
 
 def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr('reverie.opencode._OPENCODE_MODEL_CACHE', {})
     app_root = tmp_path / "app"
     project_root = tmp_path / "project"
     project_root.mkdir(parents=True, exist_ok=True)
@@ -265,7 +267,7 @@ def test_config_manager_auto_adds_tool_output_style_on_load(tmp_path: Path, monk
 
     manager = ConfigManager(project_root)
     loaded = manager.load()
-    repaired_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    repaired_payload = manager.read_config_file(config_path).to_dict()
 
     assert loaded.tool_output_style == "compact"
     assert repaired_payload["tool_output_style"] == "compact"
@@ -317,7 +319,7 @@ def test_config_manager_migrates_standard_models_to_supports_vision(tmp_path: Pa
 
     manager = ConfigManager(project_root)
     loaded = manager.load()
-    repaired_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    repaired_payload = json.loads((config_path.parent / 'Providers' / 'Manual Models.json').read_text(encoding="utf-8"))
 
     assert loaded.models[0].supports_vision is False
     model_payload = repaired_payload["models"][0]

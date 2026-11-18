@@ -104,7 +104,7 @@ def _external_catalog(source: str, config: Config, *, fetch_live: bool = False) 
             for record in list_custom_providers(getattr(config, "custom_providers", {})):
                 get_custom_provider_model_catalog(record, fetch_live=True, force_refresh=True)
                 config.custom_providers = upsert_custom_provider(config.custom_providers, record)
-        provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
+        provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}), borrow_catalog=True)
         if not provider:
             return []
         return get_custom_provider_model_catalog(
@@ -227,20 +227,20 @@ def _reasoning_metadata(source: str, model: Dict[str, Any], provider_config: Dic
             "value": normalize_sensenova_reasoning_effort(provider_config.get("reasoning_effort")),
         }
     if source == "opencode":
-        from .opencode import resolve_opencode_thinking_choice
+        from .opencode import normalize_opencode_reasoning_choice
 
         return {
             "control": str(model.get("thinking_control") or "none"),
             "options": list(model.get("thinking_options") or []),
-            "value": resolve_opencode_thinking_choice(provider_config, model_id),
+            "value": normalize_opencode_reasoning_choice(model_id, provider_config.get("reasoning_effort"), metadata=model),
         }
     if source == "modelscope":
-        from .modelscope import resolve_modelscope_thinking_choice
+        from .modelscope import normalize_modelscope_reasoning_choice
 
         return {
             "control": str(model.get("thinking_control") or "none"),
             "options": list(model.get("thinking_options") or []),
-            "value": resolve_modelscope_thinking_choice(provider_config, model_id),
+            "value": normalize_modelscope_reasoning_choice(model_id, provider_config.get("reasoning_effort")),
         }
     if source == "custom":
         from .custom_providers import (
@@ -298,7 +298,7 @@ def _raw_provider_config(source: str, config: Config) -> Dict[str, Any]:
     if source == "custom":
         from .custom_providers import resolve_active_custom_provider
 
-        return dict(resolve_active_custom_provider(getattr(config, "custom_providers", {})) or {})
+        return resolve_active_custom_provider(getattr(config, "custom_providers", {}), borrow_catalog=True) or {}
     return dict(getattr(config, source, {}) or {})
 
 
@@ -307,6 +307,7 @@ def _safe_provider_config(source: str, config: Config) -> Dict[str, Any]:
     provider_config.pop('model_catalog', None)
     if source == 'custom':
         provider_config.pop('models', None)
+        provider_config.pop('custom_headers', None)
     configured_secrets: Dict[str, bool] = {}
     for key in _SECRET_FIELDS:
         if key in provider_config:
@@ -430,6 +431,24 @@ def build_model_sources_payload(config: Config, *, fetch_live: bool = False) -> 
     }
 
 
+def model_selection_payload(config: Config, selected: Dict[str, Any]) -> Dict[str, Any]:
+    """Describe the chosen row and its provider without serializing inventories."""
+    source = config.active_model_source
+    record = _raw_provider_config(source, config) if source != 'standard' else {}
+    if source == 'custom':
+        return {
+            'model': _custom_model_entry(selected, record),
+            'provider': {key: record[key] for key in (
+                'id', 'enabled', 'selected_model_id', 'selected_model_display_name',
+                'max_context_tokens', 'max_tokens', 'supports_vision', 'thinking', 'reasoning_effort',
+            )},
+        }
+    update = {'model': _normalized_model(source, selected, record)}
+    if source != 'standard':
+        update['config'] = _safe_provider_config(source, config)
+    return update
+
+
 def _catalog_match(catalog: List[Dict[str, Any]], query: Any) -> Optional[Dict[str, Any]]:
     wanted = str(query or "").strip().lower()
     if not wanted:
@@ -460,25 +479,28 @@ def _catalog_match(catalog: List[Dict[str, Any]], query: Any) -> Optional[Dict[s
 
 def _apply_custom_provider_selection(
     config: Config,
+    provider: Dict[str, Any],
     selected: Dict[str, Any],
     reasoning: Any = None,
+    *,
+    context_limit: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Store a model choice on the active custom provider record."""
     from .custom_providers import (
         custom_provider_reasoning_options,
         normalize_custom_provider_reasoning_effort,
-        resolve_active_custom_provider,
-        upsert_custom_provider,
+        get_custom_provider_model_context_limit,
+        normalize_custom_providers_config,
     )
 
-    provider = resolve_active_custom_provider(getattr(config, "custom_providers", {}))
-    if not provider:
-        raise ValueError("No custom provider is configured. Add one with /provider add.")
     provider = dict(provider)
     provider["selected_model_id"] = str(selected.get("id") or "")
     provider["selected_model_display_name"] = str(selected.get("display_name") or selected.get("id") or "")
-    if selected.get("context_length"):
-        provider["max_context_tokens"] = int(selected["context_length"])
+    if context_limit is not None:
+        provider["model_context_limits"] = {**provider.get("model_context_limits", {}), selected["id"].lower(): context_limit}
+    limit = get_custom_provider_model_context_limit(provider, selected["id"]) or selected.get("context_length")
+    if limit:
+        provider["max_context_tokens"] = int(limit)
     if selected.get("max_output_tokens"):
         provider["max_tokens"] = min(
             int(provider.get("max_tokens") or selected["max_output_tokens"]),
@@ -493,11 +515,14 @@ def _apply_custom_provider_selection(
             raise ValueError(f"Reasoning level {reasoning!r} is not supported by {selected['id']}")
         provider["reasoning_effort"] = depth
         provider["thinking"] = depth != "off"
-    config.custom_providers = upsert_custom_provider(
-        getattr(config, "custom_providers", {}),
-        provider,
-        activate=True,
-    )
+    # Config keeps normalized records. Selection replaces just this record and
+    # leaves its inventory and the other providers' records intact.
+    records = normalize_custom_providers_config(config.custom_providers, borrow_catalogs=True)['providers']
+    config.custom_providers = {
+        "providers": [provider if item.get("id") == provider["id"] else item
+                      for item in records],
+        "active_provider_id": provider["id"],
+    }
     config.active_model_source = "custom"
     return selected
 
@@ -510,6 +535,21 @@ def apply_model_selection(
 ) -> Dict[str, Any]:
     """Apply a source/model/reasoning selection to a Config instance."""
     normalized_source = normalize_active_model_source(source)
+    if normalized_source == "custom":
+        from .custom_providers import (
+            find_custom_provider_catalog_model, get_custom_provider_model_catalog, resolve_active_custom_provider,
+        )
+
+        provider = resolve_active_custom_provider(config.custom_providers, borrow_catalog=True)
+        if not provider:
+            raise ValueError("No custom provider is configured. Add one with /provider add.")
+        wanted = model_id or provider["selected_model_id"]
+        selected = find_custom_provider_catalog_model(provider, str(wanted))
+        if selected is None:
+            selected = _catalog_match(get_custom_provider_model_catalog(provider), wanted)
+        if selected is None:
+            raise ValueError(f"Unknown or ambiguous model for {model_source_display_name(normalized_source)}: {model_id}")
+        return _apply_custom_provider_selection(config, provider, selected, reasoning)
     catalog = (
         _standard_catalog(config)
         if normalized_source == "standard"
@@ -534,9 +574,6 @@ def apply_model_selection(
         config.active_model_index = int(selected["id"])
         config.active_model_source = "standard"
         return selected
-
-    if normalized_source == "custom":
-        return _apply_custom_provider_selection(config, selected, reasoning)
 
     provider_config = dict(getattr(config, normalized_source, {}) or {})
     if (
@@ -749,37 +786,38 @@ def custom_provider_format_options() -> List[Dict[str, str]]:
     return [dict(choice) for choice in custom_provider_format_choices()]
 
 
+def _custom_model_entry(item: Dict[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
+    from .custom_providers import (
+        CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS,
+        get_custom_provider_model_context_limit,
+        parse_context_token_limit,
+    )
+
+    model = _normalized_model('custom', item, record)
+    saved_limit = get_custom_provider_model_context_limit(record, model['id'])
+    model['context_limit'] = int(saved_limit or 0)
+    model['needs_context_limit'] = not saved_limit
+    model['suggested_context_limit'] = saved_limit or parse_context_token_limit(model.get('context_length')) or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
+    return model
+
+
 def _custom_provider_entry(config: Config, record: Dict[str, Any]) -> Dict[str, Any]:
     """Describe one provider for the desktop without leaking its API key."""
     from .custom_providers import (
         custom_provider_format_label,
         custom_provider_models_url,
         custom_provider_reasoning_choices,
-        get_custom_provider_model_context_limit,
         get_custom_provider_model_catalog,
         mask_secret,
         normalize_custom_provider_reasoning_effort,
         resolve_custom_provider_api_key,
         resolve_custom_provider_reasoning_level,
-        parse_context_token_limit,
-        CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS,
     )
 
     resolved_key = resolve_custom_provider_api_key(record)
     stored_key = str(record.get("api_key") or "").strip()
     key_source = "config" if stored_key else "env" if resolved_key else "none"
-    models = []
-    for item in get_custom_provider_model_catalog(record):
-        model = _normalized_model("custom", item, record)
-        # The desktop needs to know which models still owe the user a context
-        # limit, so it can ask once on first selection just like the CLI does.
-        saved_limit = get_custom_provider_model_context_limit(record, model.get("id"))
-        model["context_limit"] = int(saved_limit or 0)
-        model["needs_context_limit"] = not saved_limit
-        model["suggested_context_limit"] = int(
-            saved_limit or parse_context_token_limit(model.get("context_length")) or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
-        )
-        models.append(model)
+    models = [_custom_model_entry(item, record) for item in get_custom_provider_model_catalog(record)]
     active_provider_id = str(
         (getattr(config, "custom_providers", {}) or {}).get("active_provider_id") or ""
     ).strip()
@@ -831,10 +869,10 @@ def custom_provider_entries(config: Config) -> List[Dict[str, Any]]:
     ]
 
 
-def _require_custom_provider(config: Config, provider_ref: Any) -> Dict[str, Any]:
+def _require_custom_provider(config: Config, provider_ref: Any, *, borrow_catalog: bool = False) -> Dict[str, Any]:
     from .custom_providers import find_custom_provider
 
-    record = find_custom_provider(getattr(config, "custom_providers", {}), provider_ref)
+    record = find_custom_provider(getattr(config, "custom_providers", {}), provider_ref, borrow_catalog=borrow_catalog)
     if not record:
         raise ValueError(f"No custom provider matches '{provider_ref}'.")
     return record
@@ -1040,7 +1078,8 @@ def refresh_custom_provider_models(config: Config, provider_ref: Any) -> Dict[st
 
 
 def select_custom_provider_model(
-    config: Config, provider_ref: Any, model_id: Any, context_limit: Any = None, reasoning: Any = None
+    config: Config, provider_ref: Any, model_id: Any, context_limit: Any = None, reasoning: Any = None,
+    *, describe_provider: bool = True,
 ) -> Dict[str, Any]:
     """Activate one provider and pin the model the user picked.
 
@@ -1053,48 +1092,30 @@ def select_custom_provider_model(
     so no selected model is ever left without one.
     """
     from .custom_providers import (
-        custom_provider_model_needs_context_limit,
+        CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS,
+        find_custom_provider_catalog_model,
+        get_custom_provider_model_context_limit,
         parse_context_token_limit,
-        set_custom_provider_model_context_limit,
-        suggest_custom_provider_model_context_limit,
-        upsert_custom_provider,
     )
 
-    record = dict(_require_custom_provider(config, provider_ref))
+    record = _require_custom_provider(config, provider_ref, borrow_catalog=True)
     wanted = str(model_id or "").strip()
-    selected = next(
-        (
-            dict(item)
-            for item in record.get("models") or []
-            if str(item.get("id") or "").lower() == wanted.lower()
-        ),
-        None,
-    )
+    selected = find_custom_provider_catalog_model(record, wanted)
     if not selected:
         raise ValueError(
             f"Model '{wanted}' is not in {record.get('name') or record.get('id')}'s catalog. Refresh it first."
         )
-    record["enabled"] = True
-    record["selected_model_id"] = str(selected.get("id") or "")
-    record["selected_model_display_name"] = str(selected.get("display_name") or selected.get("id") or "")
-
     requested_limit = parse_context_token_limit(context_limit)
     if context_limit not in (None, "") and not requested_limit:
         raise ValueError(f"'{context_limit}' is not a usable context limit.")
-    if not requested_limit and custom_provider_model_needs_context_limit(record, record["selected_model_id"]):
-        requested_limit = suggest_custom_provider_model_context_limit(record, record["selected_model_id"])
-    if requested_limit:
-        record = set_custom_provider_model_context_limit(
-            record, record["selected_model_id"], requested_limit
-        )
+    if not requested_limit and not get_custom_provider_model_context_limit(record, selected["id"]):
+        requested_limit = parse_context_token_limit(selected.get("context_length")) or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
 
-    config.custom_providers = upsert_custom_provider(
-        getattr(config, "custom_providers", {}), record, activate=True
-    )
-    config.active_model_source = "custom"
-    if reasoning is not None:
-        _apply_custom_provider_selection(config, selected, reasoning)
-    return _custom_provider_entry(config, _require_custom_provider(config, record["id"]))
+    record["enabled"] = True
+    _apply_custom_provider_selection(config, record, selected, reasoning, context_limit=requested_limit)
+    if describe_provider:
+        return _custom_provider_entry(config, _require_custom_provider(config, record["id"], borrow_catalog=True))
+    return selected
 
 
 def _resync_active_custom_provider(config: Config) -> None:

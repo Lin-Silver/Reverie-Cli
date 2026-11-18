@@ -17,14 +17,14 @@ def remember_model_catalog(config: Any, key: str, models: List[Dict[str, Any]]) 
 
 
 def remembered_model_catalog(
-    config: Any, key: str, cache: Optional[Dict[str, Any]] = None,
+    config: Any, key: str, cache: Optional[Dict[str, Any]] = None, *, copy_models: bool = True,
 ) -> Optional[List[Dict[str, Any]]]:
     """None means no successful inventory; an empty inventory is authoritative."""
     for snapshot in (cache, config.get("model_catalog") if isinstance(config, dict) else None):
         if not isinstance(snapshot, dict):
             continue
         if snapshot.get("connection_key", snapshot.get("key")) == key and isinstance(snapshot.get("models"), list):
-            return deepcopy(snapshot["models"])
+            return deepcopy(snapshot["models"]) if copy_models else snapshot["models"]
     return None
 
 

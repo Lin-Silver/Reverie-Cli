@@ -3978,7 +3978,12 @@ class ReverieInterface:
     ) -> None:
         from ..agent import ReverieAgent
 
-        config = self._clone_config(config_override) if config_override is not None else self._load_active_runtime_config()
+        if config_override is None:
+            config = self._load_active_runtime_config()
+        elif defer_runtime_enrichment and not persist_config_changes:
+            config = config_override.copy_with_shared_catalogs()
+        else:
+            config = self._clone_config(config_override)
         self.mcp_runtime.set_project_root(self.project_root)
         self.mcp_runtime.set_active_mode(config.mode)
         scope_changed = self._ensure_runtime_services_for_config(config)

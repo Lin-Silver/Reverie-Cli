@@ -70,15 +70,15 @@ function installCustomReasoningFixture(needsContextLimit: boolean) {
     if (action === "getFileChanges") return { type: "file.changes", changes: [] };
     if (action === "getImageModelSources") return { type: "image-models", imageModels: { sources: [], active_source: "local" } };
     if (action === "selectCustomProviderModel") {
-      // Omitted reasoning preserves the previously saved depth, as the core does.
-      state.models = {
-        ...state.models,
-        sources: [{
-          ...state.models.sources[0],
-          selected_reasoning: { ...reasoning, value: String(payload.reasoning ?? reasoning.value) },
-        }],
+      const value = String(payload.reasoning ?? reasoning.value);
+      return {
+        type: "custom-provider.updated",
+        workspace: state.workspace,
+        selection: {
+          provider: { id: provider.id, reasoning_effort: value },
+          model: { ...provider.models[0], reasoning: { ...reasoning, value } },
+        },
       };
-      return { type: "custom-provider.model-selected", models: state.models, workspace: state.workspace };
     }
     throw new Error(`Unexpected fixture request: ${action}`);
   });
@@ -139,7 +139,7 @@ describe("custom provider reasoning selection", () => {
     await chooseLowInCustomPicker(user);
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
-      projectRoot:'C:/fixture',sessionId:undefined,
+      projectRoot:'C:/fixture',sessionId:undefined, compact: true,
       providerId: "fixture-provider", modelId: "thought-model", reasoning: "low",
     }));
     expect(document.querySelector(".reasoning-trigger")?.textContent).toContain("低");
@@ -158,7 +158,7 @@ describe("custom provider reasoning selection", () => {
     await user.click(within(confirmation).getByRole("button", { name: "保存并使用" }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", {
-      projectRoot:'C:/fixture',sessionId:undefined,
+      projectRoot:'C:/fixture',sessionId:undefined, compact: true,
       providerId: "fixture-provider", modelId: "thought-model", contextLimit: 128000, reasoning: "low",
     }));
     expect(document.querySelector(".reasoning-trigger")?.textContent).toContain("低");

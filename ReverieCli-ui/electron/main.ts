@@ -733,13 +733,13 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
   if (["runPrompt", "resumePrompt", "callViewTool"].includes(action)) {
     const admin = bridge; const root = attachmentRoot(String(payload.projectRoot || admin.getProjectRoot())); const sessionId = String(payload.sessionId || "");
     const viewCall = action === "callViewTool";
-    const fixed = viewCall ? null : await admin.request("getConversationConfig",{projectRoot:root,sessionId,...(payload.assistantId==='aio'?{assistantId:'aio'}:{}),...(payload.configuration?{executionConfiguration:payload.configuration}:{})});
+    const fixed = viewCall ? null : await admin.request("getConversationConfig",{projectRoot:root,sessionId,summaryOnly:true,...(payload.assistantId==='aio'?{assistantId:'aio'}:{}),...(payload.configuration?{executionConfiguration:payload.configuration}:{})});
     if (fixed?.error) throw new Error(String(fixed.error));
     const ownership=fixed?.ownership as JsonRecord|undefined;
     if(payload.assistantId==='aio' && sessionId!=='aio-mainline' && ownership?.workspace && !samePath(root,String(ownership.workspace)))throw new Error(`This AiO branch belongs to ${ownership.workspace}. Open its original workspace to continue.`);
     if (fixed && !payload.configuration) payload.configuration = fixed.configuration;
-    const models = viewCall ? {} : fixed!.models as JsonRecord;
-    const record = await journal.start(root, sessionId, payload, JSON.stringify(models.active_model || {}),payload.restoredRunId?String(payload.restoredRunId):undefined); payload.runId = record.id; payload.projectRoot = root;
+    const activeModel = fixed?.active_model ?? (fixed?.models as JsonRecord | undefined)?.active_model;
+    const record = await journal.start(root, sessionId, payload, JSON.stringify(activeModel ?? {}),payload.restoredRunId?String(payload.restoredRunId):undefined); payload.runId = record.id; payload.projectRoot = root;
     let leaseId = ""; let worker: CoreBridge | null = null; let reusable = false;
     let runRevision=0;
     let finalized=false;

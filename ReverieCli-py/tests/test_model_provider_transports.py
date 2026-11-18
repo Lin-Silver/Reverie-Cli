@@ -96,7 +96,9 @@ def test_config_manager_automatically_migrates_pre_235_config(monkeypatch, tmp_p
     assert config.config_version == CONFIG_VERSION
     assert config.models[0].provider == "openai-chat"
     assert saved["config_version"] == CONFIG_VERSION
-    assert saved["models"][0]["provider"] == "openai-chat"
+    profiles = config_path.parent / 'Providers'
+    manual = json.loads((profiles / saved['provider_files']['standard']).read_text(encoding='utf-8'))
+    assert manual["models"][0]["provider"] == "openai-chat"
 
 
 @pytest.mark.parametrize("source", EXTERNAL_MODEL_SOURCES)

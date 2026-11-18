@@ -7,18 +7,30 @@ when the new list is empty. Failed requests and malformed responses retain the
 last successful inventory. Built-in catalogs are fallbacks only when no successful
 inventory exists for the current endpoint and credential.
 
-The inventory is saved in provider configuration under `model_catalog`. Its
-connection key hashes the normalized catalog URL and credential; custom providers
-also include their API format. Changing the endpoint or credential prevents reuse
-of another connection's saved inventory. Credentials are not stored in this key.
+Provider connection settings and inventories live in `Providers/<NAME>.json`,
+next to the global or workspace `config.json` that references them. Each workspace
+with its own configuration has its own `Providers` directory. Manual model
+profiles live in `Providers/Manual Models.json`. The main file holds application
+settings, provider references, and the active model source.
+
+Reverie migrates inline provider settings and custom inventory files in the older
+`profiles` directory on load. It writes the new provider files before replacing
+the index and keeps `config.pre-providers.json.bak` beside migrated canonical
+configs. An older executable needs the original configuration layout.
+
+The inventory is saved in the provider profile with a `model_catalog` connection
+key. The key hashes the normalized catalog URL and credential. Custom providers
+also include their API format. Changing the endpoint or credential associates
+future inventories with a new connection key.
 Custom model context limits entered by the user still override API context limits.
 
 Use **Refresh catalog** in the desktop model picker to discover new models.
 Explicit refreshes and provider availability probes save successful inventories.
 Opening the picker and selecting a model use the saved inventory or built-in
-fallback. If a selected model disappears from a successful inventory, the
-source uses an available model from that inventory; an empty inventory has no
-usable runtime model. A newly added custom provider still requires a model choice.
+fallback. The desktop applies the selected model and reasoning to the catalogs
+already in memory. If a selected model disappears from a successful inventory,
+the source uses an available model from that inventory. An empty inventory has
+no usable runtime model. A newly added custom provider still requires a model choice.
 Codex retains its own discovery mechanism. The Gemini source and compatible
 Gemini providers list models through the Google Gen AI SDK.
 OpenCode, SenseNova, Gemini and custom provider commands use the local catalog

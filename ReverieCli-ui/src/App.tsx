@@ -190,9 +190,11 @@ import { isViewEventRecord, parseViewEvent, toViewSegment } from "./view-events"
 import {
   CUSTOM_SOURCE_ID,
   activeSourceId,
+  applyModelSelection,
   coreSourceId,
   customProviderIdOf,
   expandModelSources,
+  modelReasoningForPicker,
   settingsModelSources,
 } from "./model-sources";
 import { SessionCache } from "./session-cache";
@@ -904,9 +906,11 @@ function ModelPicker({
     }
   };
   const source = sources.find((item) => item.id === sourceId) ?? sources[0];
-  const models = useMemo(() => (source?.models ?? []).filter((model) =>
-    `${model.display_name} ${model.id}`.toLowerCase().includes(query.toLowerCase()),
-  ), [source?.models, query]);
+  const models = useMemo(() => {
+    const catalog = source?.models ?? [];
+    const search = query.toLowerCase();
+    return search ? catalog.filter(model => `${model.display_name} ${model.id}`.toLowerCase().includes(search)) : catalog;
+  }, [source?.models, query]);
   const [firstModel, setFirstModel] = useState(0);
   const modelListRef = useRef<HTMLDivElement>(null);
   const virtualized = models.length > 80;
@@ -917,7 +921,7 @@ function ModelPicker({
     if (modelListRef.current) modelListRef.current.scrollTop = 0;
   }, [source?.id, query, models.length]);
   if (!source) return null;
-  const pendingReasoning = pendingSelection?.model.reasoning;
+  const pendingReasoning = pendingSelection && modelReasoningForPicker(pendingSelection.source, pendingSelection.model);
   return (
     <div className="popover-backdrop" onMouseDown={close}>
       <div ref={dialogRef} className="model-picker" role="dialog" aria-modal="true" aria-label={t("模型来源")} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
@@ -5210,6 +5214,7 @@ export default function App() {
       while (conversationViews.current.size > 12) conversationViews.current.delete(conversationViews.current.keys().next().value!);
       setState(current => current ? {...current,...view} : current);
       setSession(current => current?.id === session.id ? {...current, config_error:response.error, metadata:{...current.metadata,runtime_config:response.configuration}} : current);
+      contextDirty.current = true;
       if (response.error) setComposerError(response.error);
     }).catch(error => {
       if (!cancelled && sequence === configurationRequestSequence.current && ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId) === key) {
@@ -5709,8 +5714,15 @@ export default function App() {
   });
 
   const contextSnapshot = useRef<Record<string, unknown>>({});
+  const contextInFlight = useRef(false);
   const contextOwner = ownerKey(projectRoot, session?.id || NEW_SESSION_DRAFT_ID,assistantId);
-  const contextModel = JSON.stringify([state?.models.active_source, state?.models.active_model, state?.models.sources.find(source => source.id === "custom")?.custom_providers?.find(provider => provider.active)?.id]);
+  const contextModel = useMemo(() => {
+    const sources = state?.models;
+    const source = sources?.sources.find(item => item.id === sources.active_source);
+    const provider = source?.custom_providers?.find(item => item.active);
+    const selected = (provider?.models ?? source?.models)?.find(item => item.id === source?.selected_model_id);
+    return JSON.stringify([sources?.active_source, sources?.active_model, provider?.id, selected?.context_length, source?.selected_reasoning.value]);
+  }, [state?.models]);
   useEffect(() => {
     contextBaselines.current.clear();
     contextRevision.current += 1;
@@ -5734,26 +5746,37 @@ export default function App() {
     contextDirty.current = true;
   }, [session?.messages, prompt, attachments, liveTurn?.assistantText, liveTurn?.events, running]);
   useEffect(() => {
+    if (modelPickerOpen) {
+      contextDirty.current = true;
+      return;
+    }
     if (!workspaceReady || sessionBusy || !state?.workspace.active_model) return;
     let cancelled = false;
-    let inFlight = false;
+    let retryEmpty = true;
+    contextDirty.current = true;
     // Throttle rather than debounce: continuous typing/streaming must keep updating.
     const timer = window.setInterval(async () => {
-      if (!contextDirty.current || inFlight) return;
+      if (!contextDirty.current || contextInFlight.current) return;
       contextDirty.current = false;
-      inFlight = true;
+      contextInFlight.current = true;
       const revision = contextRevision.current;
       try {
         const response = await window.reverie.request("getContextUsage", contextSnapshot.current);
-        if (!cancelled && revision === contextRevision.current) setContextUsage(response.usage ?? null);
+        if (!cancelled && revision === contextRevision.current) {
+          setContextUsage(response.usage ?? null);
+          if (!response.usage && retryEmpty) {
+            retryEmpty = false;
+            contextDirty.current = true;
+          }
+        }
       } catch {
         if (!cancelled && revision === contextRevision.current) setContextUsage(null);
       } finally {
-        inFlight = false;
+        contextInFlight.current = false;
       }
     }, 250);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [workspaceReady, contextOwner, sessionBusy, contextModel]);
+  }, [workspaceReady, contextOwner, sessionBusy, contextModel, modelPickerOpen]);
 
   const openSession = useCallback(async (id: string,ownerAssistantId?:'aio') => {
     // Re-selecting the conversation already in view is just a jump back to its
@@ -6489,10 +6512,10 @@ export default function App() {
     const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
     const sequence=++configurationRequestSequence.current;
     try {
-      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, reasoning, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) });
+      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, reasoning, compact: true, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) });
       conversationViews.current.delete(owner);
       if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
-      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setState((current) => applyModelSelection(current, response));
       setSession(current=>current?{...current,config_error:''}:current);
       setComposerError('');
       toast(t("思考设置已更新"), "success");
@@ -6616,6 +6639,7 @@ export default function App() {
         ...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}),
         providerId: provider.id,
         modelId: model.id,
+        compact: true,
         ...(contextLimit === undefined ? {} : { contextLimit }),
         ...(reasoning === undefined ? {} : { reasoning }),
       });
@@ -6623,7 +6647,7 @@ export default function App() {
       if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       setSession(current=>current?{...current,config_error:''}:current);
       setComposerError('');
-      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setState((current) => applyModelSelection(current, response));
       setContextLimitModal(null);
       toast(t("model.switched", { name: model.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
@@ -6653,17 +6677,18 @@ export default function App() {
     const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
     const sequence=++configurationRequestSequence.current;
     try {
+      const capability = modelReasoningForPicker(source, model);
       const reasoning = selectedReasoning ?? (
-        model.reasoning.options.some((option) => option.id === model.reasoning.value)
-          ? model.reasoning.value
-          : model.reasoning.options[0]?.id
+        capability.options.some((option) => option.id === capability.value)
+          ? capability.value
+          : capability.options[0]?.id
       );
-      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}), ...(reasoning ? { reasoning } : {}) });
+      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, compact: true, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}), ...(reasoning ? { reasoning } : {}) });
       conversationViews.current.delete(owner);
       if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       setSession(current=>current?{...current,config_error:''}:current);
       setComposerError('');
-      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setState((current) => applyModelSelection(current, response));
       setModelPickerOpen(false);
       toast(t("model.switched", { name: model.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
@@ -6700,13 +6725,14 @@ export default function App() {
         providerId: provider.id,
         modelId: model.id,
         contextLimit: limit,
+        compact: true,
         ...(reasoning === undefined ? {} : { reasoning }),
       });
       conversationViews.current.delete(owner);
       if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       setSession(current=>current?{...current,config_error:''}:current);
       setComposerError('');
-      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      setState((current) => applyModelSelection(current, response));
       setContextLimitModal(null);
       toast(t("provider.contextSaved", { name: model.display_name, tokens: limit.toLocaleString() }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }

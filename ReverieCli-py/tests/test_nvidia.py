@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -370,7 +369,7 @@ def test_nvidia_model_selection_syncs_global_config_in_workspace_mode(tmp_path: 
     assert handler._cmd_nvidia_model("poolside/laguna-xs-2.1") is True
 
     workspace_config = config_manager.load()
-    global_data = json.loads((app_root / ".reverie" / "config.json").read_text(encoding="utf-8"))
+    global_data = config_manager.read_config_file(config_manager.global_config_path).to_dict()
 
     assert workspace_config.active_model_source == "nvidia"
     assert workspace_config.nvidia["selected_model_id"] == "poolside/laguna-xs-2.1"

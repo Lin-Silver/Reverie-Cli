@@ -267,13 +267,17 @@ def resolve_custom_provider_base_url(base_url: Any) -> str:
 
 def custom_provider_models_url(provider: Any) -> str:
     """Return the model-list URL for one provider record."""
-    record = normalize_custom_provider(provider)
-    if not record:
-        return ""
-    base = str(record.get("base_url") or "")
+    record = provider if isinstance(provider, dict) else {}
+    return _models_url(
+        resolve_custom_provider_base_url(record.get("base_url")),
+        normalize_custom_provider_format(record.get("format") or record.get("provider")),
+    )
+
+
+def _models_url(base: str, provider_format: str) -> str:
     if not base:
         return ""
-    spec = _FORMAT_SPECS[normalize_custom_provider_format(record.get("format"))]
+    spec = _FORMAT_SPECS[provider_format]
     if spec["transport"] == "gemini":
         from .gemini import gemini_http_options
 
@@ -302,13 +306,9 @@ def custom_provider_sdk_base_url(provider: Any) -> str:
     ``/v1/v1/messages``. Every other transport takes the URL as typed, because a
     custom gateway may legitimately have no version prefix at all.
     """
-    record = normalize_custom_provider(provider)
-    if not record:
-        return ""
-    base = str(record.get("base_url") or "")
-    if not base:
-        return ""
-    if custom_provider_transport(record.get("format")) != "anthropic":
+    record = provider if isinstance(provider, dict) else {}
+    base = resolve_custom_provider_base_url(record.get("base_url"))
+    if custom_provider_transport(record.get("format") or record.get("provider")) != "anthropic":
         return base
     return base[:-3].rstrip("/") if base.lower().endswith("/v1") else base
 
@@ -750,8 +750,17 @@ def normalize_custom_provider_model(raw_model: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
-    """Normalize one provider record, or return None when it is unusable."""
+def find_custom_provider_catalog_model(record: Dict[str, Any], model_id: str) -> Optional[Dict[str, Any]]:
+    """Read one exact model from the inventory of an already resolved provider."""
+    wanted = model_id.strip().lower()
+    for item in record.get("models") or []:
+        if isinstance(item, dict) and str(item.get("id") or item.get("model") or item.get("name") or "").strip().lower() == wanted:
+            return normalize_custom_provider_model(item)
+    return None
+
+
+def normalize_custom_provider(raw_provider: Any, *, borrow_catalog: bool = False) -> Optional[Dict[str, Any]]:
+    """Normalize settings. Runtime readers may borrow the inventory as read-only."""
     if not isinstance(raw_provider, dict):
         return None
 
@@ -813,31 +822,32 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
                 headers[name] = text
     cfg["custom_headers"] = headers
 
-    models: List[Dict[str, Any]] = []
-    seen_ids = set()
-    for item in raw_provider.get("models") or []:
-        model = normalize_custom_provider_model(item)
-        if not model:
-            continue
-        key = model["id"].lower()
-        if key in seen_ids:
-            continue
-        seen_ids.add(key)
-        models.append(model)
-    cfg["models"] = models
-    if isinstance(raw_provider.get("model_catalog"), dict):
-        cfg["model_catalog"] = deepcopy(raw_provider["model_catalog"])
-    models_url = f"{cfg['base_url']}{_FORMAT_SPECS[cfg['format']]['models_path']}"
+    models_url = _models_url(cfg["base_url"], cfg["format"])
     catalog_key = model_catalog_key(models_url, resolve_custom_provider_api_key(cfg), cfg["format"])
     cached = _MODEL_CACHE.get(catalog_key)
-    latest = remembered_model_catalog(cfg, catalog_key, {"key": catalog_key, **cached} if cached else None)
+    latest = remembered_model_catalog(
+        raw_provider, catalog_key, {"key": catalog_key, **cached} if cached else None,
+        copy_models=not borrow_catalog,
+    )
     if latest is not None:
         models = latest
-        cfg["models"] = models
-        remember_model_catalog(cfg, catalog_key, models)
-    elif "model_catalog" in cfg:
+        cfg["model_catalog"] = {"connection_key": catalog_key, "models": models}
+    elif isinstance(raw_provider.get("model_catalog"), dict):
+        cfg["model_catalog"] = raw_provider["model_catalog"] if borrow_catalog else deepcopy(raw_provider["model_catalog"])
         models = []
-        cfg["models"] = models
+    else:
+        raw_models = raw_provider.get("models") or []
+        if borrow_catalog:
+            models = raw_models
+        else:
+            models = []
+            seen_ids = set()
+            for item in raw_models:
+                model = normalize_custom_provider_model(item)
+                if model and model["id"].lower() not in seen_ids:
+                    seen_ids.add(model["id"].lower())
+                    models.append(model)
+    cfg["models"] = models
 
     try:
         cfg["models_synced_at"] = max(0.0, float(raw_provider.get("models_synced_at") or 0.0))
@@ -846,13 +856,13 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
 
     selected_id = str(raw_provider.get("selected_model_id", "") or "").strip()
     selected_name = str(raw_provider.get("selected_model_display_name", "") or "").strip()
+    matched = find_custom_provider_catalog_model(cfg, selected_id) if selected_id else None
     if selected_id and (latest is not None or "model_catalog" in cfg):
-        selected = next((item for item in models if item["id"].lower() == selected_id.lower()), models[0] if models else None)
-        selected_id = str(selected["id"]) if selected else ""
-        selected_name = str(selected["display_name"]) if selected else ""
+        matched = matched or (normalize_custom_provider_model(models[0]) if models else None)
+        selected_id = str(matched["id"]) if matched else ""
+        selected_name = str(matched["display_name"]) if matched else ""
     if selected_id:
         cfg["selected_model_id"] = selected_id
-        matched = next((item for item in models if item["id"].lower() == selected_id.lower()), None)
         cfg["selected_model_display_name"] = selected_name or (
             matched["display_name"] if matched else selected_id
         )
@@ -873,7 +883,7 @@ def normalize_custom_provider(raw_provider: Any) -> Optional[Dict[str, Any]]:
     return cfg
 
 
-def normalize_custom_providers_config(raw_config: Any) -> Dict[str, Any]:
+def normalize_custom_providers_config(raw_config: Any, *, borrow_catalogs: bool = False) -> Dict[str, Any]:
     """Normalize the whole ``custom_providers`` section for persistence."""
     cfg = default_custom_providers_config()
     if not isinstance(raw_config, dict):
@@ -890,7 +900,7 @@ def normalize_custom_providers_config(raw_config: Any) -> Dict[str, Any]:
             if isinstance(value, dict)
         ]
     for item in raw_providers or []:
-        record = normalize_custom_provider(item)
+        record = normalize_custom_provider(item, borrow_catalog=borrow_catalogs)
         if not record or record["id"] in seen:
             continue
         seen.add(record["id"])
@@ -917,9 +927,9 @@ def list_custom_providers(raw_config: Any) -> List[Dict[str, Any]]:
     return list(normalize_custom_providers_config(raw_config)["providers"])
 
 
-def find_custom_provider(raw_config: Any, provider_ref: Any) -> Optional[Dict[str, Any]]:
+def find_custom_provider(raw_config: Any, provider_ref: Any, *, borrow_catalog: bool = False) -> Optional[Dict[str, Any]]:
     """Resolve a provider by id or display name, allowing a unique prefix."""
-    providers = list_custom_providers(raw_config)
+    providers = normalize_custom_providers_config(raw_config, borrow_catalogs=borrow_catalog)["providers"]
     wanted = str(provider_ref or "").strip().lower()
     if not wanted:
         return None
@@ -935,9 +945,9 @@ def find_custom_provider(raw_config: Any, provider_ref: Any) -> Optional[Dict[st
     return partial[0] if len(partial) == 1 else None
 
 
-def resolve_active_custom_provider(raw_config: Any) -> Optional[Dict[str, Any]]:
+def resolve_active_custom_provider(raw_config: Any, *, borrow_catalog: bool = False) -> Optional[Dict[str, Any]]:
     """Return the provider record backing the ``custom`` model source."""
-    cfg = normalize_custom_providers_config(raw_config)
+    cfg = normalize_custom_providers_config(raw_config, borrow_catalogs=borrow_catalog)
     active_id = cfg["active_provider_id"]
     if not active_id:
         return None
@@ -1080,7 +1090,6 @@ def get_custom_provider_model_catalog(
     timeout: int = 10,
 ) -> List[Dict[str, Any]]:
     """Return the provider catalog, preferring live data and falling back to cache."""
-    record = normalize_custom_provider(provider) or {}
     if fetch_live:
         try:
             return fetch_custom_provider_models(
@@ -1088,39 +1097,36 @@ def get_custom_provider_model_catalog(
             )
         except Exception:
             report_suppressed_exception("fetch custom provider live model catalog")
-    key = model_catalog_key(custom_provider_models_url(record), resolve_custom_provider_api_key(record), record.get("format", "openai-chat"))
-    cached = _MODEL_CACHE.get(key)
-    latest = remembered_model_catalog(record, key, {"key": key, **cached} if cached else None)
-    if latest is not None:
-        return latest
-    return [dict(item) for item in record.get("models", [])]
+    record = normalize_custom_provider(provider) or {}
+    return record.get("models", [])
 
 
 def resolve_custom_provider_selected_model(
     provider: Any, model_id: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Resolve the selected model record for a provider."""
-    record = normalize_custom_provider(provider)
+    record = normalize_custom_provider(provider, borrow_catalog=True)
     if not record:
         return None
+    return _selected_model(record, model_id)
+
+
+def _selected_model(record: Dict[str, Any], model_id: Optional[str]) -> Optional[Dict[str, Any]]:
     wanted = str(model_id or record.get("selected_model_id") or "").strip()
     if not wanted:
         return None
     saved_limit = record.get("model_context_limits", {}).get(_model_limit_key(wanted))
-    models = get_custom_provider_model_catalog(record)
-    matched = next((item for item in models if item["id"].lower() == wanted.lower()), None)
-    key = model_catalog_key(custom_provider_models_url(record), resolve_custom_provider_api_key(record), record["format"])
-    cached = _MODEL_CACHE.get(key)
-    if matched is None and remembered_model_catalog(record, key, {"key": key, **cached} if cached else None) is not None:
-        matched = models[0] if models else None
+    models = record.get("models") or []
+    matched = find_custom_provider_catalog_model(record, wanted)
+    if matched is None and "model_catalog" in record:
+        matched = normalize_custom_provider_model(models[0]) if models else None
         if matched is None:
             return None
         saved_limit = record.get("model_context_limits", {}).get(_model_limit_key(matched["id"]))
     if matched:
-        resolved = dict(matched)
         if saved_limit:
-            resolved["context_length"] = int(saved_limit)
-        return resolved
+            matched["context_length"] = int(saved_limit)
+        return matched
     # A selection made before a catalog refresh is still callable by id.
     return {
         "id": wanted,
@@ -1148,12 +1154,7 @@ def build_custom_provider_runtime_model_data(
     model_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build the runtime ``ModelConfig`` payload for the active custom provider."""
-    cfg = normalize_custom_providers_config(custom_providers_config)
-    record = (
-        find_custom_provider(cfg, provider_ref)
-        if provider_ref
-        else resolve_active_custom_provider(cfg)
-    )
+    record, selected = _resolve_provider_and_model(custom_providers_config, provider_ref, model_id)
     if not record or not record.get("enabled", True):
         return None
     if not record.get("base_url"):
@@ -1163,7 +1164,6 @@ def build_custom_provider_runtime_model_data(
     if not api_key:
         return None
 
-    selected = resolve_custom_provider_selected_model(record, model_id=model_id)
     if not selected:
         return None
 
@@ -1173,7 +1173,7 @@ def build_custom_provider_runtime_model_data(
         or CUSTOM_PROVIDER_DEFAULT_CONTEXT_TOKENS
     )
     supports_vision = bool(selected.get("vision") or record.get("supports_vision", False))
-    reasoning_level = resolve_custom_provider_reasoning_level(record, selected["id"])
+    reasoning_level = custom_provider_reasoning_level_for_model(selected, record["reasoning_effort"])
     return {
         "model": selected["id"],
         "model_display_name": selected.get("display_name") or selected["id"],
@@ -1205,13 +1205,12 @@ def _resolve_provider_and_model(
     model_id: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Resolve the provider record and its selected model from a config section."""
-    cfg = normalize_custom_providers_config(custom_providers_config)
     record = (
-        find_custom_provider(cfg, provider_ref)
+        find_custom_provider(custom_providers_config, provider_ref, borrow_catalog=True)
         if provider_ref
-        else resolve_active_custom_provider(cfg)
+        else resolve_active_custom_provider(custom_providers_config, borrow_catalog=True)
     ) or {}
-    selected = resolve_custom_provider_selected_model(record, model_id=model_id) or {}
+    selected = _selected_model(record, model_id) or {}
     return record, selected
 
 
@@ -1260,14 +1259,14 @@ def resolve_custom_provider_reasoning_level(
     nothing -- ``high`` being the deepest value every OpenAI-compatible gateway
     is known to accept.
     """
-    record = normalize_custom_provider(provider) or {}
+    record = normalize_custom_provider(provider, borrow_catalog=True) or {}
     wanted = normalize_custom_provider_reasoning_effort(
         desired if desired not in (None, "") else record.get("reasoning_effort"),
     )
     if wanted == "off" or not record.get("thinking", True):
         return ""
 
-    selected = resolve_custom_provider_selected_model(record, model_id=model_id) or {}
+    selected = _selected_model(record, model_id) or {}
     return custom_provider_reasoning_level_for_model(selected, wanted)
 
 

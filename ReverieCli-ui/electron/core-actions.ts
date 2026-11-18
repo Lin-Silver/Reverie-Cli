@@ -72,7 +72,7 @@ export const CORE_RESPONSE_CONTRACT = {
   resolveApproval: { type: "approval.resolved", required: ["approval_id", "decision"] },
   getModelSources: { type: "models", required: ["models"] },
   refreshModelSources: { type: "models", required: ["models"] },
-  selectModel: { type: "model.selected", required: ["models", "workspace"] },
+  selectModel: { type: "model.selected", required: ["workspace"] },
   getImageModelSources: { type: "image-models", required: ["imageModels"] },
   refreshImageModelSources: { type: "image-models", required: ["imageModels"] },
   selectImageModel: { type: "image-model.selected", required: ["imageModels", "selected"] },
@@ -85,7 +85,7 @@ export const CORE_RESPONSE_CONTRACT = {
   updateCustomProvider: { type: "custom-provider.updated", required: ["models", "workspace"] },
   deleteCustomProvider: { type: "custom-provider.updated", required: ["models", "workspace"] },
   refreshCustomProviderModels: { type: "custom-provider.updated", required: ["models", "workspace"] },
-  selectCustomProviderModel: { type: "custom-provider.updated", required: ["models", "workspace"] },
+  selectCustomProviderModel: { type: "custom-provider.updated", required: ["workspace"] },
   probeProviders: { type: "providers.probed", required: ["probes"] },
   setPluginEnabled: { type: "plugin.updated", required: ["plugins", "settings"] },
   setPluginTrust: { type: "plugin.updated", required: ["plugins", "settings"] },
@@ -142,7 +142,10 @@ export function assertCoreResponse(action: CoreActionName, value: unknown): Json
       `Reverie core protocol mismatch for ${action}: expected ${contract.type}, received ${String(response.type)}.`,
     );
   }
-  const missing = contract.required.filter((key) => !(key in response));
+  const missing: string[] = contract.required.filter((key) => !(key in response));
+  if ((action === "selectModel" || action === "selectCustomProviderModel") && !response.models && !response.selection) {
+    missing.push("models or selection");
+  }
   if (missing.length) {
     throw new TypeError(`Reverie core response for ${action} is missing: ${missing.join(", ")}.`);
   }

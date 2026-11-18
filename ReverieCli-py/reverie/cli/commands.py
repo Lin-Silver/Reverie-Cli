@@ -7509,12 +7509,7 @@ class CommandHandler:
                 global_config_manager.ensure_dirs()
                 global_path = global_config_manager.global_config_path
                 if global_path.exists():
-                    data = global_config_manager._load_json_payload(
-                        global_path,
-                        persist_repairs=True,
-                        record_notice=False,
-                    )
-                    global_config = Config.from_dict(data)
+                    global_config = global_config_manager.read_config_file(global_path)
                 else:
                     global_config = Config()
                 global_config.nvidia = config.nvidia
@@ -10079,12 +10074,7 @@ class CommandHandler:
                 global_manager.ensure_dirs()
                 global_path = global_manager.global_config_path
                 if global_path.exists():
-                    data = global_manager._load_json_payload(
-                        global_path,
-                        persist_repairs=True,
-                        record_notice=False,
-                    )
-                    global_config = Config.from_dict(data)
+                    global_config = global_manager.read_config_file(global_path)
                 else:
                     global_config = Config()
                 global_config.custom_providers = config.custom_providers

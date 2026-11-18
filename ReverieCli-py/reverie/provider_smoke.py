@@ -150,11 +150,14 @@ def _skipped(provider: str, model: str, reason: str) -> ProviderSmokeResult:
 
 
 def _load_config(config_path: Optional[Path] = None) -> Config:
+    from .provider_profiles import ProviderProfiles
+
     path = Path(config_path).expanduser() if config_path is not None else get_app_root() / ".reverie" / "config.json"
     if not path.exists():
         return Config()
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    return Config.from_dict(payload if isinstance(payload, dict) else {})
+    profiles = ProviderProfiles(get_app_root() / ".reverie" / "profiles")
+    return Config.from_dict(profiles.hydrate(payload, path) if isinstance(payload, dict) else {})
 
 
 def _iter_sse_data_strings(response: Any, max_events: int = 12) -> Iterable[str]:

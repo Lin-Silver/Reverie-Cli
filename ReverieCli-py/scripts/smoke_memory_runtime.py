@@ -54,7 +54,11 @@ def benchmark(root: Path) -> dict:
 
 
 def live_loop(root: Path, config_path: Path, executable: Path | None, cycles: int, step_delay: float) -> list[dict]:
-    original = json.loads(config_path.read_text(encoding="utf-8"))
+    from reverie.config import get_app_root
+    from reverie.provider_profiles import ProviderProfiles
+
+    profiles = ProviderProfiles(get_app_root() / '.reverie' / 'profiles')
+    original = profiles.hydrate(json.loads(config_path.read_text(encoding="utf-8-sig")), config_path)
     agnes = original.get("agnes", {})
     api_key = os.environ.get("AGNES_API_KEY") or agnes.get("api_key")
     if not api_key:

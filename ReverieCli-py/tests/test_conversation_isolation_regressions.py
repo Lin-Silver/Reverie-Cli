@@ -186,3 +186,29 @@ def test_selecting_a_conversation_model_does_not_change_workspace_defaults(tmp_p
     page = sessions.get_page(conversation.id)
     assert page["metadata"]["runtime_config"]["model_ref"]["model"] == "second"
     assert page["messages"] == conversation.messages
+
+
+def test_compact_selection_and_send_summary_do_not_build_catalogs(tmp_path, monkeypatch):
+    sessions = SessionManager(tmp_path / 'state', project_root=tmp_path)
+    conversation = sessions.create_session('Compact response')
+    defaults = Config(models=[ModelConfig('first', 'First', 'http://127.0.0.1:9/v1'),
+                              ModelConfig('second', 'Second', 'http://127.0.0.1:9/v1')])
+    interface = SimpleNamespace(session_manager=sessions, project_data_dir=tmp_path / 'state', agent=None,
+                                config_manager=SimpleNamespace(load=lambda: defaults, get_active_config_path=lambda: tmp_path / 'config.json'))
+    bridge = ReverieSdkBridge()
+    bridge.project_root = tmp_path
+    monkeypatch.setattr(bridge, 'ensure_interface', lambda *_args: interface)
+    def unexpected_catalog(*args, **kwargs):
+        raise AssertionError('This request should not serialize model catalogs')
+    monkeypatch.setattr(bridge, 'model_sources_payload', unexpected_catalog)
+
+    response = bridge.dispatch({'action': 'selectModel', 'payload': {
+        'sessionId': conversation.id, 'source': 'standard', 'modelId': '1', 'compact': True,
+    }})
+    assert 'models' not in response
+    assert response['selection']['model']['id'] == '1'
+    assert response['workspace']['active_model']['id'] == 'second'
+    viewed = interface._conversation_config
+    summary = bridge.dispatch({'action': 'getConversationConfig', 'payload': {'sessionId': conversation.id, 'summaryOnly': True}})
+    assert summary['configuration']['model_ref']['model'] == summary['active_model']['id'] == 'second'
+    assert interface._conversation_config is viewed

@@ -284,6 +284,7 @@ export interface CustomProviderRecord {
   supports_vision: boolean;
   /** Thinking mode is on by default for custom providers. */
   thinking: boolean;
+  reasoning_effort?: string;
   /** Context limits the user has confirmed, keyed by lowercased model id. */
   model_context_limits: Record<string, number>;
   models_synced_at: number;
@@ -365,6 +366,12 @@ export interface ModelSourcesState {
   active_model: ActiveModel | null;
   sources: ModelSource[];
 }
+
+export type ModelSelectionUpdate =
+  | { model: ModelRecord; config?: ModelSource['config']; provider?: undefined }
+  | { model: CustomProviderModel; provider: Pick<CustomProviderRecord,
+      'id' | 'enabled' | 'selected_model_id' | 'selected_model_display_name' | 'max_context_tokens' |
+      'max_tokens' | 'supports_vision' | 'thinking' | 'reasoning_effort'> };
 
 /** One text-to-image model within a source's catalog (see desktop_catalog.py). */
 export interface ImageModelRecord {

@@ -59,7 +59,7 @@ def test_gui_catalog_read_is_offline_and_explicit_refresh_survives_restart(tmp_p
     refreshed = next(item for item in payload["sources"] if item["id"] == source)
     assert ids(refreshed["models"]) == [f"{source}-fresh"]
     forget_process_caches()
-    reloaded = Config.from_dict(json.loads(manager.config_path.read_text(encoding="utf-8")))
+    reloaded = ConfigManager(tmp_path).load()
     assert ids(getter(source)(getattr(reloaded, source), fetch_live=False)) == [f"{source}-fresh"]
     saved_at = manager.config_path.stat().st_mtime_ns
     bridge.model_sources_payload()

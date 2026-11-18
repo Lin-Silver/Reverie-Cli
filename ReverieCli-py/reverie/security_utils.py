@@ -45,7 +45,7 @@ def apply_restrictive_permissions(path: Path) -> None:
         report_suppressed_exception("apply restrictive file permissions")
 
 
-def write_json_secure(path: Path, data: Any) -> None:
+def write_json_secure(path: Path, data: Any, *, compact: bool = False) -> None:
     """Atomically write JSON and tighten file permissions when possible."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -60,13 +60,16 @@ def write_json_secure(path: Path, data: Any) -> None:
             suffix=".json",
             delete=False,
         ) as temp_file:
-            json.dump(data, temp_file, indent=2, ensure_ascii=False)
+            temp_name = temp_file.name
+            if compact:
+                temp_file.write(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+            else:
+                json.dump(data, temp_file, indent=2, ensure_ascii=False)
             temp_file.flush()
             try:
                 os.fsync(temp_file.fileno())
             except OSError:
                 report_suppressed_exception("flush atomic-write temporary file")
-            temp_name = temp_file.name
 
         temp_path = Path(temp_name)
         apply_restrictive_permissions(temp_path)

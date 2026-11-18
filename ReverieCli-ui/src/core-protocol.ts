@@ -11,6 +11,7 @@ import type {
   FileChange,
   ImageModelSourcesState,
   ModelSourcesState,
+  ModelSelectionUpdate,
   PluginsState,
   PromptResult,
   ProviderProbe,
@@ -36,6 +37,9 @@ type CustomProviderEnvelope = Envelope<
   "custom-provider.updated",
   { provider: CustomProviderRecord | null; models: ModelSourcesState; workspace: WorkspaceState }
 >;
+type ModelSelectionResult = { workspace: WorkspaceState } & (
+  { selection: ModelSelectionUpdate; models?: undefined } | { models: ModelSourcesState; selection?: undefined }
+);
 /** Pin, unpin, and clear all answer with the outcome plus the whole pin set. */
 type SkillPinEnvelope = Envelope<
   "skill.pinned",
@@ -143,7 +147,7 @@ interface CoreRequestMap {
   exportTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.csv", { filename: string; content: string }> };
   setTokenPrice: { payload: { modelKey: string; price: TokenPrice }; response: Envelope<"token.price", { model_key: string; price: TokenPrice }> };
   refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
-  selectModel: { payload: { source: string; modelId: string; reasoning?: string }; response: Envelope<"model.selected", { selected: Record<string, unknown>; models: ModelSourcesState; workspace: WorkspaceState }> };
+  selectModel: { payload: { source: string; modelId: string; reasoning?: string; compact?: boolean }; response: Envelope<"model.selected", ModelSelectionResult> };
   getImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   refreshImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   selectImageModel: { payload: { source: string; modelId: string }; response: Envelope<"image-model.selected", { selected: Record<string, unknown>; imageModels: ImageModelSourcesState }> };
@@ -156,7 +160,7 @@ interface CoreRequestMap {
   updateCustomProvider: { payload: { providerId: string; patch: Record<string, unknown>; clearFields?: string[] }; response: CustomProviderEnvelope };
   deleteCustomProvider: { payload: { providerId: string }; response: CustomProviderEnvelope };
   refreshCustomProviderModels: { payload: { providerId: string }; response: CustomProviderEnvelope };
-  selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number; reasoning?: string }; response: CustomProviderEnvelope };
+  selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number; reasoning?: string; compact?: boolean }; response: Envelope<"custom-provider.updated", ModelSelectionResult> };
   probeProviders: { payload: { keys?: string[] }; response: Envelope<"providers.probed", { probes: ProviderProbe[] }> };
   setPluginEnabled: { payload: { pluginId: string; enabled: boolean;sessionId?:string;projectRoot?:string;assistantId?:'aio' }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
   setPluginTrust: { payload: { pluginId: string; trusted: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };

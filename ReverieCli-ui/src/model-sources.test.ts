@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CUSTOM_SOURCE_ID,
   activeSourceId,
+  applyModelSelection,
   coreSourceId,
   customProviderIdOf,
   customSourceId,
@@ -10,7 +11,7 @@ import {
   settingsModelSources,
   visibleModelSources,
 } from "./model-sources";
-import type { CustomProviderModel, CustomProviderRecord, ModelSource, ReasoningCapability } from "./types";
+import type { CustomProviderModel, CustomProviderRecord, DesktopState, ModelSource, ReasoningCapability } from "./types";
 
 const noReasoning: ReasoningCapability = { control: "none", options: [], value: "" };
 const effortReasoning: ReasoningCapability = {
@@ -217,4 +218,25 @@ describe("activeSourceId", () => {
     expect(activeSourceId(sources, "gone")).toBe("rats");
     expect(activeSourceId([], "gone")).toBe("");
   });
+});
+
+it("updates a custom selection without replacing unrelated catalog rows", () => {
+  const previous = provider("p1", "One", { active: true });
+  const next = provider("p2", "Two");
+  const standard = source("standard");
+  const aggregate = customSource([previous, next], { active: true });
+  const state = { models: { active_source: "custom", sources: [standard, aggregate], active_model: null } } as DesktopState;
+  const model = { ...next.models[0], context_length: 96000, context_limit: 96000, needs_context_limit: false, reasoning: effortReasoning };
+  const update = applyModelSelection(state, {
+    workspace: { active_source: "custom", active_model: { id: model.id, display_name: model.display_name, provider: "openai-chat" } } as DesktopState["workspace"],
+    selection: { provider: { ...next, reasoning_effort: "high" }, model },
+  });
+  const [first, second] = update!.models.sources[1].custom_providers!;
+  expect(update!.models.sources[0]).toBe(standard);
+  expect(first.active).toBe(false);
+  expect(first.models).toBe(previous.models);
+  expect(second.active).toBe(true);
+  expect(second.models[0]).toBe(model);
+  expect(second.model_context_limits[model.id]).toBe(96000);
+  expect(update!.models.sources[1].selected_reasoning).toBe(effortReasoning);
 });

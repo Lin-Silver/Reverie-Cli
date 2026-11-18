@@ -516,6 +516,16 @@ function installDesktopApi(options: {
         };
         return selected;
       });
+      const selectedProvider = providers.find((record) => record.active);
+      const selectedModel = selectedProvider?.models.find((model) => model.id === modelId);
+      if (payload.compact && selectedProvider && selectedModel) {
+        const { models: _, model_context_limits: __, ...provider } = selectedProvider;
+        return {
+          type: "custom-provider.updated",
+          selection: { provider, model: selectedModel },
+          workspace: { ...desktopState.workspace, active_source: "custom", active_model: models().active_model },
+        };
+      }
       return customEnvelope(selected);
     }
     if (action === "probeProviders") {
@@ -1994,6 +2004,7 @@ describe("desktop GUI interactions", () => {
 
     await user.click(within(dialog).getByRole("button", { name: /高/ }));
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
+      compact: true,
       source: "test-source",
       modelId: "thinking-model",
       reasoning: "high",
@@ -2899,6 +2910,7 @@ describe("desktop GUI interactions", () => {
     await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
+      compact: true,
       providerId: "xkiro",
       modelId: "xkiro-pro",
     }));
@@ -2927,6 +2939,7 @@ describe("desktop GUI interactions", () => {
     await user.click(within(dialog).getByRole("button", { name: "保存并使用" }));
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
+      compact: true,
       providerId: "xkiro",
       modelId: "xkiro-lite",
       contextLimit: 64_000,
@@ -2937,6 +2950,7 @@ describe("desktop GUI interactions", () => {
     await user.click(screen.getByRole("button", { name: /xkiro-pro/ }));
     await user.click(screen.getByRole("button", { name: /xkiro-lite/ }));
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
+      compact: true,
       providerId: "xkiro",
       modelId: "xkiro-lite",
     }));
@@ -3370,6 +3384,7 @@ describe("desktop GUI interactions", () => {
     // Activating a provider is its own core call, not a `selectModel` on a
     // source the core has never heard of.
     await waitFor(() => expect(request).toHaveBeenCalledWith("selectCustomProviderModel", { projectRoot:"C:/workspace",sessionId:baseSession.id,
+      compact: true,
       providerId: "xkiro",
       modelId: "xkiro-pro",
     }));
@@ -3507,9 +3522,19 @@ describe("desktop GUI interactions", () => {
       rotation_tokens: 82_000,
     };
     const { request } = installDesktopApi({ contextUsage: usage });
+    const requestImpl = request.getMockImplementation()!;
+    let initialUsagePending = true;
+    request.mockImplementation(async (action, payload) => {
+      if (action === "getContextUsage" && initialUsagePending) {
+        initialUsagePending = false;
+        return { type: "context.usage", usage: null };
+      }
+      return requestImpl(action, payload);
+    });
     const user = userEvent.setup();
     render(<App />);
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await screen.findByRole("button", { name: /上下文窗口已用 5%/ });
     await user.type(composer, "inspect the cache{Enter}");
 
     await waitFor(() => expect(request).toHaveBeenCalledWith("getContextUsage", expect.anything()));

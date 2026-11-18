@@ -27,6 +27,8 @@ SESSION_SETTINGS = (
     "text_to_image", "text_to_video", "subagents",
 )
 _SECRET_FIELDS = {"api_key", "custom_headers", "authorization", "password", "token", "access_token", "refresh_token", "cookie"}
+_PROVIDER_INVENTORY_FIELDS = {'models', 'models_synced_at', 'model_catalog', 'catalog_profile', 'profile'}
+_CUSTOM_SELECTION_FIELDS = {'reasoning_effort', 'thinking', 'model_context_limits', 'max_tokens', 'timeout'}
 
 
 def _proxy_without_auth(value):
@@ -54,7 +56,13 @@ def _without_secrets(value):
     return deepcopy(value)
 
 
-def capture_runtime_config(config: Config, *, rules="", pinned_skills=None, plugins=None) -> Dict[str, Any]:
+def _provider_settings(source, provider):
+    if source == 'custom':
+        return _without_secrets({key: value for key, value in provider.items() if key in _CUSTOM_SELECTION_FIELDS})
+    return _without_secrets({key: value for key, value in provider.items() if key not in _PROVIDER_INVENTORY_FIELDS})
+
+
+def capture_runtime_config(config: Config, *, rules="", pinned_skills=None, plugins=None, previous=None) -> Dict[str, Any]:
     source = config.active_model_source
     model = config.active_model
     reference = {"source": source, "model": model.model if model else "", "profile_id": ""}
@@ -74,26 +82,39 @@ def capture_runtime_config(config: Config, *, rules="", pinned_skills=None, plug
                     ref['model'] = selected.model
         if ref.get('profile_id'):
             ref.pop('index',None)
-    provider = _without_secrets(getattr(config,source,{})) if source in EXTERNAL_MODEL_SOURCES else {}
-    provider.pop('models',None)
-    provider.pop('models_synced_at',None)
-    provider.pop('model_catalog',None)
+    provider = _provider_settings(source, getattr(config, source)) if source in EXTERNAL_MODEL_SOURCES else {}
     if source == "custom":
         active = reference.get("provider_id")
-        provider = next((_without_secrets(item) for item in config.custom_providers.get("providers",[]) if item.get("id") == active), {})
-        provider.pop("models", None)
-    return {"version":1,"model_ref":reference,"settings":settings,"provider_settings":provider,
-            "model_settings": {"max_context_tokens":model.max_context_tokens,"supports_vision":model.supports_vision} if source == 'standard' and model else {},
-            "rules":str(rules),"pinned_skills":list(pinned_skills or []),"plugins":dict(plugins or {})}
+        record = next((item for item in config.custom_providers.get("providers", []) if item.get("id") == active), {})
+        provider = _provider_settings(source, record)
+    snapshot = {"version":1,"model_ref":reference,"settings":settings,"provider_settings":provider,
+                "model_settings": {"max_context_tokens":model.max_context_tokens,"supports_vision":model.supports_vision} if source == 'standard' and model else {},
+                "rules":str(rules),"pinned_skills":list(pinned_skills or []),"plugins":dict(plugins or {})}
+    previous = previous or {}
+    limits = dict(previous.get('custom_context_limits') or {})
+    previous_id = (previous.get('model_ref') or {}).get('provider_id')
+    previous_limits = (previous.get('provider_settings') or {}).get('model_context_limits')
+    if previous_id and previous_limits:
+        limits[previous_id] = previous_limits
+    limits.pop(reference.get('provider_id'), None)  # The active provider's limits are in provider_settings.
+    if limits:
+        snapshot['custom_context_limits'] = limits
+    return snapshot
 
 
-def resolve_runtime_config(defaults: Config, snapshot: Dict[str, Any]) -> Config:
+def resolve_runtime_config(defaults: Config, snapshot: Dict[str, Any], *, share_catalogs: bool = False) -> Config:
     from ..desktop_catalog import apply_model_selection, select_custom_provider_model
 
-    config = deepcopy(defaults)
+    config = defaults.copy_with_shared_catalogs() if share_catalogs else deepcopy(defaults)
     reference = snapshot.get("model_ref") or {}
     source = str(reference.get("source") or defaults.active_model_source)
     model_id = str(reference.get("model") or "")
+    custom_limits = snapshot.get('custom_context_limits') or {}
+    if custom_limits:
+        for item in config.custom_providers.get('providers', []):
+            limits = custom_limits.get(item['id'])
+            if isinstance(limits, dict):
+                item['model_context_limits'] = {**item.get('model_context_limits', {}), **limits}
     if source == "standard" and not model_id and not reference.get("profile_id"):
         config.active_model_source = source
     elif source == "standard":
@@ -108,7 +129,7 @@ def resolve_runtime_config(defaults: Config, snapshot: Dict[str, Any]) -> Config
             if key in {'max_context_tokens','supports_vision'}:
                 setattr(config.active_model,key,value)
     elif source == "custom":
-        select_custom_provider_model(config, reference.get("provider_id"), model_id)
+        select_custom_provider_model(config, reference.get("provider_id"), model_id, describe_provider=False)
     elif source in EXTERNAL_MODEL_SOURCES:
         apply_model_selection(config,source,model_id)
     else:
@@ -116,12 +137,16 @@ def resolve_runtime_config(defaults: Config, snapshot: Dict[str, Any]) -> Config
     provider = snapshot.get("provider_settings") or {}
     if source in EXTERNAL_MODEL_SOURCES:
         current = dict(getattr(config,source))
-        current.update(_without_secrets(provider))
+        current.update(_provider_settings(source, provider))
         setattr(config,source,current)
     elif source == "custom":
         for item in config.custom_providers.get("providers",[]):
             if item.get("id") == reference.get("provider_id"):
-                item.update(_without_secrets(provider))
+                overrides = _provider_settings(source, provider)
+                overrides['model_context_limits'] = {
+                    **item.get('model_context_limits', {}), **overrides.get('model_context_limits', {}),
+                }
+                item.update(overrides)
     for name,value in (snapshot.get("settings") or {}).items():
         if name in SESSION_SETTINGS and name != "security":
             if name == 'api_proxy':
@@ -197,7 +222,8 @@ class ConversationConfigView:
                 if key.lower() in _SECRET_FIELDS or key.endswith('_key_env'):
                     current[key] = deepcopy(value)
         self.manager.save(defaults)
-        snapshot = capture_runtime_config(config,rules=session.metadata.get('runtime_config',{}).get('rules',''),pinned_skills=session.metadata.get('pinned_skills',[]),plugins=session.metadata.get('runtime_config',{}).get('plugins',{}))
+        previous = session.metadata.get('runtime_config') or {}
+        snapshot = capture_runtime_config(config,rules=previous.get('rules',''),pinned_skills=session.metadata.get('pinned_skills',[]),plugins=previous.get('plugins',{}),previous=previous)
         page = self.sessions.get_page(session.id,limit=1)
         self.sessions.update_metadata(session.id,{'runtime_config':snapshot},expected_revision=page['revision'])
         session.metadata['runtime_config'] = snapshot

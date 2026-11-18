@@ -9,7 +9,7 @@
  * instead of a generic "Custom Provider" bucket.
  */
 
-import type { CustomProviderRecord, ModelSource } from "./types";
+import type { CustomProviderModel, CustomProviderRecord, DesktopState, ModelRecord, ModelSelectionUpdate, ModelSource, ModelSourcesState, WorkspaceState } from "./types";
 
 /** Sources retired from the product but possibly still present in old configs. */
 const RETIRED_MODEL_SOURCE_IDS = new Set(["unlimitedsurf", "unlimited_surf", "unlimited.surf", "us", "ue", "webgemini", "wgemini"]);
@@ -55,11 +55,63 @@ function providerSource(aggregate: ModelSource, provider: CustomProviderRecord):
     selected_reasoning: active
       ? aggregate.selected_reasoning
       : { control: "none", options: [], value: "" },
+    config: provider.reasoning_effort === undefined ? undefined : {
+      values: { reasoning_effort: provider.reasoning_effort }, configured_secrets: {},
+    },
     models: provider.models ?? [],
     // The record list belongs to the settings panel, not to a single provider.
     custom_providers: undefined,
     custom_provider_formats: undefined,
   };
+}
+
+/** Apply a core selection using the catalogs already held by the renderer. */
+export function applyModelSelection(
+  current: DesktopState | null,
+  response: { workspace: WorkspaceState; models?: ModelSourcesState; selection?: ModelSelectionUpdate },
+): DesktopState | null {
+  if (!current) return null;
+  const { workspace, selection } = response;
+  if (response.models) return { ...current, models: response.models, workspace };
+  if (!selection) return current;
+  const { active_source, active_model } = workspace;
+  const sources = current.models.sources.map(source => {
+    const active = source.id === active_source;
+    const custom_providers = source.custom_providers?.map(provider => {
+      if (active && selection.provider?.id === provider.id) {
+        const model = selection.model as CustomProviderModel;
+        const key = model.id.toLowerCase();
+        // Row metadata changes only when the limit changes. The reasoning
+        // control reads its current value from the source and provider.
+        const limitChanged = (provider.model_context_limits[key] ?? 0) !== model.context_limit;
+        return {
+          ...provider, ...selection.provider, active: true,
+          model_context_limits: limitChanged ? { ...provider.model_context_limits, [key]: model.context_limit } : provider.model_context_limits,
+          models: limitChanged ? provider.models.map(item => item.id === model.id ? model : item) : provider.models,
+        };
+      }
+      return provider.active ? { ...provider, active: false } : provider;
+    });
+    if (active) return {
+      ...source, active, custom_providers,
+      selected_model_id: selection.model.id,
+      selected_reasoning: selection.model.reasoning,
+      config: selection.provider ? source.config : selection.config ?? source.config,
+    };
+    return source.active ? { ...source, active, custom_providers } : source;
+  });
+  return { ...current, workspace, models: { active_source, active_model, sources } };
+}
+
+export function modelReasoningForPicker(source: ModelSource, model: ModelRecord): ModelRecord['reasoning'] {
+  if (source.selected_model_id === model.id && source.selected_reasoning.options.length) return source.selected_reasoning;
+  const values = source.config?.values;
+  const preferred = model.reasoning.control === "toggle" && typeof values?.enable_thinking === "boolean"
+    ? String(values.enable_thinking)
+    : (values?.thinking_mode ?? values?.reasoning_effort);
+  return model.reasoning.options.some(option => option.id === preferred)
+    ? { ...model.reasoning, value: String(preferred) }
+    : model.reasoning;
 }
 
 /**

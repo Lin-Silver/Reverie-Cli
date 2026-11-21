@@ -89,7 +89,7 @@ fi
 
 echo "[3/6] Installing build dependencies..."
 DEPS_STAMP="$BUILD_DIR/deps.stamp"
-CURRENT_DEPS_STAMP=$($PYTHON_CMD -c "import hashlib,pathlib,sys; h=hashlib.sha256(); [h.update(p.read_bytes()) for p in (pathlib.Path('requirements.txt'),pathlib.Path('setup.py')) if p.exists()]; h.update(sys.version.encode()); print(h.hexdigest())")
+CURRENT_DEPS_STAMP=$($PYTHON_CMD -c "import hashlib,pathlib,sys; h=hashlib.sha256(); [h.update(p.read_bytes()) for p in (pathlib.Path('requirements.txt'),pathlib.Path('setup.py'),pathlib.Path('reverie/version.py')) if p.exists()]; h.update(sys.version.encode()); print(h.hexdigest())")
 if [ "$FORCE_DEPS" = "1" ] || [ ! -s "$DEPS_STAMP" ] || [ "$(<"$DEPS_STAMP")" != "$CURRENT_DEPS_STAMP" ]; then
     NEED_DEPS=1
 fi

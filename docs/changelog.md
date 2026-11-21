@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased — AiO and independent conversations
+## v2.5.5 candidate — Python closeout, AiO, and independent conversations
+
+- Prepared the near-final Python release while preserving the full project layout, existing product features, and bundled Rust Context Engine. The future Rust mainline and Python archive branch are separate work.
+- Closed SQLite memory connections at transaction boundaries, preserving rollback and full AiO durability; fixed Windows project-data deletion with open database handles.
+- Invalidated retrieval caches after incremental content refreshes, preserved Windows native index and Computer Use state paths, bounded workspace discovery, and reused message token counts without changing accounting.
+- Bound RIU view ownership to the selected conversation and isolated package-verification fixtures from enclosing Git repositories.
+- Included the canonical version in build dependency fingerprints so version-only builds refresh installed package metadata. Main pushes produce verified candidate artifacts; publication requires the exact commit's Test workflow to pass.
 
 - Replaced the Computer Controller mode entry with AiO: a persistent assistant mainline, task branches, proactive messages, a full-text reply window, lifecycle controls, and memory correction/deletion.
 - Added independent configuration for every conversation, stable model references, workspace ownership, and background execution across conversation/workspace switches.
@@ -8,7 +14,7 @@
 - Added shared execution slots, isolated Git write tasks and conflict-preserving incorporation; fixed linked-checkout ownership and explicit AiO control routing.
 - Preserved exact saved message/file bytes, retained expanded history, made memory-cache publication atomic, and added persistence failure diagnostics.
 - Kept proxy credentials in shared configuration and removed them from conversation snapshots and configuration exports, including legacy AiO event records. Malformed legacy files are reported without blocking healthy listings.
-- See [implementation status](AIO_IMPLEMENTATION_STATUS.md) for verified checks and the still-open performance, native preflight, and eight-hour endurance qualification. This source update does not create a new tagged release; package metadata remains 2.5.3.
+- See [implementation status](AIO_IMPLEMENTATION_STATUS.md) for the original acceptance contract and [candidate release notes](releases/v2.5.5.md) for the closeout scope. Candidate metadata is 2.5.5; a version bump or successful build does not establish complete acceptance or publish a tagged release. Fresh package/endurance checks and real multiple-display/DPI qualification remain required.
 
 <a id="v2-5-3"></a>
 

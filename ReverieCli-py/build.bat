@@ -121,7 +121,7 @@ echo.
 echo [3/6] Installing build dependencies...
 set "DEPS_STAMP=%LOCAL_BUILD_ROOT%\deps.stamp"
 set "CURRENT_DEPS_STAMP="
-"%PYTHON_EXE%" -c "import hashlib,pathlib,sys; h=hashlib.sha256(); [h.update(p.read_bytes()) for p in (pathlib.Path('requirements.txt'),pathlib.Path('setup.py')) if p.exists()]; h.update(sys.version.encode()); h.update(sys.prefix.encode()); print(h.hexdigest())" > "%LOCAL_BUILD_ROOT%\deps-current.stamp"
+"%PYTHON_EXE%" -c "import hashlib,pathlib,sys; h=hashlib.sha256(); [h.update(p.read_bytes()) for p in (pathlib.Path('requirements.txt'),pathlib.Path('setup.py'),pathlib.Path('reverie/version.py')) if p.exists()]; h.update(sys.version.encode()); h.update(sys.prefix.encode()); print(h.hexdigest())" > "%LOCAL_BUILD_ROOT%\deps-current.stamp"
 if errorlevel 1 (
     set "BUILD_EXIT_CODE=1"
     goto finish

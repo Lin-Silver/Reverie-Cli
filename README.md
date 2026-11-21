@@ -5,7 +5,9 @@ Start with the [documentation index](docs/README.md), [Desktop guide](docs/DESKT
 
 Reverie Desktop implements offline interactive views with inline, fullscreen and picture-in-picture presentation.
 
-Current source version: **v2.5.3**.
+Current source version: **v2.5.5**, the Python closeout release candidate. The latest published stable release remains **v2.5.3** until the full acceptance gates pass.
+
+Version 2.5.5 preserves the Python core, Electron desktop, existing features, and bundled Rust Context Engine. It is intended as the near-final Python release and the complete-project archive baseline for a future `Reverie-Cli-py` branch. The Rust mainline transition is separate work; the Python directory and project layout remain intact.
 
 
 
@@ -251,9 +253,9 @@ The core/desktop Release is separate from the optional plugin Release:
 - Windows x64: standalone `reverie.exe`, the portable GUI executable, and the NSIS installer.
 - Linux x64: `reverie`, AppImage, and Debian package. The Debian installer provides both `reverie` and `reverieui` commands.
 - macOS: explicitly named Apple Silicon (M-series) and Intel DMGs plus matching native CLI cores. Command-line tools remain an explicit user-installed symlink from the app bundle.
-- Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin paths additionally trigger their isolated plugin build while the rolling desktop prerelease is refreshed by every `main` push.
+- Official compiled plugins: the dedicated `plugins-latest` Release and `plugins-manifest.json`; plugin paths additionally trigger their isolated plugin build.
 
-Every push to `main` rebuilds the rolling `latest` tag as **Reverie CLI Latest (Prerelease)**. Version tags such as `v2.5.0` remain stable Releases. Release notes and upload labels group downloads as Windows, Linux, macOS Apple Silicon, then macOS Intel. `reverie-kernels.json` is the single optional verification file: GitHub already displays a digest for every asset, while this consolidated record additionally maps each kernel to its protocol, interface version, platform, architecture, commit, size, and SHA-256.
+Every push to `main` builds and verifies candidate artifacts without publishing a Release. Version tags such as `v2.5.5` publish stable Releases only after native package checks and the Test workflow for the exact source commit succeed. The rolling `latest` prerelease requires an explicit manual publishing request. Release notes and upload labels group downloads as Windows, Linux, macOS Apple Silicon, then macOS Intel. `reverie-kernels.json` is the consolidated verification record: GitHub also displays each asset's digest, while this record maps each kernel to its protocol, interface version, platform, architecture, commit, size, and SHA-256.
 
 `reverie` starts the TUI/core. `reverieui` starts the GUI in the current directory. Packaged GUIs start with their fast onedir kernel; the explicit portable `--tui` route may select a sibling kernel only when its SHA-256 appears in the build-time allowlist and its `--kernel-info` protocol handshake succeeds.
 

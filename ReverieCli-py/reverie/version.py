@@ -1,6 +1,6 @@
 """Canonical package version metadata for Reverie CLI."""
 
-VERSION = "2.5.3"
+VERSION = "2.5.5"
 CONFIG_VERSION = VERSION
 CORE_INTERFACE_VERSION = "1.0"
 RELEASE_STATUS = "stable"

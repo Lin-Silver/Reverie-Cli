@@ -119,3 +119,19 @@ def test_dependency_fingerprint_uses_quoted_python_path(tmp_path):
                             text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert len(result.stdout.strip()) == 64, result.stdout
+
+
+@pytest.mark.parametrize("build_script", ["build.bat", "build.sh"])
+def test_version_change_invalidates_dependency_metadata_cache(tmp_path, build_script):
+    source = (REPOSITORY / "ReverieCli-py" / build_script).read_text()
+    line = next(line for line in source.splitlines() if '-c "import hashlib,pathlib,sys;' in line)
+    fingerprint = line.split('-c "', 1)[1].split('"', 1)[0]
+    (tmp_path / "requirements.txt").write_text("fixed dependency\n")
+    (tmp_path / "setup.py").write_text("fixed setup\n")
+    version = tmp_path / "reverie/version.py"
+    version.parent.mkdir()
+    version.write_text('VERSION = "2.5.3"\n')
+    before = subprocess.check_output([sys.executable, "-c", fingerprint], cwd=tmp_path, text=True)
+    version.write_text('VERSION = "2.5.5"\n')
+    after = subprocess.check_output([sys.executable, "-c", fingerprint], cwd=tmp_path, text=True)
+    assert before != after, "A version-only release must refresh installed distribution metadata"

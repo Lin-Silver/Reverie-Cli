@@ -14,6 +14,42 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("event,ref,publish_requested,expected", [
+    ("push", "refs/heads/main", False, False),
+    ("push", "refs/tags/v2.5.5", False, True),
+    ("push", "refs/tags/plugins-latest", False, False),
+    ("pull_request", "refs/heads/main", False, False),
+    ("workflow_dispatch", "refs/heads/main", False, False),
+    ("workflow_dispatch", "refs/heads/main", True, True),
+])
+def test_publication_requires_a_version_tag_or_explicit_dispatch(event, ref, publish_requested, expected):
+    from types import SimpleNamespace
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/build-core-release.yml").read_text(encoding="utf-8"))
+    expression = workflow["jobs"]["publish"]["if"].replace("&&", " and ").replace("||", " or ")
+    allowed = eval(expression, {"__builtins__": {}, "startsWith": str.startswith}, {
+        "github": SimpleNamespace(event_name=event, ref=ref),
+        "inputs": SimpleNamespace(publish_release=publish_requested),
+    })
+    assert bool(allowed) is expected
+
+
+@pytest.mark.parametrize("verdict,expected", [("success", True), ("failure", False),
+                                             ("cancelled", False), ("missing", False)])
+def test_publication_requires_successful_tests_for_the_same_source(tmp_path, verdict, expected):
+    bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
+    if not bash or not Path(bash).is_file():
+        pytest.skip("Bash is required to exercise the release workflow")
+    workflow = yaml.safe_load((ROOT / ".github/workflows/build-core-release.yml").read_text(encoding="utf-8"))
+    step = next(s for s in workflow["jobs"]["publish"]["steps"]
+                if s.get("name") == "Require successful tests for the exact source")
+    script = f"gh() {{ printf '%s\\n' {shlex.quote(verdict)}; }}\n" + step["run"]
+    result = subprocess.run([bash, "-s"], input=script, text=True, capture_output=True,
+                            cwd=tmp_path, timeout=10,
+                            env={**os.environ, "GITHUB_SHA": "a" * 40, "GITHUB_REPOSITORY": "example/reverie"})
+    assert (result.returncode == 0) is expected, result.stderr
+
+
 @pytest.mark.parametrize("changed,native_passed", [(False, True), (True, True), (False, False)])
 def test_native_release_gate_rejects_changed_assets_and_failed_runtime(tmp_path, changed, native_passed):
     import hashlib

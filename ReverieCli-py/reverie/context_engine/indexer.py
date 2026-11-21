@@ -13,6 +13,7 @@ Optimized for large codebases (>5MB source code).
 from pathlib import Path
 from typing import List, Dict, Optional, Set, Tuple, Callable, Any, Iterable
 from dataclasses import dataclass, field
+import codecs
 import time
 import os
 import fnmatch
@@ -41,6 +42,9 @@ from .cache import CacheManager
 from .text_analysis import expand_identifier_text, subword_expansion
 from ..config import get_project_data_dir
 from ..diagnostics import report_suppressed_exception
+
+
+_PRINTABLE_ASCII = bytes(range(32, 127)) + b'\t\n\r'
 
 
 class OutdatedContentIndexError(RuntimeError):
@@ -475,27 +479,18 @@ class CodebaseIndexer:
                                      '.pyc', '.pyo', '.pyd', '.db', '.sqlite', '.sqlite3'}:
                 return True
 
-            with open(path, 'rb') as f:
-                chunk = f.read(8192)
-                if not chunk:
-                    return False
-                # Check for null bytes (common in binary files)
-                if b'\x00' in chunk:
-                    # Allow some null bytes in UTF-16/32 encodings if BOM matches, but simple null check is usually good enough for code
-                    # Text files usually don't have null bytes
-                    return True
-                
-                # Check if mostly non-text characters
-                # Text chars: printable ASCII (32-126) + tab (9) + newline (10) + carriage return (13) + extended ascii/utf8
-                text_chars = set(range(32, 127)) | {9, 10, 13}
-                # Also allow UTF-8 common bytes (roughly) - this logic is simplified
-                
-                non_text = sum(1 for b in chunk if b not in text_chars)
-                # If more than 30% non-ASCII printable, treat as binary (conservative) 
-                # This might flag some legitimate UTF-8 files as binary if they have LOTS of non-ascii, 
-                # but for codebases it's usually safe. 
-                return non_text / len(chunk) > 0.3
-        except Exception:
+            sample_size = 8192
+            with path.open('rb') as source:
+                chunk = source.read(sample_size)
+            if b'\x00' in chunk:
+                return True
+            if len(chunk.translate(None, _PRINTABLE_ASCII)) <= len(chunk) * 0.3:
+                return False
+            # Decode the sample without rejecting a character cut at its end.
+            # Count control characters, not bytes of printable UTF-8 text.
+            decoded, _ = codecs.utf_8_decode(chunk, 'strict', len(chunk) < sample_size)
+            return sum(not (char.isprintable() or char.isspace()) for char in decoded) > len(decoded) * 0.3
+        except (OSError, UnicodeError):
             return True
     
     def _get_parser(self, file_path: Path) -> Optional[BaseParser]:
@@ -1823,10 +1818,13 @@ class CodebaseIndexer:
         start_time = time.time()
         result = IndexResult()
 
+        removed_files: List[Path] = []
         if changed_files is None:
-            changed_files = self._detect_changes()
+            changed_files, removed_files = self._detect_changes()
 
-        total_files = max(len(changed_files), 1)
+        changes = [(path, False) for path in changed_files]
+        changes.extend((path, True) for path in removed_files)
+        total_files = len(changes)
         self._index_progress = IndexProgress(
             stage="incremental",
             message="Indexing 0%",
@@ -1835,7 +1833,12 @@ class CodebaseIndexer:
             updated_at=start_time,
         )
 
-        result.files_scanned = len(changed_files)
+        result.files_scanned = total_files
+        if not changes:
+            self._last_index_result = result
+            result.total_time_ms = (time.time() - start_time) * 1000
+            self._emit_progress(None, stage="complete", message="index finished")
+            return result
 
         parse_start = time.time()
 
@@ -1845,7 +1848,7 @@ class CodebaseIndexer:
             completed=0,
             total=total_files,
             message="Indexing 0%",
-            files_scanned=len(changed_files),
+            files_scanned=total_files,
             files_parsed=0,
             files_failed=0,
             files_skipped=0,
@@ -1858,7 +1861,7 @@ class CodebaseIndexer:
         except Exception:
             report_suppressed_exception("open Context Engine content search update")
 
-        for index, file_path in enumerate(changed_files, start=1):
+        for index, (file_path, removed) in enumerate(changes, start=1):
             file_key = str(file_path)
             try:
                 self._remove_from_content_index(file_key)
@@ -1868,6 +1871,10 @@ class CodebaseIndexer:
                     self.symbol_table.remove_file(file_key)
                     self.dependency_graph.remove_file(file_key)
                     self._file_info.pop(file_key, None)
+
+                if removed:
+                    self._large_files.discard(file_key)
+                    continue
 
                 parse_result, file_info = self._parse_file_safe(file_path)
 
@@ -1906,7 +1913,7 @@ class CodebaseIndexer:
                     total=total_files,
                     message=f"Indexing {percent:.0f}%",
                     current_file=str(file_path),
-                    files_scanned=len(changed_files),
+                    files_scanned=total_files,
                     files_parsed=result.files_parsed,
                     files_failed=result.files_failed,
                     files_skipped=result.files_skipped,
@@ -1931,7 +1938,7 @@ class CodebaseIndexer:
             completed=total_files,
             total=total_files,
             message="index finished",
-            files_scanned=len(changed_files),
+            files_scanned=total_files,
             files_parsed=result.files_parsed,
             files_failed=result.files_failed,
             files_skipped=result.files_skipped,
@@ -1939,8 +1946,8 @@ class CodebaseIndexer:
 
         return result
     
-    def _detect_changes(self) -> List[Path]:
-        """Detect files that have changed since last index"""
+    def _detect_changes(self) -> Tuple[List[Path], List[Path]]:
+        """Return changed and removed paths without mutating any index."""
         changed = []
         current_files = set()
         
@@ -1963,16 +1970,10 @@ class CodebaseIndexer:
             except Exception:
                 report_suppressed_exception("compare indexed file metadata")
         
-        # Check for deleted files
         with self._index_lock:
-            for file_str in list(self._file_info.keys()):
-                if file_str not in current_files:
-                    # File was deleted
-                    self.symbol_table.remove_file(file_str)
-                    self.dependency_graph.remove_file(file_str)
-                    del self._file_info[file_str]
-        
-        return changed
+            removed = [Path(path) for path in sorted(self._file_info.keys() - current_files)]
+
+        return changed, removed
     
     def _parse_file_safe(self, file_path: Path) -> Tuple[Optional[ParseResult], Optional[FileInfo]]:
         """Parse a file with safety checks for large files"""

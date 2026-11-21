@@ -805,3 +805,52 @@ def test_writer_prompt_result_fails_when_native_status_never_completes(tmp_path,
     assert result.success is False
     assert result.auto_followup_count == 3
     assert "did not reach persisted status `complete`" in result.error
+
+
+@pytest.mark.parametrize("runtime_surface, expected_success", [("terminal", False), ("desktop", True)])
+def test_writer_planning_turn_keeps_native_project_open(tmp_path, monkeypatch, runtime_surface, expected_success):
+    interface = ReverieInterface(tmp_path, headless=True, runtime_surface=runtime_surface)
+    config = Config(
+        models=[ModelConfig(model="fake-model", model_display_name="Fake Model", base_url="https://example.com/v1", api_key="test-key")],
+        active_model_index=0,
+        mode="writer",
+    )
+    state_dir = tmp_path / "novels" / "native-project" / "tracking"
+    state_dir.mkdir(parents=True)
+    state = {
+        "configured": True,
+        "status": "writing",
+        "total_chars": 0,
+        "target_chars": 30000,
+        "completed_chapters": 0,
+        "active_chapter": None,
+    }
+    state_path = state_dir / "state.json"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    original = state_path.read_bytes()
+    monkeypatch.setattr(interface.config_manager, "load", lambda: config)
+    monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
+    monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "update_session_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(interface.workspace_stats_manager, "flush", lambda: None)
+
+    class PlanningAgent(_FakeAgent):
+        def process_message(self, user_message, **kwargs):
+            output = "Project bibles are configured. No chapters have been written. //END//"
+            self.messages.extend([{"role": "user", "content": user_message}, {"role": "assistant", "content": output}])
+            yield output
+
+    monkeypatch.setattr(interface, "_init_agent", lambda **kwargs: setattr(interface, "agent", PlanningAgent()))
+    result = interface.run_prompt_once(
+        "Configure novel_id=native-project. This turn only prepares the project bibles; do not write chapters.",
+        mode_override="writer",
+        no_index=True,
+    )
+
+    assert result.success is expected_success
+    assert result.auto_followup_count == (0 if runtime_surface == "desktop" else 3)
+    assert state_path.read_bytes() == original
+    if expected_success:
+        assert result.error == ""
+    else:
+        assert "did not reach persisted status `complete`" in result.error

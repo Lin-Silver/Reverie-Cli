@@ -20,6 +20,7 @@ import { parseDesktopLaunchOptions, resolveDesktopStartupMode } from "./launch-o
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
 import { createWindowTray, showWindow } from "./window-tray";
 import { coreRequestTimeoutMs } from "./core-timeouts";
+import { requestCoreShutdown } from "./core-shutdown";
 import { createGitBranch, getGitWorkspaceStatus, switchGitBranch } from "./git-workspace";
 import { importAttachments, saveClipboardImage, validateAttachments, type ComposerAttachment } from "./attachments";
 import { gitSnapshot, gitPatch, gitMutate, gitCommit, gitPushPlan, gitPush, gitOutput, readPreview, listDirectory, readEditorFile, saveEditorFile, type DiffScope, type PushPlan } from "./workbench";
@@ -291,6 +292,7 @@ class CoreBridge {
       reject: (reason: Error) => void;
       timer: ReturnType<typeof setTimeout> | null;
       action: string;
+      sessionId?: string;
     }
   >();
 
@@ -421,7 +423,7 @@ class CoreBridge {
             reject(new Error(`Reverie core request timed out: ${action}`));
           }, timeoutMs)
         : null;
-      this.pending.set(id, { resolve, reject, timer, action });
+      this.pending.set(id, { resolve, reject, timer, action, ...(["runPrompt", "resumePrompt"].includes(action) ? { sessionId: String(payload.sessionId ?? "") } : {}) });
       child.stdin.write(`${JSON.stringify({ id, action, payload })}\n`, "utf8", (error) => {
         if (error) {
           this.pending.delete(id);
@@ -432,14 +434,20 @@ class CoreBridge {
     });
   }
 
-  async stop(reason = "Core stopped"): Promise<void> {
+  async stop(reason = "Core stopped", graceful = false): Promise<void> {
     const child = this.child;
     if (!child) return;
+    const sessionId = [...this.pending.values()].find(request => ["runPrompt", "resumePrompt"].includes(request.action))?.sessionId;
     for (const request of this.pending.values()) {
       if (request.timer) clearTimeout(request.timer);
       request.reject(new Error(reason));
     }
     this.pending.clear();
+    const exited = graceful && await requestCoreShutdown(child, sessionId);
+    if (exited || child.exitCode !== null || child.signalCode !== null) {
+      if (this.child === child) this.child = null;
+      return;
+    }
     if (process.platform === "win32" && child.pid) {
       await new Promise<void>((resolve) => {
         const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
@@ -473,7 +481,7 @@ let bridge: CoreBridge | null = null;
 const terminals = new TerminalManager(message => mainWindow?.webContents.send("core:event", message));
 const journal = new RunJournal();
 const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string; assistantId?: 'aio' }>();
-const workerPool = new WorkerPool<CoreBridge>(4, worker => worker.stop("Idle kernel released."));
+const workerPool = new WorkerPool<CoreBridge>(4, worker => worker.stop("Idle kernel released.", true));
 const approvalOwners = new Map<string, string>();
 const stopBeforeStart = new Set<string>();
 const viewInstances = new ViewInstances();
@@ -1144,7 +1152,7 @@ ipcMain.handle("desktop:select-core-data", async () => {
   if (result.canceled || !result.filePaths[0]) return null;
   let coreAppRoot = path.resolve(result.filePaths[0]);
   if (path.basename(coreAppRoot).toLowerCase() === ".reverie") coreAppRoot = path.dirname(coreAppRoot);
-  await bridge.stop("Core data directory changed.");
+  await bridge.stop("Core data directory changed.", true);
   bridge.setCoreAppRoot(coreAppRoot);
   await updateDesktopSettings({ coreAppRoot });
   await bridge.start();
@@ -1422,7 +1430,7 @@ app.on("before-quit", (event) => {
   aioHost?.stop();
   bridge = null;
   for (const entry of coordinator.list()) if (entry.state === "queued") coordinator.cancelQueued(entry.projectRoot, entry.sessionId,entry.assistantId);
-  void Promise.all([activeBridge?.stop("Application is closing."), terminals.closeAll(), workerPool.close()]).finally(() => {
+  void Promise.all([activeBridge?.stop("Application is closing.", true), terminals.closeAll(), workerPool.close()]).finally(() => {
     coreStoppedForQuit = true;
     app.quit();
   });

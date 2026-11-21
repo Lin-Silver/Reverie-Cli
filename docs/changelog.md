@@ -4,6 +4,7 @@
 
 - Prepared the near-final Python release while preserving the full project layout, existing product features, and bundled Rust Context Engine. The future Rust mainline and Python archive branch are separate work.
 - Closed SQLite memory connections at transaction boundaries, preserving rollback and full AiO durability; fixed Windows project-data deletion with open database handles.
+- Avoided unnecessary workspace-statistics journal transitions and retried concurrent WAL initialization without changing four-process workloads or FULL durability.
 - Invalidated retrieval caches after incremental content refreshes, preserved Windows native index and Computer Use state paths, bounded workspace discovery, and reused message token counts without changing accounting.
 - Bound RIU view ownership to the selected conversation and isolated package-verification fixtures from enclosing Git repositories.
 - Included the canonical version in build dependency fingerprints so version-only builds refresh installed package metadata. Main pushes produce verified candidate artifacts; publication requires the exact commit's Test workflow to pass.

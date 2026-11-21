@@ -500,7 +500,15 @@ class WorkspaceStatsManager:
     def _connect(self):
         database = sqlite3.connect(self.database_path, timeout=30)
         try:
-            database.execute("PRAGMA journal_mode=WAL")
+            for attempt in range(20):
+                try:
+                    if database.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                        database.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as error:
+                    if "locked" not in str(error) or attempt == 19:
+                        raise
+                    time.sleep(0.05)
             database.execute("PRAGMA synchronous=FULL")
             with database:
                 yield database

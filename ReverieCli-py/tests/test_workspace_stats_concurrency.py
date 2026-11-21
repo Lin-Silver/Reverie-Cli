@@ -1,10 +1,12 @@
 import json
 import multiprocessing
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from reverie.session.workspace_stats import WorkspaceStatsManager
+from reverie.session import workspace_stats
 from reverie.storage import ProjectStorageResolver
 
 
@@ -57,6 +59,66 @@ def test_legacy_statistics_are_imported_once_and_retained(tmp_path):
     manager.record_runtime(3, force=True)
     assert WorkspaceStatsManager(tmp_path).get_total_runtime_seconds() == 15
     assert json.loads(legacy.read_text(encoding="utf-8"))["total_runtime_seconds"] == 12
+
+
+def test_statistics_retry_wal_transition_after_a_concurrent_reader(tmp_path, monkeypatch):
+    database_path = tmp_path / "workspace_stats.sqlite3"
+    reader = sqlite3.connect(database_path)
+    reader.execute("CREATE TABLE probe (value INTEGER)")
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM probe").fetchall()
+    busy_errors = []
+    connect = sqlite3.connect
+
+    class JournalConnection(sqlite3.Connection):
+        def execute(self, statement, *args):
+            try:
+                return super().execute(statement, *args)
+            except sqlite3.OperationalError as error:
+                if statement == "PRAGMA journal_mode=WAL":
+                    busy_errors.append(str(error))
+                    reader.rollback()
+                raise
+
+    monkeypatch.setattr(workspace_stats.sqlite3, "connect", lambda *args, **kwargs:
+                        connect(*args, factory=JournalConnection, **kwargs))
+    try:
+        manager = WorkspaceStatsManager(tmp_path)
+        manager.record_runtime(3, force=True)
+        with manager._connect() as database:
+            assert database.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+            assert database.execute("PRAGMA synchronous").fetchone()[0] == 2
+        assert busy_errors == ["database is locked"]
+        assert WorkspaceStatsManager(tmp_path).get_total_runtime_seconds() == 3
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("message", ["disk I/O error", "database is locked"])
+def test_statistics_wal_failure_is_reported_and_connection_closed(tmp_path, monkeypatch, message):
+    connect = sqlite3.connect
+    failures, closed = [], []
+
+    class FailedJournalConnection(sqlite3.Connection):
+        def execute(self, statement, *args):
+            if statement == "PRAGMA journal_mode=WAL":
+                failures.append(statement)
+                raise sqlite3.OperationalError(message)
+            return super().execute(statement, *args)
+
+        def close(self):
+            closed.append(True)
+            return super().close()
+
+    monkeypatch.setattr(workspace_stats.sqlite3, "connect", lambda *args, **kwargs:
+                        connect(*args, factory=FailedJournalConnection, **kwargs))
+    monkeypatch.setattr(workspace_stats.time, "sleep", lambda _: None)
+    with pytest.raises(sqlite3.OperationalError, match=message):
+        WorkspaceStatsManager(tmp_path)
+    assert 1 <= len(failures) <= 20
+    if message == "disk I/O error":
+        assert len(failures) == 1
+    assert closed == [True]
 
 
 def test_statistics_commit_failure_preserves_pending_increment(tmp_path, monkeypatch):

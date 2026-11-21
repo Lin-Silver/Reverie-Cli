@@ -337,16 +337,15 @@ jobs:
           # Diagnostic replay only: the original failed report and release gate stay unchanged.
           ReverieCli-py/venv/bin/python scripts/verification/riu_p4_electron.py --exe "$executable" --output .runtime/riu-input-diagnostic --trace-input
 
-      - name: Retain the exact failed Intel package for diagnosis
-        if: failure() && runner.os == 'macOS' && matrix.arch == 'x64' && steps.installed_native.outcome == 'failure'
+      - name: Retain the exact failed native package for diagnosis
+        if: failure() && steps.installed_native.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: failed-native-package-macos-x64-${{ github.sha }}
+          name: failed-native-package-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           retention-days: 14
           if-no-files-found: error
           path: |
-            release-assets/*.dmg
-            release-assets/*.json
+            release-assets/
             .runtime/release-native-provenance.json
 
       - name: Verify the exact Windows portable release

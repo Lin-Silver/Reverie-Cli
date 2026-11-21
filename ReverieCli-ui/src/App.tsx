@@ -2048,14 +2048,25 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
     return result;
   }, [first, rows, staticEnd, offset]);
   const pendingScroll = useRef<{ height: number; top: number } | null>(null);
+  const loadingEarlier = useRef(false);
+  const [earlierBusy, setEarlierBusy] = useState(false);
   useLayoutEffect(() => {
     readingPositions.set(readingKey, { top: 0, follow: true, ...readingPositions.get(readingKey), first });
   }, [readingKey, first]);
   const loadEarlier = useCallback(async () => {
-    const container = transcript.current;
-    if (container) pendingScroll.current = { height: container.scrollHeight, top: container.scrollTop };
-    if (first === 0 && before && loadPage) await loadPage();
-    else setStart(Math.max(0, first - HISTORY_PAGE_SIZE));
+    if (loadingEarlier.current) return;
+    loadingEarlier.current = true;
+    try {
+      const container = transcript.current;
+      if (container) pendingScroll.current = { height: container.scrollHeight, top: container.scrollTop };
+      if (first === 0 && before && loadPage) {
+        setEarlierBusy(true);
+        await loadPage();
+      } else setStart(Math.max(0, first - HISTORY_PAGE_SIZE));
+    } finally {
+      loadingEarlier.current = false;
+      setEarlierBusy(false);
+    }
   }, [first, transcript, before, loadPage]);
   useLayoutEffect(() => {
     const container = transcript.current;
@@ -2080,7 +2091,7 @@ const HistoryMessages = memo(function HistoryMessages({ messages, preferences, t
         ? <InteractiveView key={`view-${row.view.viewId || first + row.index}`} segment={row.view} />
         : <Message key={`${row.message.role}-${offset + first + row.index}`} message={row.message} preferences={preferences} live={live && first + row.index >= live.first ? live : undefined} />;
   return <>
-    {(first > 0 || before) ? <button type="button" className="history-load-earlier" onClick={() => void loadEarlier()}>{t("加载更早的消息")}</button> : null}
+    {(first > 0 || before) ? <button type="button" className="history-load-earlier" disabled={earlierBusy} aria-busy={earlierBusy} onClick={() => void loadEarlier()}>{t("加载更早的消息")}</button> : null}
     {chunks.map(chunk => <HistoryChunk key={chunk.key}>
       {chunk.rows.map(renderRow)}
     </HistoryChunk>)}

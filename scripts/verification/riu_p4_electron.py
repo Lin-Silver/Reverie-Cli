@@ -334,7 +334,16 @@ def main():
             for _ in range(5):
                 button = page.locator(".history-load-earlier")
                 if not button.count(): break
-                start = time.perf_counter(); button.click()
+                previous_count = page.locator(".interactive-view-anchor").count()
+                start = time.perf_counter()
+                # Scrolling the button into view can itself request the page.
+                # Observe that request before clicking a possibly removed button.
+                page.locator(".transcript").evaluate("e=>e.scrollTop=0")
+                page.evaluate("()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
+                page.wait_for_function("()=>{const b=document.querySelector('.history-load-earlier');return !b||!b.disabled}")
+                if page.locator(".interactive-view-anchor").count() == previous_count:
+                    button.click()
+                page.wait_for_function("minimum=>document.querySelectorAll('.interactive-view-anchor').length>=minimum", arg=min(100, previous_count + 30))
                 page.evaluate("()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
                 earlier.append((time.perf_counter() - start) * 1000)
                 frame_counts.append(page.locator("iframe.interactive-view-frame").count())

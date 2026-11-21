@@ -2997,6 +2997,41 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByText("还没有自定义 Provider")).toBeTruthy();
   });
 
+  it("waits for an earlier server page before enabling another history load", async () => {
+    const messages: SessionState["messages"] = Array.from({ length: 180 }, (_, index) => ({ role: "user", content: `Paged record ${index}` }));
+    const initialSession = { ...baseSession, messages: messages.slice(120), before: 120, revision: 1 };
+    const { request } = installDesktopApi({ initialSession });
+    const original = request.getMockImplementation()!;
+    let releasePage: () => void = () => {};
+    request.mockImplementation(async (action, payload) => {
+      if (action === "getSession" && typeof payload.before === "number") {
+        await new Promise<void>(resolve => { releasePage = resolve; });
+        const before = payload.before;
+        return { type: "session", session: { ...initialSession, before: before > 60 ? before - 60 : null, messages: messages.slice(Math.max(0, before - 60), before) }, sessions: desktopState.sessions };
+      }
+      return original(action, payload);
+    });
+    render(<App />);
+    await screen.findByText("Paged record 179");
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "加载更早的消息" });
+    fireEvent.click(button);
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", expect.objectContaining({ before: 120 })));
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(request.mock.calls.filter(([action, payload]) => action === "getSession" && typeof payload.before === "number")).toHaveLength(1);
+    await act(async () => releasePage());
+    await screen.findByText("Paged record 60");
+    await waitFor(() => expect(button.disabled).toBe(false));
+    expect(document.querySelectorAll(".transcript .message")).toHaveLength(120);
+    fireEvent.click(button);
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getSession", expect.objectContaining({ before: 60 })));
+    expect(button.disabled).toBe(true);
+    await act(async () => releasePage());
+    await screen.findByText("Paged record 0");
+    expect(document.querySelectorAll(".transcript .message")).toHaveLength(180);
+    expect(screen.queryByRole("button", { name: "加载更早的消息" })).toBeNull();
+  });
+
   it("renders long history in batches while keeping every earlier record accessible", async () => {
     const messages: SessionState["messages"] = Array.from({ length: 180 }, (_, index) => ({ role: "user", content: `History record ${index}` }));
     installDesktopApi({ initialSession: { ...baseSession, messages } });

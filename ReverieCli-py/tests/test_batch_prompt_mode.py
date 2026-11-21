@@ -807,8 +807,12 @@ def test_writer_prompt_result_fails_when_native_status_never_completes(tmp_path,
     assert "did not reach persisted status `complete`" in result.error
 
 
-@pytest.mark.parametrize("runtime_surface, expected_success", [("terminal", False), ("desktop", True)])
-def test_writer_planning_turn_keeps_native_project_open(tmp_path, monkeypatch, runtime_surface, expected_success):
+@pytest.mark.parametrize("runtime_surface, state_kind, expected_success", [
+    ("terminal", "valid", False), ("desktop", "valid", True),
+    ("terminal", "missing", False), ("desktop", "missing", False),
+    ("terminal", "invalid", False), ("desktop", "invalid", False),
+])
+def test_writer_planning_turn_preserves_native_project_validation(tmp_path, monkeypatch, runtime_surface, state_kind, expected_success):
     interface = ReverieInterface(tmp_path, headless=True, runtime_surface=runtime_surface)
     config = Config(
         models=[ModelConfig(model="fake-model", model_display_name="Fake Model", base_url="https://example.com/v1", api_key="test-key")],
@@ -826,8 +830,9 @@ def test_writer_planning_turn_keeps_native_project_open(tmp_path, monkeypatch, r
         "active_chapter": None,
     }
     state_path = state_dir / "state.json"
-    state_path.write_text(json.dumps(state), encoding="utf-8")
-    original = state_path.read_bytes()
+    if state_kind != "missing":
+        state_path.write_text(json.dumps(state) if state_kind == "valid" else "{", encoding="utf-8")
+    original = state_path.read_bytes() if state_path.exists() else None
     monkeypatch.setattr(interface.config_manager, "load", lambda: config)
     monkeypatch.setattr(interface, "ensure_context_engine", lambda announce=False: True)
     monkeypatch.setattr(interface, "_sync_workspace_memory_message", lambda session: None)
@@ -849,7 +854,7 @@ def test_writer_planning_turn_keeps_native_project_open(tmp_path, monkeypatch, r
 
     assert result.success is expected_success
     assert result.auto_followup_count == (0 if runtime_surface == "desktop" else 3)
-    assert state_path.read_bytes() == original
+    assert (state_path.read_bytes() if state_path.exists() else None) == original
     if expected_success:
         assert result.error == ""
     else:

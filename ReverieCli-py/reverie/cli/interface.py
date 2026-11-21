@@ -4430,12 +4430,15 @@ class ReverieInterface:
             thinking_text = "\n\n".join(part for part in thinking_parts if part)
             context_initialized = context_initialized or (not context_was_ready and self._context_engine_ready)
 
-            if not error_text and not read_only_review and self.runtime_surface != "desktop" and normalize_mode(base_config.mode) == "writer":
+            if not error_text and not read_only_review and normalize_mode(base_config.mode) == "writer":
                 writer_progress = _writer_project_progress(self.project_root, prompt_text)
                 if writer_progress and (
                     not writer_progress.get("exists")
                     or writer_progress.get("invalid")
-                    or str(writer_progress.get("status", "")).lower() != "complete"
+                    or (
+                        self.runtime_surface != "desktop"
+                        and str(writer_progress.get("status", "")).lower() != "complete"
+                    )
                 ):
                     error_text = (
                         f"Native Writer project `{writer_progress['novel_id']}` did not reach persisted "

@@ -39,6 +39,7 @@ from .parsers.lua_parser import LuaParser
 from .parsers.gdscript_parser import GDScriptParser
 from .parsers.config_parser import ConfigParser
 from .cache import CacheManager
+from .native import NativeContextError
 from .text_analysis import expand_identifier_text, subword_expansion
 from ..config import get_project_data_dir
 from ..diagnostics import report_suppressed_exception
@@ -150,6 +151,7 @@ class FileInfo:
     tags: List[str] = field(default_factory=list)
     dependency_targets: List[str] = field(default_factory=list)
     summary: str = ""
+    mtime_ns: Optional[int] = None
 
 
 @dataclass
@@ -593,6 +595,7 @@ class CodebaseIndexer:
         file_info: Optional[FileInfo],
         *,
         remove_existing: bool = True,
+        record_content: bool = True,
     ) -> None:
         """Merge a parsed file into the provided index state."""
         file_key = str(file_path)
@@ -619,11 +622,17 @@ class CodebaseIndexer:
         if file_info:
             file_info.symbol_count = parse_result.symbol_count
             file_info_store[file_key] = file_info
-            search_body = getattr(file_info, "_content_search_body", None)
-            if search_body is not None:
-                if self._content_index_connection is not None:
-                    self._upsert_content_index(file_key, search_body, parse_result.symbols)
+            if record_content:
+                self._record_index_document(file_path, parse_result, file_info)
+            if hasattr(file_info, "_content_search_body"):
                 delattr(file_info, "_content_search_body")
+
+    def _record_index_document(
+        self, path: Path, result: Optional[ParseResult], info: Optional[FileInfo],
+    ) -> None:
+        body = getattr(info, "_content_search_body", None)
+        if result is not None and body is not None and self._content_index_connection is not None:
+            self._upsert_content_index(str(path), body, result.symbols)
 
     # Bumped whenever the content index schema or the analysis pipeline
     # changes, so a cache written by an older build is discarded instead of
@@ -791,6 +800,14 @@ class CodebaseIndexer:
                 report_suppressed_exception("close failed Context Engine content search index")
             temporary_path.unlink(missing_ok=True)
             return False
+
+    def _abort_content_index_rebuild(self) -> None:
+        connection, self._content_index_connection = self._content_index_connection, None
+        temporary_path, self._content_index_temporary_path = self._content_index_temporary_path, None
+        if connection is not None:
+            connection.close()
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
     def _begin_content_index_update(self) -> None:
         path = self._cache_manager.content_search_path
@@ -1632,6 +1649,8 @@ class CodebaseIndexer:
         try:
             self._begin_content_index_rebuild()
             content_index_started = True
+        except NativeContextError:
+            raise
         except Exception:
             report_suppressed_exception("initialize Context Engine content search index")
 
@@ -1687,6 +1706,7 @@ class CodebaseIndexer:
                             continue
 
                         if parse_result is None:
+                            self._record_index_document(file_path, None, None)
                             result.files_skipped += 1
                             processed_files += 1
                             logger.debug("Skipped: %s", file_path)
@@ -1726,6 +1746,7 @@ class CodebaseIndexer:
                                 len(parse_result.dependencies),
                             )
                         else:
+                            self._record_index_document(file_path, None, None)
                             result.files_failed += 1
                             result.errors.extend(parse_result.errors)
                             logger.warning("Failed: %s", parse_result.errors)
@@ -1746,6 +1767,8 @@ class CodebaseIndexer:
                             chunk_total=total_chunks,
                         )
 
+                except NativeContextError:
+                    raise
                 except TimeoutError:
                     logger.error("Chunk %d timed out (300s)", chunk_num)
                     result.fatal_errors.append(f"Chunk {chunk_num} timed out")
@@ -1757,6 +1780,15 @@ class CodebaseIndexer:
                 except Exception as e:
                     logger.error("Error processing chunk %d: %s", chunk_num, e)
                     result.errors.append(f"Chunk {chunk_num}: {str(e)}")
+
+        if result.fatal_errors:
+            if content_index_started:
+                self._abort_content_index_rebuild()
+            self._large_files = previous_large_files
+            result.total_time_ms = (time.time() - start_time) * 1000
+            self._last_index_result = result
+            self._emit_progress(callback, stage="complete", message="Indexing failed")
+            return result
 
         if content_index_started and not self._finish_content_index_rebuild():
             result.warnings.append("Failed to persist the content search index")
@@ -1960,12 +1992,10 @@ class CodebaseIndexer:
                 mtime = stat.st_mtime
                 size = stat.st_size
                 
-                if file_str not in self._file_info:
-                    # New file
-                    changed.append(file_path)
-                elif (self._file_info[file_str].mtime != mtime or
-                      self._file_info[file_str].size != size):
-                    # Modified file
+                previous = self._file_info.get(file_str)
+                if previous is None or previous.size != size or (
+                    previous.mtime_ns != stat.st_mtime_ns if previous.mtime_ns is not None else previous.mtime != mtime
+                ):
                     changed.append(file_path)
             except Exception:
                 report_suppressed_exception("compare indexed file metadata")
@@ -2042,7 +2072,8 @@ class CodebaseIndexer:
                 path=str(file_path),
                 mtime=stat.st_mtime,
                 size=stat.st_size,
-                content_hash=self._calculate_file_hash(content)
+                content_hash=self._calculate_file_hash(content),
+                mtime_ns=stat.st_mtime_ns,
             )
         except Exception:
             file_info = None
@@ -2081,6 +2112,10 @@ class CodebaseIndexer:
         cached = self._cache_manager.load(expected_metadata=self._cache_metadata())
         if not cached:
             return False
+        self._restore_cached_index(cached)
+        return True
+
+    def _restore_cached_index(self, cached: Dict) -> None:
         self.symbol_table.replace_with(cached['symbol_table'])
         self.dependency_graph.replace_with(cached['dependency_graph'])
         self._file_info.clear()
@@ -2097,7 +2132,6 @@ class CodebaseIndexer:
             updated_at=time.time(),
         )
         self._last_index_result = None
-        return True
     
     def get_statistics(self) -> Dict:
         """Get detailed indexing statistics"""

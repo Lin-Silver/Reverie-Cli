@@ -103,6 +103,13 @@ jobs:
       - name: Verify dependency consistency
         run: python -m pip check
 
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.python-version == '3.12'
+
+      - name: Build the Rust Context Engine for backend integration tests
+        if: matrix.python-version == '3.12'
+        run: python scripts/prepare_context_engine.py
+
       - name: Set up matching sandboxed Chromium
         if: runner.os == 'Linux'
         run: bash ../scripts/verification/setup_ci_chromium.sh

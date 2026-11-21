@@ -284,13 +284,27 @@ def _run_direct_command_if_requested(argv: list[str]) -> int | None:
 def main(argv: list[str] | None = None):
     """Main entry point for Reverie Cli"""
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["--context-engine"]:
+        import subprocess
+        from reverie.context_engine.native import find_executable
+
+        executable = find_executable()
+        if executable is None:
+            print("Reverie Context Engine executable is unavailable.", file=sys.stderr)
+            return 1
+        try:
+            return subprocess.run([str(executable), *argv[1:]], check=False).returncode
+        except OSError as error:
+            print(f"Could not start the Reverie Context Engine: {error}", file=sys.stderr)
+            return 1
     direct_command_result = _run_direct_command_if_requested(argv)
     if direct_command_result is not None:
         return direct_command_result
 
     parser = argparse.ArgumentParser(
         description="Reverie - World-Class Context Engine Coding Assistant",
-        prog="reverie"
+        prog="reverie",
+        epilog="Run reverie --context-engine --help to use the standalone Context Engine.",
     )
     
     parser.add_argument(
@@ -439,11 +453,11 @@ def main(argv: list[str] | None = None):
         from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
         from reverie.config import get_project_data_dir
-        from reverie.context_engine import CodebaseIndexer
+        from reverie.context_engine.native_indexer import create_indexer
 
         console = Console()
         print(f"Indexing: {project_root}")
-        indexer = CodebaseIndexer(project_root, cache_dir=get_project_data_dir(project_root) / "context_cache")
+        indexer = create_indexer(project_root, cache_dir=get_project_data_dir(project_root) / "context_cache")
 
         result_holder = {"result": None}
         with Progress(
@@ -474,6 +488,10 @@ def main(argv: list[str] | None = None):
             except Exception as exc:
                 console.print(f"[red]Indexing failed unexpectedly:[/red] {exc}")
                 result_holder["result"] = None
+            finally:
+                close_indexer = getattr(indexer, "close", None)
+                if close_indexer is not None:
+                    close_indexer()
 
         result = result_holder["result"]
         if result is None:

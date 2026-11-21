@@ -164,6 +164,15 @@ cd ReverieCli-py
 Builds are incremental by default; use `--clean`, `--reinstall-deps`, `--refresh-browser`, or `--rebuild-plugins` when those parts need an explicit refresh.
 GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets.
 
+Packaging requires Cargo and Rust 1.89 or newer. The bundled Rust Context Engine handles file discovery, incremental indexing, and file and symbol full-text search. Reverie's language-specific analysis, dependency graph, and context assembly use the same entry points in the CLI and desktop app.
+
+Run the standalone engine from an existing package, or build its executable with `python scripts/prepare_context_engine.py` from `ReverieCli-py`. The `index` command can update the same database after edits, renames, and deletions.
+
+```bat
+reverie --context-engine index C:\work\project C:\work\project\.reverie\search.sqlite3
+reverie --context-engine chunks C:\work\project\.reverie\search.sqlite3 validateInvoice
+```
+
 The packaged `dist/reverie.exe` includes the unified Reverie Engine, work-in-progress Reverie-Gamer flows, the Gamer-only `reverie-engine` skill, `/engine video`, built-in Ren'Py inspection/migration, and modeling tools. Godot and O3DE no longer ship as runtime plugins; their useful scene, component, data-contract, and asset-pipeline patterns feed the one built-in engine. `build.bat` still installs the official Blender and Game Models plugins into `dist/.reverie/plugins/`; Ren'Py and Live2D remain optional source plugins instead of rolling Release assets. If `ffmpeg` is available during build, it is bundled for `mp4` and `gif` export; otherwise frame-sequence export remains available.
 
 ## Documentation

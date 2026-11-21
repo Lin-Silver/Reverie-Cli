@@ -121,6 +121,8 @@ add_data_if_exists(repo_root / "reverie" / "computer_use" / "native_manifest.jso
 if os.name == 'nt':
     desktop_binary = runpy.run_path(str(repo_root / 'scripts' / 'prepare_computer_use.py'))['prepare']()
     add_tree_if_exists(desktop_binary.parent, 'reverie/computer_use/native/windows-x64')
+context_binary = runpy.run_path(str(repo_root / 'scripts' / 'prepare_context_engine.py'))['prepare']()
+binaries.append((str(context_binary), 'reverie/context_engine/native'))
 
 for package_name in ('rich', 'bs4', 'PIL', 'pyglet', 'moderngl', 'glcontext', 'uiautomation', 'comtypes'):
     try:
@@ -163,7 +165,7 @@ common_exe_options = dict(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=[context_binary.name],
     runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,

@@ -121,6 +121,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Standalone kernel handshake failed' }
           python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable $executable --timeout 120
           if ($LASTEXITCODE -ne 0) { throw 'Standalone SDK bridge failed' }
+          python ReverieCli-py/scripts/smoke_context_engine.py --executable $executable
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone Rust Context Engine verification failed' }
 
       - name: Build and verify Unix kernel
         if: runner.os != 'Windows'
@@ -135,6 +137,7 @@ jobs:
             python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable dist/reverie.exe
           else
             python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable dist/reverie
+            python ReverieCli-py/scripts/smoke_context_engine.py --executable dist/reverie
           fi
 
       - name: Install desktop dependencies
@@ -262,6 +265,8 @@ jobs:
           if ((Get-FileHash -LiteralPath $installed).Hash -ne (Get-FileHash -LiteralPath $original).Hash) { throw 'Installed Desktop differs from packaged payload' }
           & (Join-Path $installRoot 'reverie.exe') --kernel-info
           if ($LASTEXITCODE -ne 0) { throw 'Installed CLI handshake failed' }
+          python ReverieCli-py/scripts/smoke_context_engine.py --executable (Join-Path $installRoot 'reverie.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Rust Context Engine verification failed' }
 
       - name: Install Linux release package
         if: runner.os == 'Linux'

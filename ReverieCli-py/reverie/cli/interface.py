@@ -18,6 +18,7 @@ import _thread
 import json
 import re
 import concurrent.futures
+from hashlib import sha256
 
 from ..diagnostics import report_suppressed_exception
 from ..api_keys import api_key_settings
@@ -74,6 +75,7 @@ from ..stream_protocol import (
 )
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration, IndexConfig
 from ..context_engine import LSPManager
+from ..context_engine.native_indexer import create_indexer
 from ..memory import MemoryOS
 from ..modes import REPOSITORY_MODES, get_mode_display_name, normalize_mode
 from ..nvidia import (
@@ -977,6 +979,7 @@ class ReverieInterface:
         """Release workspace-scoped background services before switching projects."""
         self._stop_stream_input_capture()
         self._stop_streaming_footer_ticker()
+        self._release_context_engine()
         lsp_manager = getattr(self, "lsp_manager", None)
         if lsp_manager is not None:
             try:
@@ -1054,6 +1057,7 @@ class ReverieInterface:
 
     def _init_workspace_services(self) -> None:
         """Initialize cache/session/rollback services for the active runtime scope."""
+        self._release_context_engine()
         config = self._load_active_runtime_config()
         runtime_scope = "aio" if getattr(self,'_assistant_owner',False) or normalize_mode(getattr(config, "mode", "reverie")) == "aio" else "workspace"
         self._runtime_scope = runtime_scope
@@ -1070,13 +1074,6 @@ class ReverieInterface:
                 self.project_data_dir, self.config_manager.app_root
             ),
         )
-
-        self.indexer = None
-        self.retriever = None
-        self._context_engine_ready = False
-        self._indexing_in_progress = False
-        self._indexing_thread = None
-        self._context_engine_warmup_thread = None
 
         from ..session import MemoryIndexer, WorkspaceStatsManager
         self.memory_indexer = MemoryIndexer(self.project_data_dir)
@@ -1121,6 +1118,7 @@ class ReverieInterface:
             project_root=None if runtime_scope == "aio" else self.project_root,
         )
         self.total_active_time = self.workspace_stats_manager.get_total_active_seconds()
+        self._context_engine_closed = False
 
     def _runtime_scope_for_config(self, config: Optional[Config] = None) -> str:
         """Return the active runtime scope for the supplied config."""
@@ -1153,6 +1151,7 @@ class ReverieInterface:
             self.project_root,
             self.project_data_dir,
         )
+        self._release_context_engine()
         cleanup_result = purge_workspace_state(
             self.project_root,
             self.project_data_dir,
@@ -1167,13 +1166,12 @@ class ReverieInterface:
         }
 
         if cleanup_result["errors"]:
+            self._context_engine_closed = False
             return result
 
         self._pending_input_draft = ""
         self._status_live = None
         self.agent = None
-        self.indexer = None
-        self.retriever = None
         self.git_integration = None
         self.lsp_manager = None
         self._context_engine_ready = False
@@ -3588,11 +3586,31 @@ class ReverieInterface:
             self._context_engine_init_lock = lock
         return lock
 
+    def _release_context_engine(self) -> None:
+        with self._get_context_engine_init_lock():
+            self._context_engine_closed = True
+            indexer = getattr(self, "indexer", None)
+            self.indexer = None
+            self.retriever = None
+            self._context_engine_ready = False
+            self._indexing_in_progress = False
+            self._indexing_thread = None
+            self._context_engine_warmup_thread = None
+        close = getattr(indexer, "close", None)
+        if close is not None:
+            close()
+
     def _init_context_engine_with_options(self, *, announce: bool = False) -> None:
         with self._get_context_engine_init_lock():
+            if getattr(self, "_context_engine_closed", False):
+                return
             if self._context_engine_ready and self.indexer and self.retriever:
                 return
             cache_dir = self.project_data_dir / 'context_cache'
+            execution_key = os.path.normcase(str(Path(self.project_root).resolve()))
+            workspace_key = os.path.normcase(str(Path(getattr(self, 'workspace_root', self.project_root)).resolve()))
+            if execution_key != workspace_key or getattr(self, '_runtime_scope', 'workspace') == 'aio':
+                cache_dir = cache_dir / 'worktrees' / sha256(os.fsencode(execution_key)).hexdigest()
             if announce:
                 self._show_activity_event(
                     "Context Engine",
@@ -3604,7 +3622,7 @@ class ReverieInterface:
             index_options: Dict[str, Any] = {}
             if worker_limit is not None:
                 index_options["config"] = IndexConfig(max_workers=worker_limit)
-            self.indexer = CodebaseIndexer(
+            self.indexer = create_indexer(
                 project_root=self.project_root,
                 cache_dir=cache_dir,
                 **index_options,
@@ -3676,7 +3694,8 @@ class ReverieInterface:
 
     def _start_context_indexing_background(self) -> bool:
         """Kick off a cold Context Engine index without blocking the active turn."""
-        if not self.indexer:
+        indexer = self.indexer
+        if not indexer:
             return False
         if self._indexing_thread and self._indexing_thread.is_alive():
             return False
@@ -3685,7 +3704,7 @@ class ReverieInterface:
 
         def _worker() -> None:
             try:
-                self.indexer.full_index()
+                indexer.full_index()
                 self._show_activity_event(
                     "Context Engine",
                     "Indexing finished.",
@@ -3701,9 +3720,10 @@ class ReverieInterface:
                     render=False,
                 )
             finally:
-                self._indexing_in_progress = False
-                self._refresh_command_context()
-                self._sync_agent_context_engine()
+                if self.indexer is indexer:
+                    self._indexing_in_progress = False
+                    self._refresh_command_context()
+                    self._sync_agent_context_engine()
 
         self._indexing_thread = threading.Thread(
             target=_worker,
@@ -3715,7 +3735,8 @@ class ReverieInterface:
 
     def _start_context_incremental_background(self) -> bool:
         """Refresh a warm Context Engine cache in the background without blocking chat."""
-        if not self.indexer:
+        indexer = self.indexer
+        if not indexer:
             return False
         if self._indexing_thread and self._indexing_thread.is_alive():
             return False
@@ -3724,7 +3745,7 @@ class ReverieInterface:
 
         def _worker() -> None:
             try:
-                self.indexer.incremental_index()
+                indexer.incremental_index()
             except Exception as exc:
                 self._show_activity_event(
                     "Context Engine",
@@ -3734,9 +3755,10 @@ class ReverieInterface:
                     render=False,
                 )
             finally:
-                self._indexing_in_progress = False
-                self._refresh_command_context()
-                self._sync_agent_context_engine()
+                if self.indexer is indexer:
+                    self._indexing_in_progress = False
+                    self._refresh_command_context()
+                    self._sync_agent_context_engine()
 
         self._indexing_thread = threading.Thread(
             target=_worker,
@@ -3917,6 +3939,8 @@ class ReverieInterface:
 
     def ensure_context_engine(self, *, announce: bool = False, wait_for_index: bool = False) -> bool:
         """Initialize the Context Engine on demand and synchronize it into the active agent."""
+        if getattr(self, "_context_engine_closed", False):
+            return False
         initialized = False
         if self._context_engine_ready and self.indexer and self.retriever:
             if wait_for_index:

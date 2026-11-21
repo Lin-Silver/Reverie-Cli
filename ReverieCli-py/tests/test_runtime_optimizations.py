@@ -1120,7 +1120,7 @@ def test_silent_context_engine_init_starts_background_without_activity(monkeypat
             calls.append("load_cache")
             return False
 
-    monkeypatch.setattr("reverie.cli.interface.CodebaseIndexer", FakeIndexer)
+    monkeypatch.setattr("reverie.cli.interface.create_indexer", FakeIndexer)
 
     interface = ReverieInterface.__new__(ReverieInterface)
     interface.project_root = Path.cwd()

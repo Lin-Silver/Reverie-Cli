@@ -730,6 +730,7 @@ class ReverieSdkBridge:
             "indexing": bool(getattr(interface, "_indexing_in_progress", False)),
             "files": len(file_info) if isinstance(file_info, dict) else 0,
             "symbols": len(symbol_table) if symbol_table is not None else 0,
+            "backend": status.get("backend", "python") if indexer is not None else None,
             "progress": float(status.get("display_percent", status.get("percent", 0.0)) or 0.0),
             "label": str(status.get("display_label") or ("Warming" if warming else "On demand")),
             "automatic_retrieval": True,
@@ -2173,6 +2174,7 @@ class ReverieSdkBridge:
             store.write_model_context(session_id, view_id, summary=summary, source="component")
             return {"id": request_id, "type": "view.model_context", "status": "stored"}
         if action == "shutdown":
+            self._dispose_interface()
             self.rats_runtime.shutdown()
             return {"id": request_id, "type": "shutdown"}
         raise ValueError(f"Unknown action: {action}")

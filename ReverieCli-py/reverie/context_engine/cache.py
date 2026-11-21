@@ -193,6 +193,7 @@ class CacheManager:
                     tags=data.get('tags', []),
                     dependency_targets=data.get('dependency_targets', []),
                     summary=data.get('summary', ''),
+                    mtime_ns=data.get('mtime_ns'),
                 )
                 for path, data in files_data.items()
             }

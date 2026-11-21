@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
-from desktop_process import launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
+from desktop_process import isolated_fixture_environment, launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
 from riu_quality_benchmark import settle_view, start_event_capture
 SECRET = "PRIVATE_META_MUST_NEVER_REACH_MODEL"
 
@@ -104,8 +104,7 @@ def main():
     settings = desktop_home / ".reverie/desktop/desktop-settings.json"
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"coreAppRoot": str(app_root), "projectRoot": str(workspace), "ui": {"language": "zh-CN"}}), encoding="utf-8")
-    env = {**os.environ, "PORTABLE_EXECUTABLE_DIR": str(desktop_home)}
-    env.pop("ELECTRON_RUN_AS_NODE", None)
+    env = isolated_fixture_environment(output, desktop_home)
     checks, process, page, browser = [], None, None, None
     report = {"scope": "Production packaged Electron + unchanged official stdio MCP example + local negative fixtures; loopback model", "versions": {"ext_apps": "2.0.3", "ui_protocol": "2026-01-26", "mcp_core": "2025-06-18"}, "output": str(output), "official_html_sha256": original_hash, "checks": checks}
     log = (output / "electron.log").open("w", encoding="utf-8")

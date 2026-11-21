@@ -95,6 +95,23 @@ def process_runtime(tmp_path, monkeypatch, process):
     return runtime, start
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows native state paths')
+@pytest.mark.parametrize('namespaced', [False, True])
+def test_native_state_uses_extended_path_without_changing_data_identity(tmp_path, monkeypatch, namespaced):
+    data = tmp_path / 'state directory with spaces'
+    if namespaced:
+        data = Path('\\\\?\\' + str(data))
+    process = Mock(returncode=0)
+    process.communicate.return_value = b'{"version":"2.6","ok":true,"data":{}}', b''
+    runtime, start = process_runtime(data, monkeypatch, process)
+    runtime.command('status')
+    state_path = str(runtime.root / 'native-state')
+    expected = state_path if state_path.startswith('\\\\?\\') else '\\\\?\\' + state_path
+    assert start.call_args.kwargs['env']['AGENT_DESKTOP_HOME'] == expected
+    assert runtime.root == data.resolve() / 'computer_use'
+    assert start.call_args.kwargs['cwd'] == runtime.root
+
+
 def test_action_timeout_is_unknown_and_never_replayed(tmp_path, monkeypatch):
     process = Mock()
     process.communicate.side_effect = [subprocess.TimeoutExpired('click', 2), (b'', b'')]

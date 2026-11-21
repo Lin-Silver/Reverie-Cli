@@ -862,6 +862,14 @@ class ReverieSdkBridge:
 
         return ViewStore.for_project(self.project_root)
 
+    def _view_owner_session_id(self) -> str:
+        """Resolve navigation ownership without loading executor history."""
+        manager = self.ensure_interface().session_manager
+        if hasattr(manager, "selected_session_id"):
+            return str(manager.selected_session_id() or "")
+        session = manager.get_current_session()
+        return str(getattr(session, "id", "") or "")
+
     def _run_view_tool(self, request_id: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
         from .view_execution import run_view_tool
 
@@ -1563,6 +1571,10 @@ class ReverieSdkBridge:
             else:
                 remaining = manager.list_sessions()
                 session = manager.load_session(remaining[0].id) if remaining else None
+            if session is not None and hasattr(manager, "select_session"):
+                manager.select_session(session.id)
+            interface._view_session_id = session.id if session is not None else None
+            interface._view_draft = session is None
             if interface.agent is not None:
                 interface.agent.set_history(session.messages if session is not None else [])
             return {
@@ -1621,6 +1633,10 @@ class ReverieSdkBridge:
                 session = manager.rewind_current_session(int(payload.get("messageCount", 0)))
                 from .views import visible_view_references
                 self._view_store().restrict_visible(session.id, visible_view_references(session.messages))
+            if session is not None and hasattr(manager, "select_session"):
+                manager.select_session(session.id)
+            interface._view_session_id = session.id if session is not None else None
+            interface._view_draft = session is None
             if session is not None and interface.agent is not None:
                 interface.agent.set_history(session.messages)
             return {
@@ -2082,7 +2098,7 @@ class ReverieSdkBridge:
             }
         if action == "getView":
             # Authoritative dereference of a kernel-minted view id. Identity is
-            # the kernel's current session -- NEVER the payload -- so a forged
+            # the kernel's selected session -- NEVER the payload -- so a forged
             # event cannot reach another session's views, and a view id the
             # kernel never minted has no manifest and raises here (defeated at
             # lookup, not in a shape parser). The camelCase ``view`` block is
@@ -2095,8 +2111,7 @@ class ReverieSdkBridge:
             revision = payload.get("revision")
             if revision is not None and (type(revision) is not int or revision < 1):
                 raise ValueError("View revision must be a positive integer.")
-            session = self.ensure_interface().session_manager.get_current_session()
-            session_id = str(getattr(session, "id", "") or "")
+            session_id = self._view_owner_session_id()
             store = self._view_store()
             if payload.get("sessionId") and payload["sessionId"] != session_id:
                 raise ValueError("View belongs to a different session.")
@@ -2128,7 +2143,7 @@ class ReverieSdkBridge:
                 },
             }
         if action == "setViewState":
-            # Persist a view's private display state under the kernel's current
+            # Persist a view's private display state under the kernel's selected
             # session. ``baseRevision`` guards against a lost update; the store
             # returns the new monotonic revision.
             view_id = str(payload.get("viewId") or "").strip()
@@ -2140,8 +2155,7 @@ class ReverieSdkBridge:
             base_revision = payload.get("baseRevision")
             if base_revision is not None and (type(base_revision) is not int or base_revision < 0):
                 raise ValueError("State baseRevision must be a non-negative integer.")
-            session = self.ensure_interface().session_manager.get_current_session()
-            session_id = str(getattr(session, "id", "") or "")
+            session_id = self._view_owner_session_id()
             store = self._view_store()
             if payload.get("sessionId") and payload["sessionId"] != session_id:
                 raise ValueError("View belongs to a different session.")
@@ -2163,8 +2177,7 @@ class ReverieSdkBridge:
             if summary is None:
                 raise ValueError("updateViewModelContext requires a summary.")
             source = str(payload.get("source") or "component").strip() or "component"
-            session = self.ensure_interface().session_manager.get_current_session()
-            session_id = str(getattr(session, "id", "") or "")
+            session_id = self._view_owner_session_id()
             store = self._view_store()
             if payload.get("sessionId") and payload["sessionId"] != session_id:
                 raise ValueError("View belongs to a different session.")

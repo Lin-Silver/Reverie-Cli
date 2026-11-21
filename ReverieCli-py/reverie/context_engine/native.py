@@ -18,6 +18,17 @@ def executable_name() -> str:
     return "reverie-context-engine.exe" if os.name == "nt" else "reverie-context-engine"
 
 
+def database_argument(path) -> str:
+    """Give SQLite a Windows extended path while keeping stored workspace identities stable."""
+    value = os.fspath(path)
+    if os.name != "nt" or value == ":memory:":
+        return value
+    value = os.path.abspath(value)
+    if value.startswith("\\\\?\\"):
+        return value
+    return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+
+
 def find_executable() -> Optional[Path]:
     name = executable_name()
     if getattr(sys, "frozen", False):
@@ -61,7 +72,7 @@ class NativeContext:
     def _start(self) -> None:
         self._responses = Queue()
         self._process = subprocess.Popen(
-            [str(self.executable), "serve", str(self.database)],
+            [str(self.executable), "serve", database_argument(self.database)],
             cwd=self.executable.parent,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

@@ -91,6 +91,45 @@ def test_per_message_costs_sum_to_the_conversation_total() -> None:
     assert per_message + 2 == WorkspaceStatsManager.count_messages_tokens(messages)
 
 
+def test_context_breakdown_counts_each_payload_message_once(monkeypatch) -> None:
+    payload = _payload()
+    payload.append({"role": "user", "content": [
+        {"type": "text", "text": "Inspect this image."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,fixture", "detail": "low"}},
+    ]})
+    expected = WorkspaceStatsManager.count_messages_tokens(payload)
+    original = WorkspaceStatsManager.count_message_tokens.__func__
+    counted = []
+
+    def count(cls, message):
+        counted.append(message)
+        return original(cls, message)
+
+    monkeypatch.setattr(WorkspaceStatsManager, "count_message_tokens", classmethod(count))
+    usage = _agent(payload=payload).describe_context_usage(request_messages=payload)
+
+    assert usage["total_tokens"] == expected
+    assert sum(segment["tokens"] for segment in usage["segments"]) + usage["overhead_tokens"] == expected
+    assert len(counted) == len(payload)
+
+
+def test_context_breakdown_preserves_custom_counter_total() -> None:
+    class Counter:
+        @staticmethod
+        def count_messages_tokens(messages):
+            return 1234
+
+        @staticmethod
+        def count_message_tokens(message):
+            return 7
+
+    agent = _agent()
+    agent.tool_executor.context["workspace_stats_manager"] = Counter()
+    usage = agent.describe_context_usage()
+    assert usage["total_tokens"] == 1234
+    assert agent.get_token_estimate() == 1234
+
+
 def test_context_window_uses_the_conversation_model_before_workspace_defaults() -> None:
     defaults = Config(models=[ModelConfig("first", "First", "http://localhost/v1", max_context_tokens=16000)])
     runtime = Config(models=[ModelConfig("second", "Second", "http://localhost/v1", max_context_tokens=32000)])

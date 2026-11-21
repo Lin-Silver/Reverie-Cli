@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
-from desktop_process import launch_options, stop_process, wait_for_packaged_page
+from desktop_process import isolated_fixture_environment, launch_options, stop_process, wait_for_packaged_page
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -87,8 +87,7 @@ def main():
     settings.write_text(json.dumps({"coreAppRoot": str(app_root), "projectRoot": str(workspace), "ui": {"language": "zh-CN"}}), encoding="utf-8")
     checks, process, browser, page = [], None, None, None
     report = {"scope": "production packaged Electron + loopback model; no external provider", "output": str(output), "checks": checks}
-    env = {**os.environ, "PORTABLE_EXECUTABLE_DIR": str(desktop_home)}
-    env.pop("ELECTRON_RUN_AS_NODE", None)
+    env = isolated_fixture_environment(output, desktop_home)
     log = (output / "electron.log").open("w", encoding="utf-8")
 
     def check(name, condition, detail=None):
@@ -228,7 +227,7 @@ def main():
             unknown = result(target, "slow-once")
             check("unknown-write-never-replayed", "unknown" in json.dumps(unknown).lower() and (workspace / "slow-effects.txt").read_text() == "effect\n" and page.get_by_role("alertdialog").count() == 0, unknown)
             observe("restored-unknown")
-            current = request("getSession", {})["session"]
+            current = request("getSession", {"sessionId": session.id})["session"]
             active_session_id = current["id"]
             view_id = next(item.name for item in (config.project_data_dir / "views" / active_session_id).iterdir() if item.is_dir())
             view = request("getView", {"sessionId": active_session_id, "viewId": view_id, "revision": 1})["view"]

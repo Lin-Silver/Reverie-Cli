@@ -131,7 +131,10 @@ class ComputerUseRuntime:
             env = os.environ.copy()
             for key in ('AGENT_DESKTOP_SESSION', 'AGENT_DESKTOP_AGENT_ID', 'AGENT_DESKTOP_HOME'):
                 env.pop(key, None)
-            env['AGENT_DESKTOP_HOME'] = str(self.root / 'native-state')
+            native_state = str(self.root / 'native-state')
+            if sys.platform == 'win32' and not native_state.startswith('\\\\?\\'):
+                native_state = '\\\\?\\UNC\\' + native_state[2:] if native_state.startswith('\\\\') else '\\\\?\\' + native_state
+            env['AGENT_DESKTOP_HOME'] = native_state
             argv = [str(self.binary), '--session', self.session_id]
             if headed:
                 argv.append('--headed')

@@ -25,7 +25,7 @@ import uuid
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ReverieCli-py"))
-from desktop_process import launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
+from desktop_process import isolated_fixture_environment, launch_options, packaged_kernel_path, stop_process, wait_for_packaged_page
 FIXTURE = REPO / "scripts/verification/fixtures/riu-p4/view.html"
 
 
@@ -119,8 +119,7 @@ def main():
     settings = desktop_home / ".reverie/desktop/desktop-settings.json"
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"coreAppRoot": str(app_root), "projectRoot": str(workspace), "ui": {"language": "zh-CN"}}), encoding="utf-8")
-    env = {**os.environ, "PORTABLE_EXECUTABLE_DIR": str(desktop_home)}
-    env.pop("ELECTRON_RUN_AS_NODE", None)
+    env = isolated_fixture_environment(output, desktop_home)
     report = {"scope": "Production packaged Electron; synthetic loopback model; no external provider", "checks": [], "measurements": {}, "fixture": {"html_bytes": FIXTURE.stat().st_size, "max_data_rows": 1000, "sha256": hashlib.sha256(FIXTURE.read_bytes()).hexdigest()}, "hardware": {"platform": platform.platform(), "cpu": platform.processor(), "logical_cpus": os.cpu_count()}, "output": str(output)}
     process = browser = page = None
     log = (output / "electron.log").open("w", encoding="utf-8")

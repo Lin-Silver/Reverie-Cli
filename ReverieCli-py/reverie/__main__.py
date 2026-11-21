@@ -286,14 +286,19 @@ def main(argv: list[str] | None = None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--context-engine"]:
         import subprocess
-        from reverie.context_engine.native import find_executable
+        from reverie.context_engine.native import database_argument, find_executable
 
         executable = find_executable()
         if executable is None:
             print("Reverie Context Engine executable is unavailable.", file=sys.stderr)
             return 1
         try:
-            return subprocess.run([str(executable), *argv[1:]], check=False).returncode
+            arguments = argv[1:]
+            operation = arguments[0] if arguments else ""
+            database_index = 2 if operation == "index" else 1
+            if operation in {"index", "serve", "status", "search", "chunks", "paths"} and len(arguments) > database_index:
+                arguments[database_index] = database_argument(arguments[database_index])
+            return subprocess.run([str(executable), *arguments], check=False).returncode
         except OSError as error:
             print(f"Could not start the Reverie Context Engine: {error}", file=sys.stderr)
             return 1

@@ -10,6 +10,14 @@ import sys
 import time
 
 
+def isolated_fixture_environment(output, desktop_home):
+    """Treat repo-local evidence workspaces as standalone projects."""
+    env = {**os.environ, 'PORTABLE_EXECUTABLE_DIR': str(desktop_home),
+           'GIT_CEILING_DIRECTORIES': str(Path(output).resolve())}
+    env.pop('ELECTRON_RUN_AS_NODE', None)
+    return env
+
+
 @contextmanager
 def keep_windows_awake():
     """Hold a temporary test-thread power request, restoring its prior state on exit."""

@@ -12,7 +12,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'ReverieCli-py'))
-from desktop_process import launch_options, stop_process, wait_for_packaged_page
+from desktop_process import isolated_fixture_environment, launch_options, stop_process, wait_for_packaged_page
 from riu_rich_answer_benchmark import RICH_CONTRAST, RICH_STATE, assess_rich_state
 
 def recommendation_preview_png() -> str:
@@ -157,8 +157,7 @@ print(0)
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
-            env = {**os.environ, 'PORTABLE_EXECUTABLE_DIR': str(home)}
-            env.pop('ELECTRON_RUN_AS_NODE', None)
+            env = isolated_fixture_environment(output, home)
             process = subprocess.Popen([str(args.exe.resolve()), '--gui', '--project', str(workspace),
                                         f'--remote-debugging-port={port}'], env=env, stdout=log,
                                        stderr=subprocess.STDOUT, **launch_options())

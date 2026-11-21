@@ -14,6 +14,32 @@ desktop = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(desktop)
 
 
+def test_fixture_git_discovery_stays_inside_evidence_directory(tmp_path, monkeypatch):
+    outer = tmp_path / 'outer'
+    output = outer / 'evidence'
+    workspace = output / 'workspace'
+    workspace.mkdir(parents=True)
+    options = {'capture_output': True, 'text': True,
+               'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)}
+    subprocess.run(['git', 'init', '--quiet', str(outer)], check=True, **options)
+    discovered = subprocess.run(['git', '-C', str(workspace), 'rev-parse', '--show-toplevel'],
+                                check=True, **options)
+    assert Path(discovered.stdout.strip()).resolve() == outer.resolve()
+    monkeypatch.setenv('ELECTRON_RUN_AS_NODE', '1')
+
+    env = desktop.isolated_fixture_environment(output, output / 'desktop-home')
+    bounded = subprocess.run(['git', '-C', str(workspace), 'rev-parse', '--show-toplevel'],
+                             env=env, **options)
+    assert bounded.returncode != 0
+    assert 'ELECTRON_RUN_AS_NODE' not in env
+    assert os.environ['ELECTRON_RUN_AS_NODE'] == '1'
+
+    subprocess.run(['git', 'init', '--quiet', str(workspace)], check=True, env=env, **options)
+    inner = subprocess.run(['git', '-C', str(workspace), 'rev-parse', '--show-toplevel'],
+                           check=True, env=env, **options)
+    assert Path(inner.stdout.strip()).resolve() == workspace.resolve()
+
+
 @pytest.mark.parametrize('platform,relative,expected', [
     ('darwin', 'Reverie.app/Contents/MacOS/ReverieUI', 'Reverie.app/Contents/reverie'),
     ('win32', 'win-unpacked/ReverieUI.exe', 'win-unpacked/reverie.exe'),

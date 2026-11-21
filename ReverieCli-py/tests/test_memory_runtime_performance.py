@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 from reverie.memory import MemoryOS
 from reverie.memory.event_store import EventStore
@@ -55,10 +56,11 @@ def test_access_updates_leave_search_index_and_revision_unchanged(tmp_path, monk
     revision = store.revision
     statements = []
     original = store._connect
+    @contextmanager
     def connect():
-        connection = original()
-        connection.set_trace_callback(statements.append)
-        return connection
+        with original() as connection:
+            connection.set_trace_callback(statements.append)
+            yield connection
     monkeypatch.setattr(store, "_connect", connect)
     store.touch_access([item.id, item.id])
     assert not any("DELETE FROM memory_fts" in sql or "INSERT INTO memory_fts" in sql for sql in statements)

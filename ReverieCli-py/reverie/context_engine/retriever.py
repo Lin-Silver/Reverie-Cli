@@ -251,12 +251,13 @@ class ContextRetriever:
         self.lsp_manager = lsp_manager
         self.content_searcher = content_searcher
         self.chunk_searcher = chunk_searcher
+        self._content_indexer = getattr(content_searcher, "__self__", None)
         # Derive the content document-frequency providers from the same
         # indexer that owns ``content_searcher`` when they are not supplied
         # explicitly, so every caller (CLI, desktop bridge, benchmark) gets
         # true content-level IDF without extra wiring.
         if content_frequency is None and content_searcher is not None:
-            owner = getattr(content_searcher, "__self__", None)
+            owner = self._content_indexer
             derived = getattr(owner, "content_document_frequencies", None)
             if callable(derived):
                 content_frequency = derived
@@ -2140,7 +2141,6 @@ class ContextRetriever:
         max_tokens = max(1000, int(max_tokens or 12000))
         max_files = max(1, int(max_files or 6))
         max_symbols = max(1, int(max_symbols or 12))
-        term_weights = self._calibrate_task_term_weights(self._build_task_term_weights(query_text))
         anchors = self._extract_query_anchors(query_text)
         anchor_file_terms = self._reliable_file_anchor_terms({
             item.lower().replace("\\", "/") for item in anchors.get("files", [])
@@ -2167,6 +2167,7 @@ class ContextRetriever:
             tuple(sorted(str(path or "").strip() for path in (changed_files or []) if str(path or "").strip())),
             len(self.file_info) if isinstance(self.file_info, dict) else 0,
             len(self.symbol_table),
+            getattr(self._content_indexer, "generation", 0),
             tuple(sorted(anchor_file_terms)),
             tuple(sorted(anchor_symbol_terms)),
         )
@@ -2176,6 +2177,7 @@ class ContextRetriever:
         if cached_entry and (now - cached_entry[0]) <= cache_ttl:
             return cached_entry[1]
 
+        term_weights = self._calibrate_task_term_weights(self._build_task_term_weights(query_text))
         normalized_active_files = {
             self._normalize_file_path(path)
             for path in (active_files or [])

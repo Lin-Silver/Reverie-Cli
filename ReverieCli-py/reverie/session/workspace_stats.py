@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 import hashlib
 import json
 import os
@@ -394,11 +394,10 @@ class WorkspaceStatsManager:
         return total
 
     @classmethod
-    def count_messages_tokens(cls, messages: List[Dict[str, Any]]) -> int:
-        total = 0
-        for message in messages or []:
-            total += cls.count_message_tokens(message)
-        return total + 2
+    def count_messages_tokens(cls, messages: List[Dict[str, Any]], *, message_tokens: Optional[Iterable[int]] = None) -> int:
+        if message_tokens is None:
+            message_tokens = (cls.count_message_tokens(message) for message in messages or [])
+        return sum(message_tokens) + 2
 
     @classmethod
     def _count_value_tokens(cls, value: Any) -> int:

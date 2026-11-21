@@ -332,6 +332,7 @@ class CodebaseIndexer:
 
         # Index lock (thread safety)
         self._index_lock = threading.Lock()
+        self.generation = 0
         self._last_index_result: Optional[IndexResult] = None
         self._index_progress = IndexProgress()
 
@@ -1218,6 +1219,7 @@ class CodebaseIndexer:
             self._file_info.update(file_info)
             self._large_files.clear()
             self._large_files.update(large_files)
+            self.generation += 1
 
     def _format_index_status_label(self, status: Dict[str, Any]) -> Optional[str]:
         """Condense the live index snapshot into a short UI-friendly label."""
@@ -1956,6 +1958,7 @@ class CodebaseIndexer:
 
         with self._index_lock:
             self.dependency_graph.resolve_targets(self.symbol_table)
+            self.generation += 1
 
         result.parse_time_ms = (time.time() - parse_start) * 1000
         result.total_time_ms = (time.time() - start_time) * 1000
@@ -2132,6 +2135,7 @@ class CodebaseIndexer:
             updated_at=time.time(),
         )
         self._last_index_result = None
+        self.generation += 1
     
     def get_statistics(self) -> Dict:
         """Get detailed indexing statistics"""

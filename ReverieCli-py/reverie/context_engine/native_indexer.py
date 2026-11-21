@@ -239,6 +239,7 @@ class NativeCodebaseIndexer(CodebaseIndexer):
                 if entry["size"] > self.config.max_file_size_kb * 1024:
                     self._large_files.add(str(path))
             self.dependency_graph.resolve_targets(self.symbol_table)
+            self.generation += 1
 
     def _search(self, weighted_terms, limit, *, chunks):
         weights = [(str(term or "").strip(), float(weight or 0.0)) for term, weight in weighted_terms if str(term or "").strip()]

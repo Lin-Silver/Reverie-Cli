@@ -110,12 +110,21 @@ def test_application_native_index_preserves_hits_and_ignores(tmp_path, native_ex
         assert reloaded.get_index_status()["revision"] == revision
         assert manifest.stat().st_mtime_ns == before
 
+        retriever = ContextRetriever(
+            reloaded.symbol_table, reloaded.dependency_graph, root, file_info=reloaded._file_info,
+            content_searcher=reloaded.search_content_terms, chunk_searcher=reloaded.search_code_chunks,
+        )
+        query = "Locate the PipelineGuard validateInvoice implementation"
+        before_rename = retriever.retrieve_for_task(query, fast=True)
+        assert Path(before_rename.relevant_files[0].file_path).name == "alpha.py"
         (root / "alpha.py").rename(root / "beta.py")
         result = reloaded.refresh()
         assert result.success and result.files_parsed == 1
         assert reloaded.get_index_status()["revision"] == revision + 1
         assert reloaded.search_code_chunks([("invoice", 1.0)])[0]["file_path"] == str(root / "beta.py")
         assert str(root / "alpha.py") not in reloaded._file_info
+        after_rename = retriever.retrieve_for_task(query, fast=True)
+        assert Path(after_rename.relevant_files[0].file_path).name == "beta.py"
     finally:
         reloaded.close()
 

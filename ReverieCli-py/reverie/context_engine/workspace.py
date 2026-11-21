@@ -156,11 +156,11 @@ def detect_workspace_profile(
                 item.markers.append(_relative_label(match, root))
             languages.add(kind)
 
-    skipped_dirs = {".git", ".reverie", "node_modules", "__pycache__", "dist", "build", "target", ".venv", "venv"}
+    skipped_dirs = {".git", ".reverie", ".runtime", ".kernel", ".cache", "release", "node_modules", "__pycache__", "dist", "build", "target", ".venv", "venv"}
     scanned = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [name for name in dirnames if name not in skipped_dirs]
-        scanned += len(filenames)
+        scanned += 1 + len(filenames)
         if scanned > max_scan_entries:
             break
         for filename in filenames:

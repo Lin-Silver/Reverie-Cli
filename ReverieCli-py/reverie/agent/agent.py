@@ -8328,10 +8328,15 @@ class ReverieAgent:
 
         return WorkspaceStatsManager
 
-    def _count_request_tokens(self, request_messages: List[Dict[str, Any]]) -> int:
+    def _count_request_tokens(self, request_messages: List[Dict[str, Any]], *, message_tokens: Optional[List[int]] = None) -> int:
         """Count the tokens one built request payload will occupy."""
         counter = self._token_counter()
         try:
+            if message_tokens is not None:
+                try:
+                    return max(int(counter.count_messages_tokens(request_messages, message_tokens=message_tokens)), 0)
+                except TypeError:
+                    pass  # Existing custom counters may not accept pre-counted messages.
             return max(int(counter.count_messages_tokens(request_messages)), 0)
         except Exception:
             logger.debug("Token counter failed; falling back to character heuristic", exc_info=True)
@@ -8370,12 +8375,8 @@ class ReverieAgent:
 
         cache_estimate = request_messages is None
         request_messages = self._build_messages(read_only=True) if cache_estimate else request_messages
-        total_tokens = self._count_request_tokens(request_messages)
-        if cache_estimate:
-            self._token_estimate_cache_key = self._token_estimate_signature()
-            self._token_estimate_cache_value = total_tokens
-            self._token_estimate_cache_time = time.monotonic()
-
+        message_tokens = [0] * len(request_messages)
+        count_failed = False
         buckets: Dict[str, Dict[str, int]] = {}
         heaviest = {"role": "", "index": -1, "tokens": 0, "preview": ""}
         for index, message in enumerate(request_messages):
@@ -8398,6 +8399,8 @@ class ReverieAgent:
                 tokens = max(int(count_one(message)), 0)
             except Exception:
                 tokens = 0
+                count_failed = True
+            message_tokens[index] = tokens
             bucket = buckets.setdefault(key, {"tokens": 0, "messages": 0})
             bucket["tokens"] += tokens
             bucket["messages"] += 1
@@ -8410,6 +8413,11 @@ class ReverieAgent:
                     "preview": preview[:117] + "..." if len(preview) > 120 else preview,
                 }
 
+        total_tokens = self._count_request_tokens(request_messages, message_tokens=None if count_failed else message_tokens)
+        if cache_estimate:
+            self._token_estimate_cache_key = self._token_estimate_signature()
+            self._token_estimate_cache_value = total_tokens
+            self._token_estimate_cache_time = time.monotonic()
         return self._context_usage_report(request_messages, total_tokens, buckets, heaviest)
 
     @staticmethod

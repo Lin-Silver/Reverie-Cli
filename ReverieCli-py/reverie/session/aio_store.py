@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from copy import deepcopy
+from contextlib import contextmanager
 from pathlib import Path
 import json
 import uuid
@@ -16,10 +17,11 @@ from ..memory.store import MemoryStore
 class AiOMemoryStore(MemoryStore):
     """All assistant extraction paths share durable correction tombstones."""
 
+    @contextmanager
     def _connect(self):
-        connection = super()._connect()
-        connection.execute('PRAGMA synchronous=FULL')
-        return connection
+        with super()._connect() as connection:
+            connection.execute('PRAGMA synchronous=FULL')
+            yield connection
 
     def _initialize(self):
         super()._initialize()

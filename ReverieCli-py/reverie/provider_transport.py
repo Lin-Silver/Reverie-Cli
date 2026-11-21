@@ -182,9 +182,10 @@ def _pool(key):
 
 
 class _ResponseStream(httpx.SyncByteStream):
-    def __init__(self, response: httpx.Response, control):
+    def __init__(self, response: httpx.Response, control, on_close):
         self.response = response
         self.control = control
+        self.on_close = on_close
         self.closed = False
         self.exhausted = False
         self.iterator = response.stream.__aiter__()
@@ -231,11 +232,13 @@ class _ResponseStream(httpx.SyncByteStream):
                 network = self.response.extensions.get("network_stream")
                 if isinstance(network, _NetworkStream):
                     network.release_cancel()
+                self.on_close(self)
 
 
 class ProviderTransport(httpx.BaseTransport):
     def __init__(self, *, proxy=None, verify=True, cert=None):
         self.key = (str(proxy or ""), verify, cert)
+        self._streams = set()
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         control = _control.get()
@@ -256,12 +259,15 @@ class ProviderTransport(httpx.BaseTransport):
             return response
 
         response = _wait(send(), control)
+        stream = _ResponseStream(response, control, self._streams.discard)
+        self._streams.add(stream)
         return httpx.Response(response.status_code, headers=response.headers,
-                              stream=_ResponseStream(response, control), extensions=response.extensions)
+                              stream=stream, extensions=response.extensions)
 
     def close(self):
         # A short-lived SDK client does not own the process-wide connection pool.
-        pass
+        for stream in list(self._streams):
+            stream.close()
 
 
 def provider_client(*, proxy=None, **kwargs) -> httpx.Client:

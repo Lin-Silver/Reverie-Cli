@@ -11,6 +11,20 @@ from reverie.desktop_control import RunControl
 from reverie.provider_transport import _wait, provider_client, provider_post, request_scope, interruptible_sleep
 
 
+def _connection_pool_state():
+    from reverie.provider_transport import _transports
+
+    async def snapshot():
+        return [{"connections": len(pool.connections),
+                 "idle": sum(connection.is_idle() for connection in pool.connections),
+                 "closed": sum(connection.is_closed() for connection in pool.connections),
+                 "expired": sum(connection.has_expired() for connection in pool.connections),
+                 "pending_requests": len(pool._requests)}
+                for pool in _transports.values()]
+
+    return _wait(snapshot())
+
+
 @pytest.fixture
 def server():
     entered, disconnected, release = threading.Event(), threading.Event(), threading.Event()
@@ -139,7 +153,7 @@ def test_new_client_objects_reuse_upstream_connection(server, transport):
         else:
             with provider_client() as client:
                 assert client.post(f"{url}/quick", json={}).json() == {}
-    assert len(connections) == 1
+    assert len(connections) == 1, _connection_pool_state()
 
 
 @pytest.mark.parametrize("framing", ["length", "chunked"])
@@ -163,7 +177,28 @@ def test_stream_terminal_record_retains_keepalive_connection(server, transport, 
             with OpenAI(base_url=url, api_key="fixture", http_client=provider_client(), max_retries=0) as client:
                 response = client.post(f"/events-{framing}", cast_to=ChatCompletionChunk, body={}, stream=True, stream_cls=Stream[ChatCompletionChunk])
                 list(response)
-    assert len(connections) == 1
+    assert len(connections) == 1, _connection_pool_state()
+
+
+@pytest.mark.parametrize("retain_response", [False, True])
+def test_client_close_releases_its_active_response_and_preserves_other_clients(server, retain_response):
+    url, _, disconnected, connections = server
+    owner = provider_client()
+    other = provider_client()
+    response = owner.send(owner.build_request("POST", f"{url}/stream", json={}), stream=True)
+    if not retain_response:
+        response = None
+    try:
+        assert other.post(f"{url}/quick", json={}).json() == {}
+        owner.close()
+        assert disconnected.wait(1), "Closing a client must close its unfinished response"
+        assert other.post(f"{url}/quick", json={}).json() == {}
+        assert len(connections) == 2, _connection_pool_state()
+    finally:
+        if response is not None:
+            response.close()
+        owner.close()
+        other.close()
 
 
 def test_early_stream_close_has_a_bound_even_when_peer_keeps_sending_nothing(server):

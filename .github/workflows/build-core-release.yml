@@ -605,7 +605,11 @@ jobs:
           EOF
           fi
           if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file"
+            if [[ "$release_kind" == "stable" ]]; then
+              gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file" --draft --latest=false
+            else
+              gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file"
+            fi
           else
             if [[ "$release_kind" == "prerelease" ]]; then
               gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --prerelease --latest=false
@@ -650,5 +654,6 @@ jobs:
           if [[ "$release_kind" == "prerelease" ]]; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=true -f make_latest=false >/dev/null
           else
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=true -F prerelease=false -f make_latest=false >/dev/null
+            echo "Stable draft $release_tag contains 17 assets from $GITHUB_SHA; final downloaded-asset and physical DPI verification precede publication."
           fi

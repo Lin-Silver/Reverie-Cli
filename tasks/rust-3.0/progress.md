@@ -91,3 +91,7 @@ CI 为 Python 候选及未来 Rust 开发分支提供只读测试/构建；核�
 未提交候选新增完整发行资产清单生成器：核对十个实际程序、四个内核记录、聚合记录的来源、版本、平台、架构、大小、SHA-256 和 Python/in-process 声明，生成完整清单及 `SHA256SUMS`。发布 job 上传共 17 项资产，纠正两处仍称 Rust 后端的错误诊断。文档区分原混合版历史结果和纯 Python 重发合同。
 
 已有 `.runtime/rust-3.0/release-metadata-regression-1.xml` 记录为 50 项通过、零失败/跳过，19.557 秒，对应上述未提交候选内容。模拟发布测试证明的是守卫与上传次序，尚未替代真实四平台程序、独立下载和 DPI 验收。完整候选提交、全量回归与实际资产验证继续执行；正式标签、main 和 Rust 实现仍未变更。
+
+发行清单及上述记录已提交并推送候选分支 `d34818c`。用户随后确认稳定版采用“CI 生成草稿，最终验收后公开”：版本标签 CI 不公开稳定资产，也不把它标为 Latest；最终独立下载和真实 DPI 必须对应草稿里的实际程序。先更新发布行为测试，旧脚本得到 4 失败 / 1 通过的预期红灯（`.runtime/rust-3.0/stable-draft-red-1.xml`），再修复稳定版创建、更新和完成步骤为草稿；滚动预发布策略保留。该调整尚待定向与完整验证，不提前更新正式标签。
+
+定向验证 `tests/test_release_publication_workflow.py tests/test_release_publication.py tests/test_release_manifest.py tests/test_non_game_completion.py` 为 56 通过、零失败/跳过，27.66 秒（`.runtime/rust-3.0/stable-draft-green-1.xml`）。真实执行工作流中的 Bash 并记录 stub 调用，证明已有/新建稳定 Release 在上传前就是草稿，缺 ID/上传失败不公开，成功后完整 17 项仍为草稿。文档检查为 39 文档、195 链接、零错误；不据此替代真实 GitHub 稳定草稿及包验收。

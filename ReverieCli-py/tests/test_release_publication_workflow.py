@@ -81,7 +81,7 @@ def test_native_release_gate_rejects_changed_assets_and_failed_runtime(tmp_path,
     (True, False, "42"), (False, False, "42"), (False, True, "42"),
     (True, False, ""), (True, False, "42\n43"),
 ])
-def test_stable_notes_and_publication_after_successful_uploads(tmp_path, existing, fail_upload, release_ids):
+def test_stable_notes_and_draft_after_successful_uploads(tmp_path, existing, fail_upload, release_ids):
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
     if not bash or not Path(bash).is_file():
         pytest.skip("Bash is required to exercise the release workflow")
@@ -128,9 +128,10 @@ elif args[0] == "api" and "--method" not in args:
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     note_call = next(c for c in calls if "--notes-file" in c["args"])
     assert note_call["notes"].strip() == "- A concise verified change."
-    if not existing:
-        assert "--draft" in note_call["args"]
+    assert "--draft" in note_call["args"]
+    assert "--latest=false" in note_call["args"]
     public = [i for i, c in enumerate(calls) if "draft=false" in c["args"]]
+    assert not public, "CI must retain a stable draft until actual downloaded assets and DPI pass"
     if release_ids != "42":
         assert result.returncode != 0
         assert not public
@@ -146,4 +147,6 @@ elif args[0] == "api" and "--method" not in args:
         assert {"reverie-kernel-windows-x64.json", "reverie-kernel-linux-x64.json",
                 "reverie-kernel-macos-arm64.json", "reverie-kernel-macos-x64.json",
                 "reverie-kernels.json", "reverie-release-assets.json", "SHA256SUMS"} <= names
-        assert len(public) == 1 and public[0] > max(uploads)
+        drafts = [i for i, c in enumerate(calls) if "draft=true" in c["args"]]
+        assert len(drafts) == 1 and drafts[0] > max(uploads)
+        assert "make_latest=false" in calls[drafts[0]]["args"]

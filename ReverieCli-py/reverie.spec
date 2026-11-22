@@ -1,10 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
 from hashlib import sha256
+from http.client import IncompleteRead
 from pathlib import Path
+from urllib.error import URLError
 from urllib.request import urlopen
 import os
 import runpy
+import tempfile
+import time
 
 build_mode = os.environ.get('REVERIE_PYINSTALLER_MODE', 'onefile').strip().lower()
 datas = [('README.md', '.')]
@@ -82,17 +86,39 @@ if missing_bundle_files or (build_mode == 'ui-onedir' and not embedded_browser_c
     )
 
 # Stage the pinned vocabulary during the build so the first chat needs no download.
+def download_vocabulary(url: str, expected_sha256: str) -> bytes:
+    for attempt in range(3):
+        try:
+            with urlopen(url, timeout=30) as response:
+                data = response.read()
+        except (TimeoutError, ConnectionError, URLError, IncompleteRead):
+            if attempt == 2:
+                raise
+            time.sleep(attempt + 1)
+            continue
+        if sha256(data).hexdigest() != expected_sha256:
+            raise SystemExit("cl100k vocabulary checksum mismatch")
+        return data
+
+
 tokenizer = runpy.run_path(str(repo_root / "reverie" / "offline_tokenizer.py"))
 tokenizer_file = Path(resource_root or repo_root / "build" / "bundle_resources") / "tokenizers" / tokenizer["VOCABULARY_NAME"]
 if tokenizer["read_vocabulary"](tokenizer_file) is None:
     data = tokenizer["read_vocabulary"](tokenizer["cached_vocabulary_path"]())
     if data is None:
-        with urlopen(tokenizer["VOCABULARY_URL"], timeout=15) as response:
-            data = response.read()
-        if sha256(data).hexdigest() != tokenizer["VOCABULARY_SHA256"]:
-            raise SystemExit("cl100k vocabulary checksum mismatch")
+        data = download_vocabulary(tokenizer["VOCABULARY_URL"], tokenizer["VOCABULARY_SHA256"])
     tokenizer_file.parent.mkdir(parents=True, exist_ok=True)
-    tokenizer_file.write_bytes(data)
+    staged_file = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=tokenizer_file.parent, prefix=".cl100k-", suffix=".tmp", delete=False) as stream:
+            staged_file = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staged_file, tokenizer_file)
+    finally:
+        if staged_file is not None:
+            staged_file.unlink(missing_ok=True)
 add_data_if_exists(tokenizer_file, "reverie/tokenizer_data")
 
 icon_path_env = os.environ.get("REVERIE_ICON_PATH", "").strip()

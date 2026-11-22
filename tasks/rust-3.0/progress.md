@@ -199,3 +199,19 @@ Intel 原始 P4 仅 `local-input-p95-under-100ms` 失败：60 次样本 p50=81.6
 为在同一实际失败 DMG 上区分追踪开销，扩展 `recheck-riu-macos.yml` 支持已完成的原生验证与 core-release 失败资产；下载前限定来源 workflow 与固定 SHA，执行前核对 manifest、CLI 大小/摘要、DMG 和全资产 provenance。新 `p4-compare` 使用原门槛、60 次样本及完整 P4 工作量分别运行无追踪和有追踪；无发布写权限，诊断结果不改变原验收判定。相关本地回归首轮 39 项通过、YAML/内嵌 Python/Bash 语法及只读权限检查通过，真实失败包也通过身份校验；远端对照结果仍待取得。
 
 真实单屏 DPI、忽略规则处理决定、最终 17 项稳定草稿及正式公开仍等待必需前置。没有创建 Rust 实现或改动其他会话的收尾文档，完整 3.0 范围继续保留。
+
+### P3-7：同包对照、验证脚本与构建词表下载修复（2026-11-22）
+
+诊断提交 `b0fe71f542f77d25b6c333dc9e47eeb668d44939` 只改 macOS 复验 workflow、对应验证代码与测试、本任务计划记录；已推送 Python 候选分支，未推进 main 或标签。Test `45058606509` 八个作业均成功。
+
+复验 `45058634815` / job `137319371891` 在新宿主上安装原失败的 `20ac69e` DMG，没有重建。安装前后摘要、内核与来源一致，两次完整 P4 均通过：无追踪 n=60、p50=61.3 ms、p95=97.4 ms、max=190.8 ms；有追踪 n=60、p50=61.3 ms、p95=67.3 ms、max=69.6 ms。fixture 摘要完全相同，后置身份检查通过；独立下载的 artifact `14769495060` ZIP 摘要为 `5a4affb6b3e790b730d824aefe0288e980880810d2ba2481392ee077e96a446c`。原始失败判定保持 false。这组数据不能把初次失败归因 tracing，宿主波动的具体原因仍缺 CPU 与负载记录；没有修改 fixture 工作量或 100 ms 门槛。
+
+四份 `20ac69e` 最终原生证据全部下载、核对 ZIP digest 与来源，新增 `final-draft-v2.5.5-20ac69e/native-inputs-complete-failed.json`：下载完整为 true，四平台验收为 false（Intel 失败），稳定草稿与真实 DPI 为 false。此前只有三项的输入文件和原报告保留。
+
+DPI 驱动脚本的错误前缀解析及 emitted 记录修正用真实 Windows 开发候选 EXE 验证。自有窗口截图返回 600×421 PNG，独立像素检查发现粉色按钮范围 `[17,43,583,147]` 和绿色画布 `[17,162,583,338]`；未登记 image_id 返回 `STALE_IMAGE` / `not_delivered`，点击和拖拽计数保持 0，SDK shutdown 退出码 0。证据为 C 盘任务目录 `dpi-sdk-parser-check-2-20ac69e/preparation-verified.json`。仅证明脚本、实际截图及拒绝错误图像的链路，不代表最终程序四档 DPI 已通过；当前原生窗口清单仍无显示设置。
+
+Build `45058606286` 的 Intel job `137319279679` 失败发生在 PyInstaller 准备固定 cl100k 词表，尚未构建实际 Intel 包、也没有进入 P4。日志明确为 `reverie.spec` 的 `urlopen(..., timeout=15)` / `response.read()` 发生 `TimeoutError: The read operation timed out`，与原版输入延迟失败分开记录。
+
+最小修复仅针对构建：固定词表来源和 SHA-256 不变，连接/读取中断最多三次、每次超时 30 秒，坏摘要立即拒绝；完整验证后在目标目录写临时文件、flush/fsync 并原子替换，失败保留已有文件。先在原 spec 复现 7 失败/2 通过，包括真实回环 HTTP 503 和截断；修复后相关回归 80 通过（3.18 秒），包含拒绝坏摘要、有限重试、已有有效缓存不下载、切换失败保留旧文件。JUnit 为 C 盘 `tokenizer-download-green-1.xml`。
+
+同一修复 spec 实际从官方固定 URL 无缓存下载并原子写入：1681126 字节、SHA-256 `223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7`，2.734 秒，记录为 `tokenizer-download-live-1/report.json`。这项实测不替代四平台完整打包。修复候选须重新执行 CI、原生包与最终稳定草稿核对，main、正式标签、真实 DPI 与正式公开继续按前置次序处理。

@@ -5,7 +5,7 @@ Start with the [documentation index](docs/README.md), [Desktop guide](docs/DESKT
 
 Reverie Desktop implements offline interactive views with inline, fullscreen and picture-in-picture presentation.
 
-Current source version: **v2.5.5**, the Python closeout release candidate. The latest published stable release remains **v2.5.3** until the full acceptance gates pass.
+Python closeout version: **v2.5.5**. [Official release](https://github.com/Lin-Silver/Reverie-Cli/releases/tag/v2.5.5) · [Verification scope](docs/releases/v2.5.5-verification.md).
 
 Version 2.5.5 preserves the Python core, Electron desktop, existing features, and bundled Rust Context Engine. It is intended as the near-final Python release and the complete-project archive baseline for a future `Reverie-Cli-py` branch. The Rust mainline transition is separate work; the Python directory and project layout remain intact.
 

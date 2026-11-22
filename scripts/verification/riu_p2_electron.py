@@ -23,6 +23,15 @@ sys.path.insert(0, str(REPO / "ReverieCli-py"))
 from desktop_process import isolated_fixture_environment, launch_options, stop_process, wait_for_packaged_page
 
 
+def result(target, call_id, *, timeout=120000):
+    """Consume the next reply for this RPC ID, including reused IDs."""
+    from playwright.sync_api import expect
+
+    reply = target.locator('#replies > [data-call-id=' + json.dumps(call_id) + ']').first
+    expect(reply).to_be_attached(timeout=timeout)
+    return json.loads(reply.evaluate('element => { const text = element.textContent; element.remove(); return text; }'))
+
+
 class Fixture(BaseHTTPRequestHandler):
     requests = []
     hold = threading.Event()
@@ -134,10 +143,6 @@ def main():
         found = page.frame_locator("iframe.interactive-view-frame").first
         expect(found.locator("#ready")).to_have_text(re.compile("^Ready"), timeout=120000)
         return found
-
-    def result(target, call_id):
-        expect(target.locator("#result")).to_contain_text('"id":"' + call_id + '"', timeout=120000)
-        return json.loads(target.locator("#result").inner_text())
 
     def approve(decision="once"):
         panel = page.get_by_role("alertdialog")

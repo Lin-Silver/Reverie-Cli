@@ -10,11 +10,12 @@
 <button id="busy">Try while busy</button><button id="duplicate">Repeat write id</button>
 <button id="followup">Suggest follow-up</button><button id="bad">Invalid schema</button>
 <pre id="result" aria-live="polite"></pre>
+<div id="replies" hidden></div>
 <pre id="receipts"></pre>
 <script>
 // RIU_P2_HTML_ONLY: this script must never be copied into a model request.
 let capability, stateRevision = 0;
-const results = {};
+const results = document.querySelector("#replies");
 function send(id, method, params) { parent.postMessage({jsonrpc:"2.0",id,method,params,capability},"*"); }
 // Persisted operation ids are explicit; standard JSON-RPC ids are instance-local.
 function tool(id, name, args) { send(id, "reverie/call-tool", {toolName:name,arguments:args,callId:id}); }
@@ -34,7 +35,10 @@ addEventListener("message", e => {
     send("auto-message", "ui/message", {role:"user",content:[{type:"text",text:"RIU_P2_FOLLOWUP"}],source:"user-gesture"});
     return;
   }
-  results[m.id] = m;
+  const reply = document.createElement("pre");
+  reply.dataset.callId = m.id;
+  reply.textContent = JSON.stringify(m);
+  results.append(reply);
   if (m.id === "state" && m.result) stateRevision = m.result.revision;
   document.querySelector("#result").textContent = JSON.stringify(m);
 });

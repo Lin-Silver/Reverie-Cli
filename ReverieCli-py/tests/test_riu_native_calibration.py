@@ -25,6 +25,62 @@ def browser():
         instance.close()
 
 
+@pytest.fixture
+def p2_replies(browser):
+    from playwright.sync_api import expect
+
+    spec = importlib.util.spec_from_file_location('riu_p2_replies', ROOT/'scripts/verification/riu_p2_electron.py')
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    page = browser.new_page()
+    try:
+        page.set_content('<iframe id="p2"></iframe>')
+        fixture = ROOT/'ReverieCli-py/tests/fixtures/riu_p2/interaction.html'
+        page.locator('#p2').evaluate('(frame, html) => { frame.srcdoc = html; }', fixture.read_text(encoding='utf-8'))
+        target = page.frame_locator('#p2')
+        expect(target.locator('#result')).to_be_attached()
+
+        def deliver(*replies):
+            page.locator('#p2').evaluate('''(frame, replies) => {
+                for (const reply of replies) frame.contentWindow.postMessage(reply, '*');
+            }''', list(replies))
+            expect(target.locator('#result')).to_have_text(json.dumps(replies[-1], separators=(',', ':')))
+
+        yield verifier, target, deliver
+    finally:
+        page.close()
+
+
+def test_p2_result_survives_later_unrelated_reply(p2_replies):
+    verifier, target, deliver = p2_replies
+    busy = {'jsonrpc': '2.0', 'id': 'busy-once', 'error': {'code': -32000, 'message': 'Model run is busy'}}
+    context = {'jsonrpc': '2.0', 'id': 'context', 'result': {}}
+    deliver(busy, context)
+    assert verifier.result(target, 'busy-once', timeout=500) == busy
+    assert verifier.result(target, 'context', timeout=500) == context
+
+
+def test_p2_repeated_id_requires_the_next_reply(p2_replies):
+    verifier, target, deliver = p2_replies
+    success = {'jsonrpc': '2.0', 'id': 'write-once', 'result': {'status': 'success'}}
+    duplicate = {'jsonrpc': '2.0', 'id': 'write-once', 'error': {'code': -32000, 'message': 'Duplicate call'}}
+    deliver(success)
+    assert verifier.result(target, 'write-once', timeout=500) == success
+    with pytest.raises(AssertionError):
+        verifier.result(target, 'write-once', timeout=100)
+    deliver(duplicate)
+    assert verifier.result(target, 'write-once', timeout=500) == duplicate
+
+
+def test_p2_missing_id_does_not_accept_another_reply(p2_replies):
+    verifier, target, deliver = p2_replies
+    context = {'jsonrpc': '2.0', 'id': 'context', 'result': {}}
+    deliver(context)
+    with pytest.raises(AssertionError):
+        verifier.result(target, 'busy-once', timeout=100)
+    assert verifier.result(target, 'context', timeout=500) == context
+
+
 def test_failed_recommendation_image_does_not_shift_later_image_checks(browser, monkeypatch):
     from playwright.sync_api import Locator
 

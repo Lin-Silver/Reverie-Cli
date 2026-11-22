@@ -92,7 +92,34 @@ def verify(executable: Path, directory: Path, timeout: float) -> dict:
     hits = json.loads(queried.stdout)
     if not hits or hits[0]["file_path"] != "billing.py" or hits[0]["start_line"] != 2:
         raise RuntimeError(f"Unexpected Python symbol hits: {hits}")
-    return {"version": version, "backend": status["backend"], "files": status["files"], "hit": hits[0]}
+
+    begin = {"op": "begin", "root": "service-workspace", "replace": False, "expected_revision": 0}
+    document = {"path": "billing.py", "size": 12, "modified_ns": 1, "body": "billing"}
+    requests = [begin, {"op": "apply", "removed": [], "documents": [document]}, {"op": "commit"},
+                {**begin, "replace": "false", "expected_revision": 1}, {"op": "commit"}, {"op": "state"},
+                {"op": "search", "weights": [["billing", 1.0]], "limit": 10, "chunks": False,
+                 "expected_revision": 1},
+                {**begin, "replace": True, "expected_revision": 1},
+                {"op": "apply", "removed": [], "documents": [{**document, "body": "transport"}]},
+                "{", {"op": "commit"}, {"op": "state"},
+                {"op": "search", "weights": [["transport", 1.0]], "limit": 10, "chunks": False,
+                 "expected_revision": 2}]
+    payload = "\n".join(item if isinstance(item, str) else json.dumps(item) for item in requests) + "\n"
+    served = subprocess.run([*command, "serve", str(directory / "service.sqlite3")], input=payload,
+                            cwd=directory, env=env, capture_output=True, encoding="utf-8",
+                            timeout=timeout, check=True)
+    responses = [json.loads(line) for line in served.stdout.splitlines()]
+    if len(responses) != len(requests) or "error" not in responses[3] or "error" not in responses[4]:
+        raise RuntimeError(f"Packaged service accepted an invalid replacement request: {responses}")
+    if responses[5].get("result", {}).get("revision") != 1 or not responses[6].get("result"):
+        raise RuntimeError(f"Packaged service altered the committed index: {responses}")
+    if ("error" not in responses[9] or responses[10].get("result", {}).get("revision") != 2
+            or responses[11].get("result") != responses[10].get("result")
+            or not responses[12].get("result") or responses[12]["result"][0]["file_path"] != "billing.py"):
+        raise RuntimeError(f"Packaged service cancelled a valid pending update: {responses}")
+    return {"version": version, "backend": status["backend"], "files": status["files"], "hit": hits[0],
+            "service_contract": {"invalid_replace_rejected": True, "pending_update_committed": True,
+                                 "revision": responses[11]["result"]["revision"]}}
 
 
 def main():

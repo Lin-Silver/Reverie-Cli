@@ -604,20 +604,26 @@ jobs:
           - [Consolidated kernel manifest]($base_url/reverie-kernels.json) — optional protocol, platform, size, commit, and SHA-256 metadata. GitHub also displays its own digest for every asset.
           EOF
           fi
-          if gh release view "$release_tag" >/dev/null 2>&1; then
+          if release_id=$(gh release view "$release_tag" --json databaseId --jq .databaseId 2>/dev/null); then
+            [[ "$release_id" =~ ^[0-9]+$ ]] || { echo "Expected exactly one release ID for $release_tag"; exit 1; }
             if [[ "$release_kind" == "stable" ]]; then
-              gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file" --draft --latest=false
+              gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file" --target "$GITHUB_SHA" --draft --latest=false
             else
-              gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file"
+              gh release edit "$release_tag" --title "$release_title" --notes-file "$notes_file" --target "$GITHUB_SHA"
             fi
           else
             if [[ "$release_kind" == "prerelease" ]]; then
-              gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --prerelease --latest=false
+              gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --target "$GITHUB_SHA" --prerelease --latest=false
+              release_id=$(gh release view "$release_tag" --json databaseId --jq .databaseId)
             else
-              gh release create "$release_tag" --title "$release_title" --notes-file "$notes_file" --draft --latest=false
+              # A second list lookup failed immediately after creating a draft.
+              # Keep the identity returned by creation and pin its source commit.
+              release_id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+                -f tag_name="$release_tag" -f target_commitish="$GITHUB_SHA" \
+                -f name="$release_title" -F body="@$notes_file" \
+                -F draft=true -F prerelease=false -f make_latest=false --jq .id)
             fi
           fi
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq ".[] | select(.tag_name == \"$release_tag\") | .id")
           [[ "$release_id" =~ ^[0-9]+$ ]] || { echo "Expected exactly one release ID for $release_tag"; exit 1; }
           # Upload over the existing assets, then prune whatever is left from an
           # older version. Deleting every asset up front left the rolling release

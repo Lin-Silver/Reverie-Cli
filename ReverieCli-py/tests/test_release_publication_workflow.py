@@ -77,11 +77,13 @@ def test_native_release_gate_rejects_changed_assets_and_failed_runtime(tmp_path,
     assert (result.returncode == 0) == (not changed and native_passed), result.stderr
 
 
-@pytest.mark.parametrize("existing,fail_upload,release_ids", [
-    (True, False, "42"), (False, False, "42"), (False, True, "42"),
-    (True, False, ""), (True, False, "42\n43"),
+@pytest.mark.parametrize("existing,fail_upload,release_ids,created_id", [
+    (True, False, "42", "42"), (False, False, "42", "42"), (False, True, "42", "42"),
+    (True, False, "", "42"), (True, False, "42\n43", "42"),
+    (False, False, "", "42"),
+    (False, False, "", ""), (False, False, "", "null"), (False, False, "", "42\n43"),
 ])
-def test_stable_notes_and_draft_after_successful_uploads(tmp_path, existing, fail_upload, release_ids):
+def test_stable_notes_and_draft_after_successful_uploads(tmp_path, existing, fail_upload, release_ids, created_id):
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
     if not bash or not Path(bash).is_file():
         pytest.skip("Bash is required to exercise the release workflow")
@@ -97,18 +99,34 @@ from pathlib import Path
 args = sys.argv[1:]
 entry = {"args": args}
 if "--notes-file" in args:
-    entry["notes"] = Path(args[args.index("--notes-file")+1]).read_text()
+    entry["notes"] = Path(args[args.index("--notes-file")+1]).read_text(encoding="utf-8")
+for argument in args:
+    if argument.startswith("body=@"):
+        entry["notes"] = Path(argument.removeprefix("body=@")).read_text(encoding="utf-8")
 with Path(os.environ["PUBLICATION_LOG"]).open("a") as stream:
     stream.write(json.dumps(entry)+"\\n")
 if args[:2] == ["release", "view"]:
     if "--json" in args:
-        print("retired-old.zip")
+        if args[args.index("--json")+1] == "databaseId":
+            if os.environ["EXISTING_RELEASE"] == "0":
+                sys.exit(1)
+            print(os.environ["RELEASE_IDS"])
+        else:
+            print("retired-old.zip")
     elif os.environ["EXISTING_RELEASE"] == "0":
         sys.exit(1)
 elif args[:2] == ["release", "upload"]:
     if os.environ["FAIL_UPLOAD"] == "1" and "linux-x64.AppImage" in args[3]:
         sys.exit(17)
-elif args[0] == "api" and "--method" not in args:
+elif args[0] == "api" and "--method" in args:
+    if args[args.index("--method")+1] == "POST":
+        assert "repos/example/reverie/releases" in args
+        assert "tag_name=v2.5.3" in args and "draft=true" in args
+        assert "target_commitish=" + "a" * 40 in args
+        assert "make_latest=false" in args and "prerelease=false" in args
+        assert args[args.index("--jq")+1] == ".id"
+        print(os.environ["CREATED_ID"])
+elif args[0] == "api":
     if "/releases/tags/" in args[1]:
         sys.exit(22)
     assert args[1] == "repos/example/reverie/releases?per_page=100"
@@ -124,15 +142,25 @@ elif args[0] == "api" and "--method" not in args:
              "GITHUB_REF_NAME": "v2.5.3", "GITHUB_SHA": "a" * 40,
              "GITHUB_REPOSITORY": "example/reverie", "PUBLICATION_LOG": log.as_posix(),
              "EXISTING_RELEASE": str(int(existing)), "FAIL_UPLOAD": str(int(fail_upload)),
-             "RELEASE_IDS": release_ids})
-    calls = [json.loads(line) for line in log.read_text().splitlines()]
-    note_call = next(c for c in calls if "--notes-file" in c["args"])
-    assert note_call["notes"].strip() == "- A concise verified change."
-    assert "--draft" in note_call["args"]
-    assert "--latest=false" in note_call["args"]
+             "RELEASE_IDS": release_ids, "CREATED_ID": created_id})
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    valid_id = release_ids == "42" if existing else created_id == "42"
+    note_calls = [c for c in calls if "notes" in c]
+    if valid_id or not existing:
+        assert len(note_calls) == 1
+        note_call = note_calls[0]
+        assert note_call["notes"].strip() == "- A concise verified change."
+        if existing:
+            assert "--draft" in note_call["args"] and "--latest=false" in note_call["args"]
+            assert note_call["args"][note_call["args"].index("--target")+1] == "a" * 40
+        else:
+            assert "draft=true" in note_call["args"] and "make_latest=false" in note_call["args"]
+            assert "target_commitish=" + "a" * 40 in note_call["args"]
+    else:
+        assert not note_calls, "Reject an invalid existing ID before editing any release"
     public = [i for i, c in enumerate(calls) if "draft=false" in c["args"]]
     assert not public, "CI must retain a stable draft until actual downloaded assets and DPI pass"
-    if release_ids != "42":
+    if not valid_id:
         assert result.returncode != 0
         assert not public
         assert not any(c["args"][:2] == ["release", "upload"] for c in calls)
@@ -147,6 +175,7 @@ elif args[0] == "api" and "--method" not in args:
         assert {"reverie-kernel-windows-x64.json", "reverie-kernel-linux-x64.json",
                 "reverie-kernel-macos-arm64.json", "reverie-kernel-macos-x64.json",
                 "reverie-kernels.json", "reverie-release-assets.json", "SHA256SUMS"} <= names
-        drafts = [i for i, c in enumerate(calls) if "draft=true" in c["args"]]
+        drafts = [i for i, c in enumerate(calls)
+                  if "draft=true" in c["args"] and "PATCH" in c["args"]]
         assert len(drafts) == 1 and drafts[0] > max(uploads)
         assert "make_latest=false" in calls[drafts[0]]["args"]

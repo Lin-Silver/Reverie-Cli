@@ -660,6 +660,12 @@ jobs:
           if [[ "$release_kind" == "prerelease" ]]; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F prerelease=true -f make_latest=false >/dev/null
           else
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=true -F prerelease=false -f make_latest=false >/dev/null
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              -f tag_name="$release_tag" -f target_commitish="$GITHUB_SHA" \
+              -F draft=true -F prerelease=false -f make_latest=false >/dev/null
+            identity=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --jq '[.tag_name, .target_commitish, (.draft | tostring), (.prerelease | tostring), (.assets | length | tostring)] | @tsv')
+            test "$identity" = "$release_tag"$'\t'"$GITHUB_SHA"$'\ttrue\tfalse\t17'
+            echo "Release ID: $release_id"
             echo "Stable draft $release_tag contains 17 assets from $GITHUB_SHA; final downloaded-asset and physical DPI verification precede publication."
           fi

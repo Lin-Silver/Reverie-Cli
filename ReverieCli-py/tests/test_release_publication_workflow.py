@@ -77,13 +77,17 @@ def test_native_release_gate_rejects_changed_assets_and_failed_runtime(tmp_path,
     assert (result.returncode == 0) == (not changed and native_passed), result.stderr
 
 
-@pytest.mark.parametrize("existing,fail_upload,release_ids,created_id", [
-    (True, False, "42", "42"), (False, False, "42", "42"), (False, True, "42", "42"),
-    (True, False, "", "42"), (True, False, "42\n43", "42"),
-    (False, False, "", "42"),
-    (False, False, "", ""), (False, False, "", "null"), (False, False, "", "42\n43"),
+@pytest.mark.parametrize("existing,fail_upload,release_ids,created_id,identity_fault", [
+    (True, False, "42", "42", "none"), (False, False, "42", "42", "none"),
+    (False, True, "42", "42", "none"),
+    (True, False, "", "42", "none"), (True, False, "42\n43", "42", "none"),
+    (False, False, "", "42", "none"),
+    (False, False, "", "", "none"), (False, False, "", "null", "none"),
+    (False, False, "", "42\n43", "none"),
+    *[(False, False, "", "42", fault) for fault in
+      ("tag", "source", "public", "prerelease", "missing_asset", "extra_asset")],
 ])
-def test_stable_notes_and_draft_after_successful_uploads(tmp_path, existing, fail_upload, release_ids, created_id):
+def test_stable_notes_and_draft_after_successful_uploads(tmp_path, existing, fail_upload, release_ids, created_id, identity_fault):
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
     if not bash or not Path(bash).is_file():
         pytest.skip("Bash is required to exercise the release workflow")
@@ -129,10 +133,20 @@ elif args[0] == "api" and "--method" in args:
 elif args[0] == "api":
     if "/releases/tags/" in args[1]:
         sys.exit(22)
-    assert args[1] == "repos/example/reverie/releases?per_page=100"
-    assert "--paginate" in args
-    assert args[args.index("--jq")+1] == '.[] | select(.tag_name == "v2.5.3") | .id'
-    print(os.environ["RELEASE_IDS"])
+    if args[1] == "repos/example/reverie/releases/42":
+        fields = ["v2.5.3", "a" * 40, "true", "false", "17"]
+        changes = {"tag": (0, "untagged-test"), "source": (1, "b" * 40),
+                   "public": (2, "false"), "prerelease": (3, "true"),
+                   "missing_asset": (4, "16"), "extra_asset": (4, "18")}
+        if os.environ["IDENTITY_FAULT"] in changes:
+            index, value = changes[os.environ["IDENTITY_FAULT"]]
+            fields[index] = value
+        print("\t".join(fields))
+    else:
+        assert args[1] == "repos/example/reverie/releases?per_page=100"
+        assert "--paginate" in args
+        assert args[args.index("--jq")+1] == '.[] | select(.tag_name == "v2.5.3") | .id'
+        print(os.environ["RELEASE_IDS"])
 ''', encoding="utf-8")
     interpreter = shlex.quote(Path(sys.executable).as_posix())
     stub_arg = shlex.quote(stub.as_posix())
@@ -142,7 +156,8 @@ elif args[0] == "api":
              "GITHUB_REF_NAME": "v2.5.3", "GITHUB_SHA": "a" * 40,
              "GITHUB_REPOSITORY": "example/reverie", "PUBLICATION_LOG": log.as_posix(),
              "EXISTING_RELEASE": str(int(existing)), "FAIL_UPLOAD": str(int(fail_upload)),
-             "RELEASE_IDS": release_ids, "CREATED_ID": created_id})
+             "RELEASE_IDS": release_ids, "CREATED_ID": created_id,
+             "IDENTITY_FAULT": identity_fault})
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     valid_id = release_ids == "42" if existing else created_id == "42"
     note_calls = [c for c in calls if "notes" in c]
@@ -168,7 +183,7 @@ elif args[0] == "api":
         assert result.returncode == 17, result.stderr
         assert not public
     else:
-        assert result.returncode == 0, result.stderr
+        assert (result.returncode == 0) == (identity_fault == "none"), result.stderr
         uploads = [i for i, c in enumerate(calls) if c["args"][:2] == ["release", "upload"]]
         assert len(uploads) == 17
         names = {calls[index]["args"][3].split("#", 1)[0].removeprefix("release-assets/") for index in uploads}
@@ -179,3 +194,8 @@ elif args[0] == "api":
                   if "draft=true" in c["args"] and "PATCH" in c["args"]]
         assert len(drafts) == 1 and drafts[0] > max(uploads)
         assert "make_latest=false" in calls[drafts[0]]["args"]
+        assert "tag_name=v2.5.3" in calls[drafts[0]]["args"]
+        assert "target_commitish=" + "a" * 40 in calls[drafts[0]]["args"]
+        reads = [i for i, c in enumerate(calls)
+                 if c["args"][:2] == ["api", "repos/example/reverie/releases/42"]]
+        assert len(reads) == 1 and reads[0] > drafts[0]

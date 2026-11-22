@@ -31,6 +31,16 @@ Python 分派与桌面类型声明存在以下差异：
 
 证据保存在已获准的 C 盘候选目录 `candidate-b293b7a/phase0A-source-identity.json` 和 `github-source-verified.json`。这里仍不冻结正式纯 Python 基线、查询题集或成绩，后续 CI 修复候选须继续对应其实际来源。
 
+## 84e3c92 的只读来源及原生依赖复核
+
+来源 `84e3c92c4c5a80e491e9da97b2e26735ece3a048` 的六个协议文件仍与清单 blob 相同。其 GitHub 源码树 `d228b3c17036b0a406f075b61e8ea5ae0154daf0` 的 1566 个受管条目，与本地提交的路径、模式、对象类型及 SHA 完全一致。静态动作数量和证据片段口径保持原记录的边界，正式基线及题集未冻结。
+
+本轮从官方 crates 元数据再次取得 Bevy、两种物理适配器、底层 Rapier、FastEmbed 和 ort 的指定版本及许可声明；适配器底层依赖明确为 `=0.35.0-glamx0.2`。官方 E5 与 BGE 模型卡及配置固定到读取到的修订，E5 为 384 维，两者卡片均标 MIT。只读元数据不证明本地推理、通用 INT8 或四平台加载。
+
+`ort-sys 2.0.0-rc.15` 实际源码包 SHA-256 为 `8d22b0417f1838db5a3ac0b3f98dfe39f6fb73624aa0a27c6bbb5040b9c7db2b`。其 `build/download/dist.tsv` 不含 `x86_64-apple-darwin`；不同 API 级别可配置，sys 默认 API 17，不能将其自动等同于最终 FastEmbed/ort 组合的 ABI。官方 ONNX Runtime 仓库及 release 入口本轮返回 404，[官方安装文档](https://onnxruntime.ai/docs/install/)可读取并列出官方包及源码构建方式。没有足够证据确定最终四平台原生版本及再分发材料，最小缺失证据是固定来源及版本的实际原生包、许可集和与所选 wrapper 的加载结果。
+
+这些记录保存在 C 盘任务目录 `candidate-84e3c92/` 中的源码、依赖、模型及 ONNX 只读 JSON；首次 crates API 读取失败的记录也保留，带明确 User-Agent 的后续读取成功。未创建 Rust 工作区、构建这些依赖或加载模型。原生库交付策略的用户选择仍等待答复，不能改变四平台、本地 CPU 和性能门槛。
+
 ## 证据片段口径与题集边界
 
 用户已于 2026-11-22 确认 Recall@10 按证据片段评价。片段身份绑定语料版本、文件、位置和内容摘要。正式冻结时必须固定最小相关范围、返回上限、总预算及去重规则；完整预标注证据及版本匹配才算命中。

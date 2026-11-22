@@ -229,3 +229,17 @@ Build `45058606286` 的 Intel job `137319279679` 失败发生在 PyInstaller 准
 最小 CI 修复先取得已有草稿的单一 ID，在编辑前拒绝无效 ID；新建稳定草稿直接使用 REST 创建响应的 ID，说明按文件读取，target_commitish 固定验收 SHA，draft=true、prerelease=false、make_latest=false。保留 17 项上传、来源 Test、原生包和公开前 DPI 门槛。回归先在旧工作流复现 9 失败/13 通过（13.62 秒），包括草稿未出现在即时列表、来源未固定和无效 ID 编辑；修复后发布、保留失败包及工具链相关回归 94 通过（22.70 秒）。JUnit 为 `publish-id-red.xml`、`publish-id-green.xml`，测试执行真实 Bash 控制流并使用 gh 替身；修复后的真实 CI 与完整草稿尚待取得。
 
 为新的最终来源准备了按实际草稿文件校验、三次 SDK 启停、真实索引/检索、JSONL 事务及历史实际数据库恢复的验证器。旧库输入已保全到 C 盘，不依赖用户正在清理的目录；这些新验证器尚未对最终修复包执行。目录级忽略选择再次保持待用户答复，真实单屏四档 DPI、最终 17 项实际下载、正式公开、Python 正式归档及 Rust 实施继续等待必需前置。没有修改其他会话的收尾记录，完整 Rust 3.0 计划仍保留。
+
+### P3-9：实际草稿完成上传、最终标签绑定与回读修复（2026-11-22）
+
+提交 `84e3c92c4c5a80e491e9da97b2e26735ece3a048` 仅包含发布 ID 修复及本任务必要记录，已推送候选分支。Test `45068369808` 八作业、Build `45068369794` 四平台通过，发布跳过；四份候选原生证据独立下载并核对来源及 ZIP digest。GitHub 树 `d228b3c17036b0a406f075b61e8ea5ae0154daf0` 与本地 1566 个受管条目一致，六个协议文件 blob 未变。证据在 C 盘任务目录 `candidate-84e3c92/`，没有改动其他会话的未跟踪目录。
+
+上一空草稿 ID `454721664` 及注释标签对象 `a294896801d6407ba9a2d7af9de7c907324abc27` 保全到 `history/python-2.5.5-pure-b293b7a`，草稿保持未公开、零资产。逐项回读原混合版历史 Release 的 17 项资产身份不变后，main 正常推进到 84e3c92；`v2.5.5` 用旧对象的明确 lease 更新为 `8897f9afad472c9b4ea3eddc36e216b362268be4`。滚动与插件标签未变化。main Test `45070194116` 八作业通过，重复 main Build `45070194236` 主动取消，不能计为通过。
+
+版本 Build `45070254227` 的四个平台及 publish job `137360706965` 均成功。四份最终原生证据实际下载并核对，P4 各 31 项、输入各 60 样本：Windows p95=35.9 ms、Linux=35.4 ms、Apple Silicon=48.3 ms、Intel=68.9 ms，model-quality samples 均为 0。它们证明对应包的受控软件行为，不证明真实模型质量、物理 DPI 或整个产品验收。记录在 `final-draft-v2.5.5-84e3c92/native-evidence-verified.json`，没有改写较早来源的失败或成绩。
+
+实际稳定草稿 ID `454761433` 已有 17 项上传资产，来源为 84e3c92、draft=true、prerelease=false；独立回读却发现 tag_name 为 `untagged-db1664a31a39675f7ceb`，按 v2.5.5 查询未取得该草稿。完整 37319 字符发布日志及错误身份响应已保存。显式按 ID 写回标签、来源和草稿标志后，tag_name=v2.5.5，全部 17 项资产的 ID、大小、摘要保持不变，未公开。证据为 `draft-tag-mismatch-preserved.json`、`draft-tag-binding-request.json` 和 `draft-tag-binding-verified.json`。缺少此前各中间响应，字段变化的具体服务端原因仍未确定。
+
+工作流补齐最终身份绑定和按 ID 的回读门槛。旧脚本上新增回归先复现 9 失败/19 通过（40.50 秒）；修复后发布、保留失败包及工具链相关回归 100 通过（46.13 秒）。新增反例包含错误标签、来源、公开标志、预发布标志及资产数量，全部仍禁止 CI 公开稳定版。JUnit 为 `release-identity-red.xml` 和 `release-identity-green.xml`。测试执行真实 Bash 控制流并使用 gh 替身；手工恢复旧草稿不等于新脚本真实 CI 通过，新候选尚须验证。
+
+本轮只读依赖和模型来源复核见 [阶段 0A](phase0A.md)。默认 ONNX 原生分发缺 Intel macOS 条目，最终来源与许可未知，已提出不改变四平台门槛的策略选择，等待答复。目录级忽略合同和显示设置恢复也仍等待用户输入；窗口及应用清单没有返回可操作显示页，未发送 UI 输入或改变缩放。最终 17 项实际下载、最终 Windows 验证器执行、四档真实 DPI、正式公开、Python 正式归档及 Rust 实施均未完成。

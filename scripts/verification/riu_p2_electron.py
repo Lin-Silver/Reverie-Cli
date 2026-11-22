@@ -95,7 +95,9 @@ def main():
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"coreAppRoot": str(app_root), "projectRoot": str(workspace), "ui": {"language": "zh-CN"}}), encoding="utf-8")
     checks, process, browser, page = [], None, None, None
-    report = {"scope": "production packaged Electron + loopback model; no external provider", "output": str(output), "checks": checks}
+    report = {"scope": "production packaged Electron + loopback model; no external provider", "output": str(output), "checks": checks,
+              "frameLifecycle": [], "viewSnapshots": []}
+    started = time.monotonic()
     env = isolated_fixture_environment(output, desktop_home)
     log = (output / "electron.log").open("w", encoding="utf-8")
 
@@ -115,7 +117,21 @@ def main():
     def request(action, payload):
         return page.evaluate("async ([action,payload]) => { try { return await window.reverie.request(action,payload); } catch(e) { return {error:String(e)}; } }", [action, payload])
 
+    def frame_event(kind, frame):
+        report["frameLifecycle"].append({"event": kind, "seconds": time.monotonic() - started,
+                                         "frame": id(frame), "url": frame.url})
+
+    def snapshot(name):
+        report["viewSnapshots"].append({"name": name, "seconds": time.monotonic() - started,
+            "frames": [{"frame": id(frame), "url": frame.url} for frame in page.frames],
+            "anchors": page.locator(".interactive-view-anchor").evaluate_all('''anchors => anchors.map(anchor => {
+                const rect = anchor.getBoundingClientRect(), frame = anchor.querySelector('iframe');
+                return {key: anchor.dataset.viewKey, top: rect.top, bottom: rect.bottom, height: rect.height,
+                    viewportHeight: innerHeight, framePresent: !!frame, frameFocused: frame === document.activeElement};
+            })''')})
+
     def observe(name):
+        snapshot(name)
         page.screenshot(path=str(output / (name + ".png")), full_page=True)
         (output / (name + ".txt")).write_text(page.locator("body").inner_text(), encoding="utf-8")
         (output / "events.json").write_text(json.dumps(page.evaluate("window.__riuEvents"), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -127,6 +143,11 @@ def main():
             port = sock.getsockname()[1]
         process = subprocess.Popen([str(args.exe.resolve()), "--gui", "--project", str(workspace), f"--remote-debugging-port={port}"], env=env, stdout=log, stderr=log, **launch_options())
         browser, page = wait_for_packaged_page(playwright, process, port, attempts=120)
+        page.on("frameattached", lambda frame: frame_event("attached", frame))
+        page.on("framenavigated", lambda frame: frame_event("navigated", frame))
+        page.on("framedetached", lambda frame: frame_event("detached", frame))
+        for current_frame in page.frames:
+            frame_event("present", current_frame)
         page.set_viewport_size({"width": 1280, "height": 900})
         page.wait_for_selector(".session-item", timeout=120000)
         page.wait_for_load_state("domcontentloaded")
@@ -206,8 +227,11 @@ def main():
                 if "RIU_P2_HOLD" in str(Fixture.requests[-1].get("messages", [])[-1].get("content")): break
                 page.wait_for_timeout(50)
             target = frame()
+            snapshot("before-busy-callback")
             target.locator("#busy").click()
+            snapshot("after-busy-click")
             busy_reply = result(target, "busy-once")
+            snapshot("after-busy-reply")
             check("model-run-blocks-view-callback", "error" in busy_reply and not (workspace / "busy.txt").exists(), busy_reply)
             before_busy_followup = len(Fixture.requests)
             target.locator("#followup").click()

@@ -153,7 +153,7 @@ export const InteractiveViewRuntime = memo(function InteractiveViewRuntime({ seg
   useEffect(() => {
     if (!anchor.current || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(entries => {
-      const intersecting = entries[0]?.isIntersecting ?? false;
+      const intersecting = entries.at(-1)?.isIntersecting ?? false;
       if (!intersecting && mode === "inline") setReservedHeight(anchor.current?.getBoundingClientRect().height || 120);
       setVisible(intersecting);
     });

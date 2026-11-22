@@ -149,6 +149,40 @@ describe("RIU P4 presentation lifetime", () => {
     await waitFor(() => expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ method: "ui/notifications/host-context-changed", params: expect.objectContaining({ locale: "en-US" }) }), "*"));
   });
 
+  it("applies the latest visibility change in a batch and preserves the live reply channel", async () => {
+    const observers: Array<(entries: Partial<IntersectionObserverEntry>[]) => void> = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: Partial<IntersectionObserverEntry>[]) => void) { observers.push(callback); }
+      observe() {} disconnect() {}
+    });
+    const request = vi.fn().mockImplementation((action: string) => Promise.resolve(action === "getView"
+      ? resolved({ interactionId: "batch-lease" })
+      : { type: "view.tool_result", viewId: "vabc123", callId: "batch-call", status: "success", output: "ok" }));
+    stubReverie(request);
+    const { container } = render(<InteractiveView segment={segment()} />);
+    act(() => observers[0]([{ isIntersecting: true, time: 1 }]));
+    const frame = await waitFor(() => { const frame = container.querySelector("iframe"); expect(frame).toBeTruthy(); return frame!; });
+    const win = frame.contentWindow!;
+    const posted = vi.spyOn(win, "postMessage");
+    post(win, { jsonrpc: "2.0", id: "init", method: "ui/initialize", params: {} });
+    const capability = posted.mock.calls[0][0].result.capability;
+    post(win, { jsonrpc: "2.0", method: "ui/notifications/initialized", capability });
+
+    act(() => observers[0]([{ isIntersecting: false, time: 2 }, { isIntersecting: true, time: 3 }]));
+    expect(container.querySelector("iframe")).toBe(frame);
+    expect(request.mock.calls.filter(([action]) => action === "getView")).toHaveLength(1);
+    expect(request).not.toHaveBeenCalledWith("releaseView", expect.anything());
+    post(win, { jsonrpc: "2.0", id: "batch-rpc", method: "reverie/call-tool", capability, params: { toolName: "view_echo", callId: "batch-call", arguments: {} } });
+    await waitFor(() => expect(posted).toHaveBeenCalledWith(expect.objectContaining({ id: "batch-rpc", result: expect.objectContaining({ status: "success" }) }), "*"));
+
+    act(() => observers[0]([{ isIntersecting: true, time: 4 }, { isIntersecting: false, time: 5 }]));
+    await waitFor(() => expect(container.querySelector("iframe")).toBeNull());
+    expect(request).toHaveBeenCalledWith("releaseView", { interactionId: "batch-lease" });
+    request.mockClear();
+    post(win, { jsonrpc: "2.0", id: "late-rpc", method: "reverie/call-tool", capability, params: { toolName: "view_echo", callId: "late-call", arguments: {} } });
+    expect(request).not.toHaveBeenCalledWith("callViewTool", expect.anything());
+  });
+
   it("does not resolve 100 offscreen historical views and releases an instance leaving the viewport", async () => {
     const observers: Array<(entries: Partial<IntersectionObserverEntry>[]) => void> = [];
     const disconnect = vi.fn();

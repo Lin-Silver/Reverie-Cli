@@ -16,10 +16,10 @@
 
 | 阶段 | 状态 | 完成检查 |
 |---|---|---|
-| P1 工程收整 | 九份源码已归档；八个 worktree 已移除，最后一个因共享 junction 与删除审批阻塞保留 | 来源/私有数据/证据分开记录；独有 worktree 源码先归档并验证远端；删除可再生输出前验证绝对路径、Git 状态、链接及占用 |
-| P2 纯 Python Context Engine | 已接入 Python；定向验证通过，完整候选验收待完成 | 真实 Python CLI/SDK/桌面、索引/检索/状态/服务、增量与事务、失败保护、旧数据备份接续通过 |
-| P3 Python 重验与重发 | 进行中：修复候选验证；尚未重发 | 完整回归、四平台实际包、单屏四档真实 DPI、原混合版来源/资产归档与重发身份核对 |
-| 0A 只读整理 | 待开始 | SDK/类型/语料草案与来源 SHA 对应 |
+| P1 工程收整 | 九份远端源码归档已复核；Git 仅登记主 checkout，其他可再生残留交由用户手动清理 | 来源/私有数据/证据分开记录；独有 worktree 源码先归档并验证远端；本会话不再自行删除用户接手的残留 |
+| P2 纯 Python Context Engine | 已接入 Python；JSONL 类型与事务边界已修复，定向运行通过；新包待验收 | 真实 Python CLI/SDK/桌面、索引/检索/状态/服务、增量与事务、失败保护、旧数据备份接续通过 |
+| P3 Python 重验与重发 | 修复前候选全量回归通过，但实包发现服务缺陷；新候选须重验，尚未重发 | 完整回归、四平台实际包、单屏四档真实 DPI、原混合版来源/资产归档与重发身份核对 |
+| 0A 只读整理 | 候选快照清单与语料草案已整理；未冻结正式基线 | SDK/类型/语料草案与来源 SHA 对应，详见 [阶段 0A](phase0A.md) |
 | 0B 正式基线 | 待开始 | 纯 Python 来源及备份恢复、冷/热各至少 30 样本、耗时分解、质量与轻量基线 |
 | 1 Rust 首条链路 | 前置未满足 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
 | 2 Context Engine | 前置未满足 | 完整结构/基础/本地语义链与性能质量门槛 |
@@ -95,3 +95,39 @@ CI 为 Python 候选及未来 Rust 开发分支提供只读测试/构建；核�
 发行清单及上述记录已提交并推送候选分支 `d34818c`。用户随后确认稳定版采用“CI 生成草稿，最终验收后公开”：版本标签 CI 不公开稳定资产，也不把它标为 Latest；最终独立下载和真实 DPI 必须对应草稿里的实际程序。先更新发布行为测试，旧脚本得到 4 失败 / 1 通过的预期红灯（`.runtime/rust-3.0/stable-draft-red-1.xml`），再修复稳定版创建、更新和完成步骤为草稿；滚动预发布策略保留。该调整尚待定向与完整验证，不提前更新正式标签。
 
 定向验证 `tests/test_release_publication_workflow.py tests/test_release_publication.py tests/test_release_manifest.py tests/test_non_game_completion.py` 为 56 通过、零失败/跳过，27.66 秒（`.runtime/rust-3.0/stable-draft-green-1.xml`）。真实执行工作流中的 Bash 并记录 stub 调用，证明已有/新建稳定 Release 在上传前就是草稿，缺 ID/上传失败不公开，成功后完整 17 项仍为草稿。文档检查为 39 文档、195 链接、零错误；不据此替代真实 GitHub 稳定草稿及包验收。
+
+### P1-3 / 0A-1：当前收整与只读草案（2026-11-22）
+
+本轮重新核对九个 `codex/archive-pre-rust/` 远端分支，均存在于 GitHub。`git worktree list --porcelain` 仅登记 `G:/Reverie/Reverie-Cli`；先前受阻的 `ce-verify` 不再是登记中的 checkout。用户接手可再生残留的手动清理，本会话不再自行删除。已提供的四个旧 pytest 目录及 junction 清单在 `.runtime/rust-3.0/manual-cleanup-current.json`；约 4.42 GiB 为逻辑大小，不承诺可回收空间。
+
+阶段 0A 从固定候选 `5725d076999a64a13f3d80b4235dc2d39b122022` 做 AST 和声明清点：Python 分派 109、桌面请求/响应各 102、动作并集 110、TypeScript 导出类型 87。`releaseView` 在 Electron 宿主实现，其余静态差异须继续核对调用与运行合同。组件清单包括 14 个 Python 文件和 41 个类；Gamer 23 类型乘三维度形成 69 行适用性草案；公开语料与查询各 26 条。完整结果及事实/未知边界在 [阶段 0A](phase0A.md)，不把草案当作功能迁移或质量验收。
+
+用户确认 Recall@10 按证据片段评价，已写入完整计划。位置、内容版本、最小相关范围、预算、去重及独立难例由阶段 0B 正式冻结；当前草案全部标记 `formal_baseline_frozen: false`，没有提前计算成绩。FastEmbed 等依赖只核对固定来源元数据和许可证，没有安装 Rust 工作区或运行本地模型。
+
+### P3-3：修复前候选的完整回归与原生记录
+
+来源 `5725d07` 的本机完整 Python 回归为 **3658 通过、8 跳过、45 警告，1019.92 秒**，起止 SHA 一致，退出码 0。证据为 `.runtime/rust-3.0/python-full-2.log`、`.xml` 和起止身份文件。跳过的三项本机 Electron/display 生命周期、两项真实独立 Engine 配对、三项 symlink 权限用例保持未验证。
+
+GitHub Test `45025265450` 为 success。Build `45025265425` 第二次运行的四个平台作业均为 success，`Publish core release` 为 skipped。首轮 Intel 原生 P4 就绪 p95 为 **1223.598 ms**，超过 1000 ms；同 SHA 重跑为 **389.922 ms**，输入 p95 为 85.5 ms。两轮桌面程序 SHA-256 相同，但没有足够证据确定首轮延迟根因；保留失败，不把重跑通过表述为已修复延迟。
+
+Intel 第二轮证据按不可变 artifact ID `14757628612` 下载，9564325 字节、SHA-256 和 ZIP CRC 均通过，位于 `.runtime/rust-3.0/candidate-5725/intel-native-14757628612/`。首轮失败证据和包身份另行保留。同名 artifact 跨 attempt 存在，不能只按名称混合下载。
+
+Windows artifact ID `14756320495` 已完成续传：**1101056577 字节**，SHA-256 `728843672c6f5ac70a1d0a4c5bcaffec670dce6e7046123f3f8ade48f3746f5d`，ZIP CRC 通过，四项资产逐项计算摘要。独立执行下载得到的 `reverie.exe`，握手与内核记录一致，版本为 2.5.5，声明 Python/in-process。原始记录在 `.runtime/rust-3.0/candidate-5725/windows-retry2/`。完整四平台资产下载复核仍未完成。
+
+### P2-4：JSONL 请求与事务合同修复
+
+修复提交为 `7354f70215a9dd8b13c860085d52a8a489f33935`。先在专用数据库以相同请求对照历史 Rust worker 和当前 Python 服务，实际确认：Python 接受 `replace: "false"`，随后 commit 会清空已提交索引；布尔值修订号也被接受；非法 JSON、非法 begin 或失败的读请求会撤销合法的未提交更新。对照报告在 `.runtime/rust-3.0/serve-contract-before/report.json`。
+
+上述字符串替换缺陷又在实际下载的 Windows 程序复现，程序 SHA-256 为 `512e99e86acfad70f064e7e7b0d8cdb8f116a1631a6352653704c855fdb3db7a`，证据在 `candidate-5725/windows-retry2/local-check/report.json`。因此 `5725d07` 不满足最终服务合同，不能重发或充当正式纯 Python 性能基线。
+
+修复只涉及服务边界及必要验证：在调用 Catalog 前验证请求、布尔值、整数范围、文档/片段、扫描选项和查询类型，拒绝重复字段、非有限数字及畸形 JSON。解析失败和失败的读请求保留正在进行的合法更新；实际写操作失败仍由 Catalog 回滚整个更新。没有修改索引后端选择、上层检索算法或 Rust 实现。
+
+先增加真实 JSONL 子进程回归，旧实现得到 **24 失败、4 通过**（`serve-contract-red.log` / `.xml`）。修复后的最后定向运行为 **59 通过，57.66 秒**（`serve-contract-green-3.log` / `.xml`），含拒绝替换、修订类型、保留事务、重新打开数据库、真实写失败回滚、合法检索/片段/词频/路径/扫描和重命名合同。源码 console launcher 的 CLI、SDK、索引及新增实包验证流程也实际运行通过，报告在 `source-service-smoke-2.log`；该运行使用 Python 环境入口，不冒充冻结发行程序。
+
+`smoke_context_engine.py` 已加入服务负例和 pending 更新提交后的实际检索检查，四平台新包构建须执行这些断言。新候选必须重新完成全量回归、真实构建、独立包复核与 DPI；不得把上面的旧候选成绩转写为新候选通过。
+
+### 尚未满足的前置
+
+真实单屏 100%、125%、150%、200% DPI 仍未执行。用户暂时无法保持“设置 → 系统 → 显示”前台，等待恢复；没有更改系统缩放，也没有用显示清单、模拟公式或字体缩放替代实际命中验收。最终验收必须对应稳定草稿最终上传程序。
+
+远端 main 和正式 `v2.5.5` peeled 来源仍为 `f029496d19138176b857bedb54f7eeb225973471`，标签对象仍为 `6b941a075204df72a449ab906157fd4229725601`。本轮只准备候选，不公开稳定 Release，不移动 Python 主线，不创建 `ReverieCli-rs`。阶段 P 完成后再建立 Python 归档分支、冻结阶段 0B 和开始 Rust 实施。整个 3.0.0 的范围继续保留完整计划。

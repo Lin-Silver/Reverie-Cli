@@ -108,6 +108,9 @@ from ..gemini import (
 
 THINKING_OPEN_TAG_LITERAL = "<think>"
 THINKING_CLOSE_TAG_LITERAL = "</think>"
+WRITER_TEXTUAL_TOOL_WRAPPER_RE = re.compile(
+    r"<tool_call>\s*(?:<function=|[A-Za-z0-9_.-]+\s*<arg_key>)", re.IGNORECASE
+)
 
 # Hosted reasoning models sometimes open `reasoning_content` with a verbatim
 # replay of the user's message, which then shows the request twice in the UI and
@@ -3576,8 +3579,8 @@ class ReverieAgent:
             data = {}
 
         return bool(
-            str(data.get("content") or "").strip()
-            or str(data.get("append_content") or "").strip()
+            str(data.get("content") or arguments.get("content") or "").strip()
+            or str(data.get("append_content") or arguments.get("append_content") or "").strip()
         )
 
     def _writer_retry_instruction_for_invalid_commit_tool_call(
@@ -3647,6 +3650,14 @@ class ReverieAgent:
             return ""
         if self._writer_latest_turn_serial_novel_action() not in {"prepare_chapter", "context"}:
             return ""
+
+        if WRITER_TEXTUAL_TOOL_WRAPPER_RE.search(raw_content):
+            return (
+                "The previous reply contained an unrecognized or incomplete tool-call wrapper. "
+                "It was not committed as chapter prose. Continue the active Writer request with only "
+                "complete plain chapter prose, preserving the control card and original requirements. "
+                "Do not emit JSON, XML, summaries, notes, or tool calls. The client will submit the prose."
+            )
 
         normalized_content = self._writer_trim_append_only_direct_prose(active_project, raw_content)
         min_chars = self._writer_direct_prose_autocommit_min_chars(active_project)
@@ -3849,18 +3860,27 @@ class ReverieAgent:
         if marker_index < 0:
             return None
         text = text[marker_index:]
-
-        function_match = re.search(r"<function=([A-Za-z0-9_.-]+)>", text, flags=re.IGNORECASE)
-        if not function_match:
+        if "</tool_call>" not in text.lower():
             return None
 
-        function_name = function_match.group(1).strip()
+        function_match = re.match(r"<tool_call>\s*<function=([A-Za-z0-9_.-]+)>", text, flags=re.IGNORECASE)
+        parameter_pattern = r"<parameter=([A-Za-z0-9_.-]+)>\s*(.*?)\s*</parameter>"
+        if function_match:
+            function_name = function_match.group(1).strip()
+        else:
+            function_match = re.match(
+                r"<tool_call>\s*([A-Za-z0-9_.-]+)\s*(?=<arg_key>)", text, flags=re.IGNORECASE
+            )
+            if not function_match:
+                return None
+            function_name = function_match.group(1).strip()
+            parameter_pattern = r"<arg_key>([A-Za-z0-9_.-]+)</arg_key>\s*<arg_value>\s*(.*?)\s*</arg_value>"
         if not function_name:
             return None
 
         arguments: Dict[str, Any] = {}
         for match in re.finditer(
-            r"<parameter=([A-Za-z0-9_.-]+)>\s*(.*?)\s*</parameter>",
+            parameter_pattern,
             text,
             flags=re.IGNORECASE | re.DOTALL,
         ):
@@ -3979,6 +3999,8 @@ class ReverieAgent:
     def _promote_writer_direct_prose_commit(self, state: _StreamingTurnState) -> bool:
         """Recover a streamed chapter draft by committing it through serial_novel."""
         if state.tool_calls or normalize_mode(self.mode) != "writer":
+            return False
+        if WRITER_TEXTUAL_TOOL_WRAPPER_RE.search(state.cleaned_content()):
             return False
 
         active_project = self._writer_active_project_state()

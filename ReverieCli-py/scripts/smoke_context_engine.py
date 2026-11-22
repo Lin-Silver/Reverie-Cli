@@ -1,4 +1,4 @@
-"""Exercise the compiled Context Engine through a packaged Reverie SDK bridge."""
+"""Exercise the final Python Context Engine through a packaged Reverie SDK bridge."""
 
 import argparse
 import json
@@ -22,7 +22,7 @@ def verify(executable: Path, directory: Path, timeout: float) -> dict:
     command = [str(executable), "--context-engine"]
     version = subprocess.run([*command, "--version"], cwd=directory, env=env,
                              capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=True).stdout.strip()
-    if not version.startswith("reverie-context-engine "):
+    if not version.startswith("reverie-context-engine ") or not version.endswith(" (python)"):
         raise RuntimeError(f"Unexpected Context Engine version output: {version}")
 
     with TemporaryFile(dir=directory) as stderr:
@@ -68,7 +68,7 @@ def verify(executable: Path, directory: Path, timeout: float) -> dict:
             if indexed["files_parsed"] != 1 or indexed["fatal_errors"]:
                 raise RuntimeError(f"Packaged SDK did not index the fixture: {indexed}")
             status = request("getContextStatus")["context_engine"]
-            if status["backend"] != "rust" or status["files"] != 1:
+            if status["backend"] != "python" or status["files"] != 1:
                 raise RuntimeError(f"Packaged SDK selected the wrong index: {status}")
             mentions = request("workspaceMentions", query="QuartzBillingPipeline verifyInvoice", limit=8)["items"]
             if not any(item.get("path") == "billing.py" for item in mentions):
@@ -84,14 +84,14 @@ def verify(executable: Path, directory: Path, timeout: float) -> dict:
             process.stdout.close()
             reader.join(timeout=5)
 
-    databases = list(app.rglob("native-search.sqlite3"))
+    databases = list(app.rglob("python-search.sqlite3"))
     if len(databases) != 1:
-        raise RuntimeError(f"Unexpected native databases: {databases}")
+        raise RuntimeError(f"Unexpected Python databases: {databases}")
     queried = subprocess.run([*command, "chunks", str(databases[0]), "verifyInvoice"], cwd=directory, env=env,
                              capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=True)
     hits = json.loads(queried.stdout)
     if not hits or hits[0]["file_path"] != "billing.py" or hits[0]["start_line"] != 2:
-        raise RuntimeError(f"Unexpected native symbol hits: {hits}")
+        raise RuntimeError(f"Unexpected Python symbol hits: {hits}")
     return {"version": version, "backend": status["backend"], "files": status["files"], "hit": hits[0]}
 
 

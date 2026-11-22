@@ -2,7 +2,7 @@ name: Build plugin release
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/python-2.5.5-pure, codex/rust-3.0]
     paths:
       - ".github/workflows/build-plugins.yml"
       - "plugins/**"
@@ -10,14 +10,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: plugin-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: windows-latest
     timeout-minutes: 120
     env:
@@ -38,6 +38,7 @@ jobs:
           ReverieCli-py\venv\Scripts\python.exe -m pip install "pip==26.1.2" "pyinstaller==6.19.0"
           $archive = Join-Path $env:GITHUB_WORKSPACE "plugins\blender\$env:BLENDER_ARCHIVE_NAME"
           Invoke-WebRequest -Uri $env:BLENDER_ARCHIVE_URL -OutFile $archive
+          if ((Get-Item $archive).Length -ne 414370237) { throw "Blender portable archive size mismatch" }
           $expected = "307123caa3bad0c1d04ec373a2f22f622c403eecb34b9c646ede104906b04ced"
           if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -ne $expected) {
             throw "Blender portable archive SHA-256 mismatch"
@@ -101,12 +102,38 @@ jobs:
           retention-days: 14
           path: release-assets/*
 
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: reverie-plugins-${{ github.sha }}
+          path: release-assets
       - name: Publish dedicated plugin release
-        if: github.event_name != 'pull_request'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_EVENT_NAME -notin @('push','workflow_dispatch')) {
+            throw 'Plugin publication is restricted to main'
+          }
+          $manifest = Get-Content release-assets\plugins-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.commit -ne $env:GITHUB_SHA -or $manifest.plugins.Count -ne 4) {
+            throw 'Plugin candidate source or component count mismatch'
+          }
+          foreach ($entry in $manifest.plugins) {
+            $candidate = Join-Path release-assets $entry.asset_name
+            if ((Get-FileHash -Algorithm SHA256 $candidate).Hash.ToLowerInvariant() -ne $entry.sha256 -or (Get-Item $candidate).Length -ne $entry.size) {
+              throw "Plugin candidate integrity mismatch: $($entry.asset_name)"
+            }
+          }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f plugins-latest $env:GITHUB_SHA

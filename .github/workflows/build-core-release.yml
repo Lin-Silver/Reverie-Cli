@@ -2,7 +2,7 @@ name: Build core and desktop releases
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/python-2.5.5-pure, codex/rust-3.0]
     tags: ["v*"]
   pull_request:
     branches: [main]
@@ -20,7 +20,7 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
@@ -85,8 +85,6 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: ReverieCli-ui/package-lock.json
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - name: Install Windows FFmpeg
         if: runner.os == 'Windows'
@@ -467,10 +465,33 @@ jobs:
   publish:
     name: Publish core release
     needs: build
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release event and source
+        env:
+          PUBLISH_REQUEST: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            test "$PUBLISH_REQUEST" = true
+          else
+            test "$GITHUB_EVENT_NAME" = push
+            test "$GITHUB_REF_TYPE" = tag
+            [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            version=$(node -p "require('./ReverieCli-ui/package.json').version")
+            test "$GITHUB_REF_NAME" = "v$version"
+            python_version=$(python -c "import sys; sys.path.insert(0,'ReverieCli-py'); from reverie.version import __version__; print(__version__)")
+            test "$python_version" = "$version"
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          fi
       - name: Require successful tests for the exact source
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

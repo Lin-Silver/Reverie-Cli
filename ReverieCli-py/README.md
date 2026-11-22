@@ -164,11 +164,11 @@ cd ReverieCli-py
 
 `build.bat` runs from `ReverieCli-py` and writes a standalone `dist\reverie.exe` by default (`onefile`). Copy only that EXE to run the CLI/TUI: no adjacent runtime directory or installed Python is required. Embedded dependencies are extracted temporarily while it runs. Desktop packaging separately selects `ui-onedir` for its internal SDK kernel, keeping the GUI startup fast. Optional development builds can explicitly set `REVERIE_PYINSTALLER_MODE=onedir`; their runtime directory is required only for that build mode.
 Builds are incremental by default; use `--clean`, `--reinstall-deps`, `--refresh-browser`, or `--rebuild-plugins` when those parts need an explicit refresh.
-GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`, runs the same release job on a daily schedule, and refreshes the rolling `latest` release assets.
+GitHub Actions builds that Python PyInstaller executable as the primary `dist\reverie.exe`. Candidate branches upload CI artifacts. Publication is restricted to `main` manual release runs and validated version tags; candidate and archive branches cannot replace rolling or formal releases.
 
-Packaging requires Cargo and Rust 1.89 or newer. The bundled Rust Context Engine handles file discovery, incremental indexing, and file and symbol full-text search. Reverie's language-specific analysis, dependency graph, and context assembly use the same entry points in the CLI and desktop app.
+The final Python 2.5.5 Context Engine implements file discovery, incremental indexing, transactional manifests, file and symbol full-text search, language-specific analysis, dependency graphs, and context assembly in Python. The CLI, SDK, and desktop use the same in-process backend. Packaging no longer builds or bundles a Rust Context Engine.
 
-Run the standalone engine from an existing package, or build its executable with `python scripts/prepare_context_engine.py` from `ReverieCli-py`. The `index` command can update the same database after edits, renames, and deletions.
+Run the standalone engine with `reverie --context-engine`, or `python -m reverie --context-engine` in a source checkout. It includes `index`, `search`, `chunks`, `paths`, `status`, `serve`, help, and version commands. The `index` command updates the same database after edits, renames, and deletions. Historical Rust databases and matching snapshots are consistently backed up and retained; Python rebuilds derived indexes beside them. JSONL input and output use UTF-8.
 
 ```bat
 reverie --context-engine index C:\work\project C:\work\project\.reverie\search.sqlite3

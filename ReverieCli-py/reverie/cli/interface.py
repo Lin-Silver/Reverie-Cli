@@ -606,15 +606,21 @@ def _writer_project_progress(project_root: Path, prompt_text: str) -> Optional[D
     match = re.search(r"novel_id\s*(?:为|=|:)\s*([\w.-]+)", str(prompt_text or ""), flags=re.IGNORECASE)
     if not match:
         return None
-    state_path = Path(project_root) / "novels" / match.group(1) / "tracking" / "state.json"
+    from ..tools.serial_novel import _safe_id
+
+    try:
+        novel_id = _safe_id(match.group(1))
+    except ValueError:
+        return {"novel_id": match.group(1), "exists": False, "invalid": True}
+    state_path = Path(project_root) / "novels" / novel_id / "tracking" / "state.json"
     if not state_path.is_file():
-        return {"novel_id": match.group(1), "exists": False}
+        return {"novel_id": novel_id, "exists": False}
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"novel_id": match.group(1), "exists": True, "invalid": True}
+        return {"novel_id": novel_id, "exists": True, "invalid": True}
     return {
-        "novel_id": match.group(1),
+        "novel_id": novel_id,
         "exists": True,
         "invalid": False,
         "configured": bool(state.get("configured")),

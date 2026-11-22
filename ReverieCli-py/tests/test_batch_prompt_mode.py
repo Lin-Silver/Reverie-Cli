@@ -807,6 +807,23 @@ def test_writer_prompt_result_fails_when_native_status_never_completes(tmp_path,
     assert "did not reach persisted status `complete`" in result.error
 
 
+@pytest.mark.parametrize("requested_id, novel_id", [("native-project.", "native-project"), ("native.project.", "native.project")])
+def test_writer_progress_uses_canonical_novel_id_before_sentence_punctuation(tmp_path, requested_id, novel_id):
+    from reverie.cli.interface import _writer_project_progress
+
+    state_path = tmp_path / "novels" / novel_id / "tracking" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({"configured": True, "status": "writing"}), encoding="utf-8")
+    original = state_path.read_bytes()
+
+    progress = _writer_project_progress(tmp_path, f"Configure novel_id={requested_id} This turn only prepares the project.")
+
+    assert progress["novel_id"] == novel_id
+    assert progress["exists"] is True
+    assert progress["status"] == "writing"
+    assert state_path.read_bytes() == original
+
+
 @pytest.mark.parametrize("runtime_surface, state_kind, expected_success", [
     ("terminal", "valid", False), ("desktop", "valid", True),
     ("terminal", "missing", False), ("desktop", "missing", False),

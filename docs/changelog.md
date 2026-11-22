@@ -8,6 +8,7 @@
 - Released unfinished provider responses when their client closes while preserving shared connections used by other clients.
 - Let desktop shutdown close its SDK kernels normally before falling back to forced process cleanup.
 - Let valid desktop Writer planning and chapter turns continue without marking the whole novel complete, while retaining native project-state validation and terminal completion requirements.
+- Corrected Writer progress checks when a prompt includes punctuation after the novel ID.
 - Invalidated retrieval caches after incremental content refreshes, preserved Windows native index and Computer Use state paths, bounded workspace discovery, and reused message token counts without changing accounting.
 - Bound RIU view ownership to the selected conversation and isolated package-verification fixtures from enclosing Git repositories.
 - Included the canonical version in build dependency fingerprints so version-only builds refresh installed package metadata. Main pushes produce verified candidate artifacts; publication requires the exact commit's Test workflow to pass.

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       artifact_run:
-        description: Completed native validation run containing the macOS package
+        description: Completed native validation or failed core-release run containing the macOS package
         type: string
         required: true
       arch:
@@ -15,7 +15,7 @@ on:
       checks:
         description: Checks to run against the unchanged installed package
         type: choice
-        options: [p3, p4-profile, full]
+        options: [p3, p4-profile, p4-compare, full]
         default: p3
 
 permissions:
@@ -51,45 +51,51 @@ jobs:
           [[ "$ARTIFACT_RUN" =~ ^[0-9]+$ ]]
           mkdir -p .runtime/recheck-assets
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN" > .runtime/recheck-assets/source-run.json
-          sha=$(python -c "import json; p=json.load(open('.runtime/recheck-assets/source-run.json')); assert p['status']=='completed' and p['path']=='.github/workflows/verify-riu-packages.yml'; print(p['head_sha'])")
-          gh run download "$ARTIFACT_RUN" --repo "$GITHUB_REPOSITORY" --name "riu-validation-macos-$RIU_RECHECK_ARCH-$sha" --dir .runtime/recheck-assets
+          name=$(python -c "import json,os,sys; sys.path.insert(0,'scripts/verification'); from riu_retained_package import retained_artifact; p=json.load(open('.runtime/recheck-assets/source-run.json')); assert p['repository']['full_name']==os.environ['GITHUB_REPOSITORY']; print(retained_artifact(p,os.environ['RIU_RECHECK_ARCH']))")
+          gh run download "$ARTIFACT_RUN" --repo "$GITHUB_REPOSITORY" --name "$name" --dir .runtime/recheck-assets
           python - <<'PY'
-          import hashlib, json, os
+          import json, os, sys
           from pathlib import Path
+          sys.path.insert(0, 'scripts/verification')
+          from riu_retained_package import verify_retained_assets
           root = Path('.runtime/recheck-assets')
-          manifest = json.loads((root/f"reverie-kernel-macos-{os.environ['RIU_RECHECK_ARCH']}.json").read_text())
           source = json.loads((root/'source-run.json').read_text())
-          assert manifest['commit'] == source['head_sha']
-          core = root/manifest['asset_name']
-          assert core.resolve().parent == root.resolve()
-          assert hashlib.sha256(core.read_bytes()).hexdigest() == manifest['sha256']
-          assert len(list(root.glob('*.dmg'))) == 1
+          assets = verify_retained_assets(root, source, os.environ['RIU_RECHECK_ARCH'])
+          with open(os.environ['GITHUB_ENV'], 'a') as environment:
+              environment.write(f'RIU_RECHECK_ASSETS={assets}\n')
           PY
       - name: Install the retained DMG
+        id: retained_install
         run: |
           mount="$GITHUB_WORKSPACE/.runtime/recheck-mount"
           install="$GITHUB_WORKSPACE/.runtime/recheck-installed"
           mkdir -p "$mount" "$install"
-          images=(.runtime/recheck-assets/*.dmg)
+          images=("$RIU_RECHECK_ASSETS"/*.dmg)
           hdiutil attach "${images[0]}" -nobrowse -readonly -mountpoint "$mount"
           trap 'hdiutil detach "$mount"' EXIT
           bundles=("$mount"/*.app)
           test "${#bundles[@]}" -eq 1
           ditto "${bundles[0]}" "$install/$(basename "${bundles[0]}")"
           python - <<'PY'
-          import hashlib, json, os
+          import json, os, sys
           from pathlib import Path
           import subprocess
-          root = Path('.runtime/recheck-assets')
+          sys.path.insert(0, 'scripts/verification')
+          from riu_retained_package import file_digest, retained_artifact
+          root = Path(os.environ['RIU_RECHECK_ASSETS'])
           manifest = json.loads((root/f"reverie-kernel-macos-{os.environ['RIU_RECHECK_ARCH']}.json").read_text())
+          source = json.loads(Path('.runtime/recheck-assets/source-run.json').read_text())
           core, = Path('.runtime/recheck-installed').glob('*.app/Contents/reverie')
           # Desktop has an onedir kernel; the standalone asset is onefile.
           info = json.loads(subprocess.check_output([str(core.resolve()), '--kernel-info'], text=True, timeout=120))
           assert info == manifest['kernel']
           image, = root.glob('*.dmg')
-          (root/'installed-package.json').write_text(json.dumps({
-              'dmg_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
-              'installed_kernel_sha256': hashlib.sha256(core.read_bytes()).hexdigest(),
+          (Path('.runtime/recheck-assets')/'installed-package.json').write_text(json.dumps({
+              'source_run': source['id'], 'source_commit': source['head_sha'],
+              'verifier_commit': os.environ['GITHUB_SHA'],
+              'artifact_name': retained_artifact(source, os.environ['RIU_RECHECK_ARCH']),
+              'dmg_sha256': file_digest(image),
+              'installed_kernel_sha256': file_digest(core),
               'kernel': info,
           }, indent=2))
           PY
@@ -99,6 +105,14 @@ jobs:
         run: |
           if [[ "$CHECKS" == full ]]; then
             python scripts/verification/riu_package_native.py --package .runtime/recheck-installed --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native
+          elif [[ "$CHECKS" == p4-compare ]]; then
+            executable=$(python -c "import sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path('.runtime/recheck-installed').resolve()))")
+            status=0
+            # Both runs use the unchanged package, full P4 workload and original thresholds.
+            # A diagnostic replay never changes the source run's failed verdict.
+            python scripts/verification/riu_p4_electron.py --exe "$executable" --output .runtime/riu-package-native/p4-untraced || status=$?
+            python scripts/verification/riu_p4_electron.py --exe "$executable" --output .runtime/riu-package-native/p4-traced --trace-input || status=$?
+            exit "$status"
           elif [[ "$CHECKS" == p4-profile ]]; then
             executable=$(python -c "import sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path('.runtime/recheck-installed').resolve()))")
             python scripts/verification/riu_p4_electron.py --exe "$executable" --output .runtime/riu-package-native/p4 --trace-input
@@ -106,6 +120,24 @@ jobs:
             executable=$(python -c "import sys; from pathlib import Path; sys.path.insert(0,'scripts/verification'); from riu_package_native import package_executable; print(package_executable(Path('.runtime/recheck-installed').resolve()))")
             python scripts/verification/riu_p3_electron.py --exe "$executable" --sdk-root .runtime/riu-sdk --output .runtime/riu-package-native/p3
           fi
+      - name: Confirm retained package identity after execution
+        if: always() && steps.retained_install.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts/verification')
+          from riu_retained_package import file_digest, verify_retained_assets
+          root = Path('.runtime/recheck-assets')
+          source = json.loads((root/'source-run.json').read_text())
+          assets = verify_retained_assets(root, source, os.environ['RIU_RECHECK_ARCH'])
+          proof = json.loads((root/'installed-package.json').read_text())
+          image, = assets.glob('*.dmg')
+          core, = Path('.runtime/recheck-installed').glob('*.app/Contents/reverie')
+          assert file_digest(image) == proof['dmg_sha256']
+          assert file_digest(core) == proof['installed_kernel_sha256']
+          (root/'post-execution-identity.json').write_text(json.dumps({'source_commit': source['head_sha'], 'verifier_commit': os.environ['GITHUB_SHA'], 'unchanged': True}, indent=2))
+          PY
       - name: Retain package provenance and check results
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,3 +146,5 @@ jobs:
           path: |
             .runtime/riu-package-native/
             .runtime/recheck-assets/*.json
+            .runtime/recheck-assets/release-assets/*.json
+            .runtime/recheck-assets/.runtime/*.json

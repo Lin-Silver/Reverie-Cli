@@ -183,3 +183,19 @@ GitHub 连接器读取的索引工厂、JSONL CLI 与发布 workflow，Git blob 
 Computer Use 和 CUA 的当前原生清单均只返回两个可操作窗口，没有显示设置。通过已存在的 `SystemSettings.exe` 尝试启动，返回 `launched app did not expose a targetable window`；刷新选择与另一原生入口仍未取得设置窗口。没有改变缩放、发送键鼠输入或以模拟替代 DPI。真实 DPI 和忽略规则处理决定仍待取得；最终 17 项稳定草稿、正式重发、Python 正式归档及 Rust 开工继续等待必需前置。
 
 接续按用户已确认的草稿顺序继续独立准备最终来源和 17 项 CI 草稿。新文档提交将产生新的候选 SHA，因此旧 `34e4dcd` 的清单和实包结果继续以其原身份保存；最终来源重新执行 CI 和程序/元数据核对。文档与现有兼容实现的准备不预先决定新忽略规则；公开和 Rust 开工仍等待合同决定及真实 DPI。
+
+### P3-6：历史 Release 归档、纯 Python 主线与最终 Intel 失败（2026-11-22）
+
+候选 `20ac69e249fafafc4c133d6167fb5270cf0b2234` 的 Test `45050302674` 八个作业通过、Build `45050302665` 四平台通过、插件构建 `45052929908` 通过；候选发布 job 均跳过。独立下载的四平台 14 项文件共 3844796759 字节，逐项核对来源、大小、摘要和原生 provenance，通过记录为 C 盘任务目录 `candidate-20ac69e/candidate-assets-verified.json`。它仍是开发候选的证据。
+
+按已批准的恢复次序，原混合版 Release `454302327` 已改挂历史引用 `history/python-2.5.5-mixed-f029496`，保留全部 17 项原资产及资产 ID、摘要；历史注释标签对象仍为 `6b941a075204df72a449ab906157fd4229725601`。`main` 正常推进到 `20ac69e`，没有强推主线；通过旧对象 lease 将 `v2.5.5` 指向纯 Python 来源，新注释对象为 `6d2ec4307bcfad94a6629f3d8324583e38f9630b`。`latest` 和 `plugins-latest` 未更新；推进 main 时临时关闭的插件 workflow 已恢复 active。所有操作与回读证据保存在 C 盘任务目录的 `release-transition-preflight.json`、`original-release-archived-response.json`、`main-prepared.json` 和 `pure-python-tag-prepared.json`。
+
+主线 Test `45054318320` 八作业通过。主线重复 Build `45054318185` 主动取消，不能计为通过。最终标签 Build `45054438430` 的 Windows、Linux、macOS arm64 成功，Intel 作业 `137306447990` 在实际安装包 P4 检查失败，publish 跳过；新 `v2.5.5` 稳定 Release/草稿尚不存在。
+
+Intel 原始 P4 仅 `local-input-p95-under-100ms` 失败：60 次样本 p50=81.6 ms、p95=101.4 ms、max=122.7 ms；同一已安装失败包的诊断复测 p95=104.8 ms，再次失败。两份追踪分别为 33775 和 32207 个事件，主线程样式计算与 Layout 各 60 次，原追踪 Layout p95=38.121 ms、UpdateLayoutTree p95=26.212 ms、input EventDispatch p95=18.377 ms。追踪耗时包含重叠，不能相加冒充关键路径。此前同来源开发候选 p95=65.8 ms；数据尚不能确定差异是诊断追踪、宿主变化还是产品缺陷。
+
+失败的 Intel DMG 为 497458464 字节、SHA-256 `42c8ed72dfb3b6a22bfc79c4d2fc01219f77a64e4b79afb726ecfef524ea168d`，CLI 为 367207424 字节、SHA-256 `4325403c8b5f206b6b0bd2e78eaf7cc18b27143cd02886f6d2f0a205071aedcf`；两者及内核记录均核对原失败 artifact `14767014245` 的 provenance。完整日志、原始报告和追踪存于 C 盘任务目录 `final-draft-v2.5.5-20ac69e/`，分析摘要为 `intel-input-trace-summary.json`，原报告没有改写。
+
+为在同一实际失败 DMG 上区分追踪开销，扩展 `recheck-riu-macos.yml` 支持已完成的原生验证与 core-release 失败资产；下载前限定来源 workflow 与固定 SHA，执行前核对 manifest、CLI 大小/摘要、DMG 和全资产 provenance。新 `p4-compare` 使用原门槛、60 次样本及完整 P4 工作量分别运行无追踪和有追踪；无发布写权限，诊断结果不改变原验收判定。相关本地回归首轮 39 项通过、YAML/内嵌 Python/Bash 语法及只读权限检查通过，真实失败包也通过身份校验；远端对照结果仍待取得。
+
+真实单屏 DPI、忽略规则处理决定、最终 17 项稳定草稿及正式公开仍等待必需前置。没有创建 Rust 实现或改动其他会话的收尾文档，完整 3.0 范围继续保留。

@@ -2,7 +2,7 @@
 
 本文保留 AiO 与全模式独立对话在 2.5.3 阶段的源码检查点、历史结果与原验收门槛。下文数字和未完成事项属于所列历史提交，不能直接判定后来源码或发行包的状态。
 
-Python 2.5.5 正在完成收尾验收，保留 Python 内核、Electron 桌面、既有 Rust Context Engine 和完整项目布局。范围与发布门禁见 [2.5.5 候选版本说明](releases/v2.5.5.md)。存储、原生预验收、真实产品流程及全新连续八小时分别登记源码与包身份；全部适用门槛通过前不发布正式版本，也不声称已建立合格的 Python 归档基线。
+最终 Python 2.5.5 源码保留 Python 内核、Electron 桌面和完整项目布局，将 Context Engine 恢复为 CLI、SDK、桌面共用的纯 Python 实现。原混合版来源与验收证据作为历史记录保留，重发范围与门禁见 [2.5.5 版本说明](releases/v2.5.5.md)。新软件、上下文引擎、四平台实际包、真实单屏四档 DPI 和重发身份必须重新验收；全新八小时、真实物理多屏、完整干净宿主/产品及文学验收已显式豁免其作为 Rust 开工前置，继续单独标注未验证。以下原 AiO 门槛保持历史原文。
 
 代码检查点 [630db11](https://github.com/Lin-Silver/Reverie-Cli/commit/630db11c99bbe8c5cfbd44efa0a826064e48f9a7) 与验证工具／文档 [6998930](https://github.com/Lin-Silver/Reverie-Cli/commit/6998930b9659ce0d8b38f955f15d76859ae0634a) 已正常推送到 `main`，远端提交身份已核对。源码发布不替代下述完整稳定性验收。
 

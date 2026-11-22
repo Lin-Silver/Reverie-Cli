@@ -121,7 +121,7 @@ jobs:
           python ReverieCli-py/scripts/smoke_sdk_bridge.py --executable $executable --timeout 120
           if ($LASTEXITCODE -ne 0) { throw 'Standalone SDK bridge failed' }
           python ReverieCli-py/scripts/smoke_context_engine.py --executable $executable
-          if ($LASTEXITCODE -ne 0) { throw 'Standalone Rust Context Engine verification failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Standalone Python Context Engine verification failed' }
 
       - name: Build and verify Unix kernel
         if: runner.os != 'Windows'
@@ -270,7 +270,7 @@ jobs:
           & (Join-Path $installRoot 'reverie.exe') --kernel-info
           if ($LASTEXITCODE -ne 0) { throw 'Installed CLI handshake failed' }
           python ReverieCli-py/scripts/smoke_context_engine.py --executable (Join-Path $installRoot 'reverie.exe')
-          if ($LASTEXITCODE -ne 0) { throw 'Installed Rust Context Engine verification failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Python Context Engine verification failed' }
 
       - name: Install Linux release package
         if: runner.os == 'Linux'
@@ -547,6 +547,10 @@ jobs:
           if payload.get("schema") != "reverie.kernels.release.v1" or len(payload.get("assets", [])) != 4:
               raise SystemExit("Invalid consolidated kernel manifest")
           PY
+          release_tag=latest
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then release_tag="$GITHUB_REF_NAME"; fi
+          python ReverieCli-py/scripts/write_release_manifest.py release-assets \
+            --version "$version" --commit "$GITHUB_SHA" --tag "$release_tag"
 
       - name: Publish verified assets
         env:
@@ -626,7 +630,13 @@ jobs:
             "Reverie-CLI-macOS-Apple-Silicon#macOS Apple Silicon · Reverie-CLI-macOS-Apple-Silicon"
             "Reverie-$version-macOS-Intel.dmg#macOS Intel · Reverie-$version-macOS-Intel.dmg"
             "Reverie-CLI-macOS-Intel#macOS Intel · Reverie-CLI-macOS-Intel"
+            "reverie-kernel-windows-x64.json#Verification · reverie-kernel-windows-x64.json"
+            "reverie-kernel-linux-x64.json#Verification · reverie-kernel-linux-x64.json"
+            "reverie-kernel-macos-arm64.json#Verification · reverie-kernel-macos-arm64.json"
+            "reverie-kernel-macos-x64.json#Verification · reverie-kernel-macos-x64.json"
             "reverie-kernels.json#Verification · reverie-kernels.json"
+            "reverie-release-assets.json#Verification · reverie-release-assets.json"
+            "SHA256SUMS#Verification · SHA256SUMS"
           )
           for asset in "${assets[@]}"; do
             gh release upload "$release_tag" "release-assets/$asset" --clobber

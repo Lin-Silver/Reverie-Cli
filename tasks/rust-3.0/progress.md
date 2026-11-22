@@ -16,7 +16,7 @@
 
 | 阶段 | 状态 | 完成检查 |
 |---|---|---|
-| P1 工程收整 | 进行中：只读核对 | 来源/私有数据/证据分开记录；独有 worktree 源码先归档并验证远端；删除可再生输出前验证绝对路径、Git 状态、链接及占用 |
+| P1 工程收整 | 九份源码已归档；八个 worktree 已移除，最后一个因共享 junction 与删除审批阻塞保留 | 来源/私有数据/证据分开记录；独有 worktree 源码先归档并验证远端；删除可再生输出前验证绝对路径、Git 状态、链接及占用 |
 | P2 纯 Python Context Engine | 已接入 Python；定向验证通过，完整候选验收待完成 | 真实 Python CLI/SDK/桌面、索引/检索/状态/服务、增量与事务、失败保护、旧数据备份接续通过 |
 | P3 Python 重验与重发 | 进行中：修复候选验证；尚未重发 | 完整回归、四平台实际包、单屏四档真实 DPI、原混合版来源/资产归档与重发身份核对 |
 | 0A 只读整理 | 待开始 | SDK/类型/语料草案与来源 SHA 对应 |
@@ -81,3 +81,13 @@ CI 为 Python 候选及未来 Rust 开发分支提供只读测试/构建；核�
 验证：`build/venv/Scripts/python.exe -m pytest tests/test_non_game_completion.py tests/test_release_publication.py -q`，29 通过、7.66 秒；JUnit 为 `.runtime/rust-3.0/release-guard-regression-1.xml`。桌面已有本机结果为 527 通过/1 跳过，类型与翻译检查、renderer/Electron 构建通过，仅对应 `33295d6` 的源码。
 
 下一步按依赖推进：复核九个远端 worktree 源码归档并保全私有文件；完成新候选全量回归与四平台资产复核；运行四档真实单屏 DPI；保留原混合版身份和资产后重发纯 Python 2.5.5。上述必要前置全部通过后才建立 Rust 实现工作区。Rust 3.0 功能范围和验收门槛保持完整计划。
+
+### P1-2 / P3-2：接续归档与完整发行清单（2026-11-22）
+
+接续候选来源 `8f09fc8f42a7eccbfa2d57b410685fc12a2239fc`。GitHub 分支清单已核实九个 `codex/archive-pre-rust/` 归档存在；七个受管理 worktree 和 `py255-src` 的移除及私有文件保全记录分别在 `.runtime/rust-3.0/archive-completed-managed.json`、`archive-completed-unmanaged.json`。仅 `.runtime/ce-verify` 仍注册于 Git，原工作区的既有未跟踪 Python 收尾资料继续保留。
+
+`ce-verify` 的三个共享 junction 指向主工作区的 `ReverieCli-py/build/bundle_resources`、`ReverieCli-ui/.cache`、`ReverieCli-ui/node_modules`。归档脚本在发现链接时停止，尚未改动 checkout；只移除链接节点的 PowerShell 操作又被自动审批拒绝，仅返回 `blocked by policy`。该 checkout、链接和共享目标全部保留，不以另一种方式绕过拒绝。源码归档已成立，清理验收仍为部分完成。
+
+未提交候选新增完整发行资产清单生成器：核对十个实际程序、四个内核记录、聚合记录的来源、版本、平台、架构、大小、SHA-256 和 Python/in-process 声明，生成完整清单及 `SHA256SUMS`。发布 job 上传共 17 项资产，纠正两处仍称 Rust 后端的错误诊断。文档区分原混合版历史结果和纯 Python 重发合同。
+
+已有 `.runtime/rust-3.0/release-metadata-regression-1.xml` 记录为 50 项通过、零失败/跳过，19.557 秒，对应上述未提交候选内容。模拟发布测试证明的是守卫与上传次序，尚未替代真实四平台程序、独立下载和 DPI 验收。完整候选提交、全量回归与实际资产验证继续执行；正式标签、main 和 Rust 实现仍未变更。

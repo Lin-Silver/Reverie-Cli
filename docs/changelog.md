@@ -2,7 +2,7 @@
 
 ## v2.5.5 candidate — Python closeout, AiO, and independent conversations
 
-- Prepared the near-final Python release while preserving the full project layout, existing product features, and bundled Rust Context Engine. The future Rust mainline and Python archive branch are separate work.
+- Restored the final Python 2.5.5 Context Engine entirely to Python while preserving the project layout, Electron Desktop, and existing product features. The original mixed release retains its separate source and evidence; the pure Python reissue is verified before the Rust mainline and Python archive handoff.
 - Closed SQLite memory connections at transaction boundaries, preserving rollback and full AiO durability; fixed Windows project-data deletion with open database handles.
 - Avoided unnecessary workspace-statistics journal transitions and retried concurrent WAL initialization without changing four-process workloads or FULL durability.
 - Released unfinished provider responses when their client closes while preserving shared connections used by other clients.
@@ -19,7 +19,7 @@
 - Added shared execution slots, isolated Git write tasks and conflict-preserving incorporation; fixed linked-checkout ownership and explicit AiO control routing.
 - Preserved exact saved message/file bytes, retained expanded history, made memory-cache publication atomic, and added persistence failure diagnostics.
 - Kept proxy credentials in shared configuration and removed them from conversation snapshots and configuration exports, including legacy AiO event records. Malformed legacy files are reported without blocking healthy listings.
-- See [implementation status](AIO_IMPLEMENTATION_STATUS.md) for the original acceptance contract and [candidate release notes](releases/v2.5.5.md) for the closeout scope. Candidate metadata is 2.5.5; a version bump or successful build does not establish complete acceptance or publish a tagged release. Fresh package/endurance checks and real multiple-display/DPI qualification remain required.
+- See [implementation status](AIO_IMPLEMENTATION_STATUS.md) for the original acceptance contract and [release notes](releases/v2.5.5.md) for the reissue scope. Version metadata alone does not establish acceptance. The pure Python reissue requires fresh software and actual-package checks and real single-display DPI validation at four scaling settings; the eight-hour, physical multi-display, complete clean-host/product and literary checks retain their separately recorded limits.
 
 <a id="v2-5-3"></a>
 

@@ -14,9 +14,9 @@ Reverie CLI is a context-engine-powered AI coding assistant for large repositori
 
 ## Latest Update
 
-Current source version: `v2.5.5`, the Python closeout release candidate. The latest published stable release remains `v2.5.3` until all required acceptance gates pass.
+Current source version: `v2.5.5`, the final pure Python closeout source. The earlier mixed 2.5.5 was published from [f029496](https://github.com/Lin-Silver/Reverie-Cli/commit/f029496d19138176b857bedb54f7eeb225973471); the pure Python reissue requires its own acceptance and asset verification.
 
-The candidate preserves the Python core, desktop integration, and bundled Rust Context Engine. It is intended as the near-final Python release and the complete-project baseline for a future `Reverie-Cli-py` archive branch; this release does not move or remove the Python kernel or implement the later Rust mainline.
+This source preserves the Python core and desktop integration and uses an entirely Python Context Engine. The CLI, SDK, and Desktop share the in-process backend, including transactional indexing and old-index backup before rebuilding derived data. The complete project remains the intended baseline for the `Reverie-Cli-py` archive and the later Rust 3.0 rewrite.
 
 - Reverie CLI now exposes a stable terminal core interface for future desktop hosts through direct one-line commands such as `reverie.exe setting status`.
 - GitHub Release publishing now builds native Windows, Linux, Apple Silicon, and Intel kernels alongside their desktop packages. Official compiled plugins publish independently under `plugins-latest`.

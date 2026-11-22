@@ -141,5 +141,9 @@ elif args[0] == "api" and "--method" not in args:
     else:
         assert result.returncode == 0, result.stderr
         uploads = [i for i, c in enumerate(calls) if c["args"][:2] == ["release", "upload"]]
-        assert len(uploads) == 11
+        assert len(uploads) == 17
+        names = {calls[index]["args"][3].split("#", 1)[0].removeprefix("release-assets/") for index in uploads}
+        assert {"reverie-kernel-windows-x64.json", "reverie-kernel-linux-x64.json",
+                "reverie-kernel-macos-arm64.json", "reverie-kernel-macos-x64.json",
+                "reverie-kernels.json", "reverie-release-assets.json", "SHA256SUMS"} <= names
         assert len(public) == 1 and public[0] > max(uploads)

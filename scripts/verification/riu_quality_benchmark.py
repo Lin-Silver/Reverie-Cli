@@ -365,7 +365,6 @@ def wait_for_registered_view_frame(page, view_ref, *, process=None, timeout_ms=3
             # Opening a saved session can replace its provisional anchor. Keep
             # discovery actions within the same bounded, re-resolving loop.
             remaining = min(500, max(1, int((deadline-time.monotonic())*1000)))
-            anchor.scroll_into_view_if_needed(timeout=remaining)
             expand = anchor.get_by_role('button', name='展开', exact=True)
             if expand.count():
                 expand.click(timeout=remaining)

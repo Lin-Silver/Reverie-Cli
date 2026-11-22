@@ -54,7 +54,8 @@ def test_rich_prose_observer_includes_lists_without_code_quotes_or_native_data(v
         page.close()
 
 
-def test_registered_frame_can_appear_in_restored_pip_after_its_inline_anchor(verifier_browser):
+@pytest.mark.parametrize('moving_anchor', [False, True])
+def test_registered_frame_can_appear_in_restored_pip_after_its_inline_anchor(verifier_browser, moving_anchor):
     page = verifier_browser.new_page()
     try:
         page.set_content('''<section class=interactive-view-anchor style="min-height:100px" data-view-key="scope:session:vlate:1"></section>
@@ -67,6 +68,9 @@ def test_registered_frame_can_appear_in_restored_pip_after_its_inline_anchor(ver
                     document.querySelector('section').appendChild(portal.querySelector('iframe'));
                 };
             },200);</script>''')
+        if moving_anchor:
+            page.add_style_tag(content='''@keyframes anchor-motion { from { transform:translateY(0) } to { transform:translateY(12px) } }
+                .interactive-view-anchor { animation:anchor-motion 170ms linear infinite; }''')
         iframe, frame = benchmark.wait_for_registered_view_frame(page, ('vlate', 1), timeout_ms=3000)
         assert page.evaluate('inlineClicks') == 1
         assert iframe.evaluate('e=>e.parentElement.matches(".interactive-view-anchor")')

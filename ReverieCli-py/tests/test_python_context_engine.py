@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -6,20 +7,17 @@ from types import SimpleNamespace
 import pytest
 
 from reverie.context_engine import CodebaseIndexer, ContextRetriever, IndexConfig
-from reverie.context_engine.native import NativeContextError, find_executable
-from reverie.context_engine.native_indexer import NativeCodebaseIndexer
+from reverie.context_engine.storage_errors import ContextStorageError
+from reverie.context_engine.persistent_indexer import PersistentCodebaseIndexer
 from reverie.cli.interface import ReverieInterface
 
 
 @pytest.fixture
-def native_executable():
-    executable = find_executable()
-    if executable is None:
-        pytest.skip("Build the Rust Context Engine with scripts/prepare_context_engine.py")
-    return executable
+def python_command():
+    return [sys.executable, "-m", "reverie", "--context-engine"]
 
 
-def test_standalone_indexes_searches_and_removes_files(tmp_path, native_executable):
+def test_standalone_indexes_searches_and_removes_files(tmp_path, python_command):
     root = tmp_path / "工作区"
     src = root / "src"
     src.mkdir(parents=True)
@@ -38,7 +36,7 @@ def test_standalone_indexes_searches_and_removes_files(tmp_path, native_executab
     database = tmp_path / "index.sqlite3"
 
     def run(*arguments):
-        completed = subprocess.run([native_executable, *arguments], capture_output=True, encoding="utf-8", check=True)
+        completed = subprocess.run([*python_command, *map(str, arguments)], capture_output=True, encoding="utf-8", check=True)
         return json.loads(completed.stdout)
 
     first = run("index", root, database)
@@ -73,33 +71,33 @@ def _workspace(tmp_path):
     return root
 
 
-def test_application_native_index_preserves_hits_and_ignores(tmp_path, native_executable):
+def test_application_python_index_preserves_hits_and_ignores(tmp_path):
     root = _workspace(tmp_path)
-    native = NativeCodebaseIndexer(root, tmp_path / "native", config=IndexConfig(max_workers=2), executable=native_executable)
+    persistent = PersistentCodebaseIndexer(root, tmp_path / "persistent", config=IndexConfig(max_workers=2))
     python = CodebaseIndexer(root, tmp_path / "python", config=IndexConfig(max_workers=2))
     try:
-        assert set(native.scan_files()) == set(python.scan_files())
-        assert native.full_index(show_progress=False).files_parsed == python.full_index(show_progress=False).files_parsed == 2
-        assert set(native._file_info) == set(python._file_info)
-        assert native.get_index_status()["backend"] == "rust"
-        assert native._native.database.is_file()
+        assert set(persistent.scan_files()) == set(python.scan_files())
+        assert persistent.full_index(show_progress=False).files_parsed == python.full_index(show_progress=False).files_parsed == 2
+        assert set(persistent._file_info) == set(python._file_info)
+        assert persistent.get_index_status()["backend"] == "python"
+        assert persistent._store.database.is_file()
         weights = [("validateInvoice", 2.0), ("billing", 1.0), ("cache", 0.7)]
-        assert native.search_content_terms(weights) == python.search_content_terms(weights)
-        assert native.search_code_chunks(weights) == python.search_code_chunks(weights)
-        assert native.content_document_frequencies(["invoice", "billing"]) == {"invoice": 0, "billing": 1}
-        assert native.content_document_total() == python.content_document_total() == 2
-        assert native.search_content_terms([("PrivateSource", 1.0)]) == []
+        assert persistent.search_content_terms(weights) == python.search_content_terms(weights)
+        assert persistent.search_code_chunks(weights) == python.search_code_chunks(weights)
+        assert persistent.content_document_frequencies(["invoice", "billing"]) == {"invoice": 0, "billing": 1}
+        assert persistent.content_document_total() == python.content_document_total() == 2
+        assert persistent.search_content_terms([("PrivateSource", 1.0)]) == []
         retriever = ContextRetriever(
-            native.symbol_table, native.dependency_graph, root, file_info=native._file_info,
-            content_searcher=native.search_content_terms, chunk_searcher=native.search_code_chunks,
-            content_frequency=native.content_document_frequencies, content_total=native.content_document_total,
+            persistent.symbol_table, persistent.dependency_graph, root, file_info=persistent._file_info,
+            content_searcher=persistent.search_content_terms, chunk_searcher=persistent.search_code_chunks,
+            content_frequency=persistent.content_document_frequencies, content_total=persistent.content_document_total,
         )
         answer = retriever.retrieve_for_task("定位 PipelineGuard 和 validateInvoice 的实现", fast=True)
         assert Path(answer.relevant_files[0].file_path).name == "alpha.py"
     finally:
-        native.close()
+        persistent.close()
 
-    reloaded = NativeCodebaseIndexer(root, tmp_path / "native", executable=native_executable)
+    reloaded = PersistentCodebaseIndexer(root, tmp_path / "persistent")
     try:
         assert reloaded.load_cache()
         revision = reloaded.get_index_status()["revision"]
@@ -129,24 +127,24 @@ def test_application_native_index_preserves_hits_and_ignores(tmp_path, native_ex
         reloaded.close()
 
 
-def test_failed_native_write_preserves_the_previous_generation(tmp_path, native_executable, monkeypatch):
+def test_failed_python_write_preserves_the_previous_generation(tmp_path, monkeypatch):
     root = _workspace(tmp_path)
-    indexer = NativeCodebaseIndexer(root, tmp_path / "native", executable=native_executable)
+    indexer = PersistentCodebaseIndexer(root, tmp_path / "persistent")
     try:
         assert indexer.full_index(show_progress=False).success
         version = indexer.get_index_status()["revision"]
         previous = indexer.search_content_terms([("billing", 1.0)])
         assert previous
-        request = indexer._native.request
+        request = indexer._store.request
 
         def fail_commit(operation, **kwargs):
             if operation == "commit":
-                raise NativeContextError("Injected commit failure")
+                raise ContextStorageError("Injected commit failure")
             return request(operation, **kwargs)
 
         (root / "alpha.py").write_text("class LocalTransport:\n    pass\n", encoding="utf-8")
         with monkeypatch.context() as patch:
-            patch.setattr(indexer._native, "request", fail_commit)
+            patch.setattr(indexer._store, "request", fail_commit)
             result = indexer.refresh()
         assert not result.success
         assert indexer.get_index_status()["revision"] == version
@@ -159,11 +157,11 @@ def test_failed_native_write_preserves_the_previous_generation(tmp_path, native_
         indexer.close()
 
 
-def test_competing_writer_rejects_an_old_full_scan_and_keeps_snapshots_separate(tmp_path, native_executable, monkeypatch):
+def test_competing_writer_rejects_an_old_full_scan_and_keeps_snapshots_separate(tmp_path, monkeypatch):
     root = _workspace(tmp_path)
-    cache = tmp_path / "native"
-    first = NativeCodebaseIndexer(root, cache, executable=native_executable)
-    second = NativeCodebaseIndexer(root, cache, executable=native_executable)
+    cache = tmp_path / "persistent"
+    first = PersistentCodebaseIndexer(root, cache)
+    second = PersistentCodebaseIndexer(root, cache)
     try:
         assert first.full_index(show_progress=False).success
         assert second.load_cache()
@@ -194,12 +192,12 @@ def test_competing_writer_rejects_an_old_full_scan_and_keeps_snapshots_separate(
         second.close()
 
 
-def test_clean_releases_the_live_native_database_before_purging(tmp_path, native_executable, monkeypatch):
+def test_clean_releases_the_live_python_database_before_purging(tmp_path, monkeypatch):
     root = _workspace(tmp_path)
-    indexer = NativeCodebaseIndexer(root, tmp_path / "native", executable=native_executable)
+    indexer = PersistentCodebaseIndexer(root, tmp_path / "persistent")
     interface = ReverieInterface.__new__(ReverieInterface)
     interface.project_root = root
-    interface.project_data_dir = tmp_path / "native"
+    interface.project_data_dir = tmp_path / "persistent"
     interface.indexer = indexer
     interface.config_manager = SimpleNamespace(ensure_dirs=lambda: None)
     interface.session_manager = SimpleNamespace(get_current_session=lambda: None)
@@ -209,8 +207,8 @@ def test_clean_releases_the_live_native_database_before_purging(tmp_path, native
     interface._refresh_command_context = lambda: None
 
     def purge(project_root, project_data_dir):
-        assert indexer._native._process is None
-        indexer._native.database.rename(project_data_dir / "released.sqlite3")
+        assert indexer._store._catalog._writer is None
+        indexer._store.database.rename(project_data_dir / "released.sqlite3")
         return {"errors": []}
 
     monkeypatch.setattr("reverie.security_utils.purge_workspace_state", purge)

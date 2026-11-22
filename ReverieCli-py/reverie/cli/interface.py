@@ -75,7 +75,7 @@ from ..stream_protocol import (
 )
 from ..context_engine import CodebaseIndexer, ContextRetriever, GitIntegration, IndexConfig
 from ..context_engine import LSPManager
-from ..context_engine.native_indexer import create_indexer
+from ..context_engine.factory import create_indexer
 from ..memory import MemoryOS
 from ..modes import REPOSITORY_MODES, get_mode_display_name, normalize_mode
 from ..nvidia import (

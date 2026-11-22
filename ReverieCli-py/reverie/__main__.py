@@ -285,23 +285,8 @@ def main(argv: list[str] | None = None):
     """Main entry point for Reverie Cli"""
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--context-engine"]:
-        import subprocess
-        from reverie.context_engine.native import database_argument, find_executable
-
-        executable = find_executable()
-        if executable is None:
-            print("Reverie Context Engine executable is unavailable.", file=sys.stderr)
-            return 1
-        try:
-            arguments = argv[1:]
-            operation = arguments[0] if arguments else ""
-            database_index = 2 if operation == "index" else 1
-            if operation in {"index", "serve", "status", "search", "chunks", "paths"} and len(arguments) > database_index:
-                arguments[database_index] = database_argument(arguments[database_index])
-            return subprocess.run([str(executable), *arguments], check=False).returncode
-        except OSError as error:
-            print(f"Could not start the Reverie Context Engine: {error}", file=sys.stderr)
-            return 1
+        from reverie.context_engine.cli import main as context_engine_main
+        return context_engine_main(argv[1:])
     direct_command_result = _run_direct_command_if_requested(argv)
     if direct_command_result is not None:
         return direct_command_result
@@ -433,6 +418,7 @@ def main(argv: list[str] | None = None):
             "platform": sys.platform,
             "arch": arch,
             "frozen": bool(getattr(sys, "frozen", False)),
+            "context_engine": {"backend": "python", "execution": "in-process"},
         }, ensure_ascii=False, separators=(",", ":")))
         return 0
 
@@ -458,7 +444,7 @@ def main(argv: list[str] | None = None):
         from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
         from reverie.config import get_project_data_dir
-        from reverie.context_engine.native_indexer import create_indexer
+        from reverie.context_engine.factory import create_indexer
 
         console = Console()
         print(f"Indexing: {project_root}")

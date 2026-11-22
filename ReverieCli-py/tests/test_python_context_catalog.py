@@ -59,6 +59,18 @@ def test_failed_apply_rolls_back_and_does_not_publish_a_revision(tmp_path):
         assert _write(catalog, expected=1) == 2
 
 
+@pytest.mark.parametrize("size", [-1, True, 1.5, "200"])
+def test_invalid_metadata_preserves_the_committed_catalog(tmp_path, size):
+    with Catalog(tmp_path / "index.sqlite3") as catalog:
+        _write(catalog)
+        catalog.request("begin", root="workspace", replace=True, expected_revision=1)
+        document = _document()
+        document["size"] = size
+        with pytest.raises(ContextStorageError, match="file metadata"):
+            catalog.request("apply", removed=[], documents=[document])
+        assert _hits(catalog, "billing")
+
+
 def test_concurrent_readers_and_writers_use_committed_revisions(tmp_path):
     database = tmp_path / "index.sqlite3"
     with Catalog(database) as first, Catalog(database) as second:

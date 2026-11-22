@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 from .config import get_app_root
+from .stdio import configure_utf8_stdio as _configure_utf8_stdio
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -2191,18 +2192,6 @@ class ReverieSdkBridge:
             self.rats_runtime.shutdown()
             return {"id": request_id, "type": "shutdown"}
         raise ValueError(f"Unknown action: {action}")
-
-
-def _configure_utf8_stdio() -> None:
-    """Keep the frozen Windows JSONL bridge lossless for non-ASCII history."""
-    for stream in (sys.stdin, sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if not callable(reconfigure):
-            continue
-        try:
-            reconfigure(encoding="utf-8", errors="strict")
-        except (OSError, ValueError):
-            pass
 
 
 def main() -> int:

@@ -39,7 +39,7 @@ from .parsers.lua_parser import LuaParser
 from .parsers.gdscript_parser import GDScriptParser
 from .parsers.config_parser import ConfigParser
 from .cache import CacheManager
-from .native import NativeContextError
+from .storage_errors import ContextStorageError
 from .text_analysis import expand_identifier_text, subword_expansion
 from ..config import get_project_data_dir
 from ..diagnostics import report_suppressed_exception
@@ -1651,7 +1651,7 @@ class CodebaseIndexer:
         try:
             self._begin_content_index_rebuild()
             content_index_started = True
-        except NativeContextError:
+        except ContextStorageError:
             raise
         except Exception:
             report_suppressed_exception("initialize Context Engine content search index")
@@ -1769,7 +1769,7 @@ class CodebaseIndexer:
                             chunk_total=total_chunks,
                         )
 
-                except NativeContextError:
+                except ContextStorageError:
                     raise
                 except TimeoutError:
                     logger.error("Chunk %d timed out (300s)", chunk_num)

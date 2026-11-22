@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import sqlite3
 from threading import RLock
 
-from . import catalog_search
+from . import catalog_scan, catalog_search
 from .text_analysis import expand_identifier_text, subword_expansion
 from .indexer import CodebaseIndexer
 from .storage_errors import ContextStorageError
@@ -15,13 +15,17 @@ from .storage_paths import database_argument, readonly_uri
 class Catalog:
     APPLICATION_ID = 0x52565059  # RVPY; distinct from the historical Rust RVCE database.
     SCHEMA_VERSION = CodebaseIndexer._CONTENT_INDEX_SCHEMA_VERSION
+    SEARCHABLE_KINDS = frozenset({"CLASS", "ENUM", "FUNCTION", "INTERFACE", "MACRO", "METHOD",
+                                 "MODULE", "NAMESPACE", "PROPERTY", "STRUCT", "TRAIT", "TYPE_ALIAS"})
 
-    def __init__(self, database):
+    def __init__(self, database, *, scanner=None, readonly=False):
         self.database = Path(database).resolve()
         self._writer = None
         self._reader = None
         self._lock = RLock()
         self._closed = False
+        self._scanner = scanner
+        self._readonly = readonly
 
     def __enter__(self):
         return self
@@ -32,7 +36,19 @@ class Catalog:
     def _open(self):
         if self._closed:
             raise ContextStorageError("Context Engine catalog has been closed")
-        if self._writer is not None:
+        if self._reader is not None:
+            return
+        if self._readonly:
+            reader = sqlite3.connect(readonly_uri(self.database), uri=True, timeout=10,
+                                     isolation_level=None, check_same_thread=False)
+            try:
+                if reader.execute("PRAGMA application_id").fetchone()[0] != self.APPLICATION_ID or (
+                    reader.execute("PRAGMA user_version").fetchone()[0] != self.SCHEMA_VERSION):
+                    raise ContextStorageError("Incompatible Context Engine database")
+            except Exception:
+                reader.close()
+                raise
+            self._reader = reader
             return
         self.database.parent.mkdir(parents=True, exist_ok=True)
         writer = sqlite3.connect(database_argument(self.database), timeout=30,
@@ -88,7 +104,7 @@ class Catalog:
 
     @staticmethod
     def _relative(path):
-        if not isinstance(path, str) or not path or "\\" in path or PureWindowsPath(path).drive:
+        if not isinstance(path, str) or not path or "\\" in path or "\0" in path or PureWindowsPath(path).drive:
             raise ValueError("Invalid workspace-relative path")
         pieces = PurePosixPath(path).parts
         if not pieces or any(piece in {"/", ".", ".."} for piece in pieces) or "/".join(pieces) != path:
@@ -131,6 +147,8 @@ class Catalog:
 
     def _insert(self, document):
         path = self._relative(document["path"])
+        if type(document["size"]) is not int or document["size"] < 0 or type(document["modified_ns"]) is not int:
+            raise ValueError("Invalid file metadata")
         self._remove(path)
         body = document.get("body")
         self._writer.execute("INSERT INTO files VALUES(?,?,?,?)",
@@ -140,9 +158,11 @@ class Catalog:
         rowid = self._writer.execute("INSERT INTO content_documents(path) VALUES(?)", (path,)).lastrowid
         self._insert_search("content_search", rowid, (body, subword_expansion(body, limit=768)))
         for chunk in document.get("chunks", []):
+            if chunk["kind"] not in self.SEARCHABLE_KINDS:
+                continue
             rowid = self._writer.execute(
                 "INSERT INTO chunk_documents(path,symbol,kind,start_line,end_line) VALUES(?,?,?,?,?)",
-                (path, chunk["symbol"], chunk["kind"], chunk["start_line"], chunk["end_line"]),
+                (path, chunk["symbol"], chunk["kind"], max(1, chunk["start_line"]), max(1, chunk["end_line"])),
             ).lastrowid
             name = " ".join((chunk["symbol"], expand_identifier_text(chunk["name"]), chunk["kind"].lower()))
             signature = str(chunk.get("signature", "") or "")[:4096]
@@ -162,6 +182,15 @@ class Catalog:
             return self._begin(fields["root"], fields["replace"], fields["expected_revision"])
         if operation == "rollback":
             return self._writer.rollback()
+        if operation in {"scan", "changes"}:
+            current = catalog_scan.scan(fields["root"], fields["options"], scanner=self._scanner,
+                                        cache_dir=self.database.parent)
+            if operation == "scan":
+                return current
+            with self._read(fields["expected_revision"]) as reader:
+                previous = [dict(zip(("path", "size", "modified_ns"), row)) for row in
+                            reader.execute("SELECT path,size,modified_ns FROM files ORDER BY path")]
+                return catalog_scan.changes(previous, current)
         if operation in {"apply", "commit"}:
             if not self._writer.in_transaction:
                 raise ContextStorageError("Context index update has not started")
@@ -196,6 +225,8 @@ class Catalog:
         with self._lock:
             try:
                 self._open()
+                if self._readonly and operation in {"begin", "apply", "commit", "rollback"}:
+                    raise ContextStorageError("Context Engine catalog is read-only")
                 return self._respond(operation, fields)
             except (ContextStorageError, sqlite3.Error, OSError, ValueError, KeyError, TypeError) as error:
                 if self._writer is not None and operation in {"begin", "apply", "commit"}:

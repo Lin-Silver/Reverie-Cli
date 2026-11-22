@@ -27,8 +27,7 @@ if not defined ARCHIVE_SOURCE if exist "%~dp0..\..\dist\.reverie\plugins\blender
 if not defined ARCHIVE_SOURCE if exist "%~dp0..\..\%ARCHIVE_NAME%" set "ARCHIVE_SOURCE=%~dp0..\..\%ARCHIVE_NAME%"
 
 if not defined ARCHIVE_SOURCE (
-  echo Blender archive not found. Expected %ARCHIVE_NAME% beside this plugin, in dist\.reverie\plugins\blender, or at the repository root.
-  exit /b 1
+  set "ARCHIVE_SOURCE=%~dp0build\sdk\%ARCHIVE_NAME%"
 )
 
 "%PYTHON_EXE%" build_plugin.py --archive "%ARCHIVE_SOURCE%"

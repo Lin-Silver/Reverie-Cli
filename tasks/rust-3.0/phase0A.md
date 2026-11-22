@@ -58,3 +58,27 @@ FastEmbed `v7.7.1` 的 [Cargo features](https://github.com/anush008/fastembed-rs
 原始清单及脚本位于项目内 `.runtime/rust-3.0/phase0A/`：`sdk-protocol-inventory.json`、`component-protocol-inventory.json`、`gamer-type-matrix-draft.json`、`queries-draft.json`、`corpus-sources-draft.json`、`upstream/resource-metadata-audit.json`。这些本地派生文件不是 GitHub 发布资产。
 
 下一步先完成阶段 P 的实际候选程序核对、四档真实单屏 DPI 和纯 Python 重发。正式来源明确后再冻结阶段 0B，测冷启动及预热各至少 30 次的耗时分解、质量和轻量基线，并逐项补齐协议运行合同。完整 Rust 范围、Gamer / Live2D 独立组件、全部 GUI/TUI 和市场流程及发布门槛继续以 [完整计划](plan.md) 为准。
+
+## 当前候选的二次来源核对与生命周期观察
+
+2026-11-22 对候选 `34e4dcd572ec6aa086ba3cec78cc45856b4df04b` 再次只读核对。原清单所读的六个 SDK / 桌面协议文件与 `5725d07` 的 Git blob 完全相同，109 个 Python 分派、102 个桌面请求/响应、110 个动作并集和 87 个导出类型仍适用于当前候选。逐文件身份保存在 `.runtime/rust-3.0/phase0A/current-candidate-source-identity.json`；原草案不覆盖、不冒充正式冻结。
+
+| 链路 | 已观察的源码行为 | 迁移验收仍需补齐 |
+|---|---|---|
+| JSONL 入口 | 启动先写 `ready` / protocol_version=1；输出锁保证单条消息完整；异常返回请求 ID 和 `error` | 编码、错误形状、并发流次序和旧客户端实际互通 |
+| 后台分派 | 七个已列出的动作使用独立 daemon 线程，索引请求通过工作区锁合并 | Rust 调度、背压、取消及正常关闭；不由静态线程清点推断性能 |
+| 流式归属 | `prompt.event` 带请求 ID，并合并当前 run identity 与事件字段 | 会话/任务/运行归属、乱序与恢复、交付不确定状态 |
+| 项目与退出 | 工作区切换释放原 interface；Electron 关闭先发可选 stopPrompt，再发 shutdown 并结束 stdin，等待进程退出 | 正常关闭、EOF、异常中断、数据库与工具进程释放的实际证据 |
+| 截图坐标 | 返回图像使用 `returned_image_pixels`，保留捕获边界、裁剪及缩放；输入前再检查身份、窗口边界、可见 DWM frame 与遮挡 | 四档实际 DPI、裁剪/缩小图点击拖拽、运行中缩放及旧图拒绝 |
+
+窗口截图的 `_identity` 没有单独的 DPI 字段。真实 DPI 验证必须覆盖最大化窗口外框可能不变时的运行中缩放，确认旧观察是否失效；当前只有源码观察，不能据此宣称发生了实际坐标错误，也不能用模拟用例通过替代实机验证。
+
+本轮本机 `rustc` / `cargo` 再次返回 1.96.0；没有创建 Rust 工作区。阶段 0B 的题集、耗时样本与质量门槛仍未冻结或计算。
+
+## 忽略规则的历史合同差异
+
+2026-11-22 补充实包检查发现：规则先重新纳入 `!目录/keep.py`，之后再忽略整个目录时，当前 pathspec/扫描逻辑仍保留 keep.py，Git `check-ignore --no-index -v` 则将它忽略。原混合版和当前候选的 `_should_ignore`、`_should_descend_ignored_directory`、两个规则加载方法 AST 完全相同，既有行为测试也允许忽略目录内指定文件重新纳入。
+
+这项观察不证明 Python 恢复引入回归。目录级断言的失败报告保留，随后明确文件级排除、检索结果移除和无变更 revision 的六项实包检查单独通过。是否在 2.5.5 改为完整 Git 目录语义，或保留兼容并在 Rust 3.0 确定规则，已向用户提问，尚未决定。
+
+正式阶段 0B 应冻结默认规则、Git/Reverie 规则优先级、目录排除、重新纳入、规则变化后的缓存失效及对应语料。不能在未决定合同前修改实现，或把失败断言改名为通过。

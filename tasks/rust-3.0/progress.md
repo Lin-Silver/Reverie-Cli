@@ -17,8 +17,8 @@
 | 阶段 | 状态 | 完成检查 |
 |---|---|---|
 | P1 工程收整 | 九份远端源码归档已复核；Git 仅登记主 checkout，其他可再生残留交由用户手动清理 | 来源/私有数据/证据分开记录；独有 worktree 源码先归档并验证远端；本会话不再自行删除用户接手的残留 |
-| P2 纯 Python Context Engine | 已接入 Python；JSONL 类型与事务边界已修复，定向运行通过；新包待验收 | 真实 Python CLI/SDK/桌面、索引/检索/状态/服务、增量与事务、失败保护、旧数据备份接续通过 |
-| P3 Python 重验与重发 | 修复前候选全量回归通过，但实包发现服务缺陷；新候选须重验，尚未重发 | 完整回归、四平台实际包、单屏四档真实 DPI、原混合版来源/资产归档与重发身份核对 |
+| P2 纯 Python Context Engine | 34e4dcd 全量、四平台原生及独立 Windows 实包验证通过；补齐实际旧索引备份恢复、增量与文件级忽略更新；目录规则历史差异待用户确认 | 真实 Python CLI/SDK/桌面、索引/检索/状态/服务、增量与事务、失败保护、旧数据备份接续通过 |
+| P3 Python 重验与重发 | 候选全量、CI、四平台原生及 14 项资产已核对；原混合版 17 项资产、源码快照和历史标签对象已保全；真实 DPI 和最终草稿重发仍未完成 | 完整回归、四平台实际包、单屏四档真实 DPI、原混合版来源/资产归档与重发身份核对 |
 | 0A 只读整理 | 候选快照清单与语料草案已整理；未冻结正式基线 | SDK/类型/语料草案与来源 SHA 对应，详见 [阶段 0A](phase0A.md) |
 | 0B 正式基线 | 待开始 | 纯 Python 来源及备份恢复、冷/热各至少 30 样本、耗时分解、质量与轻量基线 |
 | 1 Rust 首条链路 | 前置未满足 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
@@ -131,3 +131,55 @@ Windows artifact ID `14756320495` 已完成续传：**1101056577 字节**，SHA-
 真实单屏 100%、125%、150%、200% DPI 仍未执行。用户暂时无法保持“设置 → 系统 → 显示”前台，等待恢复；没有更改系统缩放，也没有用显示清单、模拟公式或字体缩放替代实际命中验收。最终验收必须对应稳定草稿最终上传程序。
 
 远端 main 和正式 `v2.5.5` peeled 来源仍为 `f029496d19138176b857bedb54f7eeb225973471`，标签对象仍为 `6b941a075204df72a449ab906157fd4229725601`。本轮只准备候选，不公开稳定 Release，不移动 Python 主线，不创建 `ReverieCli-rs`。阶段 P 完成后再建立 Python 归档分支、冻结阶段 0B 和开始 Rust 实施。整个 3.0.0 的范围继续保留完整计划。
+
+### P3-4：修复后候选的全量、CI 与独立资产核对（2026-11-22）
+
+当前候选来源为 `34e4dcd572ec6aa086ba3cec78cc45856b4df04b`，本地与远端候选分支一致。本机完整 Python 回归为 **3693 通过、8 跳过、45 警告，971.16 秒**；执行起止 SHA 一致，退出码 0，证据为 `.runtime/rust-3.0/python-full-3.log`、JUnit 及起止身份文件。原有跳过不改称通过。
+
+GitHub Test `45035299724` 的八个作业和 Build `45035299684` 的四个平台作业均为 success；候选分支 `Publish core release` 为 skipped。四个平台的原生证据按不可变 artifact ID 下载并校验全 ZIP/成员字节、SHA-256 和 CRC。每平台五个原生阶段及 31 项 P4 检查通过；就绪 p95 为 Windows 382.472 ms、Linux 261.920 ms、macOS arm64 489.277 ms、macOS x64 367.515 ms。证据汇总为 `candidate-34e4dcd/native-summary.json`。这些是实际安装包配合受控回环夹具的结果，真实模型样本数为 0，不证明物理 DPI 或 Rust 性能门槛。
+
+实际 Windows 构建日志中的已安装内核声明 Python/in-process；`smoke_context_engine.py` 对新包验证非法替换被拒绝、合法待提交更新成功提交及 revision=2。两个 macOS 程序资产包全部字节、SHA-256、CRC、平台/架构和内核记录均已独立核对；对应 artifact ID 为 `14759163678`（arm64）和 `14759143904`（x64）。没有在 Windows 上冒称运行 macOS 程序。
+
+Linux artifact `14760235638` 首轮在已收到 968884224 字节时遇到 GitHub TLS EOF，退出码 1；失败完整记录保存在其 `stream-original-failure.log`。未生成完整校验结果，使用当前已补重试的传输工具重新验证，不能按部分传输宣称通过。
+
+Windows artifact `14760101770` 在 G 盘容量不足时仅停止经 PID、父进程、创建时间及命令核实的本任务传输进程，保留所有 `.part` 文件和日志；记录为其 `stopped-for-space.json`。这轮未完成全 ZIP 校验。源码及原始证据不移动，新的可续传 Windows ZIP 和验证资产存于本会话已授权的 C 盘工作目录；准确路径记在 `candidate-34e4dcd/windows-task-storage.json`。该存储例外由 G 盘实际不足触发，没有删除用户接手清理的缓存或用户数据。
+
+源代码复核确认 CLI 与 SDK/桌面使用同一 Python 索引工厂；Python 子项目已无受管理的历史 Context Engine Rust crate。原混合版仍由 main、原提交和正式标签保存。受 Git 管理的桌面 build 目录仅保留六个启动器、安装和卸载脚本；运行缓存与发行产物未进入候选源码提交。
+
+本节的独立资产验证完成后仍须核对 Windows 下载程序的实际 CLI/SDK/服务行为、最终稳定草稿资产和同一程序的四档真实单屏 DPI。稳定版公开、Python 正式归档、阶段 0B 与 Rust 实施继续等待这些前置，完整 3.0 范围不缩减。
+
+Linux 重试最终完整校验 1062301973 字节，SHA-256 为 `62f8dafbc333279cc43f2ffc9bda5658da6757ce2c64fb4862c52aac9a4a54fc`，全部成员 CRC、资产及内核身份通过。Windows 在本会话 C 盘工作目录完成可续传 ZIP 下载，首轮 HTTP 中断保留 1006632960 字节，第二轮完成 1101068746 字节；完整 SHA-256 为 `9462816cf26ba7a4aa4d70afdaec5a9e400f0e9fd3d8af9e4c7c979dd3a18e1b`。四个实际文件与独立下载的原生验证 provenance 摘要完全相同。
+
+下载得到的 Windows `reverie.exe` 为 271994348 字节，SHA-256 为 `cf4e88479b635f88debbd3dccda2dbd777f03a8b9c0219bb7bc54c911f5ba677`，PE machine=x64。清除测试环境 PATH 中的 Python/venv 目录和外部 Python 配置，使用独立应用数据及临时目录实际执行版本、内核握手、SDK ready/shutdown、持久索引/符号检索和 JSONL 服务合同，全部通过；程序运行后摘要未变。报告位置记在 C 盘 depot 的 `local-check/report.json`。这是实际冻结程序运行，不是源码 console launcher 或模拟后端。
+
+`.runtime/rust-3.0/verify-candidate-set.py` 将四个平台的全部 14 项候选文件（十个程序、四个内核记录）逐项绑定原生实包测试的摘要，资产集合、来源、版本、系统、架构、大小及 SHA-256 均一致；总字节 3844806239，结果为 `candidate-34e4dcd/candidate-assets-verified.json`。正式稳定草稿的三个聚合元数据仍须由最终 CI 产生并独立核对，不把 14 项候选检查改称 17 项正式草稿已通过。
+
+GitHub 连接器读取的索引工厂、JSONL CLI 与发布 workflow，Git blob 分别为 `71cb2be9febddb7e2f002162e63372cf3b4edf8f`、`a25b36adb203adb70358a7fd6e32ed1dad8c62e4`、`d7b5998c20a5644661bcb981ed0ebe43c0ac6719`，与本地候选完全相同。阶段 0A 原有六个协议来源也逐个核实 blob 未变，并补充了生命周期及真实 DPI 待验证点；没有扩充实现或计算成绩。
+
+已再次请求用户恢复“设置 → 系统 → 显示”前台，以完成实际四档 DPI；在取得可用环境前不执行缩放或输入。当前仅本任务计划记录有本地修改，候选代码 SHA、远端 main、正式标签和 Release 未改变；没有残留的本任务资产传输或 CLI 验证进程。
+
+### P2-5：实际历史数据库恢复与增量合同补充（2026-11-22）
+
+继续使用下载得到的 Windows 候选 `34e4dcd`，EXE SHA-256 为 `cf4e88479b635f88debbd3dccda2dbd777f03a8b9c0219bb7bc54c911f5ba677`。验证脚本及报告位于此前已授权的 C 盘候选工作目录，准确位置仍由 `candidate-34e4dcd/windows-task-storage.json` 指定；没有改动产品源码或 G 盘原探针。
+
+原探针数据库为历史实际 Rust worker 生成的 RVCE/schema=1/revision=1。用 SQLite 只读一致性备份建立测试副本，新 EXE 先拒绝直接读取未重建的旧索引，再自动备份并重建独立 Python 派生索引。新程序的路径/符号检索通过，备份清单、大小、哈希、原 revision 和工作区身份一致。恢复出的备份由历史 Rust EXE 实际执行状态、内容及符号检索通过；故意损坏的测试备份被新 EXE 拒绝，原旧数据库及已有 Python 派生索引未改变。
+
+增量实包检查覆盖无变更、重命名、内容/符号替换、删除、Git 忽略及重新纳入、Reverie 文件级忽略。`continuation-check-1/report.json` 保存 24 次实际 CLI 调用；最后一项目录级忽略断言失败，记录保持 `passed=false`。随后 `explicit-ignore-check-1/report.json` 的六项独立检查通过：明确新增文件级忽略后，旧路径和符号移除，再次无变更刷新不增加 revision。没有修改原失败结果或把它计为通过。
+
+目录差异已用 Git `check-ignore --no-index -v`、当前 pathspec 和原混合版源码直接核实：先 `!目录/keep.py`，再忽略整个目录时，当前引擎仍重新纳入 keep.py，Git 则忽略它。原版与当前候选的四个相关方法 AST 完全相同，既有测试允许被忽略目录内的指定文件重新纳入。它是既有合同差异，尚未改变实现。已询问用户选择 2.5.5 保留兼容并在 3.0 明确规则，或现在统一 Git 规则并重建/重验四平台。
+
+原 G 盘数据库、WAL 和探针源码的前后 SHA-256 一致；旧库备份恢复和实际检索已取得证据。本次实际旧库没有 native-snapshots，原快照组合的测试仍只具有既有测试夹具证据，不能改称真实历史快照全部恢复通过。
+
+### P3-5：完整原版保全与发布恢复次序（2026-11-22）
+
+原混合版 Release `454302327` 的全部 17 项资产已保存到 C 盘 `original-mixed-2.5.5/assets`，总字节 **3869554236**。逐项核对不可变资产 ID、名称、大小、GitHub digest 与实际 SHA-256，并核对原发行清单和 `SHA256SUMS`；完整记录为 `original-mixed-2.5.5/assets-preserved.json`。七项元数据复用此前独立下载的文件并再次核对字节，其余十项程序实际下载。原 Release 前后身份及资产集合一致，未修改或公开新候选。
+
+原源码 ZIP 为 22884299 字节，SHA-256 `410121acac5c2413e707138ecfbda08dc327a7a1f90ca00cb989e1252e9bd8f1`；1933 项归档条目、全部 CRC、ZIP 内提交注释及 Git 源码树一致。原注释标签内容按 Git 对象算法复核，仍为 `6b941a075204df72a449ab906157fd4229725601`。
+
+历史引用 `history/python-2.5.5-mixed-f029496` 已推送并回读，保留原注释标签对象本身，解引用到原混合版 `f029496`。当前五个 workflow 的事件规则全部核对，该历史标签不会触发它们。远端 main、正式 `v2.5.5` 和原 Release 仍保持原版身份。历史引用及工作流结果保存在 `historical-tag-preserved.json`；历史 Release 的归档尚未执行。
+
+新增 [发布转换与恢复次序](release-transition.md)，落实保全、历史 Release、正常 main 推进、单标签 lease、最终稳定草稿、独立资产/DPI 核对及公开次序。新文档所在目录被现有 `*.0` 规则忽略，后续只将本任务必要文档显式纳入提交，不改写其他会话资料。
+
+Computer Use 和 CUA 的当前原生清单均只返回两个可操作窗口，没有显示设置。通过已存在的 `SystemSettings.exe` 尝试启动，返回 `launched app did not expose a targetable window`；刷新选择与另一原生入口仍未取得设置窗口。没有改变缩放、发送键鼠输入或以模拟替代 DPI。真实 DPI 和忽略规则处理决定仍待取得；最终 17 项稳定草稿、正式重发、Python 正式归档及 Rust 开工继续等待必需前置。
+
+接续按用户已确认的草稿顺序继续独立准备最终来源和 17 项 CI 草稿。新文档提交将产生新的候选 SHA，因此旧 `34e4dcd` 的清单和实包结果继续以其原身份保存；最终来源重新执行 CI 和程序/元数据核对。文档与现有兼容实现的准备不预先决定新忽略规则；公开和 Rust 开工仍等待合同决定及真实 DPI。

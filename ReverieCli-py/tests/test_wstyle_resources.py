@@ -1,7 +1,7 @@
 from importlib import resources
 import os
 from pathlib import Path
-import subprocess
+import stat
 
 import pytest
 
@@ -31,15 +31,14 @@ def test_six_complete_resources_install_inactive_and_survive_edits_and_deletion(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows junction semantics")
 def test_real_windows_junction_is_rejected_without_following_it(tmp_path):
+    import _winapi
+
     target = tmp_path / "outside-cards"
     target.mkdir()
     repo = WStyleRepository(tmp_path / "app")
     repo.root.parent.mkdir(parents=True)
-    env = {**os.environ, "WSTYLE_JUNCTION_PATH": str(repo.root), "WSTYLE_JUNCTION_TARGET": str(target)}
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                             "New-Item -ItemType Junction -Path $env:WSTYLE_JUNCTION_PATH -Target $env:WSTYLE_JUNCTION_TARGET | Out-Null"],
-                            env=env, capture_output=True, text=True, timeout=20)
-    assert result.returncode == 0, result.stderr
+    _winapi.CreateJunction(str(target), str(repo.root))
+    assert repo.root.lstat().st_reparse_tag == stat.IO_REPARSE_TAG_MOUNT_POINT
     with pytest.raises(WStyleError, match="reparse"):
         repo.list_cards()
     assert not list(target.iterdir())

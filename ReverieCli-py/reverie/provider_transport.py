@@ -157,6 +157,12 @@ def _core_errors():
 class _CoreStream(httpx.AsyncByteStream):
     def __init__(self, stream):
         self.stream = stream
+        self.release = lambda: None
+        # Cancellation can discard the response before synchronous ownership.
+        self.release = on_cancel(self.abort)
+
+    def abort(self):
+        asyncio.run_coroutine_threadsafe(self.aclose(), _network_loop())
 
     async def __aiter__(self):
         with _core_errors():
@@ -164,13 +170,17 @@ class _CoreStream(httpx.AsyncByteStream):
                 yield chunk
 
     async def aclose(self):
-        with _core_errors():
-            await self.stream.aclose()
+        try:
+            with _core_errors():
+                await self.stream.aclose()
+        finally:
+            self.release()
 
 
 def _pool(key):
+    # httpcore counts active connections when enforcing its keepalive limit.
     kwargs = dict(ssl_context=httpx.create_ssl_context(verify=key[1], cert=key[2], trust_env=False),
-                  max_connections=32, max_keepalive_connections=16, keepalive_expiry=120,
+                  max_connections=32, max_keepalive_connections=32, keepalive_expiry=120,
                   network_backend=_NetworkBackend())
     if not key[0]:
         return httpcore.AsyncConnectionPool(**kwargs)

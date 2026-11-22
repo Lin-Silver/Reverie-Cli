@@ -4,6 +4,7 @@ import select
 import threading
 import time
 
+import httpcore
 import httpx
 import pytest
 
@@ -21,6 +22,18 @@ def _connection_pool_state():
                  "expired": sum(connection.has_expired() for connection in pool.connections),
                  "pending_requests": len(pool._requests)}
                 for pool in _transports.values()]
+
+    return _wait(snapshot())
+
+
+def _pending_requests_for(url):
+    from reverie.provider_transport import _transports
+
+    origin = httpcore.URL(url).origin
+
+    async def snapshot():
+        return sum(request.request.url.origin == origin
+                   for pool in _transports.values() for request in pool._requests)
 
     return _wait(snapshot())
 
@@ -141,6 +154,62 @@ def test_stop_aborts_real_socket_before_headers_and_during_body(server, transpor
         assert disconnected.wait(1), f"Stop must close the upstream socket: {failure.value!r}, callbacks={control._cancel_callbacks}"
         record_property("stop_and_disconnect_ms", round((time.perf_counter() - before) * 1000, 2))
     assert not control._cancel_callbacks
+
+
+@pytest.mark.parametrize("transport", ["httpx", "requests"])
+def test_cancelled_response_before_sync_delivery_releases_pool_request(server, monkeypatch, transport):
+    url, _, disconnected, _ = server
+    control = RunControl(lambda _event: None)
+    responses = []
+    original = httpcore.AsyncConnectionPool.handle_async_request
+
+    async def cancel_after_actual_headers(pool, request):
+        response = await original(pool, request)
+        responses.append(response)
+        control.stop()
+        return response
+
+    monkeypatch.setattr(httpcore.AsyncConnectionPool, "handle_async_request", cancel_after_actual_headers)
+    try:
+        with pytest.raises(RuntimeError, match="stopped"):
+            with request_scope(control):
+                if transport == "httpx":
+                    with provider_client() as client, client.stream("POST", url + "/stream", json={}):
+                        pytest.fail("A stopped response must not be delivered")
+                else:
+                    provider_post(url + "/stream", json={}, stream=True)
+        assert responses and control.cancelled.is_set()
+        assert disconnected.wait(1)
+        deadline = time.monotonic() + 1
+        while _pending_requests_for(url) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert _pending_requests_for(url) == 0, _connection_pool_state()
+        assert not control._cancel_callbacks
+    finally:
+        for response in responses:
+            _wait(response.stream.aclose())
+
+
+def test_keepalive_reuse_with_sixteen_other_live_streams(server):
+    url, _, _, connections = server
+    held = []
+    try:
+        with provider_client() as owner:
+            for _ in range(16):
+                context = owner.stream("POST", url + "/stream", json={}, timeout=30)
+                response = context.__enter__()
+                held.append((context, response))
+            start = len(connections)
+            assert start == 16 and _pending_requests_for(url) == 16
+            for _ in range(3):
+                with provider_client() as client:
+                    assert client.post(url + "/quick", json={}).json() == {}
+            assert len(connections) - start == 1, _connection_pool_state()
+            assert _pending_requests_for(url) == 16
+            assert all(not response.is_closed for _, response in held)
+    finally:
+        for context, _ in held:
+            context.__exit__(None, None, None)
 
 
 @pytest.mark.parametrize("transport", ["requests", "httpx"])

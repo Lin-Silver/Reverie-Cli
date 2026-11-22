@@ -111,4 +111,4 @@ def test_ci_covers_cross_platform_tests_and_packaged_bridge_contract() -> None:
     assert "reverie-kernels.json" in build_workflow
     assert "Reverie CLI Latest (Prerelease)" in build_workflow
     assert "publish_release:" in build_workflow
-    assert "github.event_name == 'workflow_dispatch' && inputs.publish_release" in build_workflow
+    assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release" in build_workflow

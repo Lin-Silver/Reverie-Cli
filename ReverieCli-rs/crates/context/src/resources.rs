@@ -205,6 +205,29 @@ fn validate_manifest(manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
+/// Verify only the manifest identity and contract for lightweight inventory.
+/// Asset integrity and native health still require `verify` and model loading.
+pub fn inspect_manifest(directory: &Path, expected_digest: &str) -> Result<Manifest> {
+    if !valid_digest(expected_digest) || linked(&fs::symlink_metadata(directory)?) {
+        return Err("A contained resource directory and explicit SHA-256 are required.".into());
+    }
+    let path = asset_path(directory, "manifest.json")?;
+    if fs::metadata(&path)?.len() > 1_048_576 {
+        return Err("Semantic resource manifest is too large.".into());
+    }
+    let bytes = fs::read(&path)?;
+    let actual: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    if actual != expected_digest {
+        return Err("Semantic resource manifest SHA-256 mismatch.".into());
+    }
+    let manifest = serde_json::from_slice(&bytes)?;
+    validate_manifest(&manifest)?;
+    Ok(manifest)
+}
+
 fn verify_architecture(path: &Path) -> Result<()> {
     let mut file = File::open(path)?;
     let mut header = [0u8; 64];
@@ -254,21 +277,8 @@ pub fn verify(
     expected_digest: &str,
     cancelled: &impl Fn() -> bool,
 ) -> Result<VerifiedBundle> {
-    if !valid_digest(expected_digest) || linked(&fs::symlink_metadata(directory)?) {
-        return Err("A contained resource directory and explicit SHA-256 are required.".into());
-    }
+    let manifest = inspect_manifest(directory, expected_digest)?;
     let directory = directory.canonicalize()?;
-    let manifest_path = asset_path(&directory, "manifest.json")?;
-    let manifest_bytes = fs::read(&manifest_path)?;
-    let actual: String = Sha256::digest(&manifest_bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    if actual != expected_digest {
-        return Err("Semantic resource manifest SHA-256 mismatch.".into());
-    }
-    let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
-    validate_manifest(&manifest)?;
     for (name, asset) in &manifest.files {
         if cancelled() {
             return Err("Semantic resource verification cancelled.".into());

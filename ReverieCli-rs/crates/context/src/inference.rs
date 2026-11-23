@@ -9,24 +9,15 @@ use fastembed::{
     UserDefinedEmbeddingModel, UserDefinedRerankingModel,
 };
 use ort::{environment::Environment, ep::ExecutionProviderDispatch};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    sync::{Mutex, MutexGuard},
+    sync::{Mutex, MutexGuard, TryLockError},
     time::Instant,
 };
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Device {
-    #[default]
-    Cpu,
-    Cuda,
-    DirectMl,
-    CoreMl,
-}
+pub use reverie_protocol::SemanticDevice as Device;
 
 #[derive(Clone)]
 struct RuntimeLease {
@@ -147,12 +138,16 @@ impl LocalModels {
     }
 
     pub fn status(&self) -> Result<Value> {
-        let state = lock(&self.state)?;
+        let state = match self.state.try_lock() {
+            Ok(state) => Some(state),
+            Err(TryLockError::WouldBlock) => None,
+            Err(error) => return Err(error.to_string().into()),
+        };
         Ok(
-            json!({"available":true,"installed":true,"status":if state.embedding.is_some()&&state.reranker.is_some(){"ready"}else{"on_demand"},
+            json!({"available":true,"installed":true,"status":state.as_ref().map(|state|if state.embedding.is_some()&&state.reranker.is_some(){"ready"}else{"on_demand"}).unwrap_or("busy"),
             "manifest_sha256":self.bundle.digest,"version":self.bundle.manifest.version,"dimensions":self.bundle.manifest.dimensions,
-            "requested_device":self.requested,"effective_device":state.effective,"fallback_reason":state.fallback,"intra_threads":self.threads,
-            "embedding_loaded":state.embedding.is_some(),"reranker_loaded":state.reranker.is_some(),"embedding_precision":self.bundle.manifest.embedding.precision,"reranker_precision":self.bundle.manifest.reranker.precision}),
+            "requested_device":self.requested,"effective_device":state.as_ref().map(|state|state.effective),"fallback_reason":state.as_ref().and_then(|state|state.fallback.as_ref()),"intra_threads":self.threads,
+            "embedding_loaded":state.as_ref().map(|state|state.embedding.is_some()),"reranker_loaded":state.as_ref().map(|state|state.reranker.is_some()),"embedding_precision":self.bundle.manifest.embedding.precision,"reranker_precision":self.bundle.manifest.reranker.precision}),
         )
     }
 
@@ -249,6 +244,9 @@ impl LocalModels {
             return Err("Semantic embedding cancelled.".into());
         }
         let mut state = lock(&self.state)?;
+        if cancelled() {
+            return Err("Semantic embedding cancelled while waiting for a model.".into());
+        }
         self.ensure_embedding(&mut state)?;
         let inputs = texts
             .iter()
@@ -311,7 +309,13 @@ impl LocalModels {
             return Err("Semantic reranking cancelled.".into());
         }
         let mut state = lock(&self.state)?;
+        if cancelled() {
+            return Err("Semantic reranking cancelled while waiting for a model.".into());
+        }
         self.ensure_reranker(&mut state)?;
+        if cancelled() {
+            return Err("Semantic reranking cancelled while loading a model.".into());
+        }
         let result = state
             .reranker
             .as_mut()
@@ -348,6 +352,10 @@ impl LocalModels {
     }
 
     pub fn probe(&self) -> Result<Value> {
+        self.probe_with_cancel(&|| false)
+    }
+
+    pub fn probe_with_cancel(&self, cancelled: &impl Fn() -> bool) -> Result<Value> {
         let started = Instant::now();
         let vectors = self.embed(
             &[
@@ -355,7 +363,7 @@ impl LocalModels {
                 "把游戏进度写入本地存档文件。".into(),
             ],
             false,
-            &|| false,
+            cancelled,
         )?;
         let scores = self.rerank(
             "How can I save player progress?",
@@ -363,7 +371,7 @@ impl LocalModels {
                 "把游戏进度写入本地存档文件。".into(),
                 "The menu background is blue.".into(),
             ],
-            &|| false,
+            cancelled,
         )?;
         Ok(
             json!({"loaded":true,"models":self.status()?,"ort_build_info":ort::info(),"vector_dimensions":vectors.iter().map(Vec::len).collect::<Vec<_>>(),

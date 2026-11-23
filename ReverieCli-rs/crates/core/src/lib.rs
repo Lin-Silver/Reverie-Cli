@@ -8,9 +8,11 @@ use std::{
 };
 
 pub mod config;
+mod context_jobs;
 pub mod host;
 pub mod models;
 pub mod provider;
+pub mod semantic_resources;
 pub mod session;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -22,6 +24,7 @@ pub struct Kernel {
     config: config::ConfigStore,
     sessions: Option<session::SessionStore>,
     contexts: HashMap<PathBuf, Arc<Mutex<reverie_context::ContextEngine>>>,
+    semantic: Arc<semantic_resources::SemanticResources>,
     view_session: Option<String>,
     workspace_mode: bool,
 }
@@ -34,6 +37,16 @@ pub const ACTIONS: &[&str] = &[
     "indexWorkspace",
     "queryContext",
     "workspaceMentions",
+    "getSemanticResources",
+    "installSemanticResources",
+    "selectSemanticResources",
+    "rollbackSemanticResources",
+    "disableSemanticResources",
+    "removeSemanticResources",
+    "warmSemanticResources",
+    "unloadSemanticModels",
+    "indexSemanticWorkspace",
+    "stopContextOperation",
     "runPrompt",
     "stopPrompt",
     "resolveApproval",
@@ -73,6 +86,9 @@ impl Kernel {
             .join(".reverie/projects")
             .join(config::project_name(&project_root));
         let config = config::ConfigStore::new(&app_root);
+        let semantic = Arc::new(semantic_resources::SemanticResources::new(
+            app_root.join(".reverie/resources/semantic"),
+        ));
         Ok(Self {
             project_root,
             app_root,
@@ -80,6 +96,7 @@ impl Kernel {
             config,
             sessions: None,
             contexts: HashMap::new(),
+            semantic,
             view_session: None,
             workspace_mode: false,
         })
@@ -108,7 +125,7 @@ impl Kernel {
     }
 
     pub fn context_status(&self) -> Value {
-        match self.contexts.get(&self.project_data_dir) {
+        let mut status=match self.contexts.get(&self.project_data_dir) {
             Some(context) => match context.try_lock() {
                 Ok(context) => context.status().unwrap_or_else(|error|json!({"ready":false,"available":true,"backend":"rust","error":error.to_string()})),
                 Err(TryLockError::WouldBlock) => {
@@ -122,7 +139,9 @@ impl Kernel {
                 Err(error) => json!({"ready":false,"available":true,"backend":"rust","error":error.to_string()}),
             },
             None => json!({"ready":false,"indexing":false,"files":0,"symbols":0,"backend":"rust","progress":0.0,"label":"On demand","automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
-        }
+        };
+        status["semantic"] = self.semantic.status();
+        status
     }
 
     pub fn shared_context(&mut self) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {

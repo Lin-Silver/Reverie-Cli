@@ -27,7 +27,18 @@ impl<B: Backend> Backend for CursorBackend<B> {
     {
         let size = self.inner.size()?;
         let mut final_position = None;
-        self.inner.draw(content.inspect(|(x, y, cell)| {
+        // Inline insertions include the empty cells covered by wide glyphs.
+        // Writing those cells would add spaces after CJK and emoji in scrollback.
+        let mut covered = None;
+        let visible = content.filter(|(x, y, cell)| {
+            if covered.is_some_and(|(row, end)| row == *y && *x < end) {
+                return false;
+            }
+            let width = cell.symbol().width() as u16;
+            covered = (width > 1).then_some((*y, x.saturating_add(width)));
+            true
+        });
+        self.inner.draw(visible.inspect(|(x, y, cell)| {
             final_position = Some(Position {
                 x: x.saturating_add(cell.symbol().width() as u16)
                     .min(size.width.saturating_sub(1)),

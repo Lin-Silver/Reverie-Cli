@@ -45,6 +45,9 @@ pub struct ContextEngine {
 const ANALYSIS_VERSION: i64 = 2;
 
 impl ContextEngine {
+    pub fn fork(&self) -> Result<Self> {
+        Self::from_database(&self.database_path)
+    }
     pub fn from_database(database: &Path) -> Result<Self> {
         let db = catalog::open_readonly(database)?;
         let state = catalog::state(&db)?;
@@ -87,7 +90,7 @@ impl ContextEngine {
                 row.get(0)
             })?;
         Ok(
-            json!({"ready":state.revision>0,"indexing":false,"files":files,"symbols":symbols,"references":references,"analysis_version":state.analysis_version,"structure_ready":state.analysis_version>=ANALYSIS_VERSION && state.revision>0,"backend":"rust","revision":state.revision,"progress":if state.revision>0{100}else{0},"label":if state.revision>0{"Ready"}else{"Not indexed"},"automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
+            json!({"ready":state.revision>0,"indexing":false,"files":files,"symbols":symbols,"references":references,"analysis_version":state.analysis_version,"structure_ready":state.analysis_version>=ANALYSIS_VERSION && state.revision>0,"backend":"rust","revision":state.revision,"progress":if state.revision>0{100}else{0},"label":if state.revision>0{"Ready"}else{"Not indexed"},"automatic_retrieval":true,"available":true,"semantic_index":self.semantic_status()?,"semantic":{"available":false,"status":"resource_not_installed"}}),
         )
     }
 

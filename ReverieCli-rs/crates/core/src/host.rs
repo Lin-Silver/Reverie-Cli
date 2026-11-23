@@ -54,6 +54,8 @@ struct Run {
     store: Mutex<crate::session::SessionStore>,
     context: Option<Arc<Mutex<reverie_context::ContextEngine>>>,
     context_key: PathBuf,
+    semantic: Option<Arc<crate::semantic_resources::ModelVersion>>,
+    semantic_error: Option<String>,
     reasoning: String,
     activities: Vec<Value>,
 }
@@ -64,10 +66,11 @@ pub struct PendingRun {
 }
 
 pub struct KernelHost {
-    kernel: Mutex<Kernel>,
+    pub(crate) kernel: Mutex<Kernel>,
     active: Mutex<HashMap<String, Arc<RunControl>>>,
     clients: Mutex<HashMap<String, Arc<ProviderClient>>>,
     grants: Mutex<HashMap<(PathBuf, String), SessionGrants>>,
+    pub(crate) context_jobs: Mutex<HashMap<String, Arc<crate::context_jobs::ContextControl>>>,
 }
 
 impl KernelHost {
@@ -77,6 +80,7 @@ impl KernelHost {
             active: Mutex::new(HashMap::new()),
             clients: Mutex::new(HashMap::new()),
             grants: Mutex::new(HashMap::new()),
+            context_jobs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -86,6 +90,11 @@ impl KernelHost {
                 control.cancel.cancel();
             }
         }
+        if let Ok(jobs) = self.context_jobs.lock() {
+            for job in jobs.values() {
+                job.cancel.cancel();
+            }
+        }
     }
 
     pub fn project_root(&self) -> Result<PathBuf> {
@@ -93,8 +102,16 @@ impl KernelHost {
     }
 
     pub async fn dispatch(&self, request: Request, sink: EventSink) -> Reply {
+        if Self::is_context_action(&request.action) {
+            return match self.begin_context_job(&request.action, &request.payload) {
+                Ok(job) => self.complete_context_job(request.id, job, sink).await,
+                Err(error) => Reply::error(request.id, error),
+            };
+        }
         let id = request.id.clone();
         let result = match request.action.as_str() {
+            "getSemanticResources" => self.semantic_inventory(),
+            "stopContextOperation" => self.stop_context_job(&request.payload),
             "runPrompt" => match self.begin_prompt(&request.payload) {
                 Ok(pending) => return self.complete_prompt(id, pending, sink).await,
                 Err(error) => return Reply::error(id, error),
@@ -305,6 +322,10 @@ impl KernelHost {
         } else {
             None
         };
+        let (semantic, semantic_error) = match kernel.semantic.capture() {
+            Ok(version) => (version, None),
+            Err(error) => (None, Some(error.to_string())),
+        };
         let user = json!({"role":"user","content":prompt});
         store.begin_run(
             &session,
@@ -339,6 +360,8 @@ impl KernelHost {
             store: Mutex::new(store),
             context,
             context_key,
+            semantic,
+            semantic_error,
             reasoning: String::new(),
             activities: Vec::new(),
         })
@@ -517,19 +540,42 @@ impl KernelHost {
             let engine = engine.clone();
             let cancel = control.cancel.clone();
             let prompt = run.prompt.clone();
-            let hits = tokio::task::spawn_blocking(move || {
-                let mut engine = lock(&engine)?;
-                engine.index_with_cancel(false, &|| cancel.is_cancelled())?;
+            let semantic = run.semantic.clone();
+            let (hits, mut retrieval) = tokio::task::spawn_blocking(move || {
+                let engine = {
+                    let mut engine = lock(&engine)?;
+                    engine.index_with_cancel(false, &|| cancel.is_cancelled())?;
+                    engine.fork()?
+                };
                 if cancel.is_cancelled() {
                     return Err("Run cancelled during context retrieval.".into());
                 }
-                engine.query(&prompt, 10, 12000)
+                crate::context_jobs::retrieve(
+                    &engine,
+                    semantic.as_deref(),
+                    &prompt,
+                    10,
+                    12000,
+                    "auto",
+                    &|| cancel.is_cancelled(),
+                )
             })
             .await??;
+            if let Some(error) = run.semantic_error.as_ref() {
+                retrieval["semantic_unavailable"] = json!(error);
+            }
+            emit(
+                json!({"type":"context.retrieved","retrieval":retrieval,"evidence_count":hits.len()}),
+            );
             for hit in hits {
                 context.push_str(&format!(
-                    "\n{}:{}-{}\n{}\n",
-                    hit.file_path, hit.start_line, hit.end_line, hit.content
+                    "\n{}:{}-{} [sha256:{} revision:{}]\n{}\n",
+                    hit.file_path,
+                    hit.start_line,
+                    hit.end_line,
+                    hit.content_hash,
+                    hit.revision,
+                    hit.content
                 ));
             }
         }
@@ -756,13 +802,28 @@ impl KernelHost {
             };
             let arguments = args.clone();
             let cancel = control.cancel.clone();
+            let semantic = run.semantic.clone();
             let details = tokio::task::spawn_blocking(move || -> Result<Value> {
-                let mut engine = lock(&engine)?;
-                engine.index_with_cancel(false, &|| cancel.is_cancelled())?;
+                let engine = {
+                    let mut engine = lock(&engine)?;
+                    engine.index_with_cancel(false, &|| cancel.is_cancelled())?;
+                    engine.fork()?
+                };
                 if cancel.is_cancelled() {
                     return Err("Run cancelled during context lookup.".into());
                 }
-                engine.lookup(&arguments)
+                if ["task", "explore"]
+                    .contains(&arguments["query_type"].as_str().unwrap_or_default())
+                    && let Some(version) = semantic.as_ref()
+                    && engine
+                        .semantic_status_for(&version.selection.manifest_sha256)?
+                        .is_some()
+                {
+                    let models = version.models(&|| cancel.is_cancelled())?;
+                    engine.lookup_hybrid(&models, &arguments, &|| cancel.is_cancelled())
+                } else {
+                    engine.lookup(&arguments)
+                }
             })
             .await??;
             let metadata = json!({"backend":"rust","query_type":details["query_type"],"revision":details["revision"],"symbol":details["symbol"]["qualified_name"],"file":details["file"].as_str().or_else(||details["symbol"]["file_path"].as_str()),"line":details["symbol"]["start_line"]});

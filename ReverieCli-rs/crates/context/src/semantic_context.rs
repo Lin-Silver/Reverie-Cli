@@ -7,6 +7,10 @@ impl ContextEngine {
         semantic::status(&self.semantic_path, &self.root)
     }
 
+    pub fn semantic_status_for(&self, digest: &str) -> Result<Option<semantic::IndexState>> {
+        semantic::status_for(&self.semantic_path, &self.root, digest)
+    }
+
     pub fn index_semantic(
         &self,
         models: &LocalModels,

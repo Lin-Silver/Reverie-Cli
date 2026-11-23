@@ -2310,6 +2310,7 @@ dependencies = [
  "fastembed",
  "ignore",
  "ort",
+ "reverie-protocol",
  "rusqlite",
  "serde",
  "serde_json",

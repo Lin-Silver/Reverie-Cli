@@ -74,6 +74,19 @@ pub fn status(path: &Path, root: &Path) -> Result<Option<IndexState>> {
     Ok(Some(state(&db)?))
 }
 
+pub fn status_for(path: &Path, root: &Path, digest: &str) -> Result<Option<IndexState>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let db = Connection::open_with_flags(
+        path.canonicalize()?,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    db.busy_timeout(std::time::Duration::from_secs(10))?;
+    check(&db, root)?;
+    Ok(db.query_row("SELECT id,revision,resource_digest,contract,(SELECT count(*) FROM vectors WHERE generation=g.id) FROM generations g WHERE resource_digest=?1 AND contract=?2 ORDER BY id DESC LIMIT 1",params![digest,CONTRACT_VERSION],|row|Ok(IndexState{generation:row.get(0)?,revision:row.get(1)?,resource_digest:row.get(2)?,contract_version:row.get(3)?,vectors:row.get(4)?})).optional()?)
+}
+
 impl Store {
     pub fn open(path: &Path, root: &Path) -> Result<Self> {
         let parent = path.parent().ok_or("Semantic index has no parent.")?;
@@ -219,6 +232,9 @@ impl Store {
         limit: usize,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Vec<Evidence>> {
+        if cancelled() {
+            return Err("Semantic nearest-neighbor retrieval cancelled.".into());
+        }
         encode(query)?;
         let transaction = self.db.unchecked_transaction()?;
         // Old runs retain their model resource. Keep one complete generation per

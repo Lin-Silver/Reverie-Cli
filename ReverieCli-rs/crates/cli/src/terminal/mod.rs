@@ -1,3 +1,4 @@
+mod context;
 mod cursor_backend;
 mod input;
 mod input_events;
@@ -26,6 +27,7 @@ enum PanelKind {
     Approval,
     Models,
     Sessions,
+    ContextRemoval,
 }
 pub(super) struct Panel {
     title: String,
@@ -48,6 +50,8 @@ struct Tui {
     input: Input,
     panel: Option<Panel>,
     active: Option<tokio::task::JoinHandle<Reply>>,
+    background: Option<tokio::task::JoinHandle<Reply>>,
+    background_id: String,
     queue: VecDeque<String>,
     pending: String,
     status: String,
@@ -149,6 +153,12 @@ impl Tui {
         };
         let index = panel.selected;
         match panel.kind {
+            PanelKind::ContextRemoval => {
+                if !cancelled && index == 1 {
+                    let payload = panel.source.clone();
+                    self.start_context_operation("removeSemanticResources", payload)?;
+                }
+            }
             PanelKind::Approval => {
                 let decision = if cancelled {
                     "deny"
@@ -217,6 +227,7 @@ impl Tui {
             }
             self.status = "Stopping · preserving completed work".into();
         }
+        self.stop_context_operation().await?;
         Ok(())
     }
     async fn command(&mut self, text: &str) -> Result<()> {
@@ -269,10 +280,7 @@ impl Tui {
                 self.screen.print(&format!("Approval mode: {mode}"))?;
                 self.refresh().await?;
             }
-            Some("/context") if args.get(1).is_some_and(|value|value == "index") => {
-                let result = self.request("indexWorkspace", json!({})).await?;
-                self.screen.print(&serde_json::to_string_pretty(&result["result"])? )?;
-            }
+            Some("/context")=>self.context_command(&args[1..]).await?,
             _ => return Err("Unknown command. Use /help.".into()),
         }
         Ok(())
@@ -284,7 +292,7 @@ impl Tui {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('c') if control => {
-                if self.active.is_some() {
+                if self.active.is_some() || self.background.is_some() {
                     self.stop().await?;
                 } else {
                     self.quitting = true;
@@ -401,6 +409,14 @@ impl Tui {
     }
     async fn event(&mut self, event: Value) -> Result<()> {
         match event["type"].as_str() {
+            Some("context.progress") if event["operation_id"] == self.background_id => {
+                self.status = format!(
+                    "Context {} · {}/{} · /context stop",
+                    event["phase"].as_str().unwrap_or("working"),
+                    event["completed"].as_u64().unwrap_or(0),
+                    event["total"].as_u64().unwrap_or(0)
+                );
+            }
             Some("assistant.delta") => self.screen.feed(
                 &mut self.pending,
                 event["text"].as_str().unwrap_or_default(),
@@ -462,6 +478,16 @@ impl Tui {
             while let Ok(event) = self.events.try_recv() {
                 self.event(event).await?;
             }
+            if self
+                .background
+                .as_ref()
+                .is_some_and(|task| task.is_finished())
+            {
+                let reply = self.background.take().unwrap().await?;
+                self.background_id.clear();
+                self.print_context_reply(&reply)?;
+                self.refresh().await?;
+            }
             if self.active.as_ref().is_some_and(|task| task.is_finished()) {
                 let reply = self.active.take().unwrap().await?;
                 while let Ok(event) = self.events.try_recv() {
@@ -489,7 +515,7 @@ impl Tui {
                     self.screen.print(&error.to_string())?;
                 }
             }
-            if self.quitting && self.active.is_none() {
+            if self.quitting && self.active.is_none() && self.background.is_none() {
                 break;
             }
             self.screen.draw(
@@ -531,7 +557,7 @@ pub fn run(project: PathBuf, session: Option<String>, no_index: bool) -> Result<
         let sink: EventSink=Arc::new(move |event| { let _=sender.send(event); });
         let screen=Screen::new()?;
         let input_events=InputEvents::new()?;
-        let mut tui=Tui { input_events, host, screen, events, sink, session:String::new(), state:Value::Null, input:Input::default(), panel:None, active:None, queue:VecDeque::new(), pending:String::new(), status:String::new(), history:Vec::new(), history_cursor:0, history_draft:Input::default(), quitting:false, no_index };
+        let mut tui=Tui { input_events, host, screen, events, sink, session:String::new(), state:Value::Null, input:Input::default(), panel:None, active:None, background:None,background_id:String::new(), queue:VecDeque::new(), pending:String::new(), status:String::new(), history:Vec::new(), history_cursor:0, history_draft:Input::default(), quitting:false, no_index };
         let initialized=tui.request("initialize",json!({})).await?["state"].clone();
         let selected=session.filter(|id|!id.is_empty()).or_else(|| initialized["sessions"]["current_session_id"].as_str().filter(|id|!id.is_empty()).map(str::to_owned));
         tui.session=if let Some(session)=selected { tui.request("getSession",json!({"sessionId":session})).await?; session } else { tui.request("createSession",json!({})).await?["session"]["id"].as_str().ok_or("Conversation was not created.")?.into() };
@@ -541,6 +567,7 @@ pub fn run(project: PathBuf, session: Option<String>, no_index: bool) -> Result<
         let result=tui.loop_events().await;
         tui.host.cancel_all();
         if let Some(task)=tui.active.take() { let _=task.await; }
+        if let Some(task)=tui.background.take() { let _=task.await; }
         result
     })
 }

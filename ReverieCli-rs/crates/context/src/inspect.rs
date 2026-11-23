@@ -272,6 +272,32 @@ fn verify_references(db: &Connection, root: &Path, references: &[Reference]) -> 
 
 impl ContextEngine {
     pub fn lookup(&self, request: &Value) -> Result<Value> {
+        self.lookup_with_hits(request, None)
+    }
+
+    pub fn lookup_hybrid(
+        &self,
+        models: &crate::inference::LocalModels,
+        request: &Value,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Value> {
+        if !["task", "explore"].contains(&request["query_type"].as_str().unwrap_or_default()) {
+            return self.lookup(request);
+        }
+        let query = request["query"]
+            .as_str()
+            .ok_or("Context query text is required.")?;
+        let limit = request["max_symbols"].as_u64().unwrap_or(12).clamp(1, 200) as usize;
+        let budget = request["max_tokens"]
+            .as_u64()
+            .unwrap_or(12000)
+            .try_into()
+            .map_err(|_| "Context budget is too large for this platform.")?;
+        let hits = self.query_hybrid(models, query, limit, budget, cancelled)?;
+        self.lookup_with_hits(request, Some(hits))
+    }
+
+    fn lookup_with_hits(&self, request: &Value, supplied: Option<Vec<Evidence>>) -> Result<Value> {
         let kind = request["query_type"]
             .as_str()
             .ok_or("Context query_type is required.")?;
@@ -288,7 +314,11 @@ impl ContextEngine {
         if kind == "task" || kind == "explore" {
             let max_files = request["max_files"].as_u64().unwrap_or(6).clamp(1, 200) as usize;
             let max_symbols = request["max_symbols"].as_u64().unwrap_or(12).clamp(1, 200) as usize;
-            let mut hits = self.query(query, 200, max_tokens)?;
+            let hybrid = supplied.is_some();
+            let mut hits = match supplied {
+                Some(hits) => hits,
+                None => self.query(query, 200, max_tokens)?,
+            };
             let preferred = request["active_files"]
                 .as_array()
                 .into_iter()
@@ -324,7 +354,7 @@ impl ContextEngine {
                 hits.clear();
             }
             return Ok(
-                json!({"query_type":kind,"query":query,"revision":revision,"files":files,"evidence":hits,"estimated_tokens":used,"max_tokens":max_tokens,"budget_algorithm":"unicode_scalar_count_div_4_floor","components":{"lexical":true,"structure":true,"semantic":false,"history":false,"memory":false},"unavailable_components":["semantic","history","memory"]}),
+                json!({"query_type":kind,"query":query,"revision":revision,"files":files,"evidence":hits,"estimated_tokens":used,"max_tokens":max_tokens,"budget_algorithm":"unicode_scalar_count_div_4_floor","components":{"lexical":true,"structure":true,"semantic":hybrid,"neural_rerank":hybrid,"history":false,"memory":false},"unavailable_components":if hybrid{vec!["history","memory"]}else{vec!["semantic","history","memory"]}}),
             );
         }
         let db = self.catalog.connection().unchecked_transaction()?;

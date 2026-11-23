@@ -339,3 +339,11 @@ Build `45058606286` 的 Intel job `137319279679` 失败发生在 PyInstaller 准
 本地仅保留 `main` 与 `Reverie-Cli-py`，旧分支完整历史保存在 `.git/branch-archives/20261123-rust-main/source-refs.bundle`，SHA-256 `a8b033581f27d82a78eb851aa01889405b5047e6504e4a2b3856b864d4b60235`，Git bundle verify 通过。远端分支将与本增量 main 推送一起按已记录 SHA 清理。
 
 main 的 CI 改为四平台 Rust 基本构建／检查与既有桌面测试，停止 Python 产品回归及发行构建。Rust candidate workflow 只提供只读 CI artifacts，暂不公开未完成产品；插件自动构建不自动更新 `plugins-latest`，公开仅允许 main 手动运行。正式 2.5.5 标签和资产未变；后续会话、Provider 与 Context Engine 接着实现。
+
+### R1-2：配置与事务会话首条链（2026-11-23 UTC）
+
+继续在 main 实施。新增 Rust 配置、手动模型来源、会话及 JSONL actions，保留 Python schema 7、落盘 Reverie／对外 assistant 的角色、72 条以上的原文分页、未知 JSON 字段和工作区身份。会话元数据修改使用修订检查且不重写消息，不改变另一会话的选择；重复消息事件幂等，已删除会话拒绝旧执行器追加。已有 SQLite 使用一致性在线备份并检查备份完整性后接续；配置原字节备份后原子替换。内置 Provider 文件的手动模型库存按原引用读取，首条链不将未迁移 Provider 伪装成可用。
+
+本地 cargo test --workspace --locked：4 passed；Clippy --all-targets --locked -- -D warnings 通过；实际 release 构建通过。Windows release EXE 为 2,532,864 字节。实际入口 6 项检查通过，JSONL 配置与会话 20 次请求检查通过；后者验证两个会话独立配置、未知配置保留、原字节备份、旧修订拒绝、删除确认、重启、73 条消息分页、Reverie 角色及数据库备份读回。证据为 .runtime/rust-3.0/R1-2-entry-smoke.json 和 .runtime/rust-3.0/session-smoke/case-reivU8/report.json。
+
+这是基础运行证据；全部 Provider、旧布局迁移／完整恢复、任务配置历史、fork／rewind、真实模型及完整产品仍继续实施或待独立验收。四平台 CI 已加入同一实际 session smoke；本地仅有 Windows 本轮运行证据。Python 归档、正式标签、Release 和资产不变；其它会话的未跟踪 closeout 文件保持原样。

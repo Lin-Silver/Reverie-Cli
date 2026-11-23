@@ -5,6 +5,29 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const KERNEL_SCHEMA: &str = "reverie.kernel.v1";
 pub const BRIDGE_PROTOCOL: &str = "sdk-bridge.v1";
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionPage {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub metadata: Map<String, Value>,
+    pub revision: i64,
+    pub messages: Vec<Value>,
+    pub total: i64,
+    pub before: Option<i64>,
+    pub interrupted_streams: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionInfo {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub message_count: i64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Request {
     #[serde(default)]

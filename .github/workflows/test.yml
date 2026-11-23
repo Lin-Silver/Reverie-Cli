@@ -80,3 +80,5 @@ jobs:
         run: cargo build --manifest-path ReverieCli-rs/Cargo.toml --release --locked
       - name: Run actual native entry and SDK checks
         run: node scripts/verification/rust-smoke.mjs
+      - name: Run actual configuration and session checks
+        run: node scripts/verification/rust-session-smoke.mjs

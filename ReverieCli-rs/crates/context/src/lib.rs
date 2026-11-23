@@ -2,11 +2,14 @@
 
 mod catalog;
 mod graph;
+pub mod inference;
 mod inspect;
 mod parsing;
 pub mod resources;
 pub mod scan;
 pub mod search;
+pub mod semantic;
+mod semantic_context;
 mod text;
 
 use catalog::Catalog;
@@ -35,6 +38,8 @@ pub struct ContextEngine {
     root: PathBuf,
     catalog: Catalog,
     parsers: parsing::Parsers,
+    database_path: PathBuf,
+    semantic_path: PathBuf,
 }
 
 const ANALYSIS_VERSION: i64 = 2;
@@ -63,6 +68,8 @@ impl ContextEngine {
             root,
             catalog,
             parsers: parsing::Parsers::default(),
+            database_path: database.canonicalize()?,
+            semantic_path: database.canonicalize()?.with_extension("semantic.sqlite3"),
         })
     }
 
@@ -161,12 +168,22 @@ impl ContextEngine {
         limit: usize,
         estimated_tokens: usize,
     ) -> Result<Vec<Evidence>> {
+        let db = self.catalog.connection().unchecked_transaction()?;
+        self.query_snapshot(&db, input, limit, estimated_tokens)
+    }
+
+    fn query_snapshot(
+        &self,
+        db: &rusqlite::Connection,
+        input: &str,
+        limit: usize,
+        estimated_tokens: usize,
+    ) -> Result<Vec<Evidence>> {
         let input = input.trim();
         if input.is_empty() {
             return Ok(Vec::new());
         }
-        let db = self.catalog.connection().unchecked_transaction()?;
-        let state = catalog::state(&db)?;
+        let state = catalog::state(db)?;
         if state.revision == 0 {
             return Err("Context Engine is not indexed. Run index first.".into());
         }
@@ -174,8 +191,8 @@ impl ContextEngine {
             .split_whitespace()
             .map(|word| (word.to_owned(), 1.0))
             .collect();
-        let mut hits = search::ranked(&db, &weights, limit.clamp(1, 200) * 3, true)?;
-        hits.extend(search::literal(&db, input, limit.clamp(1, 200) * 3)?);
+        let mut hits = search::ranked(db, &weights, limit.clamp(1, 200) * 3, true)?;
+        hits.extend(search::literal(db, input, limit.clamp(1, 200) * 3)?);
         hits.sort_by(|left, right| {
             right
                 .score

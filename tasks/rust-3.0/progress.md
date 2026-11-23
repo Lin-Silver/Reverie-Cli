@@ -453,3 +453,15 @@ Context Engine 增加固定版本的 C/C++、C#、Go、Java、Zig、HTML/CSS、L
 本机光标及实际 inline 行为 2 项、Clippy、锁定 release 构建通过。原生 PTY 8 项通过，探针启动后故意停止回复 CPR，仍完成多行粘贴、询问、命令、审批、缩放、取消及退出。证据 `.runtime/rust-3.0/tui-smoke/case-6I068F/report.json`；反转缓存选择后回归 exit 101，恢复原字节后两项通过，记录 `cursor-mutation.json`。首次 inline 断言误将写出新行之后的光标当作旧 editor 光标，已按实际库行为区分写行及下一帧 editor 位置，保留原失败日志。
 
 这是 Windows 实际 PTY 和定向行为证据；Apple Silicon 根因修复须按新来源 CI 验证，真实键盘、完整终端及窗口宽度矩阵继续未验证。当前同时开发的本地推理代码尚未包含在本次终端提交；其实际模型证据单独记录。
+
+### R2 真实本地语义推理、通用量化和持久检索（2026-11-23）
+
+独立回读 `294497d` 的 Test `45232927374`：Windows、Linux、macOS arm64、Intel x64、桌面及文档六个 job 全部通过，终端光标修复已有当前跨平台基本证据。后续语义来源须分别验证。
+
+Rust 接入固定 FastEmbed／ort 的纯本地 E5 向量和 BGE 神经重排，资源按明确目录及 manifest 摘要取得，不包含 hub 客户端或隐式下载。支持 CPU、显式 GPU 请求及报告后的 CPU 回退，模型按需加载和卸载；原生 ORT 库按内容身份固定到进程，换库需要内核重启。新增持久 normalized f32 向量、完整事务代际、同模型增量复用、稳定证据身份排名、RRF 和 N=16 重排；源内容及结构修订在激活前复核，查询再次核对最终正文。
+
+原生 FP32 探针及 CUDA 不可用后的 CPU 回退已有实际证据；新的通用 QInt8 对 MatMul／Gemm 和词表 Gather 量化，将含 runtime 资源从 1,635,063,911 降至 449,946,508 字节。实际 INT8 探针输出两个 384 维归一向量，中文相关正文排名正确，卸载后两个 session 均关闭。初始 MatMul-only 候选、FP32 原文及其摘要继续保存，不以资源压缩比例替代质量验证。
+
+本机完整 Rust 工作区 33 项、格式、Clippy `-D warnings` 和锁定 release 构建通过；实际语义 CLI 7 项通过，覆盖无词法命中的英文到中文召回、完整代际重启复用、正文上限、预算、旧正文拒绝、刷新与删除。Windows EXE 32,794,624 字节，SHA-256 `69abbf84b9555a71df8d43e225bb95eb3048331e1d0dc00e9c4ef5723cdfd76d`。取消未知数据库版本拒绝后定向测试如预期失败，源码按原字节恢复。
+
+证据为 `.runtime/rust-3.0/semantic-resources/fp32-probe.json`、`cuda-fallback-probe.json`、`int8-gather-probe.json`、`storage-mutation.json` 和 `.runtime/rust-3.0/semantic-smoke/case-eX9A9o/report.json`。详细步骤和来源见 `phase2.md` 及 Context `SOURCES.md`。这些是小语料、真实 CPU 推理和索引证据；精确向量遍历不是 ANN，完整 Recall、量化质量、N=16 预热 p95、四平台模型、资源激活以及共享内核／GUI／TUI 接入仍继续实施或未验证。完整主计划保持原文，Python 2.5.5 与两分支策略不变。

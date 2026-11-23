@@ -16,6 +16,16 @@ enum Syntax {
     TypeScript,
     Tsx,
     Rust,
+    C,
+    Cpp,
+    CSharp,
+    Go,
+    Java,
+    Zig,
+    Html,
+    Css,
+    Lua,
+    GdScript,
 }
 
 impl Syntax {
@@ -26,6 +36,16 @@ impl Syntax {
             "ts" => Some(Self::TypeScript),
             "tsx" => Some(Self::Tsx),
             "rs" => Some(Self::Rust),
+            "c" | "h" => Some(Self::C),
+            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => Some(Self::Cpp),
+            "cs" => Some(Self::CSharp),
+            "go" => Some(Self::Go),
+            "java" => Some(Self::Java),
+            "zig" => Some(Self::Zig),
+            "html" | "htm" => Some(Self::Html),
+            "css" => Some(Self::Css),
+            "lua" => Some(Self::Lua),
+            "gd" => Some(Self::GdScript),
             _ => None,
         }
     }
@@ -46,11 +66,34 @@ impl Syntax {
                 tree_sitter_typescript::TAGS_QUERY,
             ),
             Self::Rust => (tree_sitter_rust::LANGUAGE, tree_sitter_rust::TAGS_QUERY),
+            Self::C => (tree_sitter_c::LANGUAGE, tree_sitter_c::TAGS_QUERY),
+            Self::Cpp => (tree_sitter_cpp::LANGUAGE, tree_sitter_cpp::TAGS_QUERY),
+            Self::CSharp => (
+                tree_sitter_c_sharp::LANGUAGE,
+                tree_sitter_c_sharp::TAGS_QUERY,
+            ),
+            Self::Go => (tree_sitter_go::LANGUAGE, tree_sitter_go::TAGS_QUERY),
+            Self::Java => (tree_sitter_java::LANGUAGE, tree_sitter_java::TAGS_QUERY),
+            Self::Zig => (tree_sitter_zig::LANGUAGE, include_str!("queries/zig.scm")),
+            Self::Html => (tree_sitter_html::LANGUAGE, include_str!("queries/html.scm")),
+            Self::Css => (tree_sitter_css::LANGUAGE, include_str!("queries/css.scm")),
+            Self::Lua => (tree_sitter_lua::LANGUAGE, tree_sitter_lua::TAGS_QUERY),
+            Self::GdScript => (
+                tree_sitter_gdscript::LANGUAGE,
+                include_str!("queries/gdscript.scm"),
+            ),
         };
         let tags = if matches!(self, Self::TypeScript | Self::Tsx) {
             format!("{tags}\n{}", tree_sitter_javascript::TAGS_QUERY)
         } else {
-            tags.to_owned()
+            let calls = if matches!(self, Self::C | Self::Cpp) {
+                "\n(call_expression function: (identifier) @name) @reference.call"
+            } else if self == Self::CSharp {
+                "\n(invocation_expression function: (identifier) @name) @reference.call"
+            } else {
+                ""
+            };
+            format!("{tags}{calls}")
         };
         (language.into(), tags)
     }
@@ -142,6 +185,16 @@ impl Parsers {
             .parse(source, None)
             .ok_or("Could not parse source")?;
         let bytes = source.as_bytes();
+        let mut root_cursor = tree.root_node().walk();
+        let file_class = if syntax == Syntax::GdScript {
+            tree.root_node()
+                .named_children(&mut root_cursor)
+                .find(|node| node.kind() == "class_name_statement")
+                .and_then(|node| node.child_by_field_name("name"))
+                .and_then(|node| node.utf8_text(bytes).ok())
+        } else {
+            None
+        };
         let mut cursor = QueryCursor::new();
         let mut results = cursor.matches(query, tree.root_node(), bytes);
         let mut seen = HashSet::new();
@@ -169,7 +222,7 @@ impl Parsers {
                 }
             }
             if let (Some((node, kind)), Some(name)) = (reference, name) {
-                let reference_node = if node.kind() == "arguments" {
+                let reference_node = if matches!(node.kind(), "arguments" | "argument_list") {
                     node.parent().unwrap_or(node)
                 } else {
                     node
@@ -177,9 +230,14 @@ impl Parsers {
                 let target = reference_node
                     .child_by_field_name("function")
                     .or_else(|| reference_node.child_by_field_name("constructor"))
+                    .or_else(|| {
+                        (reference_node.kind() == "function_call")
+                            .then(|| reference_node.child_by_field_name("name"))
+                            .flatten()
+                    })
                     .and_then(|function| function.utf8_text(bytes).ok())
                     .unwrap_or(name);
-                let enclosing = enclosing_scope(node, bytes);
+                let enclosing = enclosing_scope(node, bytes, file_class);
                 let owner = if kind == "implementation" {
                     let implementing = reference_node
                         .child_by_field_name("type")
@@ -201,7 +259,7 @@ impl Parsers {
                         source: owner,
                         target: target.to_owned(),
                         kind: match kind {
-                            "call" => "CALLS",
+                            "call" | "send" => "CALLS",
                             "implementation" => "IMPLEMENTS",
                             _ => "REFERENCES",
                         }
@@ -213,13 +271,30 @@ impl Parsers {
             let (Some((node, kind)), Some(name)) = (definition, name) else {
                 continue;
             };
+            let node = if node.kind() == "function_declarator" {
+                declarator_owner(node)
+            } else {
+                node
+            };
+            let name = if syntax == Syntax::Lua && node.kind() == "function_declaration" {
+                node.child_by_field_name("name")
+                    .and_then(|node| node.utf8_text(bytes).ok())
+                    .unwrap_or(name)
+            } else {
+                name
+            };
+            let name = if syntax == Syntax::Lua {
+                name.replace(':', ".")
+            } else {
+                name.to_owned()
+            };
             if name.is_empty()
                 || chunks.len() >= 512
-                || !seen.insert((node.start_byte(), node.end_byte(), name))
+                || !seen.insert((node.start_byte(), node.end_byte(), name.clone()))
             {
                 continue;
             }
-            let enclosing = enclosing_scope(node, bytes);
+            let enclosing = enclosing_scope(node, bytes, file_class);
             let symbol = if enclosing.is_empty() {
                 format!("{module}.{name}")
             } else {
@@ -231,9 +306,24 @@ impl Parsers {
                 "enum_item" => "ENUM",
                 "trait_item" => "TRAIT",
                 "type_item" => "TYPE_ALIAS",
-                _ if kind == "function" && python_method(node) && syntax == Syntax::Python => {
-                    "METHOD"
+                "struct_specifier" | "struct_declaration" => "STRUCT",
+                "enum_specifier" | "enum_declaration" => "ENUM",
+                "type_definition" => "TYPE_ALIAS",
+                "type_spec" => match node.child_by_field_name("type").map(|node| node.kind()) {
+                    Some("struct_type") => "STRUCT",
+                    Some("interface_type") => "INTERFACE",
+                    _ => "TYPE_ALIAS",
+                },
+                _ if kind == "type" => "TYPE_ALIAS",
+                "variable_declaration"
+                    if syntax == Syntax::Zig
+                        && node
+                            .children(&mut node.walk())
+                            .any(|node| node.kind() == "const") =>
+                {
+                    "CONSTANT"
                 }
+                _ if kind == "function" && class_method(node) => "METHOD",
                 _ => kind,
             };
             chunks.push(Chunk {
@@ -249,13 +339,26 @@ impl Parsers {
                     .chars()
                     .take(4096)
                     .collect(),
-                documentation: docs.join("\n").chars().take(8192).collect(),
+                documentation: documentation(node, bytes, &docs)
+                    .chars()
+                    .take(8192)
+                    .collect(),
                 body: source.chars().take(49_152).collect(),
                 language: match syntax {
                     Syntax::Python => "python",
                     Syntax::JavaScript => "javascript",
                     Syntax::TypeScript | Syntax::Tsx => "typescript",
                     Syntax::Rust => "rust",
+                    Syntax::C => "c",
+                    Syntax::Cpp => "cpp",
+                    Syntax::CSharp => "csharp",
+                    Syntax::Go => "go",
+                    Syntax::Java => "java",
+                    Syntax::Zig => "zig",
+                    Syntax::Html => "html",
+                    Syntax::Css => "css",
+                    Syntax::Lua => "lua",
+                    Syntax::GdScript => "gdscript",
                 }
                 .into(),
                 parent: (!enclosing.is_empty()).then(|| format!("{module}.{enclosing}")),
@@ -265,18 +368,92 @@ impl Parsers {
     }
 }
 
-fn python_method(mut node: Node<'_>) -> bool {
+fn documentation(node: Node<'_>, source: &[u8], captured: &[&str]) -> String {
+    if !captured.is_empty() {
+        return captured.join("\n");
+    }
+    if let Some(string) = node
+        .child_by_field_name("body")
+        .and_then(|body| body.named_child(0))
+        .filter(|statement| statement.kind() == "expression_statement")
+        .and_then(|statement| statement.named_child(0))
+        .filter(|value| value.kind() == "string")
+        .filter(|value| {
+            !value.named_children(&mut value.walk()).any(|part| {
+                part.kind() == "string_start"
+                    && part
+                        .utf8_text(source)
+                        .unwrap_or_default()
+                        .split(['\'', '"'])
+                        .next()
+                        .unwrap_or_default()
+                        .chars()
+                        .any(|ch| matches!(ch, 'f' | 'F' | 'b' | 'B'))
+            })
+        })
+    {
+        let parts = string
+            .named_children(&mut string.walk())
+            .filter(|part| part.kind() == "string_content")
+            .filter_map(|part| part.utf8_text(source).ok())
+            .collect::<Vec<_>>();
+        if !parts.is_empty() {
+            return parts.join("");
+        }
+    }
+    let mut comments = Vec::new();
+    let mut current = node;
+    while let Some(previous) = current.prev_named_sibling() {
+        if !previous.kind().contains("comment")
+            || previous.end_position().row + 1 < current.start_position().row
+        {
+            break;
+        }
+        comments.push(previous.utf8_text(source).unwrap_or_default());
+        current = previous;
+    }
+    comments.reverse();
+    comments.join("\n")
+}
+
+fn class_method(mut node: Node<'_>) -> bool {
     while let Some(parent) = node.parent() {
         match parent.kind() {
-            "class_definition" => return true,
-            "function_definition" => return false,
+            "class_definition"
+            | "class_declaration"
+            | "class_specifier"
+            | "struct_specifier"
+            | "interface_declaration" => return true,
+            "function_definition"
+            | "function_declaration"
+            | "function_item"
+            | "method_definition"
+            | "method_declaration" => return false,
             _ => node = parent,
         }
     }
     false
 }
 
-fn enclosing_scope(mut node: Node<'_>, source: &[u8]) -> String {
+fn declarator_owner(mut node: Node<'_>) -> Node<'_> {
+    let original = node;
+    while let Some(parent) = node.parent() {
+        if matches!(
+            parent.kind(),
+            "function_definition" | "declaration" | "field_declaration"
+        ) {
+            return parent;
+        }
+        if matches!(parent.kind(), "parameter_declaration" | "type_definition") {
+            break;
+        }
+        node = parent;
+    }
+    original
+}
+
+fn enclosing_scope(mut node: Node<'_>, source: &[u8], file_class: Option<&str>) -> String {
+    let is_file_class = node.kind() == "class_name_statement";
     let mut scopes = Vec::new();
     while let Some(parent) = node.parent() {
         let field = match parent.kind() {
@@ -286,6 +463,11 @@ fn enclosing_scope(mut node: Node<'_>, source: &[u8]) -> String {
             | "function_declaration"
             | "function_item"
             | "method_definition"
+            | "method_declaration"
+            | "class_specifier"
+            | "struct_specifier"
+            | "interface_declaration"
+            | "namespace_definition"
             | "mod_item"
             | "trait_item"
             | "namespace_declaration" => "name",
@@ -295,16 +477,25 @@ fn enclosing_scope(mut node: Node<'_>, source: &[u8]) -> String {
                 continue;
             }
         };
-        if let Some(name) = parent
-            .child_by_field_name(field)
-            .and_then(|child| child.utf8_text(source).ok())
-        {
+        let mut named = parent.child_by_field_name(field);
+        if named.is_none() && parent.kind() == "function_definition" {
+            named = parent.child_by_field_name("declarator");
+            while let Some(declarator) =
+                named.and_then(|node| node.child_by_field_name("declarator"))
+            {
+                named = Some(declarator);
+            }
+        }
+        if let Some(name) = named.and_then(|child| child.utf8_text(source).ok()) {
             scopes.push(name);
         }
         node = parent;
     }
     scopes.reverse();
-    scopes.join(".")
+    if let Some(file_class) = file_class.filter(|_| !is_file_class) {
+        scopes.insert(0, file_class);
+    }
+    scopes.join(".").replace(':', ".").replace("..", ".")
 }
 
 fn headings(module: &str, body: &str) -> Vec<Chunk> {

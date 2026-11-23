@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub fn resolve(db: &Connection) -> Result<()> {
     let mut by_name = BTreeMap::<String, BTreeSet<String>>::new();
-    let mut symbols = BTreeSet::new();
+    let mut counts = BTreeMap::<String, usize>::new();
     let mut statement = db.prepare(
         "SELECT name,symbol FROM chunks WHERE kind!='MODULE' OR signature!='' ORDER BY symbol",
     )?;
@@ -12,9 +12,14 @@ pub fn resolve(db: &Connection) -> Result<()> {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })? {
         let (name, symbol) = pair?;
-        symbols.insert(symbol.clone());
+        *counts.entry(symbol.clone()).or_default() += 1;
         by_name.entry(name).or_default().insert(symbol);
     }
+    let symbols = counts
+        .into_iter()
+        .filter(|(_, count)| *count == 1)
+        .map(|(name, _)| name)
+        .collect::<BTreeSet<_>>();
     let references = db
         .prepare("SELECT rowid,source_symbol,target_text FROM symbol_references ORDER BY rowid")?
         .query_map([], |row| {
@@ -29,7 +34,7 @@ pub fn resolve(db: &Connection) -> Result<()> {
         "UPDATE symbol_references SET target_symbol=?1,resolution=?2 WHERE rowid=?3",
     )?;
     for (rowid, source, target) in references {
-        let mut name = target.replace("::", ".");
+        let mut name = target.replace(':', ".").replace("..", ".");
         let receiver = ["self.", "this.", "Self."]
             .iter()
             .find(|prefix| name.starts_with(**prefix));
@@ -59,7 +64,11 @@ pub fn resolve(db: &Connection) -> Result<()> {
         if selected.is_none() {
             let leaf = name.rsplit('.').next().unwrap_or(&name);
             if let Some(candidates) = by_name.get(leaf) {
-                if candidates.len() == 1 {
+                if candidates.len() == 1
+                    && candidates
+                        .first()
+                        .is_some_and(|name| symbols.contains(name))
+                {
                     selected = candidates.first().cloned();
                     resolution = "inferred_unique_name";
                 } else {

@@ -168,3 +168,65 @@ fn exact_symbol_and_custom_budget_are_preserved_with_bounded_evidence() {
         .unwrap();
     assert!(empty["evidence"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn python_docstrings_and_parser_revision_rebuild_are_preserved() {
+    let dir = directory();
+    let project = dir.path().join("project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("logic.py"), "class Ship:\n    \"\"\"飞船的持久进度。\"\"\"\n    def save(self):\n        \"\"\"保存当前关卡。\"\"\"\n        return 1\ndef not_a_docstring():\n    b'not documentation'\n").unwrap();
+    let database = dir.path().join("context.sqlite3");
+    let mut engine = ContextEngine::open(&project, &database).unwrap();
+    let revision = engine.index(false).unwrap()["revision"].clone();
+    let found = engine
+        .lookup(&json!({"query_type":"symbol","query":"logic.Ship.save"}))
+        .unwrap();
+    assert_eq!(found["symbol"]["documentation"], "保存当前关卡。");
+    assert_eq!(
+        engine
+            .lookup(&json!({"query_type":"symbol","query":"logic.not_a_docstring"}))
+            .unwrap()["symbol"]["documentation"],
+        ""
+    );
+    drop(engine);
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute("UPDATE state SET analysis_version=1", [])
+        .unwrap();
+    drop(db);
+    let mut engine = ContextEngine::open(&project, &database).unwrap();
+    assert_eq!(engine.status().unwrap()["structure_ready"], false);
+    assert_eq!(engine.index(false).unwrap()["indexed"], 1);
+    assert!(engine.status().unwrap()["revision"].as_i64().unwrap() > revision.as_i64().unwrap());
+}
+
+#[test]
+fn identical_qualified_names_in_different_files_remain_ambiguous() {
+    let dir = directory();
+    let project = dir.path().join("project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("logic.js"),
+        "function duplicate() {}\nfunction caller() { duplicate(); }\n",
+    )
+    .unwrap();
+    fs::write(project.join("logic.ts"), "function duplicate(): void {}\n").unwrap();
+    let mut engine = ContextEngine::open(&project, &dir.path().join("context.sqlite3")).unwrap();
+    engine.index(false).unwrap();
+    assert!(
+        engine
+            .lookup(&json!({"query_type":"symbol","query":"logic.duplicate"}))
+            .is_err()
+    );
+    let edges = engine
+        .lookup(&json!({"query_type":"dependencies","query":"logic.caller"}))
+        .unwrap();
+    assert!(
+        edges["references"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edge| edge["target_text"] == "duplicate"
+                && edge["resolution"] == "ambiguous"
+                && edge["to_symbol"].is_null())
+    );
+}

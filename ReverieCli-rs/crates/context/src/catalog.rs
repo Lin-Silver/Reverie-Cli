@@ -350,8 +350,8 @@ impl Catalog {
             return Err("Context index update has not started".into());
         }
         self.db.execute(
-            "UPDATE state SET revision=revision+1,analysis_version=1 WHERE id=1",
-            [],
+            "UPDATE state SET revision=revision+1,analysis_version=?1 WHERE id=1",
+            [crate::ANALYSIS_VERSION],
         )?;
         crate::graph::resolve(&self.db)?;
         let current = state(&self.db)?;

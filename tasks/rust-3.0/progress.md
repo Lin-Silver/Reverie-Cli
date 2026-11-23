@@ -425,3 +425,13 @@ Rust Context Engine 新增 `symbol`、`file`、`search`、`dependencies`、`outl
 提交 `4b1d087` 的 Test `45222023933` 中，文档、桌面、Windows、Linux、Intel Mac 通过；四平台 Context Engine 检查全部通过。Apple Silicon job `137858520999` 的终端部分输出取消断言失败：服务端写出数据后立即取消，Rust 可能尚未收到并保存该块，数据库为 null。探针现在先等实际终端显示及 SQLite 持久化均出现 `PARTIAL_UI_REPLY😀`，再发送 Ctrl+C；原取消后保留原文断言继续执行，没有更改产品的取消实现。
 
 本机原生 PTY 8 项通过，证据 `.runtime/rust-3.0/tui-smoke/case-RMxwfo/report.json`。该证据只证明 Windows 上修正后的检查；新来源的 Apple Silicon CI 仍待取得，旧失败不改称通过。
+
+### R2 原生语言矩阵第二增量（2026-11-23）
+
+Context Engine 增加固定版本的 C/C++、C#、Go、Java、Zig、HTML/CSS、Lua 和 GDScript 十种 Tree-sitter 语法，与现有 Python、JS、TS/TSX、Rust 共用索引及证据链。C/C++ 保留完整定义正文；类、方法、命名空间及 GDScript 文件类保留作用域；Lua 方法与调用统一，CSS 伪选择器冒号保留。Python 普通 docstring 和相邻注释进入文档字段，bytes／f-string 不误认为 docstring。相同 qualified name 跨文件出现时，符号查询及图解析继续保留歧义，不能错误认定为唯一目标。
+
+解析分析版本升至 2，旧分析的未改文件在下一次更新事务中重建。十种语法的实际 MIT 文本和固定上游来源保存在 `ReverieCli-rs/crates/context/licenses/` 与 `SOURCES.md`，缺少 crate 根 LICENSE 的六项按固定上游修订取得，其中 Lua 为 LICENSE.md。小型 Zig／HTML／CSS／GDScript 查询为本仓库独立实现；完整构造、导入／别名／类型解析和 LSP 等仍未完成。
+
+本机 Rust 工作区 27 项、格式、Clippy `-D warnings`、锁定 release 构建、生成协议类型通过。实际 parser CLI 13 项、Context CLI／SDK 22 项、模型／工具／权限／项目隔离 16 项、原生 PTY 8 项通过；文档检查为 49 文档、259 本地链接、0 错误。Windows EXE 为 29,920,256 字节，SHA-256 `3790fa51c0f6f8d5a0327f06e5a5e71f329f0d90855de7db20fc228cc3b2dc20`，交接时重新读取文件摘要一致。反转解析版本重建条件后定向测试 exit 101，恢复原字节后 lookup 测试通过。
+
+证据为 `.runtime/rust-3.0/parser-smoke/case-nWb65W/report.json`、`context-smoke/case-4nBAC0/report.json`、`run-smoke/case-7eCORM/report.json`、`tui-smoke/case-RMxwfo/report.json` 和 `parser-mutation/report.json`。最初 Go／Zig 同文件 stem 夹具触发歧义拒绝，其失败保留；改用独立 stem，并另有同名歧义回归。新的 parser probe 已接入四平台只读 CI，结果须对应新提交分别核对；不把本机基本检查当作全语言、性能或完整产品验收。Python 2.5.5、归档分支、正式标签和 Release 保持冻结，完整 3.0 主计划仍为 49,215 字节。

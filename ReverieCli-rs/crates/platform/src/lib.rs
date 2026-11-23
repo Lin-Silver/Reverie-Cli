@@ -357,13 +357,12 @@ mod tests {
         assert!(!execute("str_replace_editor",&json!({"command":"str_replace","path":"a.txt","old_str":"repeat","new_str":"broken"}),&root,&backups).success);
         assert_eq!(fs::read_to_string(root.join("a.txt")).unwrap(), before);
         assert!(execute("str_replace_editor",&json!({"command":"str_replace","path":"a.txt","old_str":"unique","new_str":"changed"}),&root,&backups).success);
-        let file = fs::read_dir(&backups)
+        let mut originals = fs::read_dir(&backups)
             .unwrap()
-            .next()
-            .unwrap()
-            .unwrap()
-            .path();
-        assert_eq!(fs::read_to_string(file).unwrap(), before);
+            .map(|file| fs::read_to_string(file.unwrap().path()).unwrap())
+            .collect::<Vec<_>>();
+        originals.sort();
+        assert_eq!(originals, ["last line", before]);
         assert!(
             !execute(
                 "create_file",

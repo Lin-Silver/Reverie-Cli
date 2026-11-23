@@ -179,6 +179,7 @@ export interface RatsState {
 }
 
 export interface CoreInfo {
+  implementation?: "rust" | "python";
   version: string;
   interface_version: string;
   release_status: string;
@@ -611,6 +612,7 @@ export interface RecoveryState {
 }
 
 export interface DesktopState {
+  capabilities?: { actions: string[] };
   protocol_version: number;
   core: CoreInfo;
   workspace: WorkspaceState;

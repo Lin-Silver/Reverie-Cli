@@ -1,172 +1,45 @@
-import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  copyFileSync,
-  createReadStream,
-  existsSync,
-  mkdirSync,
-  linkSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { spawnSync } from "node:child_process";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createHash } from 'node:crypto';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const scriptRoot = path.dirname(fileURLToPath(import.meta.url));
-const uiRoot = path.resolve(scriptRoot, "..");
-const repositoryRoot = path.resolve(uiRoot, "..");
-const pythonRoot = path.join(repositoryRoot, "ReverieCli-py");
-const buildRoot = path.join(pythonRoot, "build");
-const outputRoot = path.join(uiRoot, ".kernel");
-const kernelDirectory = path.join(outputRoot, "reverie");
-const generatedBuildDirectory = path.join(uiRoot, "build", "generated");
-const executableName = process.platform === "win32" ? "reverie.exe" : "reverie";
-const outputExecutable = path.join(kernelDirectory, executableName);
-const outputRuntime = path.join(kernelDirectory, "reverie-runtime");
-const venvBin = process.platform === "win32"
-  ? path.join(buildRoot, "venv", "Scripts")
-  : path.join(pythonRoot, "venv", "bin");
-const python = path.resolve(
-  process.env.REVERIE_PYTHON_PATH
-    || path.join(venvBin, process.platform === "win32" ? "python.exe" : "python"),
-);
-const bundleRoot = path.resolve(
-  process.env.REVERIE_BUNDLE_RES_DIR || path.join(buildRoot, "bundle_resources"),
-);
-const temporaryRoot = path.join(buildRoot, "temp");
-
-for (const required of [
-  python,
-  path.join(bundleRoot, "comfy", "generate_image.py"),
-  path.join(bundleRoot, "browser", "ms-playwright"),
-]) {
-  if (!existsSync(required)) {
-    throw new Error(`Missing CLI build input: ${required}. Run ReverieCli-py/build.bat or build.sh first.`);
-  }
+const uiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const repositoryRoot = path.resolve(uiRoot, '..');
+const manifestPath = path.join(repositoryRoot, 'ReverieCli-rs/Cargo.toml');
+const kernelDirectory = path.join(uiRoot, '.kernel/reverie-rust');
+const generatedDirectory = path.join(uiRoot, 'build/generated');
+const executableName = process.platform === 'win32' ? 'reverie.exe' : 'reverie';
+function command(executable, args, options = {}) {
+  const result = spawnSync(executable, args, {cwd: repositoryRoot, windowsHide: true, encoding: 'utf8', ...options});
+  if (result.status !== 0) throw new Error(result.error?.message || result.stderr || String(result.status));
+  return result.stdout;
 }
-
-if (!outputRoot.startsWith(`${uiRoot}${path.sep}`)) {
-  throw new Error(`Refusing to clean an output path outside the UI project: ${outputRoot}`);
+command('cargo', ['build', '--manifest-path', manifestPath, '--release', '--locked'], {stdio: 'inherit'});
+const metadata = JSON.parse(command('cargo', ['metadata', '--manifest-path', manifestPath, '--no-deps', '--format-version', '1']));
+const executable = path.join(metadata.target_directory, 'release', executableName);
+const info = JSON.parse(command(executable, ['--kernel-info']));
+const version = JSON.parse(readFileSync(path.join(uiRoot, 'package.json'), 'utf8')).version;
+if (info.schema !== 'reverie.kernel.v1' || info.bridge_protocol !== 'sdk-bridge.v1'
+    || info.implementation !== 'rust' || info.version !== version || info.platform !== process.platform || info.arch !== process.arch) {
+  throw new Error('Native kernel identity does not match this desktop build.');
 }
-rmSync(outputRoot, { recursive: true, force: true });
-mkdirSync(outputRoot, { recursive: true });
-mkdirSync(temporaryRoot, { recursive: true });
-
-const iconPath = process.platform === "win32"
-  ? path.join(pythonRoot, "reverie.ico")
-  : path.join(pythonRoot, "reverie.png");
-const result = spawnSync(
-  python,
-  [
-    "-m", "PyInstaller",
-    "--noconfirm",
-    "--distpath", outputRoot,
-    "--workpath", path.join(buildRoot, `pyinstaller-ui-${process.platform}-${process.arch}`),
-    path.join(pythonRoot, "reverie.spec"),
-  ],
-  {
-    cwd: pythonRoot,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      PYTHONNOUSERSITE: "1",
-      PYTHONPATH: "",
-      REVERIE_PYINSTALLER_MODE: "ui-onedir",
-      REVERIE_BUNDLE_RES_DIR: bundleRoot,
-      REVERIE_ICON_PATH: iconPath,
-      PYINSTALLER_CONFIG_DIR: path.join(buildRoot, "pyinstaller-config"),
-      TEMP: temporaryRoot,
-      TMP: temporaryRoot,
-      TMPDIR: temporaryRoot,
-      PYTHONWARNINGS: "ignore:Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.:UserWarning",
-    },
-  },
-);
-
-if (result.status !== 0 || !existsSync(outputExecutable)) {
-  throw new Error(`Failed to build the unpacked Reverie UI kernel (exit ${result.status ?? "unknown"}).`);
-}
-if (process.platform !== "win32") chmodSync(outputExecutable, 0o755);
-
-const packedRoot = path.resolve(process.env.REVERIE_PACKED_RES_DIR || path.join(bundleRoot, "packed"));
-if (existsSync(path.join(packedRoot, "browser.zip"))) {
-  const resources = path.join(outputRuntime, "reverie_resources");
-  mkdirSync(resources, { recursive: true });
-  for (const name of ["browser.zip", "ffmpeg.zip"]) {
-    const source = path.join(packedRoot, name);
-    if (!existsSync(source)) continue;
-    const target = path.join(resources, name);
-    try {
-      linkSync(source, target);
-    } catch {
-      copyFileSync(source, target);
-    }
-  }
-} else {
-  const resourcePack = spawnSync(
-    python,
-    [
-      path.join(pythonRoot, "scripts", "pack_ui_resources.py"),
-      "--browser", path.join(bundleRoot, "browser", "ms-playwright"),
-      "--output", path.join(outputRuntime, "reverie_resources"),
-    ],
-    { cwd: pythonRoot, stdio: "inherit", env: process.env },
-  );
-  if (resourcePack.status !== 0) {
-    throw new Error(`Failed to pack lazy UI-kernel resources (exit ${resourcePack.status ?? "unknown"}).`);
-  }
-}
-
-async function sha256(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash("sha256");
-    const stream = createReadStream(filePath);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(hash.digest("hex")));
-  });
-}
-
-const externalKernel = path.resolve(
-  process.env.REVERIE_EXTERNAL_KERNEL_PATH || path.join(repositoryRoot, "dist", executableName),
-);
-const trustedKernels = [];
-if (existsSync(externalKernel)) {
-  const probe = spawnSync(externalKernel, ["--kernel-info"], {
-    encoding: "utf8",
-    timeout: 60_000,
-    windowsHide: true,
-  });
-  if (probe.status !== 0) {
-    throw new Error(`External release kernel failed --kernel-info: ${externalKernel}`);
-  }
-  const info = JSON.parse(probe.stdout.trim());
-  if (
-    info.schema !== "reverie.kernel.v1"
-    || info.bridge_protocol !== "sdk-bridge.v1"
-    || info.platform !== process.platform
-    || info.arch !== process.arch
-  ) {
-    throw new Error(`External release kernel is incompatible with this desktop build: ${externalKernel}`);
-  }
-  trustedKernels.push({
-    sha256: await sha256(externalKernel),
-    platform: info.platform,
-    arch: info.arch,
-    version: info.version,
-    bridge_protocol: info.bridge_protocol,
-  });
-}
-
-const trustManifest = `${JSON.stringify({
-  schema: "reverie.trusted-kernels.v1",
-  generated_at: new Date().toISOString(),
-  kernels: trustedKernels,
-}, null, 2)}\n`;
-mkdirSync(generatedBuildDirectory, { recursive: true });
-writeFileSync(path.join(kernelDirectory, "reverie-trusted-kernels.json"), trustManifest, "utf8");
-writeFileSync(path.join(generatedBuildDirectory, "reverie-trusted-kernels.json"), trustManifest, "utf8");
-
-console.log(`Reverie UI kernel: ${outputExecutable}`);
-console.log(`Trusted external kernels: ${trustedKernels.length}`);
+command(process.execPath, [path.join(uiRoot, 'scripts/generate-core-types.mjs'), '--check'], {stdio: 'inherit'});
+mkdirSync(kernelDirectory, {recursive: true});
+mkdirSync(generatedDirectory, {recursive: true});
+const staged = path.join(kernelDirectory, executableName);
+copyFileSync(executable, staged);
+if (process.platform !== 'win32') chmodSync(staged, 0o755);
+copyFileSync(path.join(repositoryRoot, 'LICENSE'), path.join(kernelDirectory, 'LICENSE.txt'));
+const sha256 = createHash('sha256').update(readFileSync(staged)).digest('hex');
+const sourceSha = command('git', ['rev-parse', 'HEAD']).trim();
+const sourceDirty = !!command('git', ['status', '--porcelain']).trim();
+const trusted = {schema: 'reverie.trusted-kernels.v1', generated_at: new Date().toISOString(),
+  kernels: [{sha256, platform: info.platform, arch: info.arch, version: info.version, bridge_protocol: info.bridge_protocol}]};
+const trustBytes = JSON.stringify(trusted, null, 2) + '\n';
+writeFileSync(path.join(kernelDirectory, 'reverie-trusted-kernels.json'), trustBytes, 'utf8');
+writeFileSync(path.join(generatedDirectory, 'reverie-trusted-kernels.json'), trustBytes, 'utf8');
+writeFileSync(path.join(kernelDirectory, 'reverie-kernel-build.json'), JSON.stringify({schema: 'reverie.kernel-build.v1', source_sha: sourceSha,
+  source_dirty: sourceDirty, sha256, size: readFileSync(staged).length, kernel: info}, null, 2) + '\n', 'utf8');
+if (!existsSync(staged)) throw new Error('The staged native kernel is missing.');
+console.log('Reverie Rust desktop kernel: ' + staged);

@@ -375,3 +375,13 @@ Python 2.5.5 归档和正式发布保持冻结。Rust 下一增量继续滚动�
 本机基本 Rust 测试 13 passed；格式、Clippy `-D warnings`、release 构建通过。Windows EXE 为 15,900,160 字节；实际终端 7 项、入口 6 项、会话 20 次请求、Context Engine 16 项和模型执行 14 项通过。证据为 `.runtime/rust-3.0/tui-smoke/case-IobuoQ/report.json`、`session-smoke/case-ZQLmod/report.json`、`context-smoke/case-viMtft/report.json`、`run-smoke/case-KvmM33/report.json`。它们使用回环模型及实际 Rust 工具，不能证明真实服务质量或完整 GUI／TUI。跨 host write 拆分粘贴边界的 ConPTY 扩展用例仍失败，原失败保留并列入未验证清单，不能通过修改正常用例的名称掩盖。
 
 独立回读 `79359e7` 的 GitHub Test：Windows、Linux、Intel Mac 和桌面／文档通过，Apple Silicon 因测试假定备份目录顺序失败。修复提交 `31b533c` 改为核对两份原文，未减弱备份断言；四平台结果由后续实际 CI 核对。新终端基本检查加入同一四平台只读 CI，Electron 共用常驻内核和完整功能接着实施。
+
+### R1-6 首增量：Electron 常驻内核、询问和任务接续（2026-11-23）
+
+沿用接续时未提交的桌面增量，提取可独立运行的 CoreBridge，将并发会话事件按请求、项目和运行身份分发；同一个 Rust 进程负责实际执行。新增事务任务登记、配置版本绑定、队列原文、宿主执行目录及修订保护。重启只恢复未产生执行效果的排队意图；已失去等待器的用户询问标记中断，不能自动重放已执行任务。取消保存部分流式原文，正常关闭走内核协议。
+
+Rust 协议生成前端的会话、结果及询问类型。类型验证读取 Cargo 实际输出目录；桌面打包暂存原生程序、许可证、内核摘要和开发身份，不携带 Python 内核。GUI 增加三选项与第四项自定义、显式提交、单选／多选和切页草稿接续；普通询问显示“等待回答”，权限操作继续单独审批。普通正文单换行可见，流式与最终使用相同渲染，代码块及复制原文保留。
+
+本机基本 Rust 测试 15 passed，格式、Clippy `-D warnings`、锁定 release 构建和生成类型一致性通过；桌面定向 33 项、类型／翻译及生产构建通过。Windows 程序为 16,041,472 字节，SHA-256 `849cd6c682825130222ee57ed59f65fa24d983960f98b10e479a68408d3b3482`。实际入口 6 项、会话 20 次请求、模型执行 14 项、常驻桌面桥接 6 项通过。真实 Electron 窗口的 4 条流程通过，包含键盘提示、第四项多行回答、询问状态、Strict 先批准后写原文字节、实时输出、停止及中断保存；页面截图已检查，渲染错误为空。
+
+证据为 `.runtime/rust-3.0/R1-6-entry-smoke.json`、`session-smoke/case-2hWN8o/report.json`、`run-smoke/case-GtwKou/report.json`、`desktop-bridge-smoke/case-Vlipua/report.json`、`electron-smoke/case-aQQsyt/report.json`。窗口、协议与实际 Rust 工具使用回环模型，未证明外部真实服务、全模式、完整桌面或正式包验收。CI 加入四平台桥接运行及类型一致性，文档验证迁为 Node；开发增量只验证和生成 artifacts，不改变 Python 标签及发行。两分支和公开 2.5.5 身份已再次从 GitHub 核对。

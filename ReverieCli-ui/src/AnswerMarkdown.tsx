@@ -11,7 +11,20 @@ const isFile = (href: string) => !/^[a-z][a-z\d+.-]*:/i.test(href) || /^(?:file:
 
 const AnswerStreamingContext = createContext(false);
 const MarkdownDocument = memo(ReactMarkdown);
-const markdownPlugins = [remarkGfm];
+type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[] };
+function remarkVisibleLineBreaks() {
+  return function visit(node: MarkdownNode) {
+    if (!node.children) return;
+    node.children = node.children.flatMap(child => {
+      if (child.type === "text" && child.value?.includes("\n")) {
+        return child.value.split("\n").flatMap((value,index) => [...(index ? [{type:"break"}] : []), {...child,value}]);
+      }
+      visit(child);
+      return [child];
+    });
+  };
+}
+const markdownPlugins = [remarkGfm, remarkVisibleLineBreaks];
 const transformAnswerUrl = (value: string) => isFile(value) ? value : defaultUrlTransform(value);
 
 const components: Components = {

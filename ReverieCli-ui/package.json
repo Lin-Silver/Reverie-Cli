@@ -1,6 +1,6 @@
 {
   "name": "reverie",
-  "version": "2.5.5",
+  "version": "3.0.0-dev",
   "private": true,
   "description": "Reverie desktop — a native GUI host for the Reverie CLI core",
   "homepage": "https://github.com/Lin-Silver/Reverie-Cli",
@@ -25,7 +25,9 @@
     "pack": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --dir",
     "dist:win": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --win nsis --x64 && node scripts/build-portable.mjs",
     "dist:linux": "npm run build:kernel && npm run build && node scripts/package-validation.mjs --output release --targets AppImage,deb",
-    "dist:mac": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --mac dmg"
+    "dist:mac": "npm run build:kernel && npm run build && cross-env ELECTRON_CACHE=.cache/electron ELECTRON_BUILDER_CACHE=.cache/electron-builder electron-builder --mac dmg",
+    "generate:core-types": "node scripts/generate-core-types.mjs",
+    "check:core-types": "node scripts/generate-core-types.mjs --check"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.3",
@@ -78,7 +80,7 @@
     ],
     "extraFiles": [
       {
-        "from": ".kernel/reverie",
+        "from": ".kernel/reverie-rust",
         "to": "."
       },
       {

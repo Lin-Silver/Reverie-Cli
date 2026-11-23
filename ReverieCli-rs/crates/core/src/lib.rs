@@ -55,6 +55,10 @@ pub const ACTIONS: &[&str] = &[
     "deleteSessions",
     "getConversationConfig",
     "getWorkspaceConfig",
+    "queueConversationRun",
+    "updateConversationRun",
+    "listConversationRuns",
+    "recoverConversationRuns",
     "shutdown",
 ];
 
@@ -122,15 +126,28 @@ impl Kernel {
     }
 
     pub fn shared_context(&mut self) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {
-        if !self.contexts.contains_key(&self.project_data_dir) {
-            let context = reverie_context::ContextEngine::open(
-                &self.project_root,
-                &self.project_data_dir.join("context/rust-3.0.sqlite3"),
-            )?;
+        let root = self.project_root.clone();
+        self.shared_context_for(&root)
+    }
+
+    fn shared_context_for(
+        &mut self,
+        root: &std::path::Path,
+    ) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {
+        let key = if root == self.project_root {
+            self.project_data_dir.clone()
+        } else {
+            self.project_data_dir
+                .join("executions")
+                .join(config::project_name(root))
+        };
+        if !self.contexts.contains_key(&key) {
+            let context =
+                reverie_context::ContextEngine::open(root, &key.join("context/rust-3.0.sqlite3"))?;
             self.contexts
-                .insert(self.project_data_dir.clone(), Arc::new(Mutex::new(context)));
+                .insert(key.clone(), Arc::new(Mutex::new(context)));
         }
-        Ok(self.contexts[&self.project_data_dir].clone())
+        Ok(self.contexts[&key].clone())
     }
 
     pub fn context_engine(&mut self) -> Result<MutexGuard<'_, reverie_context::ContextEngine>> {
@@ -148,7 +165,11 @@ impl Kernel {
         let config = self.effective_config(self.view_session.clone().as_deref())?;
         let sessions = self.session_store()?.list()?;
         Ok(
-            json!({"protocol_version":1,"core":{"version":VERSION,"interface_version":"1.0","release_status":"development"},"workspace":self.workspace(&config),"models":models::sources(&config),"settings":models::settings(&config,&self.config.path,self.workspace_mode),"sessions":sessions,"capabilities":{"actions":ACTIONS}}),
+            json!({"protocol_version":1,"core":{"version":VERSION,"interface_version":"1.0","implementation":"rust","release_status":"development"},"workspace":self.workspace(&config),"models":models::sources(&config),"settings":models::settings(&config,&self.config.path,self.workspace_mode),"sessions":sessions,"capabilities":{"actions":ACTIONS},
+                "plugins":{"summary":{"available":false,"status":"migration_pending"},"records":[]},
+                "skills":{"available":false,"status":"migration_pending","count":0,"invalid_count":0,"shadowed_count":0,"records":[],"pinned":{"max":5,"names":[],"keys":[],"unresolved":[]},"errors":[],"shadowed":[]},
+                "commands":{"available":false,"status":"migration_pending","sections":[],"items":[]},
+                "recovery":{"available":false,"status":"migration_pending","summary":{"available":false},"operations":[],"checkpoints":[]}}),
         )
     }
 
@@ -238,11 +259,59 @@ impl Kernel {
                     .context_engine()?
                     .paths(query, payload["limit"].as_u64().unwrap_or(80) as u32)?;
                 let mentions:Vec<Value>=paths.into_iter().map(|path|json!({"name":path.rsplit('/').next().unwrap_or(&path),"path":path,"kind":"file"})).collect();
-                Ok(("workspace.mentions", json!({"mentions":mentions})))
+                Ok((
+                    "workspace.mentions",
+                    json!({"items":mentions,"mentions":mentions,"context_engine":self.context_status()}),
+                ))
             }
             "listSessions" => Ok((
                 "sessions",
                 json!({"sessions":self.session_store()?.list()?}),
+            )),
+            "queueConversationRun" => {
+                let configuration = models::without_secrets(
+                    payload
+                        .get("configuration")
+                        .ok_or("Task configuration is required.")?,
+                );
+                models::resolve(&self.config.effective()?, &configuration)?;
+                let execution_root = payload["executionRoot"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| self.project_root.to_string_lossy().into_owned());
+                let revision = self.session_store()?.register_run(
+                    string(payload, "sessionId")?,
+                    string(payload, "runId")?,
+                    &configuration,
+                    payload["configurationRevision"]
+                        .as_i64()
+                        .ok_or("Configuration revision is required.")?,
+                    &execution_root,
+                    &models::without_secrets(payload.get("request").unwrap_or(&json!({}))),
+                )?;
+                Ok(("conversation.run", json!({"revision":revision})))
+            }
+            "updateConversationRun" => {
+                let result = payload.get("result").map(models::without_secrets);
+                let revision = self.session_store()?.update_run(
+                    string(payload, "sessionId")?,
+                    string(payload, "runId")?,
+                    string(payload, "state")?,
+                    payload["revision"]
+                        .as_i64()
+                        .ok_or("Task revision is required.")?,
+                    payload["executionRoot"].as_str(),
+                    result.as_ref(),
+                )?;
+                Ok(("conversation.run", json!({"revision":revision})))
+            }
+            "listConversationRuns" => Ok((
+                "conversation.runs",
+                json!({"runs":self.session_store()?.list_runs(string(payload,"sessionId")?,payload["limit"].as_i64().unwrap_or(60))?}),
+            )),
+            "recoverConversationRuns" => Ok((
+                "conversation.runs",
+                json!({"runs":self.session_store()?.recover_runs(&[])?}),
             )),
             "createSession" => {
                 let defaults = self.config.effective()?;
@@ -281,7 +350,7 @@ impl Kernel {
                 self.session_store()?.rename(id, string(payload, "name")?)?;
                 let page = self.session_store()?.page(id, None, 60)?;
                 Ok((
-                    "sessions",
+                    "session.updated",
                     json!({"session":page,"sessions":self.session_store()?.list()?}),
                 ))
             }
@@ -339,7 +408,11 @@ impl Kernel {
                     self.view_session = None;
                 }
                 Ok((
-                    "sessions.deleted",
+                    if action == "deleteSession" {
+                        "session.updated"
+                    } else {
+                        "sessions.deleted"
+                    },
                     json!({"deleted_session_ids":ids,"session":null,"sessions":self.session_store()?.list()?}),
                 ))
             }

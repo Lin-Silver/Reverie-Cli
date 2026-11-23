@@ -66,11 +66,11 @@ try {
   assert.equal(tail.total,73);assert.equal(tail.before,13);assert.equal(tail.messages[0].content,'13\r\n正文😀\n');assert.equal(tail.messages[0].role,'assistant');
   const head=(await request('getSession',{sessionId:second.id,select:false,before:tail.before},'session')).session;
   assert.equal(head.messages.length,13);assert.equal(head.before,null);
-  await request('renameSession',{sessionId:second.id,name:'renamed'},'sessions');
+  await request('renameSession',{sessionId:second.id,name:'renamed'},'session.updated');
   const read=new DatabaseSync(dbPath,{readOnly:true});
   assert.deepEqual(read.prepare('SELECT payload FROM messages ORDER BY sequence').all().map(row=>row.payload),rawBefore);
   read.close();
-  await request('deleteSession',{sessionId:first.id,confirmed:true},'sessions.deleted');
+  await request('deleteSession',{sessionId:first.id,confirmed:true},'session.updated');
   await request('getSession',{sessionId:first.id},'error');
   await request('shutdown',{},'shutdown');
   assert.equal((await bridge.closed).code,0);

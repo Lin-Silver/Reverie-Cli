@@ -142,6 +142,7 @@ interface CoreRequestMap {
   deleteSession: { payload: { sessionId: string; confirmed: true }; response: Envelope<"session.updated", { session: SessionState | null; sessions: SessionListState }> };
   deleteSessions: { payload: { sessionIds: string[]; confirmed: true }; response: Envelope<"sessions.deleted", { deleted_session_ids: string[]; session: SessionState | null; sessions: SessionListState }> };
   resolveApproval: { payload: { approvalId: unknown; sessionId?: string; projectRoot?: string; decision: ApprovalDecision; message?: string }; response: Envelope<"approval.resolved", { approval_id: string; decision: ApprovalDecision }> };
+  resolveUserInput: { payload: { questionId: string; sessionId: string; projectRoot: string; answer?: string; cancelled?: boolean }; response: Envelope<"user.resolved", { question_id: string }> };
   getModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
   getTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.statistics", { statistics: TokenStatisticsData }> };
   exportTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.csv", { filename: string; content: string }> };

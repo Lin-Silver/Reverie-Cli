@@ -11,6 +11,8 @@ use std::{
 };
 use uuid::Uuid;
 
+mod runs;
+
 pub struct SessionStore {
     db: Connection,
     pub database_path: PathBuf,
@@ -204,7 +206,10 @@ impl SessionStore {
         let time = now();
         let mut metadata = metadata;
         metadata.extend(self.scope.as_object().unwrap().clone());
-        self.db.execute(
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
             "INSERT INTO conversations VALUES (?,?,?,?,?,1,0,0)",
             params![
                 id,
@@ -215,7 +220,17 @@ impl SessionStore {
                 serde_json::to_string(&metadata)?
             ],
         )?;
-        self.select(&id)?;
+        if let Some(configuration) = metadata.get("runtime_config") {
+            tx.execute(
+                "INSERT INTO configuration_versions VALUES (?,1,?,?)",
+                params![id, serde_json::to_string(configuration)?, time],
+            )?;
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO navigation VALUES ('selected',?)",
+            [&id],
+        )?;
+        tx.commit()?;
         self.page(&id, None, 60)
     }
 
@@ -478,7 +493,32 @@ impl SessionStore {
             )
             .optional()?
             .ok_or("Conversation not found.")?;
-        tx.execute("INSERT INTO task_runs(id,session_id,configuration_revision,configuration,execution_root,state,revision,result,created_at,updated_at,request) VALUES (?,?,?,?,?,'running',1,'{}',?,?,?)",params![run_id,id,configuration_revision,serde_json::to_string(configuration)?,self.scope["workspace_path"].as_str().ok_or("Workspace identity is missing.")?,time,time,serde_json::to_string(request)?])?;
+        let existing: Option<(String, String, String, String)> = tx
+            .query_row(
+                "SELECT session_id,configuration,state,request FROM task_runs WHERE id=?",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        let mut request = request.clone();
+        request["_native_started"] = json!(true);
+        if let Some((owner, encoded, state, original)) = existing {
+            let original: Value = serde_json::from_str(&original)?;
+            if owner != id
+                || serde_json::from_str::<Value>(&encoded)? != *configuration
+                || !["queued", "running"].contains(&state.as_str())
+                || original["_native_started"] == true
+                || original["prompt"] != user["content"]
+            {
+                return Err("Task is already started or its queued content differs.".into());
+            }
+            tx.execute(
+                "UPDATE task_runs SET state='running',request=?,updated_at=? WHERE id=?",
+                params![serde_json::to_string(&request)?, time, run_id],
+            )?;
+        } else {
+            tx.execute("INSERT INTO task_runs(id,session_id,configuration_revision,configuration,execution_root,state,revision,result,created_at,updated_at,request) VALUES (?,?,?,?,?,'running',1,'{}',?,?,?)",params![run_id,id,configuration_revision,serde_json::to_string(configuration)?,request["executionRoot"].as_str().unwrap_or(self.scope["workspace_path"].as_str().ok_or("Workspace identity is missing.")?),time,time,serde_json::to_string(&request)?])?;
+        }
         insert_messages(&tx, id, count, std::slice::from_ref(user))?;
         tx.execute("UPDATE conversations SET message_count=message_count+1,revision=revision+1,updated_at=? WHERE id=?",params![time,id])?;
         tx.commit()?;
@@ -495,7 +535,19 @@ impl SessionStore {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.execute("UPDATE task_runs SET state=?,result=?,revision=revision+1,updated_at=? WHERE id=? AND session_id=? AND state NOT IN ('completed','cancelled','failed')",params![state,serde_json::to_string(result)?,now(),run_id,id])? == 0 {return Err("Task is missing or already finalized.".into());}
+        let request: String = tx.query_row(
+            "SELECT request FROM task_runs WHERE id=? AND session_id=?",
+            params![run_id, id],
+            |row| row.get(0),
+        )?;
+        let task_state = if state == "completed"
+            && serde_json::from_str::<Value>(&request)?["hostManaged"] == true
+        {
+            "verifying"
+        } else {
+            state
+        };
+        if tx.execute("UPDATE task_runs SET state=?,result=?,revision=revision+1,updated_at=? WHERE id=? AND session_id=? AND state NOT IN ('completed','cancelled','failed')",params![task_state,serde_json::to_string(result)?,now(),run_id,id])? == 0 {return Err("Task is missing or already finalized.".into());}
         tx.execute("INSERT INTO conversation_read_states VALUES (?,1) ON CONFLICT(session_id) DO UPDATE SET unread=1",[id])?;
         if state == "completed" {
             tx.execute(

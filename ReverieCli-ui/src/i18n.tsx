@@ -9,6 +9,12 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "Reverie 需要回答": "Reverie needs an answer",
+  "自定义回答": "Custom answer",
+  "提交回答": "Submit answer",
+  "正在提交回答…": "Submitting answer…",
+  "取消询问": "Cancel question",
+  "这个功能正在迁移到 Rust 内核，完成后会在这里启用。": "This feature is being migrated to the Rust kernel and will become available here when ready.",
   "统计": "Statistics",
   "Token 用量统计": "Token usage",
   "查看本机已记录的请求用量与预估费用。": "View recorded requests and estimated costs on this device.",
@@ -397,6 +403,7 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "最近与手动顺序": "Recent and manual order",
   "需处理": "Needs attention",
   "需审批": "Approval needed",
+  "等待回答": "Waiting for an answer",
   "完成未读": "Completed, unread",
   "当前模型不支持图片，请切换模型或移除图片": "This model cannot accept images. Switch models or remove the image.",
   "图片输入能力未知，请选择明确支持图片的模型": "Image capability is unknown. Choose a model with confirmed image support.",

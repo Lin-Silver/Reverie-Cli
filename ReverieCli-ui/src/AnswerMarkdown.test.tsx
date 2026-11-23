@@ -11,6 +11,16 @@ beforeEach(() => { window.reverie = { openExternal: external } as unknown as typ
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("rich answer content", () => {
+  it("shows ordinary soft line breaks in both streamed and final text without changing code blocks", () => {
+    const content = "first line\n**second\nthird**\n\n- item\n  continuation\n\n```text\nA\nB\n```";
+    const view = render(<AnswerMarkdown>{content}</AnswerMarkdown>);
+    expect(document.querySelectorAll("p br")).toHaveLength(2);
+    expect(document.querySelectorAll("li br")).toHaveLength(1);
+    expect(document.querySelector("pre code")?.textContent).toBe("A\nB\n");
+    const original = view.container.innerHTML;
+    view.rerender(<AnswerMarkdown streaming>{content}</AnswerMarkdown>);
+    expect(view.container.innerHTML).toBe(original);
+  });
   it("displays actual metric values including zero without replacing them with defaults", () => {
     render(<AnswerMarkdown>{fence({ type: "metrics", items: [{ label: "待处理", value: 0 }, { label: "已完成", value: "4", detail: "本周" }] })}</AnswerMarkdown>);
     expect(screen.getByText("0").tagName).toBe("DD");

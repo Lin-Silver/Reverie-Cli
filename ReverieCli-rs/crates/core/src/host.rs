@@ -42,6 +42,7 @@ struct Run {
     session_name: String,
     id: String,
     root: PathBuf,
+    execution_root: PathBuf,
     data: PathBuf,
     model: Value,
     config: Value,
@@ -100,9 +101,28 @@ impl KernelHost {
             "stopPrompt" => self.stop(&request.payload),
             "resolveApproval" => self.resolve(&request.payload, false),
             "resolveUserInput" => self.resolve(&request.payload, true),
+            "recoverConversationRuns" => {
+                let active = match lock(&self.active) {
+                    Ok(active) => active,
+                    Err(error) => return Reply::error(id, error),
+                };
+                let mut kernel = match lock(&self.kernel) {
+                    Ok(kernel) => kernel,
+                    Err(error) => return Reply::error(id, error),
+                };
+                let recovered = (|| -> Result<Value> {
+                    if let Some(root) = request.payload["projectRoot"].as_str() {
+                        kernel.configure_project(root)?;
+                    }
+                    Ok(
+                        json!({"runs":kernel.session_store()?.recover_runs(&active.keys().cloned().collect::<Vec<_>>())?}),
+                    )
+                })();
+                recovered.map(|value| ("conversation.runs", value))
+            }
             "listTools" => Ok((
                 "tools",
-                json!({"tools":tool_catalog().into_iter().map(|tool|json!({"name":tool["function"]["name"],"description":tool["function"]["description"],"parameters":tool["function"]["parameters"]})).collect::<Vec<_>>()}),
+                json!({"mode":"reverie","tools":tool_catalog().into_iter().map(|tool|json!({"name":tool["function"]["name"],"description":tool["function"]["description"],"parameters":tool["function"]["parameters"],"kind":"built-in","category":if tool["function"]["name"]=="userInput"{"interaction"}else{"files"},"aliases":[],"tags":[],"traits":[],"supported_modes":["reverie"],"required":tool["function"]["parameters"]["required"],"properties":tool["function"]["parameters"]["properties"].as_object().map(|properties|properties.keys().collect::<Vec<_>>()).unwrap_or_default()})).collect::<Vec<_>>()}),
             )),
             _ => match lock(&self.kernel) {
                 Ok(mut kernel) => return kernel.dispatch(request),
@@ -269,13 +289,17 @@ impl KernelHost {
             .ok_or("Select a configured model before running a prompt.")?
             .clone();
         let root = kernel.project_root.clone();
+        let execution_root = match payload["executionRoot"].as_str() {
+            Some(root) => crate::config::canonical_project(std::path::Path::new(root))?,
+            None => root.clone(),
+        };
         let data = kernel.project_data_dir.clone();
         let mut store = crate::session::SessionStore::open(&data, &root)?;
         let mut messages = store.history(&session)?;
         let history_count = messages.len();
         let no_index = payload["noIndex"].as_bool().unwrap_or(false);
         let context = if !no_index && config["auto_index"].as_bool().unwrap_or(true) {
-            Some(kernel.shared_context()?)
+            Some(kernel.shared_context_for(&execution_root)?)
         } else {
             None
         };
@@ -294,6 +318,7 @@ impl KernelHost {
             session_name: page.name,
             id,
             root,
+            execution_root,
             data,
             model,
             config,
@@ -301,7 +326,14 @@ impl KernelHost {
             prompt,
             no_index,
             history_count,
-            rules: snapshot["rules"].as_str().unwrap_or_default().into(),
+            rules: [
+                snapshot["rules"].as_str().unwrap_or_default(),
+                payload["goalContext"].as_str().unwrap_or_default(),
+            ]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
             store: Mutex::new(store),
             context,
             reasoning: String::new(),
@@ -326,10 +358,16 @@ impl KernelHost {
         if active.contains_key(&id) {
             return Err("A run with this identity is already active.".into());
         }
-        if payload["sessionId"]
+        let project = payload["projectRoot"]
             .as_str()
-            .is_some_and(|id| active.values().any(|control| control.session_id == id))
-        {
+            .map(|root| crate::config::canonical_project(std::path::Path::new(root)))
+            .transpose()?
+            .unwrap_or(lock(&self.kernel)?.project_root.clone());
+        if payload["sessionId"].as_str().is_some_and(|id| {
+            active
+                .values()
+                .any(|control| control.session_id == id && control.project_root == project)
+        }) {
             return Err("A run is already active for this conversation.".into());
         }
         let run = self.prepare(payload, id)?;
@@ -415,8 +453,12 @@ impl KernelHost {
         sink(
             json!({"type":"run.finished","state":state,"project_root":run.root,"session_id":run.session,"run_id":run.id}),
         );
+        let (sessions, revision) = {
+            let store = lock(&run.store)?;
+            (store.list()?, store.run_revision(&run.session, &run.id)?)
+        };
         Ok(
-            json!({"result":result,"sessions":lock(&run.store)?.list()?,"recovery":{"checkpoints":[],"available":false},"session_id":run.session,"run_id":run.id,"project_root":run.root}),
+            json!({"result":result,"sessions":sessions,"recovery":{"summary":{"available":false},"operations":[],"checkpoints":[],"available":false},"run_revision":revision,"session_id":run.session,"run_id":run.id,"project_root":run.root}),
         )
     }
 
@@ -488,7 +530,7 @@ impl KernelHost {
                 ));
             }
         }
-        run.messages.insert(0,json!({"role":"system","content":format!("You are Reverie, an assistant working in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\nWorkspace evidence:{}",run.root.display(),run.rules,context)}));
+        run.messages.insert(0,json!({"role":"system","content":format!("You are Reverie, an assistant working in {}. Execute workspace tools in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\nWorkspace evidence:{}",run.root.display(),run.execution_root.display(),run.rules,context)}));
         let catalog = tool_catalog();
         for iteration in 0..64 {
             if control.cancel.is_cancelled() {
@@ -595,12 +637,26 @@ impl KernelHost {
             let id = Uuid::new_v4().simple().to_string();
             let (sender, receiver) = oneshot::channel();
             lock(&control.questions)?.insert(id.clone(), Waiter { sender });
-            emit(
-                json!({"type":"user.question","question_id":id,"question":question,"options":options,"custom_answer":true,"multiple":args["multiple"].as_bool().unwrap_or(false)}),
-            );
+            lock(&run.store)?.set_running_state(&run.session, &run.id, "waiting_user")?;
+            emit({
+                let mut event = serde_json::to_value(reverie_protocol::UserQuestion {
+                    question_id: id.clone(),
+                    question: question.into(),
+                    reason: args["reason"].as_str().unwrap_or_default().into(),
+                    options: options
+                        .into_iter()
+                        .map(|option| option.as_str().unwrap().to_owned())
+                        .collect(),
+                    custom_answer: true,
+                    multiple: args["multiple"].as_bool().unwrap_or(false),
+                })?;
+                event["type"] = json!("user.question");
+                event
+            });
             let answer = tokio::select! {_=control.cancel.cancelled()=>Err("Run cancelled while waiting for user input."),answer=receiver=>answer.map_err(|_|"User question is no longer active.")};
             lock(&control.questions)?.remove(&id);
             let answer = answer?;
+            lock(&run.store)?.set_running_state(&run.session, &run.id, "running")?;
             if answer["cancelled"] == true {
                 return Err("User cancelled the question.".into());
             }
@@ -634,12 +690,14 @@ impl KernelHost {
             let id = Uuid::new_v4().simple().to_string();
             let (sender, receiver) = oneshot::channel();
             lock(&control.approvals)?.insert(id.clone(), Waiter { sender });
+            lock(&run.store)?.set_running_state(&run.session, &run.id, "waiting_user")?;
             emit(
                 json!({"type":"approval.request","approval_id":id,"tool":call.name,"arguments":args,"read_only":read_only,"permission_mode":mode,"scopes":["once","session"],"paths":[args["path"]]}),
             );
             let answer = tokio::select! {_=control.cancel.cancelled()=>Err("Run cancelled while waiting for approval."),answer=receiver=>answer.map_err(|_|"Approval is no longer active.")};
             lock(&control.approvals)?.remove(&id);
             let answer = answer?;
+            lock(&run.store)?.set_running_state(&run.session, &run.id, "running")?;
             match answer["decision"].as_str() {
                 Some("once") => {}
                 Some("session") => {
@@ -661,10 +719,18 @@ impl KernelHost {
         if control.cancel.is_cancelled() {
             return Err("Run cancelled before tool execution.".into());
         }
+        let mut arguments = args.clone();
+        if run.root != run.execution_root
+            && let Some(path) = args["path"]
+                .as_str()
+                .and_then(|path| std::path::Path::new(path).strip_prefix(&run.root).ok())
+        {
+            arguments["path"] = json!(run.execution_root.join(path));
+        }
         Ok(reverie_platform::execute(
             &call.name,
-            args,
-            &run.root,
+            &arguments,
+            &run.execution_root,
             &run.data.join("tools/file-backups").join(&run.id),
         ))
     }

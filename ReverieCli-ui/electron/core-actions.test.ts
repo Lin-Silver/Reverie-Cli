@@ -24,4 +24,10 @@ describe("core protocol runtime boundary", () => {
     expect(() => assertCoreResponse("initialize", { type: "state" })).toThrow(/missing: state/);
     expect(() => assertCoreResponse("compactContext", { type: "context.compacted", success: true })).toThrow(/missing: message, session, sessions, recovery, context_engine/);
   });
+
+  it("keeps user answers separate from permission approvals", () => {
+    expect(assertCoreAction("resolveUserInput")).toBe("resolveUserInput");
+    expect(assertCoreResponse("resolveUserInput",{type:"user.resolved",question_id:"question"}).question_id).toBe("question");
+    expect(() => assertCoreResponse("resolveApproval",{type:"user.resolved",question_id:"question"})).toThrow(/protocol mismatch/);
+  });
 });

@@ -1,11 +1,10 @@
 import { ViewInstances } from "./view-interactions";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, protocol, shell, Tray } from "electron";
 import { assertCoreAction, assertCoreResponse, normalizeCorePayload } from "./core-actions";
-import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { appendFile, copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
@@ -19,8 +18,7 @@ import { resolveKernelSelection, TRUSTED_KERNELS_FILENAME } from "./kernel-resol
 import { parseDesktopLaunchOptions, resolveDesktopStartupMode } from "./launch-options";
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
 import { createWindowTray, showWindow } from "./window-tray";
-import { coreRequestTimeoutMs } from "./core-timeouts";
-import { requestCoreShutdown } from "./core-shutdown";
+import { CoreBridge } from "./core-bridge";
 import { createGitBranch, getGitWorkspaceStatus, switchGitBranch } from "./git-workspace";
 import { importAttachments, saveClipboardImage, validateAttachments, type ComposerAttachment } from "./attachments";
 import { gitSnapshot, gitPatch, gitMutate, gitCommit, gitPushPlan, gitPush, gitOutput, readPreview, listDirectory, readEditorFile, saveEditorFile, type DiffScope, type PushPlan } from "./workbench";
@@ -88,7 +86,7 @@ const outerExecutableDirectory = process.env.PORTABLE_EXECUTABLE_DIR
 const executableHome = packagedExecutableHome(process.execPath, outerExecutableDirectory);
 const runtimeRoot = app.isPackaged
   ? packagedRuntimeRoot(executableHome)
-  : path.join(uiRoot, ".runtime");
+  : path.resolve(process.env.REVERIE_DESKTOP_RUNTIME_ROOT || path.join(uiRoot, ".runtime"));
 const runtimePaths = {
   root: runtimeRoot,
   userData: path.join(runtimeRoot, "user-data"),
@@ -125,7 +123,7 @@ function awaitDirectory(directory: string): void {
 function internalKernelPath(): string {
   return app.isPackaged
     ? packagedKernelPath(process.execPath)
-    : path.resolve(uiRoot, "..", "dist", kernelExecutableName());
+    : path.resolve(uiRoot, "..", "ReverieCli-rs", "target", "release", kernelExecutableName());
 }
 
 let activeKernelPath = internalKernelPath();
@@ -205,6 +203,8 @@ for (const resolveRoots of Object.values(RATS_PROVIDER_DISCOVERY_ADAPTERS)) {
   ratsDiscoveryRoots.push(...resolveRoots());
 }
 
+const bridgeEnvironment = { settingsPath: runtimePaths.settings, tempRoot: runtimePaths.temp, discoveryRoots: ratsDiscoveryRoots, log: (message: string) => { void log(message); } };
+
 function rememberProject(preferences: StoredUiPreferences, projectRoot: string): StoredUiPreferences {
   const resolved = path.resolve(projectRoot);
   const recentProjects = [
@@ -281,197 +281,6 @@ function applyWindowAppearance(): void {
   }
 }
 
-class CoreBridge {
-  private child: ChildProcessWithoutNullStreams | null = null;
-  private starting: Promise<void> | null = null;
-  private sequence = 0;
-  private pending = new Map<
-    string,
-    {
-      resolve: (value: JsonRecord) => void;
-      reject: (reason: Error) => void;
-      timer: ReturnType<typeof setTimeout> | null;
-      action: string;
-      sessionId?: string;
-    }
-  >();
-
-  constructor(
-    private projectRoot: string,
-    private coreAppRoot: string,
-    private readonly executablePath: string,
-    private sendEvent: (message: JsonRecord) => void,
-  ) {}
-
-  setEventHandler(sendEvent: (message: JsonRecord) => void): void { this.sendEvent = sendEvent; }
-
-  setProjectRoot(projectRoot: string): void {
-    this.projectRoot = path.resolve(projectRoot);
-  }
-
-  getProjectRoot(): string {
-    return this.projectRoot;
-  }
-
-  hasActivePrompt(): boolean { return [...this.pending.values()].some(item => ["runPrompt", "resumePrompt", "callViewTool"].includes(item.action)); }
-  getPid(): number | undefined { return this.child?.pid; }
-
-  setCoreAppRoot(coreAppRoot: string): void {
-    this.coreAppRoot = path.resolve(coreAppRoot);
-  }
-
-  getCoreAppRoot(): string {
-    return this.coreAppRoot;
-  }
-
-  async start(): Promise<void> {
-    if (this.starting) return this.starting;
-    if (this.child && !this.child.killed) return;
-
-    this.starting = new Promise<void>((resolve, reject) => {
-      const executable = this.executablePath;
-      if (!existsSync(executable)) {
-        reject(new Error(`Reverie core not found: ${executable}`));
-        return;
-      }
-
-      awaitDirectory(this.coreAppRoot);
-      const child = spawn(executable, ["--sdk-bridge"], {
-        cwd: this.projectRoot,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          PYTHONIOENCODING: "utf-8",
-          PYTHONUTF8: "1",
-          REVERIE_APP_ROOT: this.coreAppRoot,
-          REVERIE_DESKTOP_SETTINGS: runtimePaths.settings,
-          REVERIE_RATS_DISCOVERY_ROOTS: [...new Set(ratsDiscoveryRoots.map((item) => path.resolve(item)))].join(path.delimiter),
-          TEMP: runtimePaths.temp,
-          TMP: runtimePaths.temp,
-        },
-      });
-      this.child = child;
-      let ready = false;
-      const lines = readline.createInterface({ input: child.stdout });
-      lines.on("line", (line) => {
-        let message: JsonRecord;
-        try {
-          message = JSON.parse(line) as JsonRecord;
-        } catch {
-          void log(`Invalid core JSON: ${line.slice(0, 500)}`);
-          return;
-        }
-        if (message.type === "ready" && !ready) {
-          ready = true;
-          void log(`Core ready in ${Date.now() - desktopStartedAt} ms`);
-          resolve();
-          return;
-        }
-        if (message.type === "prompt.event") {
-          this.sendEvent(message);
-          return;
-        }
-        const id = String(message.id ?? "");
-        const request = this.pending.get(id);
-        if (!request) return;
-        this.pending.delete(id);
-        if (request.timer) clearTimeout(request.timer);
-        if (message.type === "error") {
-          request.reject(new Error(String(message.error ?? "Unknown core error")));
-        } else {
-          request.resolve(message);
-        }
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        void log(`CORE ${chunk.toString("utf8").trimEnd()}`);
-      });
-      child.once("error", (error) => {
-        if (!ready) reject(error);
-        void log(`Core process error: ${error.message}`);
-      });
-      child.once("exit", (code, signal) => {
-        const error = new Error(`Reverie core exited (${code ?? signal ?? "unknown"})`);
-        if (this.child === child) {
-          for (const request of this.pending.values()) {
-            if (request.timer) clearTimeout(request.timer);
-            request.reject(error);
-          }
-          this.pending.clear();
-          this.child = null;
-        }
-        if (!ready) reject(error);
-        void log(error.message);
-      });
-    }).finally(() => {
-      this.starting = null;
-    });
-
-    return this.starting;
-  }
-
-  async request(action: string, payload: JsonRecord = {}): Promise<JsonRecord> {
-    payload = {projectRoot:this.projectRoot,...payload};
-    await this.start();
-    const child = this.child;
-    if (!child || child.killed) throw new Error("Reverie core is not running.");
-    const id = `desktop-${Date.now()}-${++this.sequence}`;
-    const timeoutMs = coreRequestTimeoutMs(action);
-    return new Promise<JsonRecord>((resolve, reject) => {
-      const timer = timeoutMs > 0
-        ? setTimeout(() => {
-            if (!this.pending.delete(id)) return;
-            reject(new Error(`Reverie core request timed out: ${action}`));
-          }, timeoutMs)
-        : null;
-      this.pending.set(id, { resolve, reject, timer, action, ...(["runPrompt", "resumePrompt"].includes(action) ? { sessionId: String(payload.sessionId ?? "") } : {}) });
-      child.stdin.write(`${JSON.stringify({ id, action, payload })}\n`, "utf8", (error) => {
-        if (error) {
-          this.pending.delete(id);
-          if (timer) clearTimeout(timer);
-          reject(error);
-        }
-      });
-    });
-  }
-
-  async stop(reason = "Core stopped", graceful = false): Promise<void> {
-    const child = this.child;
-    if (!child) return;
-    const sessionId = [...this.pending.values()].find(request => ["runPrompt", "resumePrompt"].includes(request.action))?.sessionId;
-    for (const request of this.pending.values()) {
-      if (request.timer) clearTimeout(request.timer);
-      request.reject(new Error(reason));
-    }
-    this.pending.clear();
-    const exited = graceful && await requestCoreShutdown(child, sessionId);
-    if (exited || child.exitCode !== null || child.signalCode !== null) {
-      if (this.child === child) this.child = null;
-      return;
-    }
-    if (process.platform === "win32" && child.pid) {
-      await new Promise<void>((resolve) => {
-        const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-          windowsHide: true,
-          stdio: "ignore",
-        });
-        killer.once("error", () => {
-          child.kill();
-          resolve();
-        });
-        killer.once("exit", () => resolve());
-      });
-    } else {
-      child.kill();
-    }
-    if (this.child === child) this.child = null;
-  }
-
-  async restart(): Promise<void> {
-    await this.stop("Prompt cancelled; core restarted.");
-    await this.start();
-  }
-}
-
 let mainWindow: BrowserWindow | null = null;
 let windowTray: Tray | null = null;
 let aioHost:AiOHost|null=null;
@@ -483,6 +292,7 @@ const journal = new RunJournal();
 const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string; assistantId?: 'aio' }>();
 const workerPool = new WorkerPool<CoreBridge>(4, worker => worker.stop("Idle kernel released.", true));
 const approvalOwners = new Map<string, string>();
+const questionOwners = new Map<string, string>();
 const stopBeforeStart = new Set<string>();
 const viewInstances = new ViewInstances();
 const coordinator = new ExecutionCoordinator(entries => mainWindow?.webContents.send("core:event", { type: "executors.changed", entries, maximum: 4 }));
@@ -625,7 +435,7 @@ async function createWindow(): Promise<void> {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("core:event", message);
     }
-  });
+  }, bridgeEnvironment);
   void bridge.start().catch((error) => log(`Core startup failed: ${error instanceof Error ? error.message : String(error)}`));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -661,7 +471,8 @@ async function createWindow(): Promise<void> {
     () => {void (async()=>{if(!bridge)return;const state=(await bridge.request('aioState',{assistantId:'aio'})).aio as JsonRecord;if(state.enabled){await bridge.request('aioControl',{assistantId:'aio',changes:{paused:!state.paused}});await aioHost?.controlsChanged();}})().catch(error=>log(`AiO tray control failed: ${String(error)}`));},
   );
   applyWindowAppearance();
-  if(!aioHost){
+  await bridge.request("hello");
+  if(!aioHost && bridge.supports("aioState")){
     let judgmentWorker:CoreBridge|null=null;
     let judgmentRoot='';
     let judgmentGeneration=0;
@@ -670,7 +481,7 @@ async function createWindow(): Promise<void> {
       if(!bridge)throw new Error('Reverie is closing.');const root=bridge.getProjectRoot();
       judgmentRoot=root;const generation=judgmentGeneration;
       const lease=await coordinator.acquire(root,'aio-judgment',true);const key=JSON.stringify([root,'aio-judgment']);let worker:CoreBridge|null=null;
-      try{if(generation!==judgmentGeneration)throw new Error('AiO judgment cancelled.');worker=(await workerPool.acquire(key,()=>new CoreBridge(root,bridge!.getCoreAppRoot(),activeKernelPath,()=>{}))).worker;judgmentWorker=worker;if(generation!==judgmentGeneration)throw new Error('AiO judgment cancelled.');await worker.request('initialize',{projectRoot:root,deferPayloads:true});return await worker.request(action,payload);}
+      try{if(generation!==judgmentGeneration)throw new Error('AiO judgment cancelled.');worker=(await workerPool.acquire(key,()=>new CoreBridge(root,bridge!.getCoreAppRoot(),activeKernelPath,()=>{},bridgeEnvironment))).worker;judgmentWorker=worker;if(generation!==judgmentGeneration)throw new Error('AiO judgment cancelled.');await worker.request('initialize',{projectRoot:root,deferPayloads:true});return await worker.request(action,payload);}
       finally{judgmentWorker=null;if(worker)await workerPool.release(key,worker,false);coordinator.release(lease.id);}
     };
     aioHost=new AiOHost(request,decide,(action,payload)=>executeCoreRequest(assertCoreAction(action),payload),()=>[...knownWorkspaceRoots],message=>{if(mainWindow){showWindow(mainWindow);mainWindow.webContents.send('core:event',{type:'aio.open',project_root:message.root,session_id:message.branch,assistant_id:'aio'});}},event=>{void log(JSON.stringify(event));mainWindow?.webContents.send('core:event',event);},async()=>{judgmentGeneration++;coordinator.cancelQueued(judgmentRoot,'aio-judgment');await judgmentWorker?.stop('AiO judgment cancelled.');});
@@ -747,8 +558,8 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
     if(payload.assistantId==='aio' && sessionId!=='aio-mainline' && ownership?.workspace && !samePath(root,String(ownership.workspace)))throw new Error(`This AiO branch belongs to ${ownership.workspace}. Open its original workspace to continue.`);
     if (fixed && !payload.configuration) payload.configuration = fixed.configuration;
     const activeModel = fixed?.active_model ?? (fixed?.models as JsonRecord | undefined)?.active_model;
-    const record = await journal.start(root, sessionId, payload, JSON.stringify(activeModel ?? {}),payload.restoredRunId?String(payload.restoredRunId):undefined); payload.runId = record.id; payload.projectRoot = root;
-    let leaseId = ""; let worker: CoreBridge | null = null; let reusable = false;
+    const record = await journal.start(root, sessionId, payload, JSON.stringify(activeModel ?? {}),payload.restoredRunId?String(payload.restoredRunId):undefined); payload.runId = record.id; payload.projectRoot = root; payload.hostManaged = true;
+    let leaseId = ""; let worker: CoreBridge | null = null;
     let runRevision=0;
     let finalized=false;
     let runWrites:Promise<void>=Promise.resolve();
@@ -760,7 +571,6 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
       });
       return runWrites;
     };
-    let workerKey = JSON.stringify([root, admin.getCoreAppRoot(), activeKernelPath]);
     try {
       if(!viewCall){const queued=await admin.request('queueConversationRun',{projectRoot:root,sessionId,runId:record.id,configuration:payload.configuration,configurationRevision:fixed!.revision,request:payload,...(payload.assistantId==='aio'?{assistantId:'aio'}:{})});runRevision=Number(queued.revision);}
       const lease = await coordinator.acquire(root, sessionId, payload.runType === "review", !viewCall, !viewCall,payload.assistantId==='aio'?'aio':undefined); leaseId = lease.id;
@@ -774,23 +584,20 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
         if(!control.enabled || stopBeforeStart.has(lease.id))throw new Error('Run stopped before tools started.');
       }
       const task = lease.gitCheckout && !lease.readOnly && !viewCall ? await coordinator.incorporate(lease.id,()=>isolateTask(root,record.id)) : null;
-      if(task){const executionRoot=path.join(task.path,path.relative(task.sourceRoot,root));payload.executionRoot=executionRoot;workerKey=JSON.stringify([root,executionRoot,admin.getCoreAppRoot(),activeKernelPath]);await journal.update(record.id,{executionRoot,taskWorkspaceId:task.id,beforeRef:`refs/reverie/runs/${record.id}/before`});}
+      if(task){const executionRoot=path.join(task.path,path.relative(task.sourceRoot,root));payload.executionRoot=executionRoot;await journal.update(record.id,{executionRoot,taskWorkspaceId:task.id,beforeRef:`refs/reverie/runs/${record.id}/before`});}
       payload.goalContext = payload.runType === "review" ? "" : goalInstructions(await loadGoal(root, sessionId));
       if(task)payload.goalContext=[String(payload.goalContext),`This task belongs to workspace ${root}, and executes in the managed isolated directory ${payload.executionRoot}. Resolve requested workspace files relative to that execution directory, including paths originally expressed under ${root}. Work and verify only there. The host incorporates verified task changes into the original workspace afterward; their absence in the original directory before incorporation is expected.`].filter(Boolean).join('\n\n');
       await journal.update(record.id, { goalContext: String(payload.goalContext) });
-      const acquired = await workerPool.acquire(workerKey, () => new CoreBridge(root, admin.getCoreAppRoot(), activeKernelPath, () => {}));
+      const acquired = { worker: admin, reused: true };
       worker = acquired.worker;
-      worker.setEventHandler(message => {
+      const onEvent = (message: JsonRecord) => {
         const event: JsonRecord = { ...(message.event as JsonRecord), project_root: root, session_id: sessionId, run_id: record.id,assistant_id:payload.assistantId };
         journal.event(record.id, event);
         if (event.type === "approval.request") { approvalOwners.set(String(event.approval_id), lease.id); void publishNotification(root, sessionId, record.id, `approval:${event.approval_id}`, "Reverie 需要审批 / Approval needed", String(event.command || event.tool || event.message || ""),payload.assistantId==='aio'?'aio':undefined); }
-        if(event.type==='approval.request' || event.type==='run.control'){
-          const state=event.type==='approval.request'?'waiting_user':String(event.state);
-          void writeRun(state).catch(error=>{void log(`Conversation task state was not saved: ${String(error)}`);void worker?.request('stopPrompt',{projectRoot:root,sessionId}).catch(()=>{});});
-        }
+        if (event.type === "user.question") { questionOwners.set(String(event.question_id), lease.id); void publishNotification(root,sessionId,record.id,`question:${event.question_id}`,"Reverie 需要回答 / Answer needed",String(event.question || ""),payload.assistantId==='aio'?'aio':undefined); }
         if (event.type === "run.control") void journal.update(record.id, { state: String(event.state) });
         mainWindow?.webContents.send("core:event", { ...message, event });
-      });
+      };
       executors.set(lease.id, { worker, root, sessionId, assistantId:payload.assistantId==='aio'?'aio':undefined, runId: record.id, interactionId: viewCall ? String(payload.interactionId) : undefined });
       if (viewCall) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "running", project_root: root, session_id: sessionId, run_id: record.id } });
       const preparation = await Promise.allSettled([
@@ -802,15 +609,15 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
       await writeRun('running',undefined,String(payload.executionRoot || root));
       if (stopBeforeStart.has(lease.id)) throw new Error("Run stopped before tools started.");
       if (viewCall) viewInstances.require(payload);
-      const response = await worker.request(action, payload);
+      const response = await worker.request(action, payload, onEvent);
+      runRevision = Number(response.run_revision ?? runRevision);
       const result = viewCall ? { success: response.status === "success", output_text: response.output, error: response.error } : response.result as JsonRecord;
-      reusable = !task;
-      const cancelled = !result.success && stopBeforeStart.has(lease.id);
+      const cancelled = result.state === "cancelled" || !result.success && stopBeforeStart.has(lease.id);
       let completionState=result.success ? 'completed' : cancelled ? 'cancelled' : 'failed';
       if(result.success && payload.acceptance && !viewCall){
         await journal.update(record.id,{state:'verifying'});
         await writeRun('verifying');
-        const verification=await worker.request('runPrompt',{...payload,promptAlreadySaved:false,runType:'review',prompt:`Verify this task against its acceptance conditions: ${payload.acceptance}. Inspect the actual artifacts in the execution directory and tool evidence. For exact text, encoding or line-ending conditions, read the complete file with native file_ops read and inspect its byte size with file_ops info; line-numbered search snippets and creation acknowledgements are insufficient. Report unmet conditions. Return only a JSON object {"passed":true|false,"evidence":"specific observed evidence"}.`});
+        const verification=await worker.request('runPrompt',{...payload,runId:`${record.id}-review`,hostManaged:false,promptAlreadySaved:false,runType:'review',prompt:`Verify this task against its acceptance conditions: ${payload.acceptance}. Inspect the actual artifacts in the execution directory and tool evidence. For exact text, encoding or line-ending conditions, read the complete file with native file_ops read and inspect its byte size with file_ops info; line-numbered search snippets and creation acknowledgements are insufficient. Report unmet conditions. Return only a JSON object {"passed":true|false,"evidence":"specific observed evidence"}.`});
         const evidence=verificationEvidence(verification.result as JsonRecord);
         result.verification=evidence;
         if(!evidence.passed){result.success=false;result.error=`Acceptance needs review: ${evidence.evidence}`;completionState='waiting_user';}
@@ -841,7 +648,7 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
       await publishNotification(root,sessionId,record.id,'recovery','Reverie 需要核对 / Needs review',String(error),payload.assistantId==='aio'?'aio':undefined);
       throw error;
     }
-    finally { if (viewCall && leaseId) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "finished", project_root: root, session_id: sessionId, run_id: record.id } }); if (worker) { worker.setEventHandler(() => {}); await workerPool.release(workerKey, worker, reusable); } if (leaseId) { executors.delete(leaseId); stopBeforeStart.delete(leaseId); coordinator.release(leaseId); for (const [id, owner] of approvalOwners) if (owner === leaseId) approvalOwners.delete(id); } }
+    finally { if (viewCall && leaseId) mainWindow?.webContents.send("core:event", { type: "prompt.event", event: { type: "view.run", state: "finished", project_root: root, session_id: sessionId, run_id: record.id } }); if (leaseId) { executors.delete(leaseId); stopBeforeStart.delete(leaseId); coordinator.release(leaseId); for (const [id, owner] of approvalOwners) if (owner === leaseId) approvalOwners.delete(id); for (const [id, owner] of questionOwners) if (owner === leaseId) questionOwners.delete(id); } }
   }
   if (["stopPrompt", "steerPrompt", "pausePrompt", "continuePrompt"].includes(action)) {
     const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot())); const sessionId = String(payload.sessionId || "");
@@ -853,13 +660,16 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
     if (action === "stopPrompt") { stopBeforeStart.add(entry.id); if (!executor.worker.hasActivePrompt()) return { type:"run.control",state:"stopping",run_id:executor.runId }; }
     return assertCoreResponse(action, await executor.worker.request(action,payload));
   }
-  if (action === "resolveApproval") {
-    const owner = approvalOwners.get(String(payload.approvalId));
+  if (action === "resolveApproval" || action === "resolveUserInput") {
+    const owners = action === "resolveApproval" ? approvalOwners : questionOwners;
+    const identity = String(action === "resolveApproval" ? payload.approvalId : payload.questionId);
+    const owner = owners.get(identity);
     const executor = owner ? executors.get(owner) : undefined;
     if (!executor || stopBeforeStart.has(owner!)) throw new Error("Approval expired or its run stopped.");
     if (payload.sessionId && payload.sessionId !== executor.sessionId || payload.projectRoot && !samePath(String(payload.projectRoot),executor.root)) throw new Error("Approval belongs to a different run.");
     if ((payload.assistantId==='aio'?'aio':undefined)!==executor.assistantId) throw new Error('Approval belongs to a different assistant.');
-    approvalOwners.delete(String(payload.approvalId)); return assertCoreResponse(action, await executor.worker.request(action,payload));
+    const response = assertCoreResponse(action, await executor.worker.request(action,payload));
+    owners.delete(identity); return response;
   }
   if (action === "getView") {
     // The kernel's response carries the model-safe `view` AND an authoritative
@@ -913,6 +723,7 @@ ipcMain.handle("core:cancel", async (_event, owner?: {projectRoot:string;session
   if (!bridge) return;
   const active = [...executors.values()].filter(item => samePath(item.root, owner?.projectRoot || bridge!.getProjectRoot()) && (!owner || item.sessionId === owner.sessionId));
   if (active.length > 1) throw new Error("Select a specific session run for forced termination.");
+  if (coordinator.list().length > 1 || [...executors.values()].some(item => !active.includes(item))) throw new Error("Stop other conversations before terminating the shared kernel.");
   if (active[0]) await active[0].worker.stop("Forced stop requested; verify incomplete effects."); else await bridge.restart();
 });
 
@@ -1430,7 +1241,7 @@ app.on("before-quit", (event) => {
   aioHost?.stop();
   bridge = null;
   for (const entry of coordinator.list()) if (entry.state === "queued") coordinator.cancelQueued(entry.projectRoot, entry.sessionId,entry.assistantId);
-  void Promise.all([activeBridge?.stop("Application is closing.", true), terminals.closeAll(), workerPool.close()]).finally(() => {
+  void Promise.all([activeBridge?.stop("Application is closing.", true, true), terminals.closeAll(), workerPool.close()]).finally(() => {
     coreStoppedForQuit = true;
     app.quit();
   });

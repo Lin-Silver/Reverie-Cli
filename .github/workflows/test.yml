@@ -20,11 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: "24"
       - name: Check local documentation
-        run: python scripts/verification/check_docs.py
+        run: node scripts/verification/check-docs.mjs
+      - name: Test documentation validation
+        run: node --test scripts/verification/check-docs.node-test.mjs
 
   desktop:
     name: Desktop tests, types, and renderer build
@@ -78,6 +80,8 @@ jobs:
         run: cargo clippy --manifest-path ReverieCli-rs/Cargo.toml --workspace --all-targets --locked -- -D warnings
       - name: Build native Rust program
         run: cargo build --manifest-path ReverieCli-rs/Cargo.toml --release --locked
+      - name: Check generated desktop protocol types
+        run: node ReverieCli-ui/scripts/generate-core-types.mjs --check
       - name: Run actual native entry and SDK checks
         run: node scripts/verification/rust-smoke.mjs
       - name: Run actual configuration and session checks
@@ -88,5 +92,9 @@ jobs:
         run: node scripts/verification/rust-run-smoke.mjs
       - name: Install native terminal check dependencies
         run: npm ci --prefix ReverieCli-ui --ignore-scripts
+      - name: Build Electron bridge
+        run: npm run build:main --prefix ReverieCli-ui
+      - name: Run actual desktop bridge and task recovery checks
+        run: node scripts/verification/rust-desktop-bridge-smoke.mjs
       - name: Run actual scrolling terminal and single-prompt checks
         run: node scripts/verification/rust-tui-smoke.mjs

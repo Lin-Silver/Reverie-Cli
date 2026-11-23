@@ -12,6 +12,7 @@ serde_json.workspace = true
 rusqlite.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
+usearch = { version = "=2.26.6", default-features = false }
 fastembed = { version = "=7.7.1", default-features = false, features = ["ort-load-dynamic", "directml"] }
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24", "cuda", "directml", "coreml"] }
 ignore = "=0.4.25"

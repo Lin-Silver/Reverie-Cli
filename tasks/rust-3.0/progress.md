@@ -8,7 +8,7 @@
 
 维护者最新决定已执行：本地和 GitHub 仅保留 `main`、`Reverie-Cli-py` 两个分支。Rust 在 `G:\Reverie\Reverie-Cli\ReverieCli-rs` 的主线上直接实施；原分支历史已验证归档。原生入口、配置与会话、四种模型协议、实际文件／命令工具、询问、审批、取消和 Electron 接入已有基本运行证据。Context Engine 正在补齐结构、引用和证据工具。既有 Python 收尾资料保持原样。Rust target 继续使用已核实的 C 盘 junction；本轮只读复核 G 盘约 13.2 GiB 可用，本会话未清理用户接手的缓存。
 
-当前重点是 Rust 实施。本地执行必要构建、基本回归和实际进程检查，扩展测评交由云端，见 [未验证清单](UNVERIFIED.md) 与 [验证提示词](CLOUD_VALIDATION_PROMPT.md)。Context Engine 的真实本地语义、共享 Agent、资源生命周期和 GUI／TUI 管理已有基本运行证据，完整近邻索引、自动更新及其他模式和扩展继续实施。已完成的 48×30 质量和 960 次基础检索、启动、索引及内存记录继续保留；其原始合同见 [阶段 0B](phase0B.md)。性能归因、Intel ORT 同版本源码和完整产品验收不再阻塞当前实施。未取得的证据继续列为未验证。
+当前重点是 Rust 实施。本地执行必要构建、基本回归和实际进程检查，扩展测评交由云端，见 [未验证清单](UNVERIFIED.md) 与 [验证提示词](CLOUD_VALIDATION_PROMPT.md)。Context Engine 的真实本地语义、HNSW 图、共享 Agent、资源生命周期和 GUI／TUI 管理已有基本运行证据，自动更新及其他模式和扩展继续实施。已完成的 48×30 质量和 960 次基础检索、启动、索引及内存记录继续保留；其原始合同见 [阶段 0B](phase0B.md)。性能归因、Intel ORT 同版本源码和完整产品验收不再阻塞当前实施。未取得的证据继续列为未验证。
 
 ## 接手快照（2026-11-22）
 

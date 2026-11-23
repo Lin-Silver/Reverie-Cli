@@ -1,13 +1,8 @@
-use crate::{Evidence, Result, inference::LocalModels};
+use crate::{Evidence, Result, ann, inference::LocalModels};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    cmp::{Ordering, Reverse},
-    collections::{BTreeMap, BinaryHeap},
-    fs,
-    path::Path,
-};
+use std::{collections::BTreeMap, fs, path::Path};
 
 const APPLICATION_ID: i64 = 0x52565345;
 const CONTRACT_VERSION: i64 = 1;
@@ -25,6 +20,7 @@ pub struct IndexState {
     pub resource_digest: String,
     pub vectors: i64,
     pub contract_version: i64,
+    pub ann: Option<ann::State>,
 }
 
 pub struct Store {
@@ -43,9 +39,12 @@ fn state(db: &Connection) -> Result<IndexState> {
             resource_digest: String::new(),
             vectors: 0,
             contract_version: CONTRACT_VERSION,
+            ann: None,
         });
     }
-    Ok(db.query_row("SELECT revision,resource_digest,contract,(SELECT count(*) FROM vectors WHERE generation=?1) FROM generations WHERE id=?1",[generation],|row|Ok(IndexState{generation,revision:row.get(0)?,resource_digest:row.get(1)?,contract_version:row.get(2)?,vectors:row.get(3)?}))?)
+    let mut state = db.query_row("SELECT revision,resource_digest,contract,(SELECT count(*) FROM vectors WHERE generation=?1) FROM generations WHERE id=?1",[generation],|row|Ok(IndexState{generation,revision:row.get(0)?,resource_digest:row.get(1)?,contract_version:row.get(2)?,vectors:row.get(3)?,ann:None}))?;
+    state.ann = ann::state(db, generation)?;
+    Ok(state)
 }
 
 fn check(db: &Connection, root: &Path) -> Result<()> {
@@ -55,7 +54,10 @@ fn check(db: &Connection, root: &Path) -> Result<()> {
         db.query_row("SELECT root FROM semantic_state WHERE id=1", [], |row| {
             row.get(0)
         })?;
-    if application != APPLICATION_ID || version != 1 || stored_root != root.to_string_lossy() {
+    if application != APPLICATION_ID
+        || ![1, 2].contains(&version)
+        || stored_root != root.to_string_lossy()
+    {
         return Err("Incompatible semantic index or workspace identity.".into());
     }
     Ok(())
@@ -84,11 +86,23 @@ pub fn status_for(path: &Path, root: &Path, digest: &str) -> Result<Option<Index
     )?;
     db.busy_timeout(std::time::Duration::from_secs(10))?;
     check(&db, root)?;
-    Ok(db.query_row("SELECT id,revision,resource_digest,contract,(SELECT count(*) FROM vectors WHERE generation=g.id) FROM generations g WHERE resource_digest=?1 AND contract=?2 ORDER BY id DESC LIMIT 1",params![digest,CONTRACT_VERSION],|row|Ok(IndexState{generation:row.get(0)?,revision:row.get(1)?,resource_digest:row.get(2)?,contract_version:row.get(3)?,vectors:row.get(4)?})).optional()?)
+    let mut state = db.query_row("SELECT id,revision,resource_digest,contract,(SELECT count(*) FROM vectors WHERE generation=g.id) FROM generations g WHERE resource_digest=?1 AND contract=?2 ORDER BY id DESC LIMIT 1",params![digest,CONTRACT_VERSION],|row|Ok(IndexState{generation:row.get(0)?,revision:row.get(1)?,resource_digest:row.get(2)?,contract_version:row.get(3)?,vectors:row.get(4)?,ann:None})).optional()?;
+    if let Some(state) = &mut state {
+        state.ann = ann::state(&db, state.generation)?;
+    }
+    Ok(state)
 }
 
 impl Store {
     pub fn open(path: &Path, root: &Path) -> Result<Self> {
+        Self::open_with_cancel(path, root, &|| false)
+    }
+
+    pub fn open_with_cancel(
+        path: &Path,
+        root: &Path,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Self> {
         let parent = path.parent().ok_or("Semantic index has no parent.")?;
         fs::create_dir_all(parent)?;
         let mut db = Connection::open(
@@ -115,18 +129,65 @@ impl Store {
                     return Err("Refusing to overwrite an unrelated semantic database.".into());
                 }
                 transaction.execute_batch(SCHEMA)?;
+                transaction.execute_batch(ann::SCHEMA)?;
                 transaction.execute(
                     "INSERT INTO semantic_state(id,root) VALUES(1,?1)",
                     [root.to_string_lossy().as_ref()],
                 )?;
                 transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
-                transaction.pragma_update(None, "user_version", 1)?;
+                transaction.pragma_update(None, "user_version", 2)?;
             }
             transaction.commit()?;
         }
         check(&db, root)?;
+        if db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? == 1 {
+            let transaction = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if transaction.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?
+                == 1
+            {
+                let backup = tempfile::Builder::new()
+                    .prefix("semantic-v1-before-")
+                    .suffix(".sqlite3")
+                    .tempfile_in(parent)?;
+                let (file, backup_path) = backup.keep()?;
+                drop(file);
+                let snapshot =
+                    Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+                snapshot.backup("main", &backup_path, None::<fn(rusqlite::backup::Progress)>)?;
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&backup_path)?
+                    .sync_all()?;
+                transaction.execute_batch(ann::SCHEMA)?;
+                let generations = transaction
+                    .prepare("SELECT id FROM generations ORDER BY id")?
+                    .query_map([], |row| row.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                for generation in generations {
+                    ann::build(&transaction, generation, cancelled)?;
+                }
+                if cancelled() {
+                    return Err(
+                        "Semantic index migration cancelled; the original schema is preserved."
+                            .into(),
+                    );
+                }
+                transaction.pragma_update(None, "user_version", 2)?;
+            }
+            transaction.commit()?;
+        }
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
+        Ok(Self { db })
+    }
+
+    pub fn open_readonly(path: &Path, root: &Path) -> Result<Self> {
+        let db = Connection::open_with_flags(
+            path.canonicalize()?,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        db.busy_timeout(std::time::Duration::from_secs(10))?;
+        check(&db, root)?;
         Ok(Self { db })
     }
 
@@ -150,6 +211,7 @@ impl Store {
             && previous.revision == revision
             && previous.resource_digest == models.bundle.digest
             && previous.contract_version == CONTRACT_VERSION
+            && ann::healthy(&transaction, previous.generation)?
         {
             before_activate()?;
             progress(evidence.len(), evidence.len());
@@ -212,6 +274,7 @@ impl Store {
                 "Semantic indexing cancelled; the previous generation remains active.".into(),
             );
         }
+        ann::build(&transaction, generation, cancelled)?;
         before_activate()?;
         transaction.execute(
             "UPDATE semantic_state SET active=?1 WHERE id=1",
@@ -232,6 +295,23 @@ impl Store {
         limit: usize,
         cancelled: &impl Fn() -> bool,
     ) -> Result<Vec<Evidence>> {
+        self.query_cached(
+            query,
+            resource_digest,
+            limit,
+            cancelled,
+            &ann::Cache::default(),
+        )
+    }
+
+    pub(crate) fn query_cached(
+        &self,
+        query: &[f32],
+        resource_digest: &str,
+        limit: usize,
+        cancelled: &impl Fn() -> bool,
+        cache: &ann::Cache,
+    ) -> Result<Vec<Evidence>> {
         if cancelled() {
             return Err("Semantic nearest-neighbor retrieval cancelled.".into());
         }
@@ -244,48 +324,42 @@ impl Store {
             params![resource_digest, CONTRACT_VERSION],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?.ok_or("Semantic index is missing or belongs to another model resource revision.")?;
-        let mut nearest = BinaryHeap::new();
         let limit = limit.clamp(1, 200);
-        let mut statement =
-            transaction.prepare("SELECT id,vector,identity FROM vectors WHERE generation=?1")?;
-        let mut rows = statement.query([generation])?;
-        while let Some(row) = rows.next()? {
-            if cancelled() {
-                return Err("Semantic nearest-neighbor retrieval cancelled.".into());
-            }
-            let vector = decode(&row.get::<_, Vec<u8>>(1)?)?;
-            let score = query
-                .iter()
-                .zip(vector)
-                .map(|(left, right)| left * right)
-                .sum::<f32>();
-            let neighbor = Neighbor {
-                id: row.get(0)?,
-                identity: row.get(2)?,
-                score,
-            };
-            nearest.push(Reverse(neighbor));
-            if nearest.len() > limit {
-                nearest.pop();
-            }
+        let graph = cache.load(&transaction, generation, resource_digest)?;
+        let nearest = graph.search(query, (limit * 4).clamp(16, 200))?;
+        if cancelled() {
+            return Err("Semantic nearest-neighbor retrieval cancelled.".into());
         }
-        let mut nearest = nearest.into_iter().map(|value| value.0).collect::<Vec<_>>();
-        nearest.sort_by(|left, right| right.cmp(left));
-        nearest
+        let mut results = nearest
+            .keys
             .into_iter()
-            .map(|neighbor| {
+            .zip(nearest.distances)
+            .map(|(id, distance)| {
+                if !distance.is_finite() {
+                    return Err("Invalid semantic neighbor distance.".into());
+                }
                 let text: String = transaction.query_row(
                     "SELECT evidence FROM vectors WHERE id=?1 AND generation=?2",
-                    params![neighbor.id, generation],
+                    params![i64::try_from(id)?, generation],
                     |row| row.get(0),
                 )?;
                 let mut evidence: Evidence = serde_json::from_str(&text)?;
                 evidence.revision = revision;
-                evidence.score = neighbor.score as f64;
+                evidence.score = 1.0 - distance as f64;
                 evidence.sources = vec!["semantic".into()];
                 Ok(evidence)
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        results.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| left.file_path.cmp(&right.file_path))
+                .then_with(|| left.start_line.cmp(&right.start_line))
+                .then_with(|| left.end_line.cmp(&right.end_line))
+        });
+        results.truncate(limit);
+        Ok(results)
     }
 }
 
@@ -336,7 +410,7 @@ fn encode(vector: &[f32]) -> Result<Vec<u8>> {
         .flat_map(|value| value.to_le_bytes())
         .collect())
 }
-fn decode(bytes: &[u8]) -> Result<Vec<f32>> {
+pub(crate) fn decode(bytes: &[u8]) -> Result<Vec<f32>> {
     if bytes.len() != 384 * 4 {
         return Err("Invalid semantic vector size.".into());
     }
@@ -346,30 +420,6 @@ fn decode(bytes: &[u8]) -> Result<Vec<f32>> {
         .collect::<Vec<_>>();
     encode(&vector)?;
     Ok(vector)
-}
-#[derive(Debug)]
-struct Neighbor {
-    id: i64,
-    identity: String,
-    score: f32,
-}
-impl PartialEq for Neighbor {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-impl Eq for Neighbor {}
-impl Ord for Neighbor {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.score
-            .total_cmp(&other.score)
-            .then_with(|| other.identity.cmp(&self.identity))
-    }
-}
-impl PartialOrd for Neighbor {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 pub fn fuse(lexical: Vec<Evidence>, semantic: Vec<Evidence>) -> Vec<Evidence> {
@@ -414,6 +464,149 @@ pub fn fuse(lexical: Vec<Evidence>, semantic: Vec<Evidence>) -> Vec<Evidence> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_vectors_migrate_after_backup_and_cancelled_migration_preserves_schema() {
+        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
+        fs::create_dir_all(&parent).unwrap();
+        let root = tempfile::tempdir_in(parent).unwrap();
+        let database = root.path().join("legacy.sqlite3");
+        let db = Connection::open(&database).unwrap();
+        db.execute_batch(SCHEMA).unwrap();
+        db.pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        db.pragma_update(None, "user_version", 1).unwrap();
+        db.execute(
+            "INSERT INTO semantic_state(id,root,active) VALUES(1,?1,1)",
+            [root.path().to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        db.execute("INSERT INTO generations(id,revision,resource_digest,contract) VALUES(1,7,'legacy-model',1)", []).unwrap();
+        let evidence = Evidence {
+            file_path: "saved.md".into(),
+            start_line: 1,
+            end_line: 1,
+            content: "Preserved evidence".into(),
+            content_hash: "fixed".into(),
+            revision: 7,
+            symbol: None,
+            score: 0.0,
+            sources: vec!["semantic".into()],
+        };
+        let mut vector = vec![0.0; 384];
+        vector[0] = 1.0;
+        let vector_bytes = encode(&vector).unwrap();
+        insert(&db, 1, "original-identity", &evidence, &vector_bytes).unwrap();
+        drop(db);
+        assert!(Store::open_with_cancel(&database, root.path(), &|| true).is_err());
+        let old = Connection::open(&database).unwrap();
+        assert_eq!(
+            old.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            old.query_row("SELECT vector FROM vectors WHERE id=1", [], |row| row
+                .get::<_, Vec<u8>>(0))
+                .unwrap(),
+            vector_bytes
+        );
+        drop(old);
+        let store = Store::open(&database, root.path()).unwrap();
+        assert_eq!(
+            store
+                .db
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        let result = store.query(&vector, "legacy-model", 1, &|| false).unwrap();
+        assert_eq!(result[0].content, evidence.content);
+        assert_eq!(result[0].revision, 7);
+        assert_eq!(
+            store
+                .db
+                .query_row("SELECT identity FROM vectors WHERE id=1", [], |row| row
+                    .get::<_, String>(
+                    0
+                ))
+                .unwrap(),
+            "original-identity"
+        );
+        let backups = fs::read_dir(root.path())
+            .unwrap()
+            .filter_map(|item| {
+                let path = item.unwrap().path();
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("semantic-v1-before-")
+                    .then_some(path)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 2);
+        for backup in backups {
+            let restored = Connection::open(backup).unwrap();
+            assert_eq!(
+                restored
+                    .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                restored
+                    .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                    .unwrap(),
+                "ok"
+            );
+            assert_eq!(
+                restored
+                    .query_row("SELECT evidence FROM vectors WHERE id=1", [], |row| row
+                        .get::<_, String>(
+                        0
+                    ))
+                    .unwrap(),
+                serde_json::to_string(&evidence).unwrap()
+            );
+        }
+        let cache = ann::Cache::default();
+        let first = cache.load(&store.db, 1, "legacy-model").unwrap();
+        let second = cache.load(&store.db, 1, "legacy-model").unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        store
+            .db
+            .execute(
+                "UPDATE neighbor_graphs SET data=zeroblob(1) WHERE generation=1",
+                [],
+            )
+            .unwrap();
+        assert!(!ann::healthy(&store.db, 1).unwrap());
+        let readonly = Store::open_readonly(&database, root.path()).unwrap();
+        assert!(
+            readonly
+                .query(&vector, "legacy-model", 1, &|| false)
+                .unwrap_err()
+                .to_string()
+                .contains("SHA-256")
+        );
+        assert_eq!(
+            store
+                .db
+                .query_row("SELECT active FROM semantic_state WHERE id=1", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+        ann::build(&store.db, 1, &|| false).unwrap();
+        assert_eq!(
+            readonly
+                .query(&vector, "legacy-model", 1, &|| false)
+                .unwrap()[0]
+                .content,
+            evidence.content
+        );
+    }
     #[test]
     fn stored_vectors_and_top_k_keep_positive_negative_and_tied_neighbors() {
         let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
@@ -448,6 +641,7 @@ mod tests {
             vector[0] = sign;
             insert(&store.db, 1, name, &evidence, &encode(&vector).unwrap()).unwrap();
         }
+        ann::build(&store.db, 1, &|| false).unwrap();
         let mut vector = vec![0.0; 384];
         vector[0] = 1.0;
         let results = store.query(&vector, "model-v1", 2, &|| false).unwrap();

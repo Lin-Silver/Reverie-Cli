@@ -36,9 +36,14 @@ try {
   const first = run(['semantic-index', database, bundle, digest]);
   assert.equal(first.index.revision, structural.revision);
   assert(first.index.vectors >= 5);
+  assert.equal(first.index.ann.algorithm, 'hnsw-cosine-f32');
+  assert.equal(first.index.ann.format, 1);
+  assert.equal(first.index.ann.vectors, first.index.vectors);
+  assert.match(first.index.ann.sha256, /^[0-9a-f]{64}$/);
   checks.push('Build actual persisted vectors from bounded, hashed source evidence');
   const repeated = run(['semantic-index', database, bundle, digest]);
   assert.equal(repeated.index.generation, first.index.generation);
+  assert.equal(repeated.index.ann.sha256, first.index.ann.sha256);
   assert.equal(repeated.models.embedding_loaded, false);
   checks.push('Reuse a complete generation after process restart without loading the embedding model');
   const question = 'How can I recover player progress after closing the game?';

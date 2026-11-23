@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod ann;
 mod catalog;
 mod graph;
 pub mod inference;
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
+    sync::Arc,
     time::Instant,
 };
 
@@ -40,13 +42,16 @@ pub struct ContextEngine {
     parsers: parsing::Parsers,
     database_path: PathBuf,
     semantic_path: PathBuf,
+    neighbors: Arc<ann::Cache>,
 }
 
 const ANALYSIS_VERSION: i64 = 2;
 
 impl ContextEngine {
     pub fn fork(&self) -> Result<Self> {
-        Self::from_database(&self.database_path)
+        let mut fork = Self::from_database(&self.database_path)?;
+        fork.neighbors = self.neighbors.clone();
+        Ok(fork)
     }
     pub fn from_database(database: &Path) -> Result<Self> {
         let db = catalog::open_readonly(database)?;
@@ -73,6 +78,7 @@ impl ContextEngine {
             parsers: parsing::Parsers::default(),
             database_path: database.canonicalize()?,
             semantic_path: database.canonicalize()?.with_extension("semantic.sqlite3"),
+            neighbors: Arc::new(ann::Cache::default()),
         })
     }
 

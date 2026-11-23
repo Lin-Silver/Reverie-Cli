@@ -63,7 +63,8 @@ impl ContextEngine {
                 });
             }
         }
-        let mut store = semantic::Store::open(&self.semantic_path, &self.root)?;
+        let mut store =
+            semantic::Store::open_with_cancel(&self.semantic_path, &self.root, cancelled)?;
         let index = store.update(state.revision, &evidence, models, cancelled, progress, &|| {
             let latest = catalog::open_readonly(&self.database_path)?;
             if catalog::state(&latest)?.revision != state.revision {
@@ -99,12 +100,13 @@ impl ContextEngine {
         let limit = limit.clamp(1, 200);
         let candidates = limit.max(16);
         let vector = models.embed(&[input.to_owned()], true, cancelled)?;
-        let store = semantic::Store::open(&self.semantic_path, &self.root)?;
-        let semantic = store.query(
+        let store = semantic::Store::open_readonly(&self.semantic_path, &self.root)?;
+        let semantic = store.query_cached(
             &vector[0],
             &models.bundle.digest,
             (candidates * 4).min(200),
             cancelled,
+            &self.neighbors,
         )?;
         let database = self.catalog.connection().unchecked_transaction()?;
         let revision = catalog::state(&database)?.revision;

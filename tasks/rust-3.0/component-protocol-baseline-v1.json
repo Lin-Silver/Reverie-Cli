@@ -1,0 +1,3904 @@
+{
+  "schema": "reverie.rust-planning.declarations/1",
+  "evidence": "Static declarations only; no source module was imported or executed.",
+  "declarations": [
+    {
+      "file": "ReverieCli-py/reverie/rats.py",
+      "sha256": "c9b70419eea975eb95ad54bc7fe277239cc2fe5a8ec00e640c5641e0f6021649",
+      "classes": [
+        {
+          "name": "RatsClientError",
+          "line": 148,
+          "end_line": 177,
+          "bases": [
+            "RuntimeError"
+          ],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self, message: str, *, status: int=0, code: str='request_failed', audit_id: str='', result_sha256: str='', retryable: bool=False, retry: str='', attempts: int=1",
+              "returns": "None",
+              "line": 151
+            }
+          ]
+        },
+        {
+          "name": "RatsProviderSpec",
+          "line": 496,
+          "end_line": 535,
+          "bases": [],
+          "fields": [
+            {
+              "name": "provider_id",
+              "annotation": "str",
+              "default": null,
+              "line": 499
+            },
+            {
+              "name": "product",
+              "annotation": "str",
+              "default": null,
+              "line": 500
+            },
+            {
+              "name": "service_kinds",
+              "annotation": "Tuple[str, ...]",
+              "default": null,
+              "line": 501
+            },
+            {
+              "name": "executable_validator",
+              "annotation": "Callable[[Path], bool]",
+              "default": null,
+              "line": 502
+            },
+            {
+              "name": "discovery_root_resolver",
+              "annotation": "Callable[[Path], Path]",
+              "default": null,
+              "line": 503
+            },
+            {
+              "name": "permission_classes",
+              "annotation": "Tuple[str, ...]",
+              "default": null,
+              "line": 504
+            },
+            {
+              "name": "label",
+              "annotation": "str",
+              "default": null,
+              "line": 505
+            },
+            {
+              "name": "tool_tags",
+              "annotation": "Tuple[str, ...]",
+              "default": "()",
+              "line": 506
+            },
+            {
+              "name": "executable_error",
+              "annotation": "str",
+              "default": "'Select an existing executable for this RATS provider.'",
+              "line": 507
+            },
+            {
+              "name": "process_validator",
+              "annotation": "Callable[[int, Path], bool]",
+              "default": "_reverie_engine_process",
+              "line": 508
+            },
+            {
+              "name": "executable_normalizer",
+              "annotation": "Callable[[Path], Path]",
+              "default": "_identity_executable",
+              "line": 509
+            }
+          ],
+          "methods": [
+            {
+              "name": "service_kind",
+              "arguments": "self",
+              "returns": "str",
+              "line": 512
+            },
+            {
+              "name": "accepts_service_kind",
+              "arguments": "self, value: str",
+              "returns": "bool",
+              "line": 516
+            },
+            {
+              "name": "validate_executable",
+              "arguments": "self, executable: Path",
+              "returns": "bool",
+              "line": 519
+            },
+            {
+              "name": "validate_process",
+              "arguments": "self, pid: int, executable: Path",
+              "returns": "bool",
+              "line": 525
+            },
+            {
+              "name": "discovery_root_for_executable",
+              "arguments": "self, executable: Path | str",
+              "returns": "Path",
+              "line": 531
+            },
+            {
+              "name": "normalize_executable",
+              "arguments": "self, executable: Path | str",
+              "returns": "Path",
+              "line": 534
+            }
+          ]
+        },
+        {
+          "name": "RatsProviderRegistry",
+          "line": 539,
+          "end_line": 563,
+          "bases": [],
+          "fields": [
+            {
+              "name": "providers",
+              "annotation": "Mapping[str, RatsProviderSpec]",
+              "default": null,
+              "line": 542
+            }
+          ],
+          "methods": [
+            {
+              "name": "__post_init__",
+              "arguments": "self",
+              "returns": "None",
+              "line": 544
+            },
+            {
+              "name": "__getitem__",
+              "arguments": "self, provider_id: str",
+              "returns": "RatsProviderSpec",
+              "line": 547
+            },
+            {
+              "name": "get",
+              "arguments": "self, provider_id: str, default: Optional[RatsProviderSpec]=None",
+              "returns": "Optional[RatsProviderSpec]",
+              "line": 550
+            },
+            {
+              "name": "items",
+              "arguments": "self",
+              "returns": null,
+              "line": 553
+            },
+            {
+              "name": "values",
+              "arguments": "self",
+              "returns": null,
+              "line": 556
+            },
+            {
+              "name": "__iter__",
+              "arguments": "self",
+              "returns": null,
+              "line": 559
+            },
+            {
+              "name": "__len__",
+              "arguments": "self",
+              "returns": "int",
+              "line": 562
+            }
+          ]
+        },
+        {
+          "name": "RatsDescriptor",
+          "line": 863,
+          "end_line": 877,
+          "bases": [],
+          "fields": [
+            {
+              "name": "service_id",
+              "annotation": "str",
+              "default": null,
+              "line": 864
+            },
+            {
+              "name": "provider_id",
+              "annotation": "str",
+              "default": null,
+              "line": 865
+            },
+            {
+              "name": "service_kind",
+              "annotation": "str",
+              "default": null,
+              "line": 866
+            },
+            {
+              "name": "product",
+              "annotation": "str",
+              "default": null,
+              "line": 867
+            },
+            {
+              "name": "product_version",
+              "annotation": "str",
+              "default": null,
+              "line": 868
+            },
+            {
+              "name": "executable",
+              "annotation": "Path",
+              "default": null,
+              "line": 869
+            },
+            {
+              "name": "pid",
+              "annotation": "int",
+              "default": null,
+              "line": 870
+            },
+            {
+              "name": "port",
+              "annotation": "int",
+              "default": null,
+              "line": 871
+            },
+            {
+              "name": "endpoint",
+              "annotation": "str",
+              "default": null,
+              "line": 872
+            },
+            {
+              "name": "descriptor_path",
+              "annotation": "Path",
+              "default": null,
+              "line": 873
+            },
+            {
+              "name": "catalog_revision",
+              "annotation": "str",
+              "default": null,
+              "line": 874
+            },
+            {
+              "name": "native_tool_count",
+              "annotation": "int",
+              "default": null,
+              "line": 875
+            },
+            {
+              "name": "started_utc",
+              "annotation": "str",
+              "default": null,
+              "line": 876
+            },
+            {
+              "name": "control_token",
+              "annotation": "str",
+              "default": "field(repr=False)",
+              "line": 877
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "_RatsSession",
+          "line": 881,
+          "end_line": 895,
+          "bases": [],
+          "fields": [
+            {
+              "name": "descriptor",
+              "annotation": "RatsDescriptor",
+              "default": null,
+              "line": 882
+            },
+            {
+              "name": "token",
+              "annotation": "str",
+              "default": "field(repr=False)",
+              "line": 883
+            },
+            {
+              "name": "permissions",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 884
+            },
+            {
+              "name": "capabilities",
+              "annotation": "RatsCapabilities",
+              "default": "field(default_factory=fallback_capabilities, compare=False)",
+              "line": 889
+            },
+            {
+              "name": "compact_tools",
+              "annotation": "List[Dict[str, Any]]",
+              "default": "field(default_factory=list)",
+              "line": 890
+            },
+            {
+              "name": "definitions",
+              "annotation": "'OrderedDict[str, Dict[str, Any]]'",
+              "default": "field(default_factory=OrderedDict)",
+              "line": 893
+            },
+            {
+              "name": "pinned",
+              "annotation": "Set[str]",
+              "default": "field(default_factory=set)",
+              "line": 894
+            },
+            {
+              "name": "io_lock",
+              "annotation": "threading.Lock",
+              "default": "field(default_factory=threading.Lock, repr=False, compare=False)",
+              "line": 895
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "RatsRuntime",
+          "line": 1036,
+          "end_line": 3097,
+          "bases": [],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self, app_root: Optional[Path]=None, *, provider_registry: RatsProviderRegistry=RATS_SUPPORTED_PROVIDERS, request_timeout: float=1.5, probe_timeout: float=0.35, tool_timeout: float=12.0",
+              "returns": "None",
+              "line": 1039
+            },
+            {
+              "name": "registry",
+              "arguments": "self",
+              "returns": "RatsProviderRegistry",
+              "line": 1091
+            },
+            {
+              "name": "_effective_registry",
+              "arguments": "self",
+              "returns": "RatsProviderRegistry",
+              "line": 1096
+            },
+            {
+              "name": "_reserved_provider_ids",
+              "arguments": "self",
+              "returns": "Set[str]",
+              "line": 1104
+            },
+            {
+              "name": "_validate_deadline",
+              "arguments": "deadline_ms: Optional[int], capabilities: Optional[RatsCapabilities]=None",
+              "returns": "Optional[int]",
+              "line": 1111
+            },
+            {
+              "name": "_validate_idempotency_key",
+              "arguments": "value: str, capabilities: Optional[RatsCapabilities]=None",
+              "returns": "str",
+              "line": 1124
+            },
+            {
+              "name": "_load_diagnostics",
+              "arguments": "self",
+              "returns": "List[Dict[str, Any]]",
+              "line": 1140
+            },
+            {
+              "name": "_log_diagnostic",
+              "arguments": "self, event: str, *, level: str='info', service_id: str='', provider_id: str='', operation: str='', reason: str='', path: str='', field: str='', detail: str='', duration_ms: Optional[int]=None, count: Optional[int]=None, audit_id: str='', result_sha256: str='', task_id: str='', cursor: Optional[int]=None, task_state: str='', progress: Optional[float]=None, attempt: Optional[int]=None, retry: str='', effects: str='', delay_ms: Optional[int]=None",
+              "returns": "None",
+              "line": 1155
+            },
+            {
+              "name": "_read_settings",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 1239
+            },
+            {
+              "name": "_read_custom_providers",
+              "arguments": "self, source: Dict[str, Any]",
+              "returns": "List[Dict[str, Any]]",
+              "line": 1329
+            },
+            {
+              "name": "_read_declared_permission_classes",
+              "arguments": "self, source: Dict[str, Any], registry: Optional[RatsProviderRegistry]=None",
+              "returns": "Dict[str, Tuple[str, ...]]",
+              "line": 1372
+            },
+            {
+              "name": "_known_permission_classes",
+              "arguments": "self, provider: 'RatsProviderSpec'",
+              "returns": "List[str]",
+              "line": 1399
+            },
+            {
+              "name": "_write_settings",
+              "arguments": "self, settings: Dict[str, Any]",
+              "returns": "None",
+              "line": 1412
+            },
+            {
+              "name": "_roots",
+              "arguments": "self, settings: Dict[str, Any]",
+              "returns": "List[Path]",
+              "line": 1418
+            },
+            {
+              "name": "_request",
+              "arguments": "self, descriptor: RatsDescriptor, role: str, args: Optional[Dict[str, Any]]=None, *, control_token: str='', session_token: str='', timeout: Optional[float]=None, deadline_ms: Optional[int]=None, idempotency_key: str='', capabilities: Optional[RatsCapabilities]=None, attempts: Optional[int]=None",
+              "returns": "Dict[str, Any]",
+              "line": 1423
+            },
+            {
+              "name": "_retry_permitted",
+              "arguments": "self, role: str, error: RatsClientError, contract: RatsCapabilities",
+              "returns": "bool",
+              "line": 1503
+            },
+            {
+              "name": "_attempt_request",
+              "arguments": "self, descriptor: RatsDescriptor, role: str, args: Optional[Dict[str, Any]]=None, *, control_token: str='', session_token: str='', timeout: Optional[float]=None, deadline_ms: Optional[int]=None, idempotency_key: str='', capabilities: Optional[RatsCapabilities]=None",
+              "returns": "Dict[str, Any]",
+              "line": 1544
+            },
+            {
+              "name": "_selection",
+              "arguments": "self, settings: Dict[str, Any], provider_id: str, executable: Path | str",
+              "returns": "Optional[Dict[str, Any]]",
+              "line": 1709
+            },
+            {
+              "name": "_close_session",
+              "arguments": "self, session: _RatsSession, *, timeout: float=0.75",
+              "returns": "None",
+              "line": 1726
+            },
+            {
+              "name": "_store_definitions",
+              "arguments": "session: _RatsSession, definitions: Iterable[Dict[str, Any]], *, pin: bool=False",
+              "returns": "None",
+              "line": 1743
+            },
+            {
+              "name": "_evict_definitions",
+              "arguments": "session: _RatsSession",
+              "returns": "List[str]",
+              "line": 1762
+            },
+            {
+              "name": "_touch_definition",
+              "arguments": "session: _RatsSession, tool_name: Any",
+              "returns": "None",
+              "line": 1775
+            },
+            {
+              "name": "_describe_into_session",
+              "arguments": "self, session: _RatsSession, names: Iterable[Any], *, pin: bool=False",
+              "returns": "List[Dict[str, Any]]",
+              "line": 1781
+            },
+            {
+              "name": "_open_session",
+              "arguments": "self, descriptor: RatsDescriptor, permissions: List[str], capabilities: Optional[RatsCapabilities]=None",
+              "returns": "_RatsSession",
+              "line": 1811
+            },
+            {
+              "name": "_detach_session",
+              "arguments": "self, session: _RatsSession",
+              "returns": "bool",
+              "line": 1864
+            },
+            {
+              "name": "_service_record",
+              "arguments": "self, descriptor: RatsDescriptor, settings: Dict[str, Any]",
+              "returns": "Optional[Dict[str, Any]]",
+              "line": 1874
+            },
+            {
+              "name": "_ensure_open",
+              "arguments": "self",
+              "returns": "None",
+              "line": 2060
+            },
+            {
+              "name": "_refresh_lifecycle",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 2065
+            },
+            {
+              "name": "refresh",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 2192
+            },
+            {
+              "name": "state",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 2196
+            },
+            {
+              "name": "_provider",
+              "arguments": "self, provider_id: str",
+              "returns": "RatsProviderSpec",
+              "line": 2214
+            },
+            {
+              "name": "register_provider_executable",
+              "arguments": "self, provider_id: str, executable: Path | str",
+              "returns": "Dict[str, Any]",
+              "line": 2229
+            },
+            {
+              "name": "add_engine",
+              "arguments": "self, executable: Path | str",
+              "returns": "Dict[str, Any]",
+              "line": 2247
+            },
+            {
+              "name": "remove_discovery_root",
+              "arguments": "self, root: Path | str",
+              "returns": "Dict[str, Any]",
+              "line": 2250
+            },
+            {
+              "name": "set_provider_enabled",
+              "arguments": "self, provider_id: str, executable: Path | str, enabled: bool, permissions: Any",
+              "returns": "Dict[str, Any]",
+              "line": 2259
+            },
+            {
+              "name": "set_engine_enabled",
+              "arguments": "self, executable: Path | str, enabled: bool, permissions: Any",
+              "returns": "Dict[str, Any]",
+              "line": 2304
+            },
+            {
+              "name": "list_custom_providers",
+              "arguments": "self",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2307
+            },
+            {
+              "name": "define_custom_provider",
+              "arguments": "self, definition: Any",
+              "returns": "Dict[str, Any]",
+              "line": 2317
+            },
+            {
+              "name": "remove_custom_provider",
+              "arguments": "self, provider_id: str",
+              "returns": "Dict[str, Any]",
+              "line": 2347
+            },
+            {
+              "name": "describe",
+              "arguments": "self, service_id: str, names: Iterable[Any], *, provider_id: str=''",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2407
+            },
+            {
+              "name": "_find_session",
+              "arguments": "self, service_id: str='', provider_id: str=''",
+              "returns": "Optional[_RatsSession]",
+              "line": 2456
+            },
+            {
+              "name": "_session_is_current",
+              "arguments": "self, session: _RatsSession",
+              "returns": "bool",
+              "line": 2475
+            },
+            {
+              "name": "search",
+              "arguments": "self, query: str, *, limit: int=5, service_id: str='', provider_id: str='', load: bool=False",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2479
+            },
+            {
+              "name": "call_tool",
+              "arguments": "self, service_id: str, tool_name: str, arguments: Dict[str, Any], *, provider_id: str='', dry_run: bool=False, deadline_ms: Optional[int]=None, idempotency_key: str=''",
+              "returns": "Dict[str, Any]",
+              "line": 2593
+            },
+            {
+              "name": "_task_key",
+              "arguments": "self, session: _RatsSession, task_id: str",
+              "returns": "Tuple[str, str, str]",
+              "line": 2632
+            },
+            {
+              "name": "_remember_task",
+              "arguments": "self, session: _RatsSession, task: Dict[str, Any], *, result: Optional[Dict[str, Any]]=None",
+              "returns": "Dict[str, Any]",
+              "line": 2635
+            },
+            {
+              "name": "_find_task",
+              "arguments": "self, service_id: str, task_id: str, provider_id: str=''",
+              "returns": "Tuple[_RatsSession, Dict[str, Any], Tuple[str, str, str]]",
+              "line": 2669
+            },
+            {
+              "name": "_confirm_task_snapshot",
+              "arguments": "self, session: _RatsSession, task: Dict[str, Any], key: Tuple[str, str, str]",
+              "returns": "None",
+              "line": 2679
+            },
+            {
+              "name": "_drop_tasks_for_session",
+              "arguments": "self, session: _RatsSession",
+              "returns": "None",
+              "line": 2690
+            },
+            {
+              "name": "_drop_tasks_for_key",
+              "arguments": "self, provider_id: str, service_id: str",
+              "returns": "None",
+              "line": 2697
+            },
+            {
+              "name": "_task_is_terminal",
+              "arguments": "task: Dict[str, Any]",
+              "returns": "bool",
+              "line": 2703
+            },
+            {
+              "name": "_prune_terminal_task_history",
+              "arguments": "self, session: _RatsSession",
+              "returns": "None",
+              "line": 2711
+            },
+            {
+              "name": "task_status",
+              "arguments": "self, service_id: str, task_id: str, *, provider_id: str='', deadline_ms: Optional[int]=None",
+              "returns": "Dict[str, Any]",
+              "line": 2726
+            },
+            {
+              "name": "task_events",
+              "arguments": "self, service_id: str, task_id: str, *, provider_id: str='', cursor: Optional[int]=None, limit: int=32, deadline_ms: Optional[int]=None",
+              "returns": "Dict[str, Any]",
+              "line": 2760
+            },
+            {
+              "name": "cancel_task",
+              "arguments": "self, service_id: str, task_id: str, *, provider_id: str='', deadline_ms: Optional[int]=None",
+              "returns": "Dict[str, Any]",
+              "line": 2807
+            },
+            {
+              "name": "task_logs",
+              "arguments": "self, service_id: str, task_id: str, *, provider_id: str='', cursor: Optional[int]=None, limit: int=65536, deadline_ms: Optional[int]=None",
+              "returns": "Dict[str, Any]",
+              "line": 2837
+            },
+            {
+              "name": "get_tasks",
+              "arguments": "self, *, service_id: str='', provider_id: str=''",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2879
+            },
+            {
+              "name": "sync_tasks",
+              "arguments": "self, *, service_id: str='', provider_id: str=''",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2889
+            },
+            {
+              "name": "compact_catalog",
+              "arguments": "self",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2906
+            },
+            {
+              "name": "capability_card",
+              "arguments": "self",
+              "returns": "List[Dict[str, Any]]",
+              "line": 2925
+            },
+            {
+              "name": "request_limits",
+              "arguments": "self",
+              "returns": "Dict[str, int]",
+              "line": 2959
+            },
+            {
+              "name": "loaded_definition_names",
+              "arguments": "self",
+              "returns": "Dict[str, List[str]]",
+              "line": 2976
+            },
+            {
+              "name": "_dynamic_name",
+              "arguments": "self, session: _RatsSession, tool_name: str, used: set[str]",
+              "returns": "str",
+              "line": 2986
+            },
+            {
+              "name": "get_tool_definitions",
+              "arguments": "self, force_refresh: bool=False",
+              "returns": "List[Dict[str, Any]]",
+              "line": 3002
+            },
+            {
+              "name": "get_tool_definitions_snapshot",
+              "arguments": "self, force_refresh: bool=False",
+              "returns": "Tuple[int, List[Dict[str, Any]]]",
+              "line": 3006
+            },
+            {
+              "name": "_update_generation",
+              "arguments": "self",
+              "returns": "None",
+              "line": 3057
+            },
+            {
+              "name": "get_generation",
+              "arguments": "self",
+              "returns": "int",
+              "line": 3077
+            },
+            {
+              "name": "has_connected_services",
+              "arguments": "self",
+              "returns": "bool",
+              "line": 3081
+            },
+            {
+              "name": "shutdown",
+              "arguments": "self",
+              "returns": "None",
+              "line": 3085
+            }
+          ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "RATS_PROTOCOL",
+          "line": 38,
+          "expression": "RATS_CONTRACT_PROTOCOL"
+        },
+        {
+          "name": "RATS_DISCOVERY_SCHEMA",
+          "line": 39,
+          "expression": "'reverie.rats.discovery/1'"
+        },
+        {
+          "name": "RATS_SETTINGS_VERSION",
+          "line": 47,
+          "expression": "4"
+        },
+        {
+          "name": "RATS_STATE_VERSION",
+          "line": 48,
+          "expression": "2"
+        },
+        {
+          "name": "RATS_PERMISSIONS",
+          "line": 53,
+          "expression": "FALLBACK_PERMISSIONS"
+        },
+        {
+          "name": "_TOKEN_RE",
+          "line": 54,
+          "expression": "re.compile('^[0-9a-f]{64}$')"
+        },
+        {
+          "name": "_SHA256_RE",
+          "line": 55,
+          "expression": "re.compile('^[0-9a-f]{64}$')"
+        },
+        {
+          "name": "_SERVICE_RE",
+          "line": 56,
+          "expression": "re.compile('^rats-[1-9][0-9]*-[a-z0-9]+$')"
+        },
+        {
+          "name": "_IDENTIFIER_RE",
+          "line": 57,
+          "expression": "re.compile('[^a-z0-9_-]+')"
+        },
+        {
+          "name": "_PERMISSION_CLASS_RE",
+          "line": 61,
+          "expression": "re.compile('^[a-z][a-z0-9_.-]{0,31}$')"
+        },
+        {
+          "name": "_MAX_STORED_PERMISSION_CLASSES",
+          "line": 62,
+          "expression": "32"
+        },
+        {
+          "name": "_MAX_DESCRIPTOR_BYTES",
+          "line": 63,
+          "expression": "128 * 1024"
+        },
+        {
+          "name": "_MAX_RESPONSE_BYTES",
+          "line": 64,
+          "expression": "1024 * 1024"
+        },
+        {
+          "name": "_MAX_DIAGNOSTIC_BYTES",
+          "line": 65,
+          "expression": "2 * 1024 * 1024"
+        },
+        {
+          "name": "_MAX_DIAGNOSTIC_ENTRIES",
+          "line": 66,
+          "expression": "240"
+        },
+        {
+          "name": "_MAX_TERMINAL_TASK_HISTORY_PER_SESSION",
+          "line": 67,
+          "expression": "64"
+        },
+        {
+          "name": "_DEFAULT_LOADED_TOOLS",
+          "line": 68,
+          "expression": "FALLBACK_BOOTSTRAP_TOOLS"
+        },
+        {
+          "name": "_MAX_LOADED_DEFINITIONS_PER_SESSION",
+          "line": 82,
+          "expression": "32"
+        },
+        {
+          "name": "_REVERIE_ENGINE_PRODUCT_NAMES",
+          "line": 83,
+          "expression": "frozenset({'Reverie Engine', 'Reverie Engine (Console)'})"
+        },
+        {
+          "name": "_REVERIE_ENGINE_TERMINAL_PRODUCT_NAME",
+          "line": 84,
+          "expression": "'Reverie Engine Terminal'"
+        },
+        {
+          "name": "_RETRY_MAX_ATTEMPTS",
+          "line": 94,
+          "expression": "3"
+        },
+        {
+          "name": "_RETRY_BACKOFF_SECONDS",
+          "line": 99,
+          "expression": "0.12"
+        },
+        {
+          "name": "_RETRY_TOTAL_BUDGET_SECONDS",
+          "line": 104,
+          "expression": "5.0"
+        },
+        {
+          "name": "_TRANSPORT_FAILURE_CODES",
+          "line": 115,
+          "expression": "frozenset({'transport_error', 'response_too_large', 'malformed_response', 'result_hash_missing', 'result_hash_mismatch', 'response_id_missing', 'response_id_mismatch'})"
+        },
+        {
+          "name": "_PROCESS_QUERY_LIMITED_INFORMATION",
+          "line": 126,
+          "expression": "4096"
+        },
+        {
+          "name": "_SYNCHRONIZE",
+          "line": 127,
+          "expression": "1048576"
+        },
+        {
+          "name": "_WAIT_TIMEOUT",
+          "line": 128,
+          "expression": "258"
+        },
+        {
+          "name": "_MAX_WINDOWS_PROCESS_ID",
+          "line": 129,
+          "expression": "4294967295"
+        },
+        {
+          "name": "_MAX_WINDOWS_PROCESS_PATH",
+          "line": 130,
+          "expression": "32768"
+        },
+        {
+          "name": "_TERMINAL_TASK_STATES",
+          "line": 131,
+          "expression": "frozenset({'cancelled', 'canceled', 'completed', 'error', 'failed', 'killed', 'stopped', 'succeeded', 'success', 'timed_out', 'timeout'})"
+        },
+        {
+          "name": "RATS_SUPPORTED_PROVIDERS",
+          "line": 566,
+          "expression": "RatsProviderRegistry({'reverie.engine': RatsProviderSpec(provider_id='reverie.engine', product='Reverie Engine', service_kinds=('builtin',), executable_validator=_reverie_engine_executable, process_validator=_reverie_engine_process, discovery_root_resolver=rats_discovery_root_for_executable, permission_classes=RATS_PERMISSIONS, label='Reverie Engine', tool_tags=('reverie-engine',), executable_error='Select an existing Reverie Engine executable.', executable_normalizer=_reverie_engine_provider_executable)})"
+        },
+        {
+          "name": "RATS_PROVIDER_REGISTRY",
+          "line": 584,
+          "expression": "RATS_SUPPORTED_PROVIDERS"
+        },
+        {
+          "name": "RATS_CUSTOM_PROVIDER_SCHEMA",
+          "line": 599,
+          "expression": "'reverie.rats.custom-provider/1'"
+        },
+        {
+          "name": "_CUSTOM_PROVIDER_ID_RE",
+          "line": 603,
+          "expression": "re.compile('^[a-z][a-z0-9]{1,31}(\\\\.[a-z0-9][a-z0-9_-]{0,31}){1,3}$')"
+        },
+        {
+          "name": "_SERVICE_KIND_RE",
+          "line": 604,
+          "expression": "re.compile('^[a-z][a-z0-9_-]{0,31}$')"
+        },
+        {
+          "name": "_TOOL_TAG_RE",
+          "line": 605,
+          "expression": "re.compile('^[a-z0-9][a-z0-9_-]{0,31}$')"
+        },
+        {
+          "name": "_ROOT_SEGMENT_RE",
+          "line": 608,
+          "expression": "re.compile('^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$')"
+        },
+        {
+          "name": "_DEFAULT_CUSTOM_ROOT_SEGMENTS",
+          "line": 609,
+          "expression": "('ReverieLocal', 'RATS', 'Services')"
+        },
+        {
+          "name": "_MAX_CUSTOM_PROVIDERS",
+          "line": 610,
+          "expression": "16"
+        },
+        {
+          "name": "_MAX_SERVICE_KINDS",
+          "line": 611,
+          "expression": "8"
+        },
+        {
+          "name": "_MAX_TOOL_TAGS",
+          "line": 612,
+          "expression": "8"
+        },
+        {
+          "name": "_MAX_ROOT_SEGMENTS",
+          "line": 613,
+          "expression": "8"
+        },
+        {
+          "name": "_MAX_PRODUCT_NAMES",
+          "line": 614,
+          "expression": "8"
+        },
+        {
+          "name": "_MAX_PRODUCT_LENGTH",
+          "line": 615,
+          "expression": "128"
+        },
+        {
+          "name": "_MAX_LABEL_LENGTH",
+          "line": 616,
+          "expression": "64"
+        },
+        {
+          "name": "_MAX_EXECUTABLE_ERROR_LENGTH",
+          "line": 617,
+          "expression": "240"
+        },
+        {
+          "name": "_EXECUTABLE_IDENTITY_PATH",
+          "line": 622,
+          "expression": "'path'"
+        },
+        {
+          "name": "_EXECUTABLE_IDENTITY_PRODUCT_NAME",
+          "line": 623,
+          "expression": "'product_name'"
+        },
+        {
+          "name": "_EXECUTABLE_IDENTITY_MODES",
+          "line": 624,
+          "expression": "(_EXECUTABLE_IDENTITY_PATH, _EXECUTABLE_IDENTITY_PRODUCT_NAME)"
+        },
+        {
+          "name": "_CUSTOM_PROVIDER_ERRORS",
+          "line": 824,
+          "expression": "MappingProxyType({'invalid_provider_id': \"providerId must be a dotted lowercase id such as 'acme.toolhost' (2-4 segments, letters/digits, '-' and '_' allowed after the first segment).\", 'reserved_provider_id': 'That providerId belongs to a built-in RATS provider and cannot be redefined.', 'invalid_product': 'product must be the exact product name the service reports in its descriptor.', 'invalid_service_kinds': 'serviceKinds must list 1-8 lowercase kinds, matching what the service puts in its descriptor.', 'invalid_permission_classes': 'permissionClasses must list at least one permission class name, lowercase, matching what the service declares.', 'invalid_tool_tags': 'toolTags must list up to 8 lowercase tags.', 'invalid_discovery_root': \"discoveryRoot must be up to 8 plain path segments relative to the executable's own directory: no absolute path, no drive letter, no '..'.\", 'invalid_executable_identity': f\"executableIdentity must be '{_EXECUTABLE_IDENTITY_PATH}' or '{_EXECUTABLE_IDENTITY_PRODUCT_NAME}'.\", 'invalid_executable_product_names': 'executableProductNames must be a list of product name strings.', 'missing_executable_product_names': f\"executableIdentity '{_EXECUTABLE_IDENTITY_PRODUCT_NAME}' needs at least one entry in executableProductNames to check against.\"})"
+        }
+      ],
+      "blob_sha1": "624b67ffe3dd1aabac0cf5af33a85893d5957a0f",
+      "bytes": 142965
+    },
+    {
+      "file": "ReverieCli-py/reverie/rats_contract.py",
+      "sha256": "0003b2912462fe6c65d5d3545e0f6217ebd83cbed8babef7ca34ed57201858cc",
+      "classes": [
+        {
+          "name": "RatsErrorSpec",
+          "line": 183,
+          "end_line": 197,
+          "bases": [],
+          "fields": [
+            {
+              "name": "code",
+              "annotation": "str",
+              "default": null,
+              "line": 186
+            },
+            {
+              "name": "status",
+              "annotation": "int",
+              "default": "DEFAULT_ERROR_STATUS",
+              "line": 187
+            },
+            {
+              "name": "retryable",
+              "annotation": "bool",
+              "default": "DEFAULT_ERROR_RETRYABLE",
+              "line": 188
+            },
+            {
+              "name": "category",
+              "annotation": "str",
+              "default": "DEFAULT_ERROR_CATEGORY",
+              "line": 189
+            },
+            {
+              "name": "retry",
+              "annotation": "str",
+              "default": "DEFAULT_ERROR_RETRY",
+              "line": 192
+            }
+          ],
+          "methods": [
+            {
+              "name": "proves_no_effect",
+              "arguments": "self",
+              "returns": "bool",
+              "line": 195
+            }
+          ]
+        },
+        {
+          "name": "RatsCapabilities",
+          "line": 201,
+          "end_line": 331,
+          "bases": [],
+          "fields": [
+            {
+              "name": "source",
+              "annotation": "str",
+              "default": null,
+              "line": 204
+            },
+            {
+              "name": "contract",
+              "annotation": "str",
+              "default": null,
+              "line": 205
+            },
+            {
+              "name": "protocol",
+              "annotation": "str",
+              "default": null,
+              "line": 206
+            },
+            {
+              "name": "roles",
+              "annotation": "Mapping[str, str]",
+              "default": null,
+              "line": 207
+            },
+            {
+              "name": "auth_by_role",
+              "annotation": "Mapping[str, str]",
+              "default": null,
+              "line": 208
+            },
+            {
+              "name": "effects_by_role",
+              "annotation": "Mapping[str, str]",
+              "default": null,
+              "line": 209
+            },
+            {
+              "name": "summaries",
+              "annotation": "Mapping[str, str]",
+              "default": null,
+              "line": 210
+            },
+            {
+              "name": "control_header",
+              "annotation": "str",
+              "default": null,
+              "line": 211
+            },
+            {
+              "name": "session_header",
+              "annotation": "str",
+              "default": null,
+              "line": 212
+            },
+            {
+              "name": "permissions",
+              "annotation": "Tuple[str, ...]",
+              "default": null,
+              "line": 213
+            },
+            {
+              "name": "permission_tool_counts",
+              "annotation": "Mapping[str, int]",
+              "default": null,
+              "line": 214
+            },
+            {
+              "name": "features",
+              "annotation": "frozenset",
+              "default": null,
+              "line": 215
+            },
+            {
+              "name": "constraints",
+              "annotation": "frozenset",
+              "default": null,
+              "line": 216
+            },
+            {
+              "name": "limits",
+              "annotation": "Mapping[str, int]",
+              "default": null,
+              "line": 217
+            },
+            {
+              "name": "errors",
+              "annotation": "Mapping[str, RatsErrorSpec]",
+              "default": null,
+              "line": 218
+            },
+            {
+              "name": "error_default",
+              "annotation": "RatsErrorSpec",
+              "default": null,
+              "line": 219
+            },
+            {
+              "name": "task_event_schema",
+              "annotation": "str",
+              "default": null,
+              "line": 220
+            }
+          ],
+          "methods": [
+            {
+              "name": "declared",
+              "arguments": "self",
+              "returns": "bool",
+              "line": 223
+            },
+            {
+              "name": "operation",
+              "arguments": "self, role: str",
+              "returns": "str",
+              "line": 227
+            },
+            {
+              "name": "auth",
+              "arguments": "self, role: str",
+              "returns": "str",
+              "line": 237
+            },
+            {
+              "name": "effects",
+              "arguments": "self, role: str",
+              "returns": "str",
+              "line": 241
+            },
+            {
+              "name": "may_retry",
+              "arguments": "self, role: str, code: str",
+              "returns": "bool",
+              "line": 251
+            },
+            {
+              "name": "may_retry_spec",
+              "arguments": "self, role: str, spec: RatsErrorSpec",
+              "returns": "bool",
+              "line": 260
+            },
+            {
+              "name": "summary",
+              "arguments": "self, role: str",
+              "returns": "str",
+              "line": 290
+            },
+            {
+              "name": "declares_role",
+              "arguments": "self, role: str",
+              "returns": "bool",
+              "line": 293
+            },
+            {
+              "name": "has_feature",
+              "arguments": "self, name: str",
+              "returns": "bool",
+              "line": 296
+            },
+            {
+              "name": "has_constraint",
+              "arguments": "self, name: str",
+              "returns": "bool",
+              "line": 299
+            },
+            {
+              "name": "limit",
+              "arguments": "self, name: str, default: Optional[int]=None",
+              "returns": "int",
+              "line": 302
+            },
+            {
+              "name": "error",
+              "arguments": "self, code: str",
+              "returns": "RatsErrorSpec",
+              "line": 312
+            },
+            {
+              "name": "describes_error",
+              "arguments": "self, code: str",
+              "returns": "bool",
+              "line": 330
+            }
+          ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "RATS_CAPABILITY_CONTRACT",
+          "line": 40,
+          "expression": "'reverie.rtp.capabilities/1'"
+        },
+        {
+          "name": "RATS_CONTRACT_PROTOCOL",
+          "line": 41,
+          "expression": "'reverie.rtp/1'"
+        },
+        {
+          "name": "RATS_HELLO_ROLE",
+          "line": 45,
+          "expression": "'hello'"
+        },
+        {
+          "name": "RATS_CLIENT_ROLES",
+          "line": 50,
+          "expression": "('hello', 'session.open', 'session.close', 'status', 'catalog.index', 'catalog.describe', 'catalog.search', 'tool.call', 'task.status', 'task.events', 'task.cancel')"
+        },
+        {
+          "name": "FALLBACK_CONTROL_HEADER",
+          "line": 64,
+          "expression": "'X-Reverie-RATS-Control'"
+        },
+        {
+          "name": "FALLBACK_SESSION_HEADER",
+          "line": 65,
+          "expression": "'X-Reverie-RTP-Session'"
+        },
+        {
+          "name": "FALLBACK_PERMISSIONS",
+          "line": 66,
+          "expression": "('read', 'project', 'edit', 'asset', 'ai', 'run', 'build')"
+        },
+        {
+          "name": "FALLBACK_BOOTSTRAP_TOOLS",
+          "line": 71,
+          "expression": "('ping', 'version', 'get_status', 'project.status')"
+        },
+        {
+          "name": "FALLBACK_LIMITS",
+          "line": 77,
+          "expression": "MappingProxyType({'request_bytes': 1024 * 1024, 'request_id_bytes': 128, 'idempotency_key_bytes': 128, 'client_name_bytes': 128, 'deadline_ms': 120000, 'idempotency_wait_ms': 15000, 'describe_tools': 16, 'search_results': 16, 'task_events': 64, 'concurrent_sessions': 1})"
+        },
+        {
+          "name": "FALLBACK_FEATURES",
+          "line": 96,
+          "expression": "frozenset({'catalog.progressive_disclosure', 'catalog.search', 'tool.dry_run', 'tool.idempotency', 'tool.deadline', 'task.events', 'task.cancel', 'audit.sha256'})"
+        },
+        {
+          "name": "FALLBACK_CONSTRAINTS",
+          "line": 111,
+          "expression": "frozenset({'single_active_session'})"
+        },
+        {
+          "name": "DEFAULT_ERROR_STATUS",
+          "line": 113,
+          "expression": "400"
+        },
+        {
+          "name": "DEFAULT_ERROR_RETRYABLE",
+          "line": 114,
+          "expression": "False"
+        },
+        {
+          "name": "DEFAULT_ERROR_CATEGORY",
+          "line": 115,
+          "expression": "'request'"
+        },
+        {
+          "name": "RETRY_NEVER",
+          "line": 122,
+          "expression": "'never'"
+        },
+        {
+          "name": "RETRY_SAFE",
+          "line": 123,
+          "expression": "'safe'"
+        },
+        {
+          "name": "RETRY_UNSAFE",
+          "line": 124,
+          "expression": "'unsafe'"
+        },
+        {
+          "name": "RETRY_VALUES",
+          "line": 125,
+          "expression": "(RETRY_NEVER, RETRY_SAFE, RETRY_UNSAFE)"
+        },
+        {
+          "name": "DEFAULT_ERROR_RETRY",
+          "line": 126,
+          "expression": "RETRY_NEVER"
+        },
+        {
+          "name": "EFFECTS_NONE",
+          "line": 130,
+          "expression": "'none'"
+        },
+        {
+          "name": "EFFECTS_IDEMPOTENT",
+          "line": 131,
+          "expression": "'idempotent'"
+        },
+        {
+          "name": "EFFECTS_MUTATING",
+          "line": 132,
+          "expression": "'mutating'"
+        },
+        {
+          "name": "EFFECTS_VALUES",
+          "line": 133,
+          "expression": "(EFFECTS_NONE, EFFECTS_IDEMPOTENT, EFFECTS_MUTATING)"
+        },
+        {
+          "name": "DEFAULT_EFFECTS",
+          "line": 134,
+          "expression": "EFFECTS_MUTATING"
+        },
+        {
+          "name": "FEATURE_RETRY_SEMANTICS",
+          "line": 139,
+          "expression": "'error.retry_semantics'"
+        },
+        {
+          "name": "_HEADER_NAME_RE",
+          "line": 151,
+          "expression": "re.compile(\"^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$\")"
+        }
+      ],
+      "blob_sha1": "bc0e9ee8b0ce106f28aa714eac3c77cbf381adc4",
+      "bytes": 30057
+    },
+    {
+      "file": "ReverieCli-py/reverie/plugin/protocol.py",
+      "sha256": "7f31aaedcfdcdbb082f678e423eb280b319b97ab9c651ce66c794d40a3a1a444",
+      "classes": [
+        {
+          "name": "RuntimePluginCommandSpec",
+          "line": 86,
+          "end_line": 96,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 89
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": null,
+              "line": 90
+            },
+            {
+              "name": "parameters",
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "line": 91
+            },
+            {
+              "name": "expose_as_tool",
+              "annotation": "bool",
+              "default": "True",
+              "line": 92
+            },
+            {
+              "name": "include_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 93
+            },
+            {
+              "name": "exclude_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 94
+            },
+            {
+              "name": "guidance",
+              "annotation": "str",
+              "default": "''",
+              "line": 95
+            },
+            {
+              "name": "example",
+              "annotation": "str",
+              "default": "''",
+              "line": 96
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "RuntimePluginSkillSpec",
+          "line": 100,
+          "end_line": 108,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 103
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": null,
+              "line": 104
+            },
+            {
+              "name": "body",
+              "annotation": "str",
+              "default": null,
+              "line": 105
+            },
+            {
+              "name": "include_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 106
+            },
+            {
+              "name": "exclude_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 107
+            },
+            {
+              "name": "metadata",
+              "annotation": "dict[str, Any]",
+              "default": "field(default_factory=dict)",
+              "line": 108
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "RuntimePluginMcpServerSpec",
+          "line": 112,
+          "end_line": 119,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 115
+            },
+            {
+              "name": "config",
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "line": 116
+            },
+            {
+              "name": "include_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 117
+            },
+            {
+              "name": "exclude_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 118
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": "''",
+              "line": 119
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "RuntimePluginHandshake",
+          "line": 123,
+          "end_line": 142,
+          "bases": [],
+          "fields": [
+            {
+              "name": "protocol_version",
+              "annotation": "str",
+              "default": null,
+              "line": 126
+            },
+            {
+              "name": "plugin_id",
+              "annotation": "str",
+              "default": null,
+              "line": 127
+            },
+            {
+              "name": "display_name",
+              "annotation": "str",
+              "default": null,
+              "line": 128
+            },
+            {
+              "name": "version",
+              "annotation": "str",
+              "default": null,
+              "line": 129
+            },
+            {
+              "name": "runtime_family",
+              "annotation": "str",
+              "default": null,
+              "line": 130
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": "''",
+              "line": 131
+            },
+            {
+              "name": "tool_call_hint",
+              "annotation": "str",
+              "default": "''",
+              "line": 132
+            },
+            {
+              "name": "system_prompt",
+              "annotation": "str",
+              "default": "''",
+              "line": 133
+            },
+            {
+              "name": "include_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 134
+            },
+            {
+              "name": "exclude_modes",
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "line": 135
+            },
+            {
+              "name": "commands",
+              "annotation": "tuple[RuntimePluginCommandSpec, ...]",
+              "default": "()",
+              "line": 136
+            },
+            {
+              "name": "skills",
+              "annotation": "tuple[RuntimePluginSkillSpec, ...]",
+              "default": "()",
+              "line": 137
+            },
+            {
+              "name": "mcp_servers",
+              "annotation": "tuple[RuntimePluginMcpServerSpec, ...]",
+              "default": "()",
+              "line": 138
+            }
+          ],
+          "methods": [
+            {
+              "name": "tool_commands",
+              "arguments": "self",
+              "returns": "tuple[RuntimePluginCommandSpec, ...]",
+              "line": 141
+            }
+          ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "RC_PROTOCOL_VERSION",
+          "line": 12,
+          "expression": "'1.0'"
+        }
+      ],
+      "blob_sha1": "e0c5b3628a627b07edd7aa071ff847681713acf9",
+      "bytes": 10317
+    },
+    {
+      "file": "ReverieCli-py/reverie/stream_protocol.py",
+      "sha256": "045439522596d5158e76d7d75012c716a01966fdc0a7d3bead03f478b68ee53a",
+      "classes": [],
+      "constants": [
+        {
+          "name": "THINKING_START_MARKER",
+          "line": 10,
+          "expression": "'[[THINKING_START]]'"
+        },
+        {
+          "name": "THINKING_END_MARKER",
+          "line": 11,
+          "expression": "'[[THINKING_END]]'"
+        },
+        {
+          "name": "STREAM_EVENT_MARKER",
+          "line": 12,
+          "expression": "'[[REVERIE_EVENT]]'"
+        },
+        {
+          "name": "HIDDEN_STREAM_TOKEN",
+          "line": 13,
+          "expression": "'//END//'"
+        }
+      ],
+      "blob_sha1": "f6c65533a636b768bc3a705d65e6005c9a33aa49",
+      "bytes": 1165
+    },
+    {
+      "file": "ReverieCli-py/reverie/views.py",
+      "sha256": "587b337b325d0af59212b109472c4cdac2dba46a17c544e659b73c971409a692",
+      "classes": [
+        {
+          "name": "ViewStoreError",
+          "line": 59,
+          "end_line": 60,
+          "bases": [
+            "ValueError"
+          ],
+          "fields": [],
+          "methods": []
+        },
+        {
+          "name": "ViewIdentity",
+          "line": 138,
+          "end_line": 155,
+          "bases": [],
+          "fields": [
+            {
+              "name": "session_id",
+              "annotation": "str",
+              "default": null,
+              "line": 141
+            },
+            {
+              "name": "turn_id",
+              "annotation": "str",
+              "default": null,
+              "line": 142
+            },
+            {
+              "name": "tool_call_id",
+              "annotation": "str",
+              "default": null,
+              "line": 143
+            }
+          ],
+          "methods": [
+            {
+              "name": "__post_init__",
+              "arguments": "self",
+              "returns": "None",
+              "line": 145
+            }
+          ]
+        },
+        {
+          "name": "ViewManifest",
+          "line": 159,
+          "end_line": 235,
+          "bases": [],
+          "fields": [
+            {
+              "name": "schema_version",
+              "annotation": "int",
+              "default": null,
+              "line": 162
+            },
+            {
+              "name": "view_id",
+              "annotation": "str",
+              "default": null,
+              "line": 163
+            },
+            {
+              "name": "revision",
+              "annotation": "int",
+              "default": null,
+              "line": 164
+            },
+            {
+              "name": "session_id",
+              "annotation": "str",
+              "default": null,
+              "line": 165
+            },
+            {
+              "name": "turn_id",
+              "annotation": "str",
+              "default": null,
+              "line": 166
+            },
+            {
+              "name": "tool_call_id",
+              "annotation": "str",
+              "default": null,
+              "line": 167
+            },
+            {
+              "name": "title",
+              "annotation": "str",
+              "default": null,
+              "line": 168
+            },
+            {
+              "name": "summary",
+              "annotation": "str",
+              "default": null,
+              "line": 169
+            },
+            {
+              "name": "source",
+              "annotation": "Dict[str, Any]",
+              "default": null,
+              "line": 170
+            },
+            {
+              "name": "mime_type",
+              "annotation": "str",
+              "default": null,
+              "line": 171
+            },
+            {
+              "name": "entry",
+              "annotation": "str",
+              "default": null,
+              "line": 172
+            },
+            {
+              "name": "sha256",
+              "annotation": "str",
+              "default": null,
+              "line": 173
+            },
+            {
+              "name": "created_at",
+              "annotation": "str",
+              "default": null,
+              "line": 174
+            },
+            {
+              "name": "replaces_view_id",
+              "annotation": "Optional[str]",
+              "default": null,
+              "line": 175
+            },
+            {
+              "name": "policy_id",
+              "annotation": "str",
+              "default": null,
+              "line": 176
+            },
+            {
+              "name": "callable_tools",
+              "annotation": "Tuple[str, ...]",
+              "default": "()",
+              "line": 181
+            }
+          ],
+          "methods": [
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 183
+            },
+            {
+              "name": "from_dict",
+              "arguments": "cls, payload: Dict[str, Any]",
+              "returns": "'ViewManifest'",
+              "line": 204
+            },
+            {
+              "name": "model_reference",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 224
+            }
+          ]
+        },
+        {
+          "name": "ViewStore",
+          "line": 238,
+          "end_line": 656,
+          "bases": [],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self, views_root: Any",
+              "returns": "None",
+              "line": 241
+            },
+            {
+              "name": "for_project",
+              "arguments": "cls, project_root: Any, *, launcher_root: Optional[Any]=None",
+              "returns": "'ViewStore'",
+              "line": 245
+            },
+            {
+              "name": "_session_dir",
+              "arguments": "self, session_id: str",
+              "returns": "Path",
+              "line": 252
+            },
+            {
+              "name": "_view_dir",
+              "arguments": "self, session_id: str, view_id: str",
+              "returns": "Path",
+              "line": 255
+            },
+            {
+              "name": "view_directory",
+              "arguments": "self, session_id: str, view_id: str, revision: int",
+              "returns": "Path",
+              "line": 258
+            },
+            {
+              "name": "latest_revision",
+              "arguments": "self, session_id: str, view_id: str",
+              "returns": "int",
+              "line": 264
+            },
+            {
+              "name": "manifest",
+              "arguments": "self, session_id: str, view_id: str, revision: Optional[int]=None",
+              "returns": "ViewManifest",
+              "line": 272
+            },
+            {
+              "name": "resolve_entry",
+              "arguments": "self, session_id: str, view_id: str, revision: Optional[int]=None",
+              "returns": "Tuple[Path, ViewManifest]",
+              "line": 284
+            },
+            {
+              "name": "register",
+              "arguments": "self, *, artifact_path: Any, identity: ViewIdentity, title: str, summary: str, workspace_root: Any, replaces_view_id: Optional[str]=None, source_kind: str='model', callable_tools: Iterable[str]=()",
+              "returns": "ViewManifest",
+              "line": 299
+            },
+            {
+              "name": "_read_validated_artifact",
+              "arguments": "self, artifact_path: Any, workspace_root: Any",
+              "returns": "bytes",
+              "line": 359
+            },
+            {
+              "name": "_commit",
+              "arguments": "self, manifest: ViewManifest, data: bytes",
+              "returns": "None",
+              "line": 380
+            },
+            {
+              "name": "register_mcp_app",
+              "arguments": "self, *, resource: Dict[str, Any], identity: ViewIdentity, title: str, summary: str, arguments: Dict[str, Any], result: Dict[str, Any], callable_tools: Iterable[str]=()",
+              "returns": "ViewManifest",
+              "line": 399
+            },
+            {
+              "name": "read_mcp_app",
+              "arguments": "self, session_id: str, view_id: str, revision: int",
+              "returns": "Optional[Dict[str, Any]]",
+              "line": 429
+            },
+            {
+              "name": "read_state",
+              "arguments": "self, session_id: str, view_id: str, revision: Optional[int]=None",
+              "returns": "Optional[Dict[str, Any]]",
+              "line": 438
+            },
+            {
+              "name": "write_state",
+              "arguments": "self, session_id: str, view_id: str, *, state: Dict[str, Any], base_revision: Optional[int]=None, revision: Optional[int]=None",
+              "returns": "int",
+              "line": 447
+            },
+            {
+              "name": "visible_revision",
+              "arguments": "self, session_id: str, view_id: str",
+              "returns": "int",
+              "line": 473
+            },
+            {
+              "name": "current_manifest",
+              "arguments": "self, session_id: str, view_id: str, revision: Optional[int]=None",
+              "returns": "ViewManifest",
+              "line": 482
+            },
+            {
+              "name": "restrict_visible",
+              "arguments": "self, session_id: str, visible: Iterable[Tuple[str, int]]",
+              "returns": "None",
+              "line": 488
+            },
+            {
+              "name": "fork_session",
+              "arguments": "self, from_session: str, to_session: str, visible: Iterable[Tuple[str, int]]",
+              "returns": "None",
+              "line": 494
+            },
+            {
+              "name": "delete_view",
+              "arguments": "self, session_id: str, view_id: str",
+              "returns": "None",
+              "line": 523
+            },
+            {
+              "name": "delete_session",
+              "arguments": "self, session_id: str",
+              "returns": "None",
+              "line": 526
+            },
+            {
+              "name": "list_view_revisions",
+              "arguments": "self, session_id: str",
+              "returns": "List[Tuple[str, int]]",
+              "line": 530
+            },
+            {
+              "name": "write_model_context",
+              "arguments": "self, session_id: str, view_id: str, *, summary: str, source: str='component'",
+              "returns": "Dict[str, Any]",
+              "line": 558
+            },
+            {
+              "name": "read_model_context",
+              "arguments": "self, session_id: str, view_id: str",
+              "returns": "Optional[Dict[str, Any]]",
+              "line": 600
+            },
+            {
+              "name": "_call_file",
+              "arguments": "self, session_id: str, view_id: str, revision: int, call_id: str",
+              "returns": "Path",
+              "line": 608
+            },
+            {
+              "name": "begin_call",
+              "arguments": "self, session_id: str, view_id: str, revision: int, call_id: str, tool: str, arguments: Dict[str, Any]",
+              "returns": "Optional[Dict[str, Any]]",
+              "line": 614
+            },
+            {
+              "name": "finish_call",
+              "arguments": "self, session_id: str, view_id: str, revision: int, call_id: str, outcome: Dict[str, Any]",
+              "returns": "None",
+              "line": 638
+            },
+            {
+              "name": "call_receipts",
+              "arguments": "self, session_id: str, view_id: str, revision: int",
+              "returns": "List[Dict[str, Any]]",
+              "line": 648
+            }
+          ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "VIEW_SCHEMA_VERSION",
+          "line": 32,
+          "expression": "1"
+        },
+        {
+          "name": "VIEW_POLICY_ID",
+          "line": 33,
+          "expression": "'local-offline-v1'"
+        },
+        {
+          "name": "VIEW_ENTRY_NAME",
+          "line": 34,
+          "expression": "'index.html'"
+        },
+        {
+          "name": "VIEW_MANIFEST_NAME",
+          "line": 35,
+          "expression": "'manifest.json'"
+        },
+        {
+          "name": "VIEW_STATE_NAME",
+          "line": 36,
+          "expression": "'state.json'"
+        },
+        {
+          "name": "VIEW_MODEL_CONTEXT_NAME",
+          "line": 37,
+          "expression": "'model_context.json'"
+        },
+        {
+          "name": "VIEW_MCP_APP_NAME",
+          "line": 38,
+          "expression": "'mcp-app.json'"
+        },
+        {
+          "name": "MAX_VIEW_ENTRY_BYTES",
+          "line": 40,
+          "expression": "2 * 1024 * 1024"
+        },
+        {
+          "name": "MAX_VIEW_BUNDLE_BYTES",
+          "line": 41,
+          "expression": "8 * 1024 * 1024"
+        },
+        {
+          "name": "MAX_VIEW_STATE_BYTES",
+          "line": 42,
+          "expression": "64 * 1024"
+        },
+        {
+          "name": "MAX_VIEW_SUMMARY_BYTES",
+          "line": 43,
+          "expression": "8 * 1024"
+        },
+        {
+          "name": "MAX_VIEW_TITLE_BYTES",
+          "line": 44,
+          "expression": "512"
+        },
+        {
+          "name": "MAX_VIEW_CALL_BYTES",
+          "line": 45,
+          "expression": "256 * 1024"
+        },
+        {
+          "name": "_STATE_LOCK",
+          "line": 46,
+          "expression": "threading.RLock()"
+        },
+        {
+          "name": "MAX_VIEW_PROVENANCE_BYTES",
+          "line": 51,
+          "expression": "256"
+        },
+        {
+          "name": "_IDENTIFIER",
+          "line": 55,
+          "expression": "re.compile('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')"
+        },
+        {
+          "name": "_HTML_SUFFIXES",
+          "line": 56,
+          "expression": "('.html', '.htm')"
+        },
+        {
+          "name": "MAX_VIEW_CALLABLE_TOOLS",
+          "line": 99,
+          "expression": "32"
+        },
+        {
+          "name": "MAX_VIEW_TOOL_NAME_BYTES",
+          "line": 100,
+          "expression": "128"
+        }
+      ],
+      "blob_sha1": "7e6dcdb69a0505659eda2f0f3726e336ae3fe01b",
+      "bytes": 33339
+    },
+    {
+      "file": "ReverieCli-py/reverie/tools/user_input.py",
+      "sha256": "afd271da8359f03b42d5fa3eb061ae5cf11300f8c8c6dff4802749373b458257",
+      "classes": [
+        {
+          "name": "UserInputTool",
+          "line": 9,
+          "end_line": 263,
+          "bases": [
+            "BaseTool"
+          ],
+          "fields": [],
+          "methods": [
+            {
+              "name": "execute",
+              "arguments": "self, question: str, reason: str, multiline: bool=False, default_value: Optional[str]=None, allow_cancel: bool=True",
+              "returns": "ToolResult",
+              "line": 64
+            },
+            {
+              "name": "_get_multiline_input",
+              "arguments": "self, console",
+              "returns": "str",
+              "line": 222
+            },
+            {
+              "name": "get_execution_message",
+              "arguments": "self, **kwargs",
+              "returns": "str",
+              "line": 255
+            }
+          ]
+        }
+      ],
+      "constants": [],
+      "blob_sha1": "9d075ccaddec8076d9e8092a3d5356aae7bff164",
+      "bytes": 10628
+    },
+    {
+      "file": "ReverieCli-py/reverie/context_engine/parsers/base.py",
+      "sha256": "6038608bd3fa3d1a8202a1529e97939cca06f61b08202dab7610e504a65c06f1",
+      "classes": [
+        {
+          "name": "ParseResult",
+          "line": 17,
+          "end_line": 33,
+          "bases": [],
+          "fields": [
+            {
+              "name": "file_path",
+              "annotation": "str",
+              "default": null,
+              "line": 19
+            },
+            {
+              "name": "language",
+              "annotation": "str",
+              "default": null,
+              "line": 20
+            },
+            {
+              "name": "symbols",
+              "annotation": "List[Symbol]",
+              "default": "field(default_factory=list)",
+              "line": 21
+            },
+            {
+              "name": "dependencies",
+              "annotation": "List[Dependency]",
+              "default": "field(default_factory=list)",
+              "line": 22
+            },
+            {
+              "name": "imports",
+              "annotation": "List[Dict]",
+              "default": "field(default_factory=list)",
+              "line": 23
+            },
+            {
+              "name": "errors",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 24
+            },
+            {
+              "name": "parse_time_ms",
+              "annotation": "float",
+              "default": "0.0",
+              "line": 25
+            }
+          ],
+          "methods": [
+            {
+              "name": "success",
+              "arguments": "self",
+              "returns": "bool",
+              "line": 28
+            },
+            {
+              "name": "symbol_count",
+              "arguments": "self",
+              "returns": "int",
+              "line": 32
+            }
+          ]
+        },
+        {
+          "name": "BaseParser",
+          "line": 36,
+          "end_line": 112,
+          "bases": [
+            "ABC"
+          ],
+          "fields": [
+            {
+              "name": "LANGUAGE",
+              "annotation": "str",
+              "default": "'unknown'",
+              "line": 47
+            },
+            {
+              "name": "FILE_EXTENSIONS",
+              "annotation": "Tuple[str, ...]",
+              "default": "()",
+              "line": 48
+            }
+          ],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self, project_root: Path",
+              "returns": null,
+              "line": 50
+            },
+            {
+              "name": "parse_file",
+              "arguments": "self, file_path: Path, content: Optional[str]=None",
+              "returns": "ParseResult",
+              "line": 54
+            },
+            {
+              "name": "can_parse",
+              "arguments": "self, file_path: Path",
+              "returns": "bool",
+              "line": 68
+            },
+            {
+              "name": "get_relative_path",
+              "arguments": "self, file_path: Path",
+              "returns": "str",
+              "line": 72
+            },
+            {
+              "name": "read_file",
+              "arguments": "self, file_path: Path",
+              "returns": "Optional[str]",
+              "line": 79
+            },
+            {
+              "name": "extract_docstring",
+              "arguments": "self, source: str, start_line: int",
+              "returns": "Optional[str]",
+              "line": 94
+            },
+            {
+              "name": "get_module_name",
+              "arguments": "self, file_path: Path",
+              "returns": "str",
+              "line": 101
+            }
+          ]
+        }
+      ],
+      "constants": [],
+      "blob_sha1": "7741d63e46f89782bbd9f637e172138fec2536a4",
+      "bytes": 3456
+    },
+    {
+      "file": "ReverieCli-py/reverie/context_engine/symbol_table.py",
+      "sha256": "c0810d2f5ac6778cc80d01ea2815b951d858438601f987be1345be2eeb326215",
+      "classes": [
+        {
+          "name": "SymbolKind",
+          "line": 23,
+          "end_line": 43,
+          "bases": [
+            "Enum"
+          ],
+          "fields": [],
+          "methods": []
+        },
+        {
+          "name": "Reference",
+          "line": 47,
+          "end_line": 53,
+          "bases": [],
+          "fields": [
+            {
+              "name": "file_path",
+              "annotation": "str",
+              "default": null,
+              "line": 49
+            },
+            {
+              "name": "line",
+              "annotation": "int",
+              "default": null,
+              "line": 50
+            },
+            {
+              "name": "column",
+              "annotation": "int",
+              "default": null,
+              "line": 51
+            },
+            {
+              "name": "context",
+              "annotation": "str",
+              "default": null,
+              "line": 52
+            },
+            {
+              "name": "ref_type",
+              "annotation": "str",
+              "default": "'usage'",
+              "line": 53
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "Symbol",
+          "line": 57,
+          "end_line": 200,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 63
+            },
+            {
+              "name": "qualified_name",
+              "annotation": "str",
+              "default": null,
+              "line": 64
+            },
+            {
+              "name": "kind",
+              "annotation": "SymbolKind",
+              "default": null,
+              "line": 65
+            },
+            {
+              "name": "file_path",
+              "annotation": "str",
+              "default": null,
+              "line": 66
+            },
+            {
+              "name": "start_line",
+              "annotation": "int",
+              "default": null,
+              "line": 67
+            },
+            {
+              "name": "end_line",
+              "annotation": "int",
+              "default": null,
+              "line": 68
+            },
+            {
+              "name": "start_column",
+              "annotation": "int",
+              "default": "0",
+              "line": 69
+            },
+            {
+              "name": "end_column",
+              "annotation": "int",
+              "default": "0",
+              "line": 70
+            },
+            {
+              "name": "signature",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 71
+            },
+            {
+              "name": "docstring",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 72
+            },
+            {
+              "name": "source_code",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 73
+            },
+            {
+              "name": "parent",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 74
+            },
+            {
+              "name": "children",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 75
+            },
+            {
+              "name": "references",
+              "annotation": "List[Reference]",
+              "default": "field(default_factory=list)",
+              "line": 76
+            },
+            {
+              "name": "type_annotation",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 77
+            },
+            {
+              "name": "return_type",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 78
+            },
+            {
+              "name": "parameters",
+              "annotation": "List[Dict]",
+              "default": "field(default_factory=list)",
+              "line": 79
+            },
+            {
+              "name": "decorators",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 80
+            },
+            {
+              "name": "modifiers",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 81
+            },
+            {
+              "name": "language",
+              "annotation": "str",
+              "default": "'unknown'",
+              "line": 82
+            },
+            {
+              "name": "content_hash",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 85
+            }
+          ],
+          "methods": [
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "dict",
+              "line": 87
+            },
+            {
+              "name": "from_dict",
+              "arguments": "cls, data: dict",
+              "returns": "'Symbol'",
+              "line": 123
+            },
+            {
+              "name": "get_context_string",
+              "arguments": "self, include_source: bool=True, max_lines: int=50",
+              "returns": "str",
+              "line": 160
+            }
+          ]
+        },
+        {
+          "name": "SymbolTable",
+          "line": 203,
+          "end_line": 548,
+          "bases": [],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self",
+              "returns": null,
+              "line": 214
+            },
+            {
+              "name": "clear",
+              "arguments": "self",
+              "returns": "None",
+              "line": 235
+            },
+            {
+              "name": "replace_with",
+              "arguments": "self, other: 'SymbolTable'",
+              "returns": "None",
+              "line": 248
+            },
+            {
+              "name": "add_symbol",
+              "arguments": "self, symbol: Symbol",
+              "returns": "None",
+              "line": 270
+            },
+            {
+              "name": "_remove_from_indices",
+              "arguments": "self, symbol: Symbol",
+              "returns": "None",
+              "line": 301
+            },
+            {
+              "name": "get_symbol",
+              "arguments": "self, qualified_name: str",
+              "returns": "Optional[Symbol]",
+              "line": 316
+            },
+            {
+              "name": "find_by_name",
+              "arguments": "self, name: str",
+              "returns": "List[Symbol]",
+              "line": 320
+            },
+            {
+              "name": "find_by_pattern",
+              "arguments": "self, pattern: str, limit: int=999999",
+              "returns": "List[Symbol]",
+              "line": 332
+            },
+            {
+              "name": "find_by_prefix",
+              "arguments": "self, prefix: str, limit: int=999999",
+              "returns": "List[Symbol]",
+              "line": 354
+            },
+            {
+              "name": "get_by_kind",
+              "arguments": "self, kind: SymbolKind, limit: int=999999",
+              "returns": "List[Symbol]",
+              "line": 371
+            },
+            {
+              "name": "get_all_in_file",
+              "arguments": "self, file_path: str",
+              "returns": "List[Symbol]",
+              "line": 376
+            },
+            {
+              "name": "get_symbols_in_file",
+              "arguments": "self, file_path: str",
+              "returns": "List[Symbol]",
+              "line": 391
+            },
+            {
+              "name": "iter_symbols",
+              "arguments": "self",
+              "returns": "List[Symbol]",
+              "line": 395
+            },
+            {
+              "name": "get_children",
+              "arguments": "self, qualified_name: str",
+              "returns": "List[Symbol]",
+              "line": 399
+            },
+            {
+              "name": "remove_file",
+              "arguments": "self, file_path: str",
+              "returns": "int",
+              "line": 406
+            },
+            {
+              "name": "update_file",
+              "arguments": "self, file_path: str, symbols: List[Symbol]",
+              "returns": "None",
+              "line": 422
+            },
+            {
+              "name": "get_statistics",
+              "arguments": "self",
+              "returns": "Dict",
+              "line": 428
+            },
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "dict",
+              "line": 432
+            },
+            {
+              "name": "from_dict",
+              "arguments": "cls, data: dict",
+              "returns": "'SymbolTable'",
+              "line": 444
+            },
+            {
+              "name": "search",
+              "arguments": "self, query: str, kinds: Optional[List[SymbolKind]]=None, file_pattern: Optional[str]=None, limit: int=999999",
+              "returns": "List[Symbol]",
+              "line": 452
+            },
+            {
+              "name": "__len__",
+              "arguments": "self",
+              "returns": "int",
+              "line": 544
+            },
+            {
+              "name": "__contains__",
+              "arguments": "self, qualified_name: str",
+              "returns": "bool",
+              "line": 547
+            }
+          ]
+        }
+      ],
+      "constants": [],
+      "blob_sha1": "b628077b2c9534f6108fad82fb5a0204fc8cc4d0",
+      "bytes": 20327
+    },
+    {
+      "file": "ReverieCli-py/reverie/context_engine/dependency_graph.py",
+      "sha256": "4e34ea3d2f380dd9f319e3c69bee7fd93d9d22f1740c5019e841b14eb0db8eb3",
+      "classes": [
+        {
+          "name": "DependencyType",
+          "line": 20,
+          "end_line": 32,
+          "bases": [
+            "Enum"
+          ],
+          "fields": [],
+          "methods": []
+        },
+        {
+          "name": "Dependency",
+          "line": 36,
+          "end_line": 64,
+          "bases": [],
+          "fields": [
+            {
+              "name": "from_symbol",
+              "annotation": "str",
+              "default": null,
+              "line": 38
+            },
+            {
+              "name": "to_symbol",
+              "annotation": "str",
+              "default": null,
+              "line": 39
+            },
+            {
+              "name": "dep_type",
+              "annotation": "DependencyType",
+              "default": null,
+              "line": 40
+            },
+            {
+              "name": "file_path",
+              "annotation": "str",
+              "default": null,
+              "line": 41
+            },
+            {
+              "name": "line",
+              "annotation": "int",
+              "default": null,
+              "line": 42
+            },
+            {
+              "name": "context",
+              "annotation": "str",
+              "default": "''",
+              "line": 43
+            }
+          ],
+          "methods": [
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "dict",
+              "line": 45
+            },
+            {
+              "name": "from_dict",
+              "arguments": "cls, data: dict",
+              "returns": "'Dependency'",
+              "line": 56
+            }
+          ]
+        },
+        {
+          "name": "DependencyGraph",
+          "line": 67,
+          "end_line": 603,
+          "bases": [],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self",
+              "returns": null,
+              "line": 78
+            },
+            {
+              "name": "clear",
+              "arguments": "self",
+              "returns": "None",
+              "line": 94
+            },
+            {
+              "name": "_sorted_edges",
+              "arguments": "edges: List[Dependency]",
+              "returns": "List[Dependency]",
+              "line": 105
+            },
+            {
+              "name": "replace_with",
+              "arguments": "self, other: 'DependencyGraph'",
+              "returns": "None",
+              "line": 124
+            },
+            {
+              "name": "resolve_targets",
+              "arguments": "self, symbol_table: Any",
+              "returns": "int",
+              "line": 140
+            },
+            {
+              "name": "add_dependency",
+              "arguments": "self, dep: Dependency",
+              "returns": "None",
+              "line": 268
+            },
+            {
+              "name": "add_simple",
+              "arguments": "self, from_symbol: str, to_symbol: str, dep_type: DependencyType, file_path: str='', line: int=0, context: str=''",
+              "returns": "None",
+              "line": 277
+            },
+            {
+              "name": "get_dependencies",
+              "arguments": "self, symbol: str, dep_types: Optional[List[DependencyType]]=None, depth: int=1",
+              "returns": "List[Dependency]",
+              "line": 297
+            },
+            {
+              "name": "get_dependents",
+              "arguments": "self, symbol: str, dep_types: Optional[List[DependencyType]]=None, depth: int=1",
+              "returns": "List[Dependency]",
+              "line": 331
+            },
+            {
+              "name": "get_call_chain",
+              "arguments": "self, symbol: str, direction: str='down', max_depth: int=5",
+              "returns": "List[List[str]]",
+              "line": 366
+            },
+            {
+              "name": "get_inheritance_tree",
+              "arguments": "self, symbol: str, direction: str='up'",
+              "returns": "Dict",
+              "line": 412
+            },
+            {
+              "name": "get_related_symbols",
+              "arguments": "self, symbol: str, max_distance: int=2, max_results: int=50",
+              "returns": "List[Tuple[str, int, DependencyType]]",
+              "line": 446
+            },
+            {
+              "name": "remove_file",
+              "arguments": "self, file_path: str",
+              "returns": "int",
+              "line": 504
+            },
+            {
+              "name": "visualize",
+              "arguments": "self, symbol: str, depth: int=2",
+              "returns": "str",
+              "line": 534
+            },
+            {
+              "name": "get_statistics",
+              "arguments": "self",
+              "returns": "Dict",
+              "line": 574
+            },
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "dict",
+              "line": 582
+            },
+            {
+              "name": "from_dict",
+              "arguments": "cls, data: dict",
+              "returns": "'DependencyGraph'",
+              "line": 594
+            },
+            {
+              "name": "__len__",
+              "arguments": "self",
+              "returns": "int",
+              "line": 602
+            }
+          ]
+        }
+      ],
+      "constants": [],
+      "blob_sha1": "2225c4e61c9f7141c770ea3ee4594faa36a5fd71",
+      "bytes": 21775
+    },
+    {
+      "file": "ReverieCli-py/reverie/context_engine/handoff.py",
+      "sha256": "da55b2e28c5b2dc6703a736b19ea7c4584706080daa171b4809757c161153ef0",
+      "classes": [
+        {
+          "name": "SessionHandoffPacket",
+          "line": 104,
+          "end_line": 142,
+          "bases": [],
+          "fields": [
+            {
+              "name": "schema_version",
+              "annotation": "int",
+              "default": null,
+              "line": 105
+            },
+            {
+              "name": "created_at",
+              "annotation": "str",
+              "default": null,
+              "line": 106
+            },
+            {
+              "name": "model",
+              "annotation": "str",
+              "default": null,
+              "line": 107
+            },
+            {
+              "name": "provider",
+              "annotation": "str",
+              "default": null,
+              "line": 108
+            },
+            {
+              "name": "session_id",
+              "annotation": "str",
+              "default": null,
+              "line": 109
+            },
+            {
+              "name": "token_estimate",
+              "annotation": "int",
+              "default": null,
+              "line": 110
+            },
+            {
+              "name": "max_tokens",
+              "annotation": "int",
+              "default": null,
+              "line": 111
+            },
+            {
+              "name": "usage_ratio",
+              "annotation": "float",
+              "default": null,
+              "line": 112
+            },
+            {
+              "name": "latest_user_request",
+              "annotation": "str",
+              "default": null,
+              "line": 113
+            },
+            {
+              "name": "raw_response_text",
+              "annotation": "str",
+              "default": null,
+              "line": 114
+            },
+            {
+              "name": "data",
+              "annotation": "Dict[str, Any]",
+              "default": null,
+              "line": 115
+            },
+            {
+              "name": "carryover_text",
+              "annotation": "str",
+              "default": null,
+              "line": 116
+            },
+            {
+              "name": "context_digest",
+              "annotation": "str",
+              "default": "''",
+              "line": 117
+            },
+            {
+              "name": "workspace_memory",
+              "annotation": "str",
+              "default": "''",
+              "line": 118
+            },
+            {
+              "name": "recent_transcript",
+              "annotation": "str",
+              "default": "''",
+              "line": 119
+            },
+            {
+              "name": "prior_memory",
+              "annotation": "str",
+              "default": "''",
+              "line": 120
+            },
+            {
+              "name": "tool_activity",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 121
+            }
+          ],
+          "methods": [
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 123
+            }
+          ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "SESSION_HANDOFF_SCHEMA_VERSION",
+          "line": 35,
+          "expression": "2"
+        },
+        {
+          "name": "DEFAULT_RECENT_MESSAGE_LIMIT",
+          "line": 36,
+          "expression": "14"
+        },
+        {
+          "name": "DEFAULT_HANDOFF_TRANSCRIPT_CHAR_BUDGET",
+          "line": 37,
+          "expression": "24000"
+        },
+        {
+          "name": "DEFAULT_HANDOFF_MIN_MESSAGES",
+          "line": 38,
+          "expression": "8"
+        },
+        {
+          "name": "SESSION_HANDOFF_SYSTEM_PROMPT",
+          "line": 71,
+          "expression": "'You are Reverie\\'s automatic session-handoff generator.\\n\\nYour job is to prepare the next model session so it can continue the SAME task without asking the user to restate context.\\n\\nRules:\\n- Return exactly one JSON object and nothing else.\\n- This is not an end-user status report. Write memory for the next model session only.\\n- Preserve only the durable memory that a strong coding model would choose to keep.\\n- Prefer verified facts over guesses.\\n- Focus on the current project goal, the user\\'s latest active request, completed work, unresolved blockers, important files, constraints, and the exact next action.\\n- If the conversation contains partial implementation or unfinished verification, preserve that state explicitly.\\n- Do not write a status report for the end user.\\n- Do not say \"continue\" or \"ask the user\" unless a real blocker exists.\\n- Do not echo transcript snippets unless they are necessary facts.\\n- If information is unknown, use an empty string or empty array instead of inventing.\\n\\nUse this schema exactly:\\n{\\n  \"project_goal\": \"string\",\\n  \"latest_user_request\": \"string\",\\n  \"current_state\": [\"string\"],\\n  \"completed_work\": [\"string\"],\\n  \"open_problems\": [\"string\"],\\n  \"critical_constraints\": [\"string\"],\\n  \"important_files\": [{\"path\": \"string\", \"reason\": \"string\"}],\\n  \"verification_state\": [\"string\"],\\n  \"next_actions\": [\"string\"],\\n  \"resume_instructions\": [\"string\"]\\n}\\n'"
+        }
+      ],
+      "blob_sha1": "906208c566b31363b73d36c8abfab5f7fa2a7d49",
+      "bytes": 27522
+    },
+    {
+      "file": "ReverieCli-py/reverie/context_engine/novel_index.py",
+      "sha256": "5bd78ceae189552e6b1d77fc48a72b8de255a5a9c6dba057d9099be9b7567dad",
+      "classes": [
+        {
+          "name": "IndexEntry",
+          "line": 19,
+          "end_line": 26,
+          "bases": [],
+          "fields": [
+            {
+              "name": "element_type",
+              "annotation": "str",
+              "default": null,
+              "line": 21
+            },
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 22
+            },
+            {
+              "name": "chapters",
+              "annotation": "List[int]",
+              "default": null,
+              "line": 23
+            },
+            {
+              "name": "first_appearance",
+              "annotation": "int",
+              "default": null,
+              "line": 24
+            },
+            {
+              "name": "last_appearance",
+              "annotation": "int",
+              "default": null,
+              "line": 25
+            },
+            {
+              "name": "metadata",
+              "annotation": "Dict[str, Any]",
+              "default": null,
+              "line": 26
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "NovelIndex",
+          "line": 29,
+          "end_line": 90,
+          "bases": [],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self",
+              "returns": null,
+              "line": 40
+            },
+            {
+              "name": "add_entry",
+              "arguments": "self, entry: IndexEntry",
+              "returns": "None",
+              "line": 45
+            },
+            {
+              "name": "get_by_chapter",
+              "arguments": "self, chapter: int",
+              "returns": "List[IndexEntry]",
+              "line": 60
+            },
+            {
+              "name": "get_by_type",
+              "arguments": "self, element_type: str",
+              "returns": "List[IndexEntry]",
+              "line": 69
+            },
+            {
+              "name": "get_chapter_range",
+              "arguments": "self, start_chapter: int, end_chapter: int",
+              "returns": "Dict[int, List[IndexEntry]]",
+              "line": 77
+            },
+            {
+              "name": "_infer_type",
+              "arguments": "self, name: str",
+              "returns": "str",
+              "line": 84
+            }
+          ]
+        }
+      ],
+      "constants": [],
+      "blob_sha1": "17129e8b3bad8dca7a334bb41bd4e28a75afc0ee",
+      "bytes": 3005
+    },
+    {
+      "file": "ReverieCli-py/reverie/writer/novel_memory.py",
+      "sha256": "a094eb7b39b19e123cdd38dfbbe8948ad3174496da9fd5401e7770494afe9667",
+      "classes": [
+        {
+          "name": "ElementType",
+          "line": 22,
+          "end_line": 30,
+          "bases": [
+            "Enum"
+          ],
+          "fields": [],
+          "methods": []
+        },
+        {
+          "name": "Character",
+          "line": 34,
+          "end_line": 44,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 36
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": null,
+              "line": 37
+            },
+            {
+              "name": "first_appearance_chapter",
+              "annotation": "int",
+              "default": null,
+              "line": 38
+            },
+            {
+              "name": "traits",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 39
+            },
+            {
+              "name": "relationships",
+              "annotation": "Dict[str, str]",
+              "default": "field(default_factory=dict)",
+              "line": 40
+            },
+            {
+              "name": "development_arc",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 41
+            },
+            {
+              "name": "last_appearance_chapter",
+              "annotation": "int",
+              "default": "0",
+              "line": 42
+            },
+            {
+              "name": "is_protagonist",
+              "annotation": "bool",
+              "default": "False",
+              "line": 43
+            },
+            {
+              "name": "background",
+              "annotation": "str",
+              "default": "''",
+              "line": 44
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "Location",
+          "line": 48,
+          "end_line": 56,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 50
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": null,
+              "line": 51
+            },
+            {
+              "name": "first_appearance_chapter",
+              "annotation": "int",
+              "default": null,
+              "line": 52
+            },
+            {
+              "name": "connections",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 53
+            },
+            {
+              "name": "significance",
+              "annotation": "str",
+              "default": "''",
+              "line": 54
+            },
+            {
+              "name": "atmosphere",
+              "annotation": "str",
+              "default": "''",
+              "line": 55
+            },
+            {
+              "name": "last_appearance_chapter",
+              "annotation": "int",
+              "default": "0",
+              "line": 56
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "PlotEvent",
+          "line": 60,
+          "end_line": 68,
+          "bases": [],
+          "fields": [
+            {
+              "name": "chapter",
+              "annotation": "int",
+              "default": null,
+              "line": 62
+            },
+            {
+              "name": "summary",
+              "annotation": "str",
+              "default": null,
+              "line": 63
+            },
+            {
+              "name": "participants",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 64
+            },
+            {
+              "name": "location",
+              "annotation": "str",
+              "default": "''",
+              "line": 65
+            },
+            {
+              "name": "causal_consequences",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 66
+            },
+            {
+              "name": "is_major_twist",
+              "annotation": "bool",
+              "default": "False",
+              "line": 67
+            },
+            {
+              "name": "timestamp_in_story",
+              "annotation": "str",
+              "default": "''",
+              "line": 68
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "EmotionalArc",
+          "line": 72,
+          "end_line": 79,
+          "bases": [],
+          "fields": [
+            {
+              "name": "chapter",
+              "annotation": "int",
+              "default": null,
+              "line": 74
+            },
+            {
+              "name": "character",
+              "annotation": "str",
+              "default": null,
+              "line": 75
+            },
+            {
+              "name": "emotional_state",
+              "annotation": "str",
+              "default": null,
+              "line": 76
+            },
+            {
+              "name": "tone",
+              "annotation": "str",
+              "default": null,
+              "line": 77
+            },
+            {
+              "name": "intensity",
+              "annotation": "float",
+              "default": "0.5",
+              "line": 78
+            },
+            {
+              "name": "triggers",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 79
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "Theme",
+          "line": 83,
+          "end_line": 89,
+          "bases": [],
+          "fields": [
+            {
+              "name": "name",
+              "annotation": "str",
+              "default": null,
+              "line": 85
+            },
+            {
+              "name": "description",
+              "annotation": "str",
+              "default": null,
+              "line": 86
+            },
+            {
+              "name": "appearances",
+              "annotation": "List[int]",
+              "default": "field(default_factory=list)",
+              "line": 87
+            },
+            {
+              "name": "variations",
+              "annotation": "List[str]",
+              "default": "field(default_factory=list)",
+              "line": 88
+            },
+            {
+              "name": "symbol",
+              "annotation": "Optional[str]",
+              "default": "None",
+              "line": 89
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "ContentSummary",
+          "line": 93,
+          "end_line": 101,
+          "bases": [],
+          "fields": [
+            {
+              "name": "chapter",
+              "annotation": "int",
+              "default": null,
+              "line": 95
+            },
+            {
+              "name": "content_hash",
+              "annotation": "str",
+              "default": null,
+              "line": 96
+            },
+            {
+              "name": "summary",
+              "annotation": "str",
+              "default": null,
+              "line": 97
+            },
+            {
+              "name": "key_events",
+              "annotation": "List[str]",
+              "default": null,
+              "line": 98
+            },
+            {
+              "name": "characters_involved",
+              "annotation": "List[str]",
+              "default": null,
+              "line": 99
+            },
+            {
+              "name": "new_information",
+              "annotation": "str",
+              "default": null,
+              "line": 100
+            },
+            {
+              "name": "tokens_estimated",
+              "annotation": "int",
+              "default": null,
+              "line": 101
+            }
+          ],
+          "methods": []
+        },
+        {
+          "name": "NovelMemorySystem",
+          "line": 104,
+          "end_line": 435,
+          "bases": [],
+          "fields": [],
+          "methods": [
+            {
+              "name": "__init__",
+              "arguments": "self, novel_id: str, storage_dir: Optional[Path]=None",
+              "returns": null,
+              "line": 116
+            },
+            {
+              "name": "add_character",
+              "arguments": "self, character: Character",
+              "returns": "None",
+              "line": 145
+            },
+            {
+              "name": "add_location",
+              "arguments": "self, location: Location",
+              "returns": "None",
+              "line": 150
+            },
+            {
+              "name": "add_plot_event",
+              "arguments": "self, event: PlotEvent",
+              "returns": "None",
+              "line": 155
+            },
+            {
+              "name": "add_emotional_arc",
+              "arguments": "self, arc: EmotionalArc",
+              "returns": "None",
+              "line": 162
+            },
+            {
+              "name": "add_theme",
+              "arguments": "self, theme: Theme",
+              "returns": "None",
+              "line": 167
+            },
+            {
+              "name": "add_content_summary",
+              "arguments": "self, summary: ContentSummary",
+              "returns": "None",
+              "line": 172
+            },
+            {
+              "name": "get_character_by_name",
+              "arguments": "self, name: str",
+              "returns": "Optional[Character]",
+              "line": 178
+            },
+            {
+              "name": "get_location_by_name",
+              "arguments": "self, name: str",
+              "returns": "Optional[Location]",
+              "line": 191
+            },
+            {
+              "name": "get_character_relationships",
+              "arguments": "self, character_name: str",
+              "returns": "Dict[str, str]",
+              "line": 202
+            },
+            {
+              "name": "get_plot_context",
+              "arguments": "self, chapter: int, lookback_chapters: int=5",
+              "returns": "List[PlotEvent]",
+              "line": 207
+            },
+            {
+              "name": "get_character_emotional_arc",
+              "arguments": "self, character: str, chapter: int",
+              "returns": "List[EmotionalArc]",
+              "line": 216
+            },
+            {
+              "name": "get_active_themes",
+              "arguments": "self, chapter: int",
+              "returns": "Dict[str, Theme]",
+              "line": 223
+            },
+            {
+              "name": "get_chapter_context",
+              "arguments": "self, chapter: int, window: int=3",
+              "returns": "str",
+              "line": 230
+            },
+            {
+              "name": "validate_continuity",
+              "arguments": "self, chapter: int, new_content: str",
+              "returns": "Dict[str, Any]",
+              "line": 249
+            },
+            {
+              "name": "get_memory_stats",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 285
+            },
+            {
+              "name": "_save_to_disk",
+              "arguments": "self",
+              "returns": "None",
+              "line": 299
+            },
+            {
+              "name": "_load_from_disk",
+              "arguments": "self",
+              "returns": "None",
+              "line": 371
+            },
+            {
+              "name": "save",
+              "arguments": "self",
+              "returns": "None",
+              "line": 433
+            }
+          ]
+        }
+      ],
+      "constants": [],
+      "blob_sha1": "8cfac7fadc539c25169c28e483b20fd1c69afff5",
+      "bytes": 16909
+    },
+    {
+      "file": "ReverieCli-py/reverie/engine/config.py",
+      "sha256": "66102d642f49cc3a4a3da2e48115e7f2f7b4b56a2b959ced87102f336f965779",
+      "classes": [
+        {
+          "name": "RuntimeSettings",
+          "line": 204,
+          "end_line": 238,
+          "bases": [],
+          "fields": [
+            {
+              "name": "entry_scene",
+              "annotation": "str",
+              "default": "'data/scenes/main.relscene.json'",
+              "line": 205
+            },
+            {
+              "name": "fixed_step",
+              "annotation": "float",
+              "default": "1.0 / 60.0",
+              "line": 206
+            },
+            {
+              "name": "target_fps",
+              "annotation": "int",
+              "default": "60",
+              "line": 207
+            },
+            {
+              "name": "window_title",
+              "annotation": "str",
+              "default": "ENGINE_BRAND",
+              "line": 208
+            },
+            {
+              "name": "headless_default",
+              "annotation": "bool",
+              "default": "True",
+              "line": 209
+            },
+            {
+              "name": "deterministic_smoke_frames",
+              "annotation": "int",
+              "default": "180",
+              "line": 210
+            },
+            {
+              "name": "sample_name",
+              "annotation": "str",
+              "default": "''",
+              "line": 211
+            },
+            {
+              "name": "genre",
+              "annotation": "str",
+              "default": "'sandbox'",
+              "line": 212
+            }
+          ],
+          "methods": [
+            {
+              "name": "from_dict",
+              "arguments": "cls, payload: Dict[str, Any]",
+              "returns": "'RuntimeSettings'",
+              "line": 215
+            },
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 228
+            }
+          ]
+        },
+        {
+          "name": "Live2DSettings",
+          "line": 242,
+          "end_line": 270,
+          "bases": [],
+          "fields": [
+            {
+              "name": "enabled",
+              "annotation": "bool",
+              "default": "False",
+              "line": 243
+            },
+            {
+              "name": "renderer",
+              "annotation": "str",
+              "default": "'web'",
+              "line": 244
+            },
+            {
+              "name": "sdk_candidates",
+              "annotation": "list[str]",
+              "default": "field(default_factory=lambda : ['vendor/live2d/live2dcubismcore.min.js', 'web/vendor/live2d/live2dcubismcore.min.js'])",
+              "line": 245
+            },
+            {
+              "name": "manifest_path",
+              "annotation": "str",
+              "default": "'data/live2d/models.yaml'",
+              "line": 249
+            },
+            {
+              "name": "models_dir",
+              "annotation": "str",
+              "default": "'assets/live2d'",
+              "line": 250
+            }
+          ],
+          "methods": [
+            {
+              "name": "from_dict",
+              "arguments": "cls, payload: Dict[str, Any]",
+              "returns": "'Live2DSettings'",
+              "line": 253
+            },
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 263
+            }
+          ]
+        },
+        {
+          "name": "ModelingSettings",
+          "line": 274,
+          "end_line": 314,
+          "bases": [],
+          "fields": [
+            {
+              "name": "enabled",
+              "annotation": "bool",
+              "default": "False",
+              "line": 275
+            },
+            {
+              "name": "source_models_dir",
+              "annotation": "str",
+              "default": "'assets/models/source'",
+              "line": 276
+            },
+            {
+              "name": "runtime_models_dir",
+              "annotation": "str",
+              "default": "'assets/models/runtime'",
+              "line": 277
+            },
+            {
+              "name": "preview_dir",
+              "annotation": "str",
+              "default": "'playtest/renders/models'",
+              "line": 278
+            },
+            {
+              "name": "registry_path",
+              "annotation": "str",
+              "default": "'data/models/model_registry.yaml'",
+              "line": 279
+            },
+            {
+              "name": "pipeline_manifest_path",
+              "annotation": "str",
+              "default": "'data/models/pipeline.yaml'",
+              "line": 280
+            },
+            {
+              "name": "blockbench_executable",
+              "annotation": "str",
+              "default": "''",
+              "line": 281
+            },
+            {
+              "name": "ashfox_server_name",
+              "annotation": "str",
+              "default": "ASHFOX_MCP_SERVER_NAME",
+              "line": 282
+            },
+            {
+              "name": "ashfox_endpoint",
+              "annotation": "str",
+              "default": "ASHFOX_DEFAULT_ENDPOINT",
+              "line": 283
+            },
+            {
+              "name": "preferred_runtime_format",
+              "annotation": "str",
+              "default": "'glb'",
+              "line": 284
+            }
+          ],
+          "methods": [
+            {
+              "name": "from_dict",
+              "arguments": "cls, payload: Dict[str, Any]",
+              "returns": "'ModelingSettings'",
+              "line": 287
+            },
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 302
+            }
+          ]
+        },
+        {
+          "name": "EngineConfig",
+          "line": 318,
+          "end_line": 370,
+          "bases": [],
+          "fields": [
+            {
+              "name": "project_name",
+              "annotation": "str",
+              "default": null,
+              "line": 319
+            },
+            {
+              "name": "dimension",
+              "annotation": "str",
+              "default": null,
+              "line": 320
+            },
+            {
+              "name": "genre",
+              "annotation": "str",
+              "default": "'sandbox'",
+              "line": 321
+            },
+            {
+              "name": "engine_name",
+              "annotation": "str",
+              "default": "ENGINE_NAME",
+              "line": 322
+            },
+            {
+              "name": "modules",
+              "annotation": "list[str]",
+              "default": "field(default_factory=list)",
+              "line": 323
+            },
+            {
+              "name": "runtime",
+              "annotation": "RuntimeSettings",
+              "default": "field(default_factory=RuntimeSettings)",
+              "line": 324
+            },
+            {
+              "name": "live2d",
+              "annotation": "Live2DSettings",
+              "default": "field(default_factory=Live2DSettings)",
+              "line": 325
+            },
+            {
+              "name": "modeling",
+              "annotation": "ModelingSettings",
+              "default": "field(default_factory=ModelingSettings)",
+              "line": 326
+            },
+            {
+              "name": "capabilities",
+              "annotation": "Dict[str, Any]",
+              "default": "field(default_factory=dict)",
+              "line": 327
+            }
+          ],
+          "methods": [
+            {
+              "name": "from_dict",
+              "arguments": "cls, payload: Dict[str, Any]",
+              "returns": "'EngineConfig'",
+              "line": 330
+            },
+            {
+              "name": "to_dict",
+              "arguments": "self",
+              "returns": "Dict[str, Any]",
+              "line": 356
+            }
+          ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "ENGINE_BRAND",
+          "line": 14,
+          "expression": "'Reverie Engine'"
+        },
+        {
+          "name": "ENGINE_NAME",
+          "line": 15,
+          "expression": "'reverie_engine'"
+        },
+        {
+          "name": "ENGINE_ALIASES",
+          "line": 16,
+          "expression": "(ENGINE_NAME,)"
+        },
+        {
+          "name": "SUPPORTED_DIMENSIONS",
+          "line": 17,
+          "expression": "('2D', '2.5D', '3D')"
+        },
+        {
+          "name": "UNSUPPORTED_QUALITY_TIERS",
+          "line": 18,
+          "expression": "('aaa', '3a')"
+        },
+        {
+          "name": "GENRE_LIBRARY",
+          "line": 71,
+          "expression": "{'sandbox': {'label': 'Sandbox', 'modules': ['scene', 'physics', 'input', 'animation', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'platformer': {'label': 'Platformer', 'modules': ['scene', 'physics', 'input', 'animation', 'audio', 'ui', 'quests', 'telemetry', 'save_data'], 'supports_live2d': False}, 'adventure': {'label': 'Adventure', 'modules': ['scene', 'physics', 'input', 'dialogue', 'quests', 'ai', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'action_rpg': {'label': 'Action RPG', 'modules': ['scene', 'physics', 'input', 'combat', 'dialogue', 'quests', 'ai', 'inventory', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'galgame': {'label': 'Galgame', 'modules': ['scene', 'dialogue', 'timeline', 'ui', 'audio', 'localization', 'telemetry', 'save_data', 'live2d'], 'supports_live2d': True}, 'tower_defense': {'label': 'Tower Defense', 'modules': ['scene', 'physics', 'ai', 'tower_defense', 'ui', 'economy', 'audio', 'telemetry', 'save_data'], 'supports_live2d': False}, 'arena': {'label': 'Arena Combat', 'modules': ['scene', 'physics', 'input', 'combat', 'ai', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'card_game': {'label': 'Card and Deckbuilding', 'modules': ['scene', 'input', 'turns', 'cards', 'economy', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'fighting': {'label': 'Fighting', 'modules': ['scene', 'physics', 'input', 'combat', 'animation', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'horror': {'label': 'Horror', 'modules': ['scene', 'physics', 'input', 'ai', 'dialogue', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'idle': {'label': 'Idle and Incremental', 'modules': ['scene', 'economy', 'progression', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'management': {'label': 'Management', 'modules': ['scene', 'input', 'simulation', 'economy', 'ai', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'metroidvania': {'label': 'Metroidvania', 'modules': ['scene', 'physics', 'input', 'combat', 'quests', 'inventory', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'puzzle': {'label': 'Puzzle', 'modules': ['scene', 'input', 'rules', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'racing': {'label': 'Racing', 'modules': ['scene', 'physics', 'input', 'ai', 'progression', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'rhythm': {'label': 'Rhythm', 'modules': ['scene', 'input', 'timeline', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'roguelike': {'label': 'Roguelike', 'modules': ['scene', 'physics', 'input', 'combat', 'procedural', 'inventory', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'shooter': {'label': 'Shooter', 'modules': ['scene', 'physics', 'input', 'combat', 'ai', 'inventory', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'simulation': {'label': 'Simulation', 'modules': ['scene', 'physics', 'input', 'simulation', 'ai', 'economy', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'sports': {'label': 'Sports', 'modules': ['scene', 'physics', 'input', 'ai', 'rules', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'strategy': {'label': 'Strategy', 'modules': ['scene', 'input', 'ai', 'rules', 'economy', 'navigation', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'survival': {'label': 'Survival', 'modules': ['scene', 'physics', 'input', 'combat', 'ai', 'inventory', 'crafting', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}, 'tactics': {'label': 'Turn-based Tactics', 'modules': ['scene', 'input', 'turns', 'ai', 'rules', 'navigation', 'audio', 'ui', 'telemetry', 'save_data'], 'supports_live2d': False}}"
+        },
+        {
+          "name": "SAMPLE_TO_GENRE",
+          "line": 190,
+          "expression": "{'2d_platformer': 'platformer', 'iso_adventure': 'adventure', '2_5d_exploration': 'adventure', '3d_arena': 'arena', '3d_third_person': 'arena', 'topdown_action': 'action_rpg', 'galgame_live2d': 'galgame', 'galgame': 'galgame', 'tower_defense': 'tower_defense'}"
+        }
+      ],
+      "blob_sha1": "2c4e80bc88fbe915306058785c1bc622351ffc0b",
+      "bytes": 19648
+    },
+    {
+      "file": "ReverieCli-py/reverie/engine/schemas.py",
+      "sha256": "7500040a7ce17d6ffe0f26c64129e14017933aada18a664dcf77c633cab38e36",
+      "classes": [],
+      "constants": [
+        {
+          "name": "ENGINE_CONFIG_SCHEMA",
+          "line": 10,
+          "expression": "{'type': 'object', 'required': ['project', 'runtime', 'modules', 'capabilities', 'live2d', 'content'], 'properties': {'project': {'type': 'object', 'required': ['name', 'engine', 'dimension', 'genre', 'brand'], 'properties': {'name': {'type': 'string', 'min_length': 1}, 'engine': {'type': 'string', 'enum': list(ENGINE_ALIASES)}, 'dimension': {'type': 'string', 'enum': list(SUPPORTED_DIMENSIONS)}, 'genre': {'type': 'string', 'min_length': 1}, 'brand': {'type': 'string', 'const': ENGINE_BRAND}}}, 'runtime': {'type': 'object', 'required': ['entry_scene', 'fixed_step', 'target_fps', 'window_title', 'headless_default', 'deterministic_smoke_frames', 'sample_name', 'genre'], 'properties': {'entry_scene': {'type': 'string', 'min_length': 1}, 'fixed_step': {'type': 'number', 'minimum': 0.0001}, 'target_fps': {'type': 'integer', 'minimum': 1}, 'window_title': {'type': 'string', 'min_length': 1}, 'headless_default': {'type': 'boolean'}, 'deterministic_smoke_frames': {'type': 'integer', 'minimum': 1}, 'sample_name': {'type': 'string'}, 'genre': {'type': 'string', 'min_length': 1}}}, 'modules': {'type': 'array', 'min_items': 1, 'items': {'type': 'string', 'min_length': 1}}, 'capabilities': {'type': 'object', 'required': ['modules', 'supports_2d', 'supports_2_5d', 'supports_3d', 'supports_dialogue', 'supports_quests', 'supports_tower_defense', 'supports_live2d', 'supports_save_data', 'supports_ai_agents', 'supports_ui'], 'properties': {'modules': {'type': 'array', 'min_items': 1, 'items': {'type': 'string', 'min_length': 1}}, 'supports_2d': {'type': 'boolean'}, 'supports_2_5d': {'type': 'boolean'}, 'supports_3d': {'type': 'boolean'}, 'supports_dialogue': {'type': 'boolean'}, 'supports_quests': {'type': 'boolean'}, 'supports_tower_defense': {'type': 'boolean'}, 'supports_live2d': {'type': 'boolean'}, 'supports_save_data': {'type': 'boolean'}, 'supports_ai_agents': {'type': 'boolean'}, 'supports_ui': {'type': 'boolean'}, 'supports_model_pipeline': {'type': 'boolean'}, 'supports_ashfox_mcp': {'type': 'boolean'}}}, 'live2d': {'type': 'object', 'required': ['enabled', 'renderer', 'sdk_candidates', 'manifest_path', 'models_dir'], 'properties': {'enabled': {'type': 'boolean'}, 'renderer': {'type': 'string', 'enum': ['web', 'native', 'headless']}, 'sdk_candidates': {'type': 'array', 'min_items': 1, 'items': {'type': 'string', 'min_length': 1}}, 'manifest_path': {'type': 'string', 'min_length': 1}, 'models_dir': {'type': 'string', 'min_length': 1}}}, 'modeling': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}, 'source_models_dir': {'type': 'string', 'min_length': 1}, 'runtime_models_dir': {'type': 'string', 'min_length': 1}, 'preview_dir': {'type': 'string', 'min_length': 1}, 'registry_path': {'type': 'string', 'min_length': 1}, 'pipeline_manifest_path': {'type': 'string', 'min_length': 1}, 'blockbench_executable': {'type': 'string'}, 'ashfox_server_name': {'type': 'string', 'min_length': 1}, 'ashfox_endpoint': {'type': 'string', 'min_length': 1}, 'preferred_runtime_format': {'type': 'string', 'min_length': 1}}}, 'content': {'type': 'object', 'required': ['scene_format', 'prefab_format', 'config_format', 'data_driven', 'content_bundle_paths'], 'properties': {'scene_format': {'type': 'string', 'min_length': 1}, 'prefab_format': {'type': 'string', 'min_length': 1}, 'config_format': {'type': 'string', 'min_length': 1}, 'data_driven': {'type': 'boolean'}, 'content_bundle_paths': {'type': 'array', 'min_items': 1, 'items': {'type': 'string', 'min_length': 1}}}}}}"
+        },
+        {
+          "name": "GAMEPLAY_MANIFEST_SCHEMA",
+          "line": 137,
+          "expression": "{'type': 'object', 'required': ['project', 'dimension', 'genre', 'systems', 'economy'], 'properties': {'project': {'type': 'string', 'min_length': 1}, 'dimension': {'type': 'string', 'enum': list(SUPPORTED_DIMENSIONS)}, 'genre': {'type': 'string', 'min_length': 1}, 'systems': {'type': 'object', 'required': ['dialogue', 'quests', 'tower_defense', 'live2d'], 'properties': {'dialogue': {'type': 'boolean'}, 'quests': {'type': 'boolean'}, 'tower_defense': {'type': 'boolean'}, 'live2d': {'type': 'boolean'}}}, 'economy': {'type': 'object', 'required': ['starting_resources'], 'properties': {'starting_resources': {'type': 'object', 'required': ['gold', 'lives'], 'properties': {'gold': {'type': 'integer', 'minimum': 0}, 'lives': {'type': 'integer', 'minimum': 0}}}}}}}"
+        }
+      ],
+      "blob_sha1": "e10ff1934ff97ba6e71870bf0c77aeb019b60140",
+      "bytes": 10634
+    }
+  ],
+  "missing": [
+    "Runtime envelopes and schema rejection samples",
+    "Ordering, cancellation and recovery behavior",
+    "Final pure Python release identity"
+  ],
+  "source_commit": "070fa25b07692c90c56a6b00a9a969ff2abb7804",
+  "formal_baseline_frozen": false,
+  "static_declaration_origin_commit": "5725d076999a64a13f3d80b4235dc2d39b122022",
+  "origin_inventory_sha256": "c0033d2cbd2d03e8a54f156072aef1cf629c5d7a596c4cff1748057234277bce",
+  "source_snapshot_frozen": true,
+  "behavior_contracts_verified": false
+}

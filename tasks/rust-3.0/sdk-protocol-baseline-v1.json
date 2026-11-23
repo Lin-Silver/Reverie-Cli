@@ -1,0 +1,4606 @@
+{
+  "schema": "reverie.rust-migration.protocol-baseline.v1",
+  "source_commit": "070fa25b07692c90c56a6b00a9a969ff2abb7804",
+  "formal_baseline_frozen": false,
+  "scope": "Frozen final Python declarations; streaming, lifecycle and individual action runtime contracts remain unverified",
+  "counts": {
+    "python_dispatch": 109,
+    "desktop_response": 102,
+    "desktop_request": 102,
+    "union": 110,
+    "exported_types": 87
+  },
+  "discrepancies": [
+    {
+      "name": "callPluginTool",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "getRecovery",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "hello",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "inspectPlugin",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "listSessions",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "listSettings",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "releaseView",
+      "python": false,
+      "response": true,
+      "request": true
+    },
+    {
+      "name": "resolveComputerImage",
+      "python": true,
+      "response": false,
+      "request": false
+    },
+    {
+      "name": "shutdown",
+      "python": true,
+      "response": false,
+      "request": false
+    }
+  ],
+  "background_actions": [
+    "callViewTool",
+    "compactContext",
+    "indexWorkspace",
+    "resumePrompt",
+    "runPrompt",
+    "workspaceMentions",
+    "wstyleCommand"
+  ],
+  "actions": [
+    {
+      "name": "addCustomProvider",
+      "python_dispatch": {
+        "name": "addCustomProvider",
+        "dispatch_branches": [
+          {
+            "line": 1345,
+            "end_line": 1412,
+            "condition": "action in {'addCustomProvider', 'updateCustomProvider', 'deleteCustomProvider', 'refreshCustomProviderModels', 'selectCustomProviderModel'}"
+          },
+          {
+            "line": 1371,
+            "end_line": 1395,
+            "condition": "action == 'addCustomProvider'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "compact",
+          "contextLimit",
+          "model",
+          "modelId",
+          "patch",
+          "provider",
+          "providerId",
+          "reasoning",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "custom-provider.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 84,
+        "type": "custom-provider.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 159,
+        "declaration": "{ payload: { provider: { name: string; base_url: string; api_key: string; api_key_env?: string; format: string } }; response: CustomProviderEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "addStandardModel",
+      "python_dispatch": {
+        "name": "addStandardModel",
+        "dispatch_branches": [
+          {
+            "line": 1318,
+            "end_line": 1344,
+            "condition": "action in {'addStandardModel', 'updateStandardModel', 'deleteStandardModel'}"
+          },
+          {
+            "line": 1323,
+            "end_line": 1335,
+            "condition": "action == 'addStandardModel'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "index",
+          "model"
+        ],
+        "literal_response_types_observed": [
+          "standard-model.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 81,
+        "type": "standard-model.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 156,
+        "declaration": "{ payload: { model: Record<string, unknown> }; response: Envelope<\"standard-model.updated\", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioAcknowledgeSignal",
+      "python_dispatch": {
+        "name": "aioAcknowledgeSignal",
+        "dispatch_branches": [
+          {
+            "line": 927,
+            "end_line": 929,
+            "condition": "action == 'aioAcknowledgeSignal'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "aio.signal-state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 42,
+        "type": "aio.signal-state",
+        "required": [
+          "saved"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 83,
+        "declaration": "{payload:{assistantId:'aio';eventId:string};response:Envelope<'aio.signal-state',{saved:boolean}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioControl",
+      "python_dispatch": {
+        "name": "aioControl",
+        "dispatch_branches": [
+          {
+            "line": 909,
+            "end_line": 914,
+            "condition": "action == 'aioControl'"
+          }
+        ],
+        "payload_keys_observed": [
+          "changes",
+          "enable"
+        ],
+        "literal_response_types_observed": [
+          "aio.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 37,
+        "type": "aio.state",
+        "required": [
+          "aio"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 78,
+        "declaration": "{payload:{assistantId:'aio';enable?:boolean;changes?:{enabled?:boolean;proactive?:boolean;paused?:boolean}};response:Envelope<'aio.state',{aio:AiOState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioDecision",
+      "python_dispatch": {
+        "name": "aioDecision",
+        "dispatch_branches": [
+          {
+            "line": 920,
+            "end_line": 922,
+            "condition": "action == 'aioDecision'"
+          }
+        ],
+        "payload_keys_observed": [
+          "observation",
+          "urgent",
+          "workspaces"
+        ],
+        "literal_response_types_observed": [
+          "aio.decision"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 39,
+        "type": "aio.decision",
+        "required": [
+          "decision"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 80,
+        "declaration": "{payload:{assistantId:'aio';observation:Record<string,unknown>;workspaces:string[];urgent?:boolean};response:Envelope<'aio.decision',{decision:Record<string,unknown>}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioMemory",
+      "python_dispatch": {
+        "name": "aioMemory",
+        "dispatch_branches": [
+          {
+            "line": 948,
+            "end_line": 951,
+            "condition": "action == 'aioMemory'"
+          }
+        ],
+        "payload_keys_observed": [
+          "content",
+          "memoryId"
+        ],
+        "literal_response_types_observed": [
+          "aio.memory"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 48,
+        "type": "aio.memory",
+        "required": [
+          "memories"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 89,
+        "declaration": "{payload:{assistantId:'aio';memoryId?:string;content?:string};response:Envelope<'aio.memory',{memories:Record<string,unknown>[]}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioMessageState",
+      "python_dispatch": {
+        "name": "aioMessageState",
+        "dispatch_branches": [
+          {
+            "line": 934,
+            "end_line": 941,
+            "condition": "action == 'aioMessageState'"
+          }
+        ],
+        "payload_keys_observed": [
+          "messageId",
+          "state"
+        ],
+        "literal_response_types_observed": [
+          "aio.message-state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 45,
+        "type": "aio.message-state",
+        "required": [
+          "claimed"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 86,
+        "declaration": "{payload:{assistantId:'aio';messageId:string;state:string};response:Envelope<'aio.message-state',{claimed:boolean}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioMessages",
+      "python_dispatch": {
+        "name": "aioMessages",
+        "dispatch_branches": [
+          {
+            "line": 923,
+            "end_line": 924,
+            "condition": "action == 'aioMessages'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "aio.messages"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 40,
+        "type": "aio.messages",
+        "required": [
+          "messages"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 81,
+        "declaration": "{payload:{assistantId:'aio'};response:Envelope<'aio.messages',{messages:Record<string,unknown>[]}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioObserve",
+      "python_dispatch": {
+        "name": "aioObserve",
+        "dispatch_branches": [
+          {
+            "line": 915,
+            "end_line": 919,
+            "condition": "action == 'aioObserve'"
+          }
+        ],
+        "payload_keys_observed": [
+          "excludePids",
+          "idleSeconds"
+        ],
+        "literal_response_types_observed": [
+          "aio.observation"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 38,
+        "type": "aio.observation",
+        "required": [
+          "observation"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 79,
+        "declaration": "{payload:{assistantId:'aio';excludePids?:number[];idleSeconds?:number};response:Envelope<'aio.observation',{observation:Record<string,unknown>|null}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioPendingSignals",
+      "python_dispatch": {
+        "name": "aioPendingSignals",
+        "dispatch_branches": [
+          {
+            "line": 925,
+            "end_line": 926,
+            "condition": "action == 'aioPendingSignals'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "aio.signals"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 41,
+        "type": "aio.signals",
+        "required": [
+          "signals"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 82,
+        "declaration": "{payload:{assistantId:'aio'};response:Envelope<'aio.signals',{signals:Record<string,unknown>[]}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioPendingTasks",
+      "python_dispatch": {
+        "name": "aioPendingTasks",
+        "dispatch_branches": [
+          {
+            "line": 930,
+            "end_line": 931,
+            "condition": "action == 'aioPendingTasks'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "aio.tasks"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 43,
+        "type": "aio.tasks",
+        "required": [
+          "tasks"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 84,
+        "declaration": "{payload:{assistantId:'aio'};response:Envelope<'aio.tasks',{tasks:Record<string,unknown>[]}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioRecoverHost",
+      "python_dispatch": {
+        "name": "aioRecoverHost",
+        "dispatch_branches": [
+          {
+            "line": 932,
+            "end_line": 933,
+            "condition": "action == 'aioRecoverHost'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "aio.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 44,
+        "type": "aio.state",
+        "required": [
+          "aio"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 85,
+        "declaration": "{payload:{assistantId:'aio'};response:Envelope<'aio.state',{aio:AiOState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioReply",
+      "python_dispatch": {
+        "name": "aioReply",
+        "dispatch_branches": [
+          {
+            "line": 942,
+            "end_line": 944,
+            "condition": "action == 'aioReply'"
+          }
+        ],
+        "payload_keys_observed": [
+          "messageId",
+          "replyId",
+          "text"
+        ],
+        "literal_response_types_observed": [
+          "aio.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 46,
+        "type": "aio.state",
+        "required": [
+          "aio"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 87,
+        "declaration": "{payload:{assistantId:'aio';messageId:string;replyId:string;text:string};response:Envelope<'aio.state',{aio:AiOState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioState",
+      "python_dispatch": {
+        "name": "aioState",
+        "dispatch_branches": [
+          {
+            "line": 907,
+            "end_line": 908,
+            "condition": "action == 'aioState'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "aio.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 36,
+        "type": "aio.state",
+        "required": [
+          "aio"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 77,
+        "declaration": "{payload:{assistantId:'aio'};response:Envelope<'aio.state',{aio:AiOState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "aioTaskState",
+      "python_dispatch": {
+        "name": "aioTaskState",
+        "dispatch_branches": [
+          {
+            "line": 945,
+            "end_line": 947,
+            "condition": "action == 'aioTaskState'"
+          }
+        ],
+        "payload_keys_observed": [
+          "result",
+          "revision",
+          "state",
+          "taskId"
+        ],
+        "literal_response_types_observed": [
+          "aio.task-state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 47,
+        "type": "aio.task-state",
+        "required": [
+          "revision"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 88,
+        "declaration": "{payload:{assistantId:'aio';taskId:string;state:string;revision:number;result?:Record<string,unknown>};response:Envelope<'aio.task-state',{revision:number}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "archiveSession",
+      "python_dispatch": {
+        "name": "archiveSession",
+        "dispatch_branches": [
+          {
+            "line": 1430,
+            "end_line": 1433,
+            "condition": "action == 'archiveSession'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "sessions"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 29,
+        "type": "sessions",
+        "required": [
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 71,
+        "declaration": "{payload:{projectRoot:string;assistantId?:'aio';sessionId:string;revision:number;archived:boolean};response:Envelope<'sessions',{sessions:SessionListState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "callPluginTool",
+      "python_dispatch": {
+        "name": "callPluginTool",
+        "dispatch_branches": [
+          {
+            "line": 2077,
+            "end_line": 2099,
+            "condition": "action == 'callPluginTool'"
+          }
+        ],
+        "payload_keys_observed": [
+          "arguments",
+          "name",
+          "toolName"
+        ],
+        "literal_response_types_observed": [
+          "plugin.tool.result"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "callViewTool",
+      "python_dispatch": {
+        "name": "callViewTool",
+        "dispatch_branches": [
+          {
+            "line": 2165,
+            "end_line": 2169,
+            "condition": "action == 'callViewTool'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 112,
+        "type": "view.tool_result",
+        "required": [
+          "viewId",
+          "callId",
+          "status"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 187,
+        "declaration": "{\n    payload: { viewId: string; sessionId: string; revision: number; interactionId: string; toolName: string; arguments?: Record<string, unknown>; callId: string; source?: string };\n    response: Envelope<\"view.tool_result\", { viewId: string; callId: string; status: string; duplicate?: boolean; output?: string; error?: string; reason?: string; data?: Record<string, unknown>; source?: string }>;\n  };\n  /** RIU P2 untrusted model-context summary. Stored capped (MAX_VIEW_SUMMARY_BYTES) and tagged\n   *  untrusted-user-data, kept separate from the private setViewState display state and never\n   *  escalated to a system role. */"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "clearPinnedSkills",
+      "python_dispatch": {
+        "name": "clearPinnedSkills",
+        "dispatch_branches": [
+          {
+            "line": 1873,
+            "end_line": 1910,
+            "condition": "action in {'pinSkill', 'unpinSkill', 'clearPinnedSkills'}"
+          },
+          {
+            "line": 1884,
+            "end_line": 1898,
+            "condition": "action == 'clearPinnedSkills'"
+          }
+        ],
+        "payload_keys_observed": [
+          "draft",
+          "key",
+          "name",
+          "sessionId",
+          "skill"
+        ],
+        "literal_response_types_observed": [
+          "skill.pinned"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 96,
+        "type": "skill.pinned",
+        "required": [
+          "status",
+          "name",
+          "skills"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 171,
+        "declaration": "{ payload: {draft?:boolean}; response: SkillPinEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "compactContext",
+      "python_dispatch": {
+        "name": "compactContext",
+        "dispatch_branches": [
+          {
+            "line": 1170,
+            "end_line": 1215,
+            "condition": "action == 'compactContext'"
+          }
+        ],
+        "payload_keys_observed": [
+          "focus",
+          "projectRoot",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "context.compacted"
+        ],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 66,
+        "type": "context.compacted",
+        "required": [
+          "success",
+          "message",
+          "session",
+          "sessions",
+          "recovery",
+          "context_engine"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 135,
+        "declaration": "{\n    payload: { sessionId: string; focus?: string; projectRoot?: string };\n    response: Envelope<\"context.compacted\", { success: boolean; message: string; session: SessionState; sessions: SessionListState; recovery: RecoveryState; context_engine: NonNullable<WorkspaceState[\"context_engine\"]> }>;\n  }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "continuePrompt",
+      "python_dispatch": {
+        "name": "continuePrompt",
+        "dispatch_branches": [
+          {
+            "line": 1141,
+            "end_line": 1160,
+            "condition": "action in {'steerPrompt', 'stopPrompt', 'pausePrompt', 'continuePrompt'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "attachments",
+          "prompt",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "run.control"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 64,
+        "type": "run.control",
+        "required": [
+          "state",
+          "run_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 93,
+        "declaration": "{ payload: { sessionId: string; projectRoot?: string }; response: Envelope<\"run.control\", { state: string; run_id: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "createSession",
+      "python_dispatch": {
+        "name": "createSession",
+        "dispatch_branches": [
+          {
+            "line": 1516,
+            "end_line": 1541,
+            "condition": "action == 'createSession'"
+          }
+        ],
+        "payload_keys_observed": [
+          "name"
+        ],
+        "literal_response_types_observed": [
+          "session.created"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 59,
+        "type": "session.created",
+        "required": [
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 126,
+        "declaration": "{ payload: { name?: string }; response: Envelope<\"session.created\", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "deleteCustomProvider",
+      "python_dispatch": {
+        "name": "deleteCustomProvider",
+        "dispatch_branches": [
+          {
+            "line": 1345,
+            "end_line": 1412,
+            "condition": "action in {'addCustomProvider', 'updateCustomProvider', 'deleteCustomProvider', 'refreshCustomProviderModels', 'selectCustomProviderModel'}"
+          },
+          {
+            "line": 1383,
+            "end_line": 1395,
+            "condition": "action == 'deleteCustomProvider'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "compact",
+          "contextLimit",
+          "model",
+          "modelId",
+          "patch",
+          "provider",
+          "providerId",
+          "reasoning",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "custom-provider.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 86,
+        "type": "custom-provider.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 161,
+        "declaration": "{ payload: { providerId: string }; response: CustomProviderEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "deleteProjectData",
+      "python_dispatch": {
+        "name": "deleteProjectData",
+        "dispatch_branches": [
+          {
+            "line": 1658,
+            "end_line": 1684,
+            "condition": "action == 'deleteProjectData'"
+          }
+        ],
+        "payload_keys_observed": [
+          "confirmed",
+          "projectRoot"
+        ],
+        "literal_response_types_observed": [
+          "project.deleted"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 101,
+        "type": "project.deleted",
+        "required": [
+          "project_root",
+          "deleted_sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 176,
+        "declaration": "{ payload: { projectRoot: string; confirmed: true }; response: Envelope<\"project.deleted\", { project_root: string; project_data_dir: string; deleted_sessions: number; deleted: string[] }> };\n  /** RIU P1 view dereference. The renderer receives only the model-safe, path-free\n   *  reference: main.ts resolves the kernel's authoritative paths through the host\n   *  registrar (see electron/view-resolve.ts) and strips them before this crosses IPC. */"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "deleteSession",
+      "python_dispatch": {
+        "name": "deleteSession",
+        "dispatch_branches": [
+          {
+            "line": 1588,
+            "end_line": 1649,
+            "condition": "action in {'renameSession', 'deleteSession', 'forkSession', 'rewindSession'}"
+          },
+          {
+            "line": 1607,
+            "end_line": 1636,
+            "condition": "action == 'deleteSession'"
+          }
+        ],
+        "payload_keys_observed": [
+          "confirmed",
+          "id",
+          "messageCount",
+          "name",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "session.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 70,
+        "type": "session.updated",
+        "required": [
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 142,
+        "declaration": "{ payload: { sessionId: string; confirmed: true }; response: Envelope<\"session.updated\", { session: SessionState | null; sessions: SessionListState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "deleteSessions",
+      "python_dispatch": {
+        "name": "deleteSessions",
+        "dispatch_branches": [
+          {
+            "line": 1542,
+            "end_line": 1587,
+            "condition": "action == 'deleteSessions'"
+          }
+        ],
+        "payload_keys_observed": [
+          "confirmed",
+          "sessionIds"
+        ],
+        "literal_response_types_observed": [
+          "sessions.deleted"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 71,
+        "type": "sessions.deleted",
+        "required": [
+          "deleted_session_ids",
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 143,
+        "declaration": "{ payload: { sessionIds: string[]; confirmed: true }; response: Envelope<\"sessions.deleted\", { deleted_session_ids: string[]; session: SessionState | null; sessions: SessionListState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "deleteStandardModel",
+      "python_dispatch": {
+        "name": "deleteStandardModel",
+        "dispatch_branches": [
+          {
+            "line": 1318,
+            "end_line": 1344,
+            "condition": "action in {'addStandardModel', 'updateStandardModel', 'deleteStandardModel'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "index",
+          "model"
+        ],
+        "literal_response_types_observed": [
+          "standard-model.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 83,
+        "type": "standard-model.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 158,
+        "declaration": "{ payload: { index: number }; response: Envelope<\"standard-model.updated\", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "exportTokenStatistics",
+      "python_dispatch": {
+        "name": "exportTokenStatistics",
+        "dispatch_branches": [
+          {
+            "line": 1019,
+            "end_line": 1026,
+            "condition": "action in {'getTokenStatistics', 'exportTokenStatistics'}"
+          },
+          {
+            "line": 1024,
+            "end_line": 1025,
+            "condition": "action == 'exportTokenStatistics'"
+          }
+        ],
+        "payload_keys_observed": [
+          "filters"
+        ],
+        "literal_response_types_observed": [
+          "token.csv",
+          "token.statistics"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 53,
+        "type": "token.csv",
+        "required": [
+          "filename",
+          "content"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 147,
+        "declaration": "{ payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<\"token.csv\", { filename: string; content: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "forkSession",
+      "python_dispatch": {
+        "name": "forkSession",
+        "dispatch_branches": [
+          {
+            "line": 1588,
+            "end_line": 1649,
+            "condition": "action in {'renameSession', 'deleteSession', 'forkSession', 'rewindSession'}"
+          },
+          {
+            "line": 1617,
+            "end_line": 1636,
+            "condition": "action == 'forkSession'"
+          }
+        ],
+        "payload_keys_observed": [
+          "confirmed",
+          "id",
+          "messageCount",
+          "name",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "session.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 68,
+        "type": "session.updated",
+        "required": [
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 140,
+        "declaration": "{ payload: { sessionId: string; messageCount: number; name?: string }; response: Envelope<\"session.updated\", { session: SessionState; sessions: SessionListState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getContextStatus",
+      "python_dispatch": {
+        "name": "getContextStatus",
+        "dispatch_branches": [
+          {
+            "line": 1007,
+            "end_line": 1012,
+            "condition": "action == 'getContextStatus'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "context.status"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 50,
+        "type": "context.status",
+        "required": [
+          "context_engine"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 120,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"context.status\", { context_engine: NonNullable<WorkspaceState[\"context_engine\"]> }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getContextUsage",
+      "python_dispatch": {
+        "name": "getContextUsage",
+        "dispatch_branches": [
+          {
+            "line": 1027,
+            "end_line": 1090,
+            "condition": "action == 'getContextUsage'"
+          }
+        ],
+        "payload_keys_observed": [
+          "apiBaseline",
+          "attachments",
+          "draftText",
+          "liveAssistantText",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "context.usage"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 51,
+        "type": "context.usage",
+        "required": [
+          "usage"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 121,
+        "declaration": "{ payload: { sessionId?: string }; response: Envelope<\"context.usage\", { usage: ContextUsage | null }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getConversationConfig",
+      "python_dispatch": {
+        "name": "getConversationConfig",
+        "dispatch_branches": [
+          {
+            "line": 1461,
+            "end_line": 1496,
+            "condition": "action == 'getConversationConfig'"
+          }
+        ],
+        "payload_keys_observed": [
+          "configuration",
+          "executionConfiguration",
+          "revision",
+          "sessionId",
+          "summaryOnly"
+        ],
+        "literal_response_types_observed": [
+          "conversation.config"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 30,
+        "type": "conversation.config",
+        "required": [
+          "configuration",
+          "revision",
+          "error",
+          "models",
+          "workspace",
+          "settings"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 118,
+        "declaration": "{ payload: { sessionId: string; configuration?: Record<string, unknown>; revision?: number }; response: Envelope<\"conversation.config\", { configuration: Record<string, unknown>; revision: number; error: string; models: ModelSourcesState; workspace: WorkspaceState; settings: SettingsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getFileChanges",
+      "python_dispatch": {
+        "name": "getFileChanges",
+        "dispatch_branches": [
+          {
+            "line": 1738,
+            "end_line": 1744,
+            "condition": "action == 'getFileChanges'"
+          }
+        ],
+        "payload_keys_observed": [
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "file.changes"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 49,
+        "type": "file.changes",
+        "required": [
+          "session_id",
+          "changes"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 119,
+        "declaration": "{ payload: { sessionId: string }; response: Envelope<\"file.changes\", { session_id: string; changes: FileChange[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getImageModelSources",
+      "python_dispatch": {
+        "name": "getImageModelSources",
+        "dispatch_branches": [
+          {
+            "line": 1254,
+            "end_line": 1259,
+            "condition": "action in {'getImageModelSources', 'refreshImageModelSources'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "image-models"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 76,
+        "type": "image-models",
+        "required": [
+          "imageModels"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 151,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"image-models\", { imageModels: ImageModelSourcesState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getModelSources",
+      "python_dispatch": {
+        "name": "getModelSources",
+        "dispatch_branches": [
+          {
+            "line": 1216,
+            "end_line": 1224,
+            "condition": "action in {'getModelSources', 'refreshModelSources'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "models"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 73,
+        "type": "models",
+        "required": [
+          "models"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 145,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"models\", { models: ModelSourcesState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getRecovery",
+      "python_dispatch": {
+        "name": "getRecovery",
+        "dispatch_branches": [
+          {
+            "line": 1745,
+            "end_line": 1746,
+            "condition": "action == 'getRecovery'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "recovery"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getSession",
+      "python_dispatch": {
+        "name": "getSession",
+        "dispatch_branches": [
+          {
+            "line": 1434,
+            "end_line": 1454,
+            "condition": "action == 'getSession'"
+          }
+        ],
+        "payload_keys_observed": [
+          "before",
+          "id",
+          "limit",
+          "markRead",
+          "select",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "session"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 28,
+        "type": "session",
+        "required": [
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 117,
+        "declaration": "{ payload: { sessionId: string; before?: number; limit?: number; select?: boolean }; response: Envelope<\"session\", { session: SessionState; sessions: SessionListState; skills?: SkillsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getState",
+      "python_dispatch": {
+        "name": "getState",
+        "dispatch_branches": [
+          {
+            "line": 1001,
+            "end_line": 1006,
+            "condition": "action == 'getState'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 27,
+        "type": "state",
+        "required": [
+          "state"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 116,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"state\", { state: DesktopState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getSubagentRunLog",
+      "python_dispatch": {
+        "name": "getSubagentRunLog",
+        "dispatch_branches": [
+          {
+            "line": 1102,
+            "end_line": 1122,
+            "condition": "action == 'getSubagentRunLog'"
+          }
+        ],
+        "payload_keys_observed": [
+          "runId"
+        ],
+        "literal_response_types_observed": [
+          "subagent.log"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 58,
+        "type": "subagent.log",
+        "required": [
+          "run_id",
+          "log"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 125,
+        "declaration": "{ payload: { runId: string }; response: Envelope<\"subagent.log\", { run_id: string; log: SubagentRunLog }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getSubagents",
+      "python_dispatch": {
+        "name": "getSubagents",
+        "dispatch_branches": [
+          {
+            "line": 1091,
+            "end_line": 1101,
+            "condition": "action == 'getSubagents'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "subagents"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 57,
+        "type": "subagents",
+        "required": [
+          "subagents"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 124,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"subagents\", { subagents: SubagentsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getTokenStatistics",
+      "python_dispatch": {
+        "name": "getTokenStatistics",
+        "dispatch_branches": [
+          {
+            "line": 1019,
+            "end_line": 1026,
+            "condition": "action in {'getTokenStatistics', 'exportTokenStatistics'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "filters"
+        ],
+        "literal_response_types_observed": [
+          "token.csv",
+          "token.statistics"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 52,
+        "type": "token.statistics",
+        "required": [
+          "statistics"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 146,
+        "declaration": "{ payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<\"token.statistics\", { statistics: TokenStatisticsData }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getView",
+      "python_dispatch": {
+        "name": "getView",
+        "dispatch_branches": [
+          {
+            "line": 2100,
+            "end_line": 2145,
+            "condition": "action == 'getView'"
+          }
+        ],
+        "payload_keys_observed": [
+          "revision",
+          "sessionId",
+          "viewId"
+        ],
+        "literal_response_types_observed": [
+          "view.resolved"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 106,
+        "type": "view.resolved",
+        "required": [
+          "view"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 180,
+        "declaration": "{ payload: { viewId: string; sessionId?: string; revision?: number }; response: Envelope<\"view.resolved\", { view: ResolvedViewRef }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "getWorkspaceConfig",
+      "python_dispatch": {
+        "name": "getWorkspaceConfig",
+        "dispatch_branches": [
+          {
+            "line": 1455,
+            "end_line": 1460,
+            "condition": "action == 'getWorkspaceConfig'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "workspace.config"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 31,
+        "type": "workspace.config",
+        "required": [
+          "models",
+          "workspace",
+          "settings"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 72,
+        "declaration": "{payload:{projectRoot:string};response:Envelope<'workspace.config',{models:ModelSourcesState;workspace:WorkspaceState;settings:SettingsState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "hello",
+      "python_dispatch": {
+        "name": "hello",
+        "dispatch_branches": [
+          {
+            "line": 968,
+            "end_line": 979,
+            "condition": "action == 'hello'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "ready"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "indexWorkspace",
+      "python_dispatch": {
+        "name": "indexWorkspace",
+        "dispatch_branches": [
+          {
+            "line": 1730,
+            "end_line": 1737,
+            "condition": "action == 'indexWorkspace'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "workspace.indexed"
+        ],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 98,
+        "type": "workspace.indexed",
+        "required": [
+          "result",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 173,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"workspace.indexed\", { result: Record<string, unknown>; workspace: WorkspaceState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "initialize",
+      "python_dispatch": {
+        "name": "initialize",
+        "dispatch_branches": [
+          {
+            "line": 980,
+            "end_line": 1000,
+            "condition": "action == 'initialize'"
+          }
+        ],
+        "payload_keys_observed": [
+          "deferPayloads",
+          "executionRoot",
+          "prepareModel",
+          "projectRoot"
+        ],
+        "literal_response_types_observed": [
+          "state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 26,
+        "type": "state",
+        "required": [
+          "state"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 115,
+        "declaration": "{ payload: { projectRoot: string; deferPayloads?: boolean }; response: Envelope<\"state\", { state: DesktopState; deferred?: boolean }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "inspectPlugin",
+      "python_dispatch": {
+        "name": "inspectPlugin",
+        "dispatch_branches": [
+          {
+            "line": 1858,
+            "end_line": 1866,
+            "condition": "action == 'inspectPlugin'"
+          }
+        ],
+        "payload_keys_observed": [
+          "id",
+          "pluginId"
+        ],
+        "literal_response_types_observed": [
+          "plugin.inspect"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "inspectSkill",
+      "python_dispatch": {
+        "name": "inspectSkill",
+        "dispatch_branches": [
+          {
+            "line": 1911,
+            "end_line": 1925,
+            "condition": "action == 'inspectSkill'"
+          }
+        ],
+        "payload_keys_observed": [
+          "key",
+          "name",
+          "skill"
+        ],
+        "literal_response_types_observed": [
+          "skill.inspect"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 97,
+        "type": "skill.inspect",
+        "required": [
+          "record"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 172,
+        "declaration": "{ payload: { skill: string }; response: Envelope<\"skill.inspect\", { record: SkillDetail | null }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listApiKeyEnvironmentVariables",
+      "python_dispatch": {
+        "name": "listApiKeyEnvironmentVariables",
+        "dispatch_branches": [
+          {
+            "line": 1277,
+            "end_line": 1279,
+            "condition": "action == 'listApiKeyEnvironmentVariables'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "provider.environment"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 56,
+        "type": "provider.environment",
+        "required": [
+          "names"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 123,
+        "declaration": "{ payload: Record<string, never>; response: Envelope<\"provider.environment\", { names: string[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listCommands",
+      "python_dispatch": {
+        "name": "listCommands",
+        "dispatch_branches": [
+          {
+            "line": 1685,
+            "end_line": 1686,
+            "condition": "action == 'listCommands'"
+          }
+        ],
+        "payload_keys_observed": [
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "commands"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 5,
+        "type": "commands",
+        "required": [
+          "commands"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 70,
+        "declaration": "{payload:EmptyPayload;response:Envelope<'commands',{commands:CommandsState}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listConversationRuns",
+      "python_dispatch": {
+        "name": "listConversationRuns",
+        "dispatch_branches": [
+          {
+            "line": 1497,
+            "end_line": 1515,
+            "condition": "action in {'queueConversationRun', 'updateConversationRun', 'listConversationRuns', 'recoverConversationRuns'}"
+          },
+          {
+            "line": 1504,
+            "end_line": 1505,
+            "condition": "action == 'listConversationRuns'"
+          }
+        ],
+        "payload_keys_observed": [
+          "executionRoot",
+          "request",
+          "result",
+          "runId",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "conversation.run",
+          "conversation.runs"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 34,
+        "type": "conversation.runs",
+        "required": [
+          "runs"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 75,
+        "declaration": "{payload:{projectRoot:string;sessionId:string;assistantId?:'aio'};response:Envelope<'conversation.runs',{runs:Record<string,unknown>[]}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listPlugins",
+      "python_dispatch": {
+        "name": "listPlugins",
+        "dispatch_branches": [
+          {
+            "line": 1814,
+            "end_line": 1819,
+            "condition": "action in {'listPlugins', 'refreshPlugins'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "plugins"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 8,
+        "type": "plugins",
+        "required": [
+          "plugins"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 96,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"plugins\", { plugins: PluginsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listSessions",
+      "python_dispatch": {
+        "name": "listSessions",
+        "dispatch_branches": [
+          {
+            "line": 1428,
+            "end_line": 1429,
+            "condition": "action == 'listSessions'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "sessions"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listSettings",
+      "python_dispatch": {
+        "name": "listSettings",
+        "dispatch_branches": [
+          {
+            "line": 1765,
+            "end_line": 1766,
+            "condition": "action == 'listSettings'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "settings"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listSkills",
+      "python_dispatch": {
+        "name": "listSkills",
+        "dispatch_branches": [
+          {
+            "line": 1867,
+            "end_line": 1872,
+            "condition": "action in {'listSkills', 'refreshSkills'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "skills"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 7,
+        "type": "skills",
+        "required": [
+          "skills"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 95,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"skills\", { skills: SkillsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "listTools",
+      "python_dispatch": {
+        "name": "listTools",
+        "dispatch_branches": [
+          {
+            "line": 1926,
+            "end_line": 1934,
+            "condition": "action == 'listTools'"
+          }
+        ],
+        "payload_keys_observed": [
+          "mode"
+        ],
+        "literal_response_types_observed": [
+          "tools"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 6,
+        "type": "tools",
+        "required": [
+          "tools"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 94,
+        "declaration": "{ payload: { mode: string }; response: Envelope<\"tools\", { mode: string; tools: ToolRecord[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "pausePrompt",
+      "python_dispatch": {
+        "name": "pausePrompt",
+        "dispatch_branches": [
+          {
+            "line": 1141,
+            "end_line": 1160,
+            "condition": "action in {'steerPrompt', 'stopPrompt', 'pausePrompt', 'continuePrompt'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "attachments",
+          "prompt",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "run.control"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 63,
+        "type": "run.control",
+        "required": [
+          "state",
+          "run_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 92,
+        "declaration": "{ payload: { sessionId: string; projectRoot?: string }; response: Envelope<\"run.control\", { state: string; run_id: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "pinSkill",
+      "python_dispatch": {
+        "name": "pinSkill",
+        "dispatch_branches": [
+          {
+            "line": 1873,
+            "end_line": 1910,
+            "condition": "action in {'pinSkill', 'unpinSkill', 'clearPinnedSkills'}"
+          },
+          {
+            "line": 1890,
+            "end_line": 1893,
+            "condition": "action == 'pinSkill'"
+          }
+        ],
+        "payload_keys_observed": [
+          "draft",
+          "key",
+          "name",
+          "sessionId",
+          "skill"
+        ],
+        "literal_response_types_observed": [
+          "skill.pinned"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 94,
+        "type": "skill.pinned",
+        "required": [
+          "status",
+          "name",
+          "skills"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 169,
+        "declaration": "{ payload: { skill: string; draft?:boolean }; response: SkillPinEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "probeProviders",
+      "python_dispatch": {
+        "name": "probeProviders",
+        "dispatch_branches": [
+          {
+            "line": 1413,
+            "end_line": 1427,
+            "condition": "action == 'probeProviders'"
+          }
+        ],
+        "payload_keys_observed": [
+          "keys"
+        ],
+        "literal_response_types_observed": [
+          "providers.probed"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 89,
+        "type": "providers.probed",
+        "required": [
+          "probes"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 164,
+        "declaration": "{ payload: { keys?: string[] }; response: Envelope<\"providers.probed\", { probes: ProviderProbe[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "queueConversationRun",
+      "python_dispatch": {
+        "name": "queueConversationRun",
+        "dispatch_branches": [
+          {
+            "line": 1497,
+            "end_line": 1515,
+            "condition": "action in {'queueConversationRun', 'updateConversationRun', 'listConversationRuns', 'recoverConversationRuns'}"
+          },
+          {
+            "line": 1509,
+            "end_line": 1514,
+            "condition": "action == 'queueConversationRun'"
+          }
+        ],
+        "payload_keys_observed": [
+          "executionRoot",
+          "request",
+          "result",
+          "runId",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "conversation.run",
+          "conversation.runs"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 32,
+        "type": "conversation.run",
+        "required": [
+          "revision"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 73,
+        "declaration": "{payload:{projectRoot:string;sessionId:string;assistantId?:'aio';runId:string;configuration:Record<string,unknown>;configurationRevision:number;executionRoot?:string};response:Envelope<'conversation.run',{revision:number}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsAddEngine",
+      "python_dispatch": {
+        "name": "ratsAddEngine",
+        "dispatch_branches": [
+          {
+            "line": 1963,
+            "end_line": 1973,
+            "condition": "action in {'ratsRegisterProvider', 'ratsAddEngine'}"
+          },
+          {
+            "line": 1968,
+            "end_line": 1972,
+            "condition": "action == 'ratsAddEngine'"
+          }
+        ],
+        "payload_keys_observed": [
+          "executable",
+          "providerId"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 16,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 105,
+        "declaration": "{ payload: { executable: string }; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsDefineCustomProvider",
+      "python_dispatch": {
+        "name": "ratsDefineCustomProvider",
+        "dispatch_branches": [
+          {
+            "line": 1945,
+            "end_line": 1956,
+            "condition": "action == 'ratsDefineCustomProvider'"
+          }
+        ],
+        "payload_keys_observed": [
+          "definition"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 11,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 100,
+        "declaration": "{ payload: { definition: Record<string, unknown> }; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsDescribe",
+      "python_dispatch": {
+        "name": "ratsDescribe",
+        "dispatch_branches": [
+          {
+            "line": 2065,
+            "end_line": 2076,
+            "condition": "action == 'ratsDescribe'"
+          }
+        ],
+        "payload_keys_observed": [
+          "names",
+          "providerId",
+          "serviceId"
+        ],
+        "literal_response_types_observed": [
+          "rats.definitions"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 19,
+        "type": "rats.definitions",
+        "required": [
+          "definitions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 108,
+        "declaration": "{ payload: { providerId?: string; serviceId: string; names: string[] }; response: Envelope<\"rats.definitions\", { provider_id?: string; service_id: string; definitions: Record<string, unknown>[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsRegisterProvider",
+      "python_dispatch": {
+        "name": "ratsRegisterProvider",
+        "dispatch_branches": [
+          {
+            "line": 1963,
+            "end_line": 1973,
+            "condition": "action in {'ratsRegisterProvider', 'ratsAddEngine'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "executable",
+          "providerId"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 13,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 102,
+        "declaration": "{ payload: { providerId: string; executable: string }; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsRemoveCustomProvider",
+      "python_dispatch": {
+        "name": "ratsRemoveCustomProvider",
+        "dispatch_branches": [
+          {
+            "line": 1957,
+            "end_line": 1962,
+            "condition": "action == 'ratsRemoveCustomProvider'"
+          }
+        ],
+        "payload_keys_observed": [
+          "providerId"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 12,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 101,
+        "declaration": "{ payload: { providerId: string }; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsRemoveRoot",
+      "python_dispatch": {
+        "name": "ratsRemoveRoot",
+        "dispatch_branches": [
+          {
+            "line": 1974,
+            "end_line": 1979,
+            "condition": "action == 'ratsRemoveRoot'"
+          }
+        ],
+        "payload_keys_observed": [
+          "root"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 17,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 106,
+        "declaration": "{ payload: { root: string }; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsSetEnabled",
+      "python_dispatch": {
+        "name": "ratsSetEnabled",
+        "dispatch_branches": [
+          {
+            "line": 1980,
+            "end_line": 1996,
+            "condition": "action in {'ratsSetProviderEnabled', 'ratsSetEnabled'}"
+          },
+          {
+            "line": 1986,
+            "end_line": 1995,
+            "condition": "action == 'ratsSetEnabled'"
+          }
+        ],
+        "payload_keys_observed": [
+          "enabled",
+          "executable",
+          "permissions",
+          "providerId"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 18,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 107,
+        "declaration": "{ payload: { executable: string; enabled: boolean; permissions: string[] }; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsSetProviderEnabled",
+      "python_dispatch": {
+        "name": "ratsSetProviderEnabled",
+        "dispatch_branches": [
+          {
+            "line": 1980,
+            "end_line": 1996,
+            "condition": "action in {'ratsSetProviderEnabled', 'ratsSetEnabled'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "enabled",
+          "executable",
+          "permissions",
+          "providerId"
+        ],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 14,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 103,
+        "declaration": "{ payload: { providerId: string; executable: string; enabled: boolean; permissions: string[] }; response: Envelope<\"rats.state\", { rats: RatsState }> };\n  // Deprecated aliases retained for packaged Desktop/Core compatibility."
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsState",
+      "python_dispatch": {
+        "name": "ratsState",
+        "dispatch_branches": [
+          {
+            "line": 1939,
+            "end_line": 1940,
+            "condition": "action == 'ratsState'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 9,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 97,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"rats.state\", { rats: RatsState }> };\n  /** The last scan, without walking the discovery roots again. `ratsState` is the rescan. */"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsStateCached",
+      "python_dispatch": {
+        "name": "ratsStateCached",
+        "dispatch_branches": [
+          {
+            "line": 1941,
+            "end_line": 1944,
+            "condition": "action == 'ratsStateCached'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "rats.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 10,
+        "type": "rats.state",
+        "required": [
+          "rats"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 99,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"rats.state\", { rats: RatsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsTaskCancel",
+      "python_dispatch": {
+        "name": "ratsTaskCancel",
+        "dispatch_branches": [
+          {
+            "line": 2037,
+            "end_line": 2049,
+            "condition": "action == 'ratsTaskCancel'"
+          }
+        ],
+        "payload_keys_observed": [
+          "deadlineMs",
+          "providerId",
+          "serviceId",
+          "taskId"
+        ],
+        "literal_response_types_observed": [
+          "rats.task.cancelled"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 23,
+        "type": "rats.task.cancelled",
+        "required": [
+          "result",
+          "task_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 112,
+        "declaration": "{ payload: { providerId?: string; serviceId: string; taskId: string; deadlineMs?: number }; response: Envelope<\"rats.task.cancelled\", { service_id: string; task_id: string; result: Record<string, unknown> }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsTaskEvents",
+      "python_dispatch": {
+        "name": "ratsTaskEvents",
+        "dispatch_branches": [
+          {
+            "line": 2021,
+            "end_line": 2036,
+            "condition": "action == 'ratsTaskEvents'"
+          }
+        ],
+        "payload_keys_observed": [
+          "cursor",
+          "deadlineMs",
+          "limit",
+          "providerId",
+          "serviceId",
+          "taskId"
+        ],
+        "literal_response_types_observed": [
+          "rats.task.events"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 22,
+        "type": "rats.task.events",
+        "required": [
+          "result",
+          "task_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 111,
+        "declaration": "{ payload: { providerId?: string; serviceId: string; taskId: string; cursor?: number; limit?: number; deadlineMs?: number }; response: Envelope<\"rats.task.events\", { service_id: string; task_id: string; result: Record<string, unknown> }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsTaskLogs",
+      "python_dispatch": {
+        "name": "ratsTaskLogs",
+        "dispatch_branches": [
+          {
+            "line": 2050,
+            "end_line": 2064,
+            "condition": "action == 'ratsTaskLogs'"
+          }
+        ],
+        "payload_keys_observed": [
+          "cursor",
+          "deadlineMs",
+          "limit",
+          "providerId",
+          "serviceId",
+          "taskId"
+        ],
+        "literal_response_types_observed": [
+          "rats.task.logs"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 24,
+        "type": "rats.task.logs",
+        "required": [
+          "result",
+          "task_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 113,
+        "declaration": "{ payload: { providerId?: string; serviceId: string; taskId: string; cursor?: number; limit?: number; deadlineMs?: number }; response: Envelope<\"rats.task.logs\", { service_id: string; task_id: string; result: Record<string, unknown> }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsTaskStatus",
+      "python_dispatch": {
+        "name": "ratsTaskStatus",
+        "dispatch_branches": [
+          {
+            "line": 2008,
+            "end_line": 2020,
+            "condition": "action == 'ratsTaskStatus'"
+          }
+        ],
+        "payload_keys_observed": [
+          "deadlineMs",
+          "providerId",
+          "serviceId",
+          "taskId"
+        ],
+        "literal_response_types_observed": [
+          "rats.task.status"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 21,
+        "type": "rats.task.status",
+        "required": [
+          "result",
+          "task_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 110,
+        "declaration": "{ payload: { providerId?: string; serviceId: string; taskId: string; deadlineMs?: number }; response: Envelope<\"rats.task.status\", { service_id: string; task_id: string; result: Record<string, unknown> }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "ratsTasks",
+      "python_dispatch": {
+        "name": "ratsTasks",
+        "dispatch_branches": [
+          {
+            "line": 1997,
+            "end_line": 2007,
+            "condition": "action == 'ratsTasks'"
+          }
+        ],
+        "payload_keys_observed": [
+          "providerId",
+          "serviceId"
+        ],
+        "literal_response_types_observed": [
+          "rats.tasks"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 20,
+        "type": "rats.tasks",
+        "required": [
+          "tasks"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 109,
+        "declaration": "{ payload: { providerId?: string; serviceId?: string }; response: Envelope<\"rats.tasks\", { provider_id?: string; service_id?: string; tasks: Record<string, unknown>[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "recoverConversationRuns",
+      "python_dispatch": {
+        "name": "recoverConversationRuns",
+        "dispatch_branches": [
+          {
+            "line": 1497,
+            "end_line": 1515,
+            "condition": "action in {'queueConversationRun', 'updateConversationRun', 'listConversationRuns', 'recoverConversationRuns'}"
+          },
+          {
+            "line": 1502,
+            "end_line": 1503,
+            "condition": "action == 'recoverConversationRuns'"
+          }
+        ],
+        "payload_keys_observed": [
+          "executionRoot",
+          "request",
+          "result",
+          "runId",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "conversation.run",
+          "conversation.runs"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 35,
+        "type": "conversation.runs",
+        "required": [
+          "runs"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 76,
+        "declaration": "{payload:{projectRoot:string};response:Envelope<'conversation.runs',{runs:Record<string,unknown>[]}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "refreshCustomProviderModels",
+      "python_dispatch": {
+        "name": "refreshCustomProviderModels",
+        "dispatch_branches": [
+          {
+            "line": 1345,
+            "end_line": 1412,
+            "condition": "action in {'addCustomProvider', 'updateCustomProvider', 'deleteCustomProvider', 'refreshCustomProviderModels', 'selectCustomProviderModel'}"
+          },
+          {
+            "line": 1385,
+            "end_line": 1395,
+            "condition": "action == 'refreshCustomProviderModels'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "compact",
+          "contextLimit",
+          "model",
+          "modelId",
+          "patch",
+          "provider",
+          "providerId",
+          "reasoning",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "custom-provider.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 87,
+        "type": "custom-provider.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 162,
+        "declaration": "{ payload: { providerId: string }; response: CustomProviderEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "refreshImageModelSources",
+      "python_dispatch": {
+        "name": "refreshImageModelSources",
+        "dispatch_branches": [
+          {
+            "line": 1254,
+            "end_line": 1259,
+            "condition": "action in {'getImageModelSources', 'refreshImageModelSources'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "image-models"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 77,
+        "type": "image-models",
+        "required": [
+          "imageModels"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 152,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"image-models\", { imageModels: ImageModelSourcesState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "refreshModelSources",
+      "python_dispatch": {
+        "name": "refreshModelSources",
+        "dispatch_branches": [
+          {
+            "line": 1216,
+            "end_line": 1224,
+            "condition": "action in {'getModelSources', 'refreshModelSources'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "models"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 74,
+        "type": "models",
+        "required": [
+          "models"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 149,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"models\", { models: ModelSourcesState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "refreshPlugins",
+      "python_dispatch": {
+        "name": "refreshPlugins",
+        "dispatch_branches": [
+          {
+            "line": 1814,
+            "end_line": 1819,
+            "condition": "action in {'listPlugins', 'refreshPlugins'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "plugins"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 92,
+        "type": "plugins",
+        "required": [
+          "plugins"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 167,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"plugins\", { plugins: PluginsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "refreshSkills",
+      "python_dispatch": {
+        "name": "refreshSkills",
+        "dispatch_branches": [
+          {
+            "line": 1867,
+            "end_line": 1872,
+            "condition": "action in {'listSkills', 'refreshSkills'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "skills"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 93,
+        "type": "skills",
+        "required": [
+          "skills"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 168,
+        "declaration": "{ payload: EmptyPayload; response: Envelope<\"skills\", { skills: SkillsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "releaseView",
+      "python_dispatch": null,
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 114,
+        "type": "view.released",
+        "required": []
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 195,
+        "declaration": "{ payload: { interactionId: string }; response: Envelope<\"view.released\", Record<string, never>> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "renameSession",
+      "python_dispatch": {
+        "name": "renameSession",
+        "dispatch_branches": [
+          {
+            "line": 1588,
+            "end_line": 1649,
+            "condition": "action in {'renameSession', 'deleteSession', 'forkSession', 'rewindSession'}"
+          },
+          {
+            "line": 1598,
+            "end_line": 1636,
+            "condition": "action == 'renameSession'"
+          }
+        ],
+        "payload_keys_observed": [
+          "confirmed",
+          "id",
+          "messageCount",
+          "name",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "session.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 67,
+        "type": "session.updated",
+        "required": [
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 139,
+        "declaration": "{ payload: { sessionId: string; name: string }; response: Envelope<\"session.updated\", { session: SessionState | null; updated_session?: SessionState | null; sessions: SessionListState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "resolveApproval",
+      "python_dispatch": {
+        "name": "resolveApproval",
+        "dispatch_branches": [
+          {
+            "line": 1123,
+            "end_line": 1140,
+            "condition": "action == 'resolveApproval'"
+          }
+        ],
+        "payload_keys_observed": [
+          "approvalId",
+          "decision",
+          "id",
+          "message",
+          "projectRoot",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "approval.resolved"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 72,
+        "type": "approval.resolved",
+        "required": [
+          "approval_id",
+          "decision"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 144,
+        "declaration": "{ payload: { approvalId: unknown; sessionId?: string; projectRoot?: string; decision: ApprovalDecision; message?: string }; response: Envelope<\"approval.resolved\", { approval_id: string; decision: ApprovalDecision }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "resolveComputerImage",
+      "python_dispatch": {
+        "name": "resolveComputerImage",
+        "dispatch_branches": [
+          {
+            "line": 1935,
+            "end_line": 1938,
+            "condition": "action == 'resolveComputerImage'"
+          }
+        ],
+        "payload_keys_observed": [
+          "file",
+          "projectRoot"
+        ],
+        "literal_response_types_observed": [
+          "computer.image"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "resumePrompt",
+      "python_dispatch": {
+        "name": "resumePrompt",
+        "dispatch_branches": [
+          {
+            "line": 1161,
+            "end_line": 1169,
+            "condition": "action in {'runPrompt', 'resumePrompt'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 65,
+        "type": "prompt.result",
+        "required": [
+          "result",
+          "sessions",
+          "recovery"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 131,
+        "declaration": "{\n    payload: { sessionId: string; mode?: string; configuration?: Record<string, unknown>; stream?: boolean };\n    response: Envelope<\"prompt.result\", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;\n  }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "revealProviderSecret",
+      "python_dispatch": {
+        "name": "revealProviderSecret",
+        "dispatch_branches": [
+          {
+            "line": 1281,
+            "end_line": 1298,
+            "condition": "action == 'revealProviderSecret'"
+          }
+        ],
+        "payload_keys_observed": [
+          "field",
+          "index",
+          "kind",
+          "provider",
+          "providerId",
+          "source"
+        ],
+        "literal_response_types_observed": [
+          "provider.secret"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 55,
+        "type": "provider.secret",
+        "required": [
+          "value"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 122,
+        "declaration": "{ payload: { kind: \"provider\" | \"standard\" | \"custom\"; field?: string; source?: string; index?: number; providerId?: string }; response: Envelope<\"provider.secret\", { value: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "rewindSession",
+      "python_dispatch": {
+        "name": "rewindSession",
+        "dispatch_branches": [
+          {
+            "line": 1588,
+            "end_line": 1649,
+            "condition": "action in {'renameSession', 'deleteSession', 'forkSession', 'rewindSession'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "confirmed",
+          "id",
+          "messageCount",
+          "name",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "session.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 69,
+        "type": "session.updated",
+        "required": [
+          "session",
+          "sessions"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 141,
+        "declaration": "{ payload: { sessionId: string; messageCount: number; confirmed: true }; response: Envelope<\"session.updated\", { session: SessionState; sessions: SessionListState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "rollbackCheckpoint",
+      "python_dispatch": {
+        "name": "rollbackCheckpoint",
+        "dispatch_branches": [
+          {
+            "line": 1747,
+            "end_line": 1764,
+            "condition": "action == 'rollbackCheckpoint'"
+          }
+        ],
+        "payload_keys_observed": [
+          "checkpointId",
+          "confirmed"
+        ],
+        "literal_response_types_observed": [
+          "rollback.result"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 99,
+        "type": "rollback.result",
+        "required": [
+          "result",
+          "recovery"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 174,
+        "declaration": "{ payload: { checkpointId: string; confirmed: true }; response: Envelope<\"rollback.result\", { result: Record<string, unknown>; recovery: RecoveryState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "runPrompt",
+      "python_dispatch": {
+        "name": "runPrompt",
+        "dispatch_branches": [
+          {
+            "line": 1161,
+            "end_line": 1169,
+            "condition": "action in {'runPrompt', 'resumePrompt'}"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 60,
+        "type": "prompt.result",
+        "required": [
+          "result",
+          "sessions",
+          "recovery"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 127,
+        "declaration": "{\n    payload: { prompt: string; sessionId: string; mode?: string; configuration?: Record<string, unknown>; stream?: boolean; projectRoot?: string; noIndex?: boolean; freshSession?: boolean; source?: string; model?: string; reasoning?: string; attachments?: ComposerAttachment[]; runId?: string; runType?: \"prompt\" | \"review\"; goalContext?: string };\n    response: Envelope<\"prompt.result\", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;\n  }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "searchSessions",
+      "python_dispatch": {
+        "name": "searchSessions",
+        "dispatch_branches": [
+          {
+            "line": 1650,
+            "end_line": 1657,
+            "condition": "action == 'searchSessions'"
+          }
+        ],
+        "payload_keys_observed": [
+          "limit",
+          "offset",
+          "query"
+        ],
+        "literal_response_types_observed": [
+          "session.search"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 25,
+        "type": "session.search",
+        "required": [
+          "results"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 114,
+        "declaration": "{ payload: { query: string }; response: Envelope<\"session.search\", { query: string; results: SessionSearchResult[] }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "selectCustomProviderModel",
+      "python_dispatch": {
+        "name": "selectCustomProviderModel",
+        "dispatch_branches": [
+          {
+            "line": 1345,
+            "end_line": 1412,
+            "condition": "action in {'addCustomProvider', 'updateCustomProvider', 'deleteCustomProvider', 'refreshCustomProviderModels', 'selectCustomProviderModel'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "compact",
+          "contextLimit",
+          "model",
+          "modelId",
+          "patch",
+          "provider",
+          "providerId",
+          "reasoning",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "custom-provider.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 88,
+        "type": "custom-provider.updated",
+        "required": [
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 163,
+        "declaration": "{ payload: { providerId: string; modelId: string; contextLimit?: number; reasoning?: string; compact?: boolean }; response: Envelope<\"custom-provider.updated\", ModelSelectionResult> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "selectImageModel",
+      "python_dispatch": {
+        "name": "selectImageModel",
+        "dispatch_branches": [
+          {
+            "line": 1260,
+            "end_line": 1276,
+            "condition": "action == 'selectImageModel'"
+          }
+        ],
+        "payload_keys_observed": [
+          "model",
+          "modelId",
+          "source"
+        ],
+        "literal_response_types_observed": [
+          "image-model.selected"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 78,
+        "type": "image-model.selected",
+        "required": [
+          "imageModels",
+          "selected"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 153,
+        "declaration": "{ payload: { source: string; modelId: string }; response: Envelope<\"image-model.selected\", { selected: Record<string, unknown>; imageModels: ImageModelSourcesState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "selectModel",
+      "python_dispatch": {
+        "name": "selectModel",
+        "dispatch_branches": [
+          {
+            "line": 1225,
+            "end_line": 1253,
+            "condition": "action == 'selectModel'"
+          }
+        ],
+        "payload_keys_observed": [
+          "compact",
+          "model",
+          "modelId",
+          "reasoning",
+          "sessionId",
+          "source"
+        ],
+        "literal_response_types_observed": [
+          "model.selected"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 75,
+        "type": "model.selected",
+        "required": [
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 150,
+        "declaration": "{ payload: { source: string; modelId: string; reasoning?: string; compact?: boolean }; response: Envelope<\"model.selected\", ModelSelectionResult> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "setPluginEnabled",
+      "python_dispatch": {
+        "name": "setPluginEnabled",
+        "dispatch_branches": [
+          {
+            "line": 1820,
+            "end_line": 1857,
+            "condition": "action in {'setPluginEnabled', 'setPluginTrust'}"
+          },
+          {
+            "line": 1828,
+            "end_line": 1849,
+            "condition": "action == 'setPluginEnabled'"
+          }
+        ],
+        "payload_keys_observed": [
+          "enabled",
+          "id",
+          "pluginId",
+          "sessionId",
+          "trusted"
+        ],
+        "literal_response_types_observed": [
+          "plugin.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 90,
+        "type": "plugin.updated",
+        "required": [
+          "plugins",
+          "settings"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 165,
+        "declaration": "{ payload: { pluginId: string; enabled: boolean;sessionId?:string;projectRoot?:string;assistantId?:'aio' }; response: Envelope<\"plugin.updated\", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "setPluginTrust",
+      "python_dispatch": {
+        "name": "setPluginTrust",
+        "dispatch_branches": [
+          {
+            "line": 1820,
+            "end_line": 1857,
+            "condition": "action in {'setPluginEnabled', 'setPluginTrust'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "enabled",
+          "id",
+          "pluginId",
+          "sessionId",
+          "trusted"
+        ],
+        "literal_response_types_observed": [
+          "plugin.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 91,
+        "type": "plugin.updated",
+        "required": [
+          "plugins",
+          "settings"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 166,
+        "declaration": "{ payload: { pluginId: string; trusted: boolean }; response: Envelope<\"plugin.updated\", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "setProviderConfig",
+      "python_dispatch": {
+        "name": "setProviderConfig",
+        "dispatch_branches": [
+          {
+            "line": 1299,
+            "end_line": 1317,
+            "condition": "action == 'setProviderConfig'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "patch",
+          "source"
+        ],
+        "literal_response_types_observed": [
+          "provider.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 80,
+        "type": "provider.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 155,
+        "declaration": "{ payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<\"provider.updated\", { models: ModelSourcesState; workspace: WorkspaceState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "setSetting",
+      "python_dispatch": {
+        "name": "setSetting",
+        "dispatch_branches": [
+          {
+            "line": 1767,
+            "end_line": 1813,
+            "condition": "action == 'setSetting'"
+          }
+        ],
+        "payload_keys_observed": [
+          "key",
+          "sessionId",
+          "value"
+        ],
+        "literal_response_types_observed": [
+          "setting.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 79,
+        "type": "setting.updated",
+        "required": [
+          "success",
+          "message",
+          "settings"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 154,
+        "declaration": "{ payload: { key: string; value: unknown }; response: Envelope<\"setting.updated\", { success: boolean; message: string; settings: SettingsState; models?: ModelSourcesState; workspace?: WorkspaceState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "setTokenPrice",
+      "python_dispatch": {
+        "name": "setTokenPrice",
+        "dispatch_branches": [
+          {
+            "line": 1013,
+            "end_line": 1018,
+            "condition": "action == 'setTokenPrice'"
+          }
+        ],
+        "payload_keys_observed": [
+          "modelKey",
+          "price"
+        ],
+        "literal_response_types_observed": [
+          "token.price"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 54,
+        "type": "token.price",
+        "required": [
+          "model_key",
+          "price"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 148,
+        "declaration": "{ payload: { modelKey: string; price: TokenPrice }; response: Envelope<\"token.price\", { model_key: string; price: TokenPrice }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "setViewState",
+      "python_dispatch": {
+        "name": "setViewState",
+        "dispatch_branches": [
+          {
+            "line": 2146,
+            "end_line": 2164,
+            "condition": "action == 'setViewState'"
+          }
+        ],
+        "payload_keys_observed": [
+          "baseRevision",
+          "revision",
+          "sessionId",
+          "state",
+          "viewId"
+        ],
+        "literal_response_types_observed": [
+          "view.state"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 107,
+        "type": "view.state",
+        "required": [
+          "revision"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 181,
+        "declaration": "{ payload: { viewId: string; sessionId: string; revision: number; interactionId: string; state: Record<string, unknown>; baseRevision: number }; response: Envelope<\"view.state\", { revision: number }> };\n  /** RIU P2 gated tool callback. The renderer never names the tool executor: callViewTool\n   *  routes through the kernel's single gated ToolExecutor (cancel -> read-only review ->\n   *  security_policy -> approval gate). viewId is the controller's kernel-bound ref, never\n   *  frame-supplied; `source` is clamped provenance; a duplicate callId answers `duplicate`\n   *  without re-running the write. */"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "shutdown",
+      "python_dispatch": {
+        "name": "shutdown",
+        "dispatch_branches": [
+          {
+            "line": 2190,
+            "end_line": 2193,
+            "condition": "action == 'shutdown'"
+          }
+        ],
+        "payload_keys_observed": [],
+        "literal_response_types_observed": [
+          "shutdown"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": null,
+      "desktop_request": null,
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "steerPrompt",
+      "python_dispatch": {
+        "name": "steerPrompt",
+        "dispatch_branches": [
+          {
+            "line": 1141,
+            "end_line": 1160,
+            "condition": "action in {'steerPrompt', 'stopPrompt', 'pausePrompt', 'continuePrompt'}"
+          },
+          {
+            "line": 1146,
+            "end_line": 1159,
+            "condition": "action == 'steerPrompt'"
+          }
+        ],
+        "payload_keys_observed": [
+          "attachments",
+          "prompt",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "run.control"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 61,
+        "type": "run.control",
+        "required": [
+          "state",
+          "run_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 90,
+        "declaration": "{ payload: { sessionId: string; projectRoot?: string; prompt: string; attachments?: ComposerAttachment[] }; response: Envelope<\"run.control\", { state: string; run_id: string; message_id?: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "stopPrompt",
+      "python_dispatch": {
+        "name": "stopPrompt",
+        "dispatch_branches": [
+          {
+            "line": 1141,
+            "end_line": 1160,
+            "condition": "action in {'steerPrompt', 'stopPrompt', 'pausePrompt', 'continuePrompt'}"
+          },
+          {
+            "line": 1154,
+            "end_line": 1159,
+            "condition": "action == 'stopPrompt'"
+          }
+        ],
+        "payload_keys_observed": [
+          "attachments",
+          "prompt",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "run.control"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 62,
+        "type": "run.control",
+        "required": [
+          "state",
+          "run_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 91,
+        "declaration": "{ payload: { sessionId: string; projectRoot?: string }; response: Envelope<\"run.control\", { state: string; run_id: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "unpinSkill",
+      "python_dispatch": {
+        "name": "unpinSkill",
+        "dispatch_branches": [
+          {
+            "line": 1873,
+            "end_line": 1910,
+            "condition": "action in {'pinSkill', 'unpinSkill', 'clearPinnedSkills'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "draft",
+          "key",
+          "name",
+          "sessionId",
+          "skill"
+        ],
+        "literal_response_types_observed": [
+          "skill.pinned"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 95,
+        "type": "skill.pinned",
+        "required": [
+          "status",
+          "name",
+          "skills"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 170,
+        "declaration": "{ payload: { skill: string; draft?:boolean }; response: SkillPinEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "updateConversationRun",
+      "python_dispatch": {
+        "name": "updateConversationRun",
+        "dispatch_branches": [
+          {
+            "line": 1497,
+            "end_line": 1515,
+            "condition": "action in {'queueConversationRun', 'updateConversationRun', 'listConversationRuns', 'recoverConversationRuns'}"
+          }
+        ],
+        "payload_keys_observed": [
+          "executionRoot",
+          "request",
+          "result",
+          "runId",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "conversation.run",
+          "conversation.runs"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 33,
+        "type": "conversation.run",
+        "required": [
+          "revision"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 74,
+        "declaration": "{payload:{projectRoot:string;sessionId:string;assistantId?:'aio';runId:string;revision:number;state:string;executionRoot?:string;result?:Record<string,unknown>};response:Envelope<'conversation.run',{revision:number}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "updateCustomProvider",
+      "python_dispatch": {
+        "name": "updateCustomProvider",
+        "dispatch_branches": [
+          {
+            "line": 1345,
+            "end_line": 1412,
+            "condition": "action in {'addCustomProvider', 'updateCustomProvider', 'deleteCustomProvider', 'refreshCustomProviderModels', 'selectCustomProviderModel'}"
+          },
+          {
+            "line": 1376,
+            "end_line": 1395,
+            "condition": "action == 'updateCustomProvider'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "compact",
+          "contextLimit",
+          "model",
+          "modelId",
+          "patch",
+          "provider",
+          "providerId",
+          "reasoning",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "custom-provider.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 85,
+        "type": "custom-provider.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 160,
+        "declaration": "{ payload: { providerId: string; patch: Record<string, unknown>; clearFields?: string[] }; response: CustomProviderEnvelope }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "updateStandardModel",
+      "python_dispatch": {
+        "name": "updateStandardModel",
+        "dispatch_branches": [
+          {
+            "line": 1318,
+            "end_line": 1344,
+            "condition": "action in {'addStandardModel', 'updateStandardModel', 'deleteStandardModel'}"
+          },
+          {
+            "line": 1327,
+            "end_line": 1335,
+            "condition": "action == 'updateStandardModel'"
+          }
+        ],
+        "payload_keys_observed": [
+          "clearFields",
+          "index",
+          "model"
+        ],
+        "literal_response_types_observed": [
+          "standard-model.updated"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 82,
+        "type": "standard-model.updated",
+        "required": [
+          "models",
+          "workspace"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 157,
+        "declaration": "{ payload: { index: number; model: Record<string, unknown>; clearFields?: string[] }; response: Envelope<\"standard-model.updated\", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "updateViewModelContext",
+      "python_dispatch": {
+        "name": "updateViewModelContext",
+        "dispatch_branches": [
+          {
+            "line": 2170,
+            "end_line": 2189,
+            "condition": "action == 'updateViewModelContext'"
+          }
+        ],
+        "payload_keys_observed": [
+          "revision",
+          "sessionId",
+          "source",
+          "summary",
+          "viewId"
+        ],
+        "literal_response_types_observed": [
+          "view.model_context"
+        ],
+        "background_dispatch": false
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 113,
+        "type": "view.model_context",
+        "required": [
+          "status"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 194,
+        "declaration": "{ payload: { viewId: string; sessionId: string; revision: number; interactionId: string; summary: string }; response: Envelope<\"view.model_context\", { status: string }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "workspaceMentions",
+      "python_dispatch": {
+        "name": "workspaceMentions",
+        "dispatch_branches": [
+          {
+            "line": 1716,
+            "end_line": 1729,
+            "condition": "action == 'workspaceMentions'"
+          }
+        ],
+        "payload_keys_observed": [
+          "limit",
+          "query"
+        ],
+        "literal_response_types_observed": [
+          "workspace.mentions"
+        ],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 100,
+        "type": "workspace.mentions",
+        "required": [
+          "items",
+          "context_engine"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 175,
+        "declaration": "{ payload: { query: string; limit: number }; response: Envelope<\"workspace.mentions\", { query: string; items: WorkspaceMention[]; elapsed_ms: number; context_engine: NonNullable<WorkspaceState[\"context_engine\"]> }> }"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    },
+    {
+      "name": "wstyleCommand",
+      "python_dispatch": {
+        "name": "wstyleCommand",
+        "dispatch_branches": [
+          {
+            "line": 1687,
+            "end_line": 1715,
+            "condition": "action == 'wstyleCommand'"
+          }
+        ],
+        "payload_keys_observed": [
+          "args",
+          "sessionId"
+        ],
+        "literal_response_types_observed": [
+          "wstyle.result"
+        ],
+        "background_dispatch": true
+      },
+      "desktop_response": {
+        "file": "ReverieCli-ui/electron/core-actions.ts",
+        "line": 4,
+        "type": "wstyle.result",
+        "required": [
+          "success",
+          "output",
+          "error",
+          "data",
+          "session_id"
+        ]
+      },
+      "desktop_request": {
+        "file": "ReverieCli-ui/src/core-protocol.ts",
+        "line": 69,
+        "declaration": "{payload:{args:string;projectRoot?:string;sessionId?:string};response:Envelope<'wstyle.result',{success:boolean;output:string;error:string;data:Record<string,unknown>;session_id:string}>}"
+      },
+      "evidence_status": "static declaration observed; actual request/output, event, cancellation and lifecycle validation pending"
+    }
+  ],
+  "exported_types": [
+    {
+      "file": "ReverieCli-ui/electron/core-actions.ts",
+      "name": "JsonRecord",
+      "line": 1,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/electron/core-actions.ts",
+      "name": "CoreActionName",
+      "line": 117,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "AiOState",
+      "line": 33,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "ApprovalDecision",
+      "line": 50,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "SessionSearchResult",
+      "line": 52,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "WorkspaceMention",
+      "line": 59,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "CoreAction",
+      "line": 198,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "CorePayload",
+      "line": 199,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "name": "CoreResponse",
+      "line": 200,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ViewId",
+      "line": 1,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SubagentSpecRecord",
+      "line": 3,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SubagentRunRecord",
+      "line": 14,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SubagentsState",
+      "line": 26,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SubagentRunLog",
+      "line": 32,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsPermission",
+      "line": 40,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsCompactTool",
+      "line": 42,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsProviderSelection",
+      "line": 52,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsEngineSelection",
+      "line": 60,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsServiceRecord",
+      "line": 65,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsProviderRecord",
+      "line": 97,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsCustomProviderDefinition",
+      "line": 118,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsDiagnosticEntry",
+      "line": 136,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsTaskRecord",
+      "line": 149,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RatsState",
+      "line": 158,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CoreInfo",
+      "line": 181,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "WorkspaceState",
+      "line": 187,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ActiveModel",
+      "line": 207,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ReasoningOption",
+      "line": 213,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ReasoningCapability",
+      "line": 219,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ModelRecord",
+      "line": 225,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ConfigField",
+      "line": 249,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CustomProviderFormat",
+      "line": 260,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CustomProviderRecord",
+      "line": 266,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CustomProviderModel",
+      "line": 296,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ProviderProbeStatus",
+      "line": 305,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ProviderProbe",
+      "line": 315,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ModelSource",
+      "line": 336,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ModelSourcesState",
+      "line": 364,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ModelSelectionUpdate",
+      "line": 370,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ImageModelRecord",
+      "line": 377,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ImageModelSource",
+      "line": 390,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ActiveImageModel",
+      "line": 402,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ImageModelSourcesState",
+      "line": 409,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SessionInfo",
+      "line": 415,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ToolRecord",
+      "line": 423,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SessionListState",
+      "line": 436,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SessionMessage",
+      "line": 444,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SessionState",
+      "line": 460,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SettingItem",
+      "line": 474,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SettingsState",
+      "line": 492,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "PluginRecord",
+      "line": 498,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "PluginsState",
+      "line": 516,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SkillRecord",
+      "line": 521,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "PinnedSkillsState",
+      "line": 537,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SkillsState",
+      "line": 545,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "SkillDetail",
+      "line": 557,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CommandRecord",
+      "line": 562,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CommandsState",
+      "line": 573,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "CheckpointRecord",
+      "line": 578,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "OperationRecord",
+      "line": 587,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "FileChange",
+      "line": 596,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "RecoveryState",
+      "line": 607,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "DesktopState",
+      "line": 613,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "PromptResult",
+      "line": 626,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TurnSegment",
+      "line": 642,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ViewRef",
+      "line": 650,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ViewSegment",
+      "line": 659,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ViewStateEnvelope",
+      "line": 671,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ResolvedViewRef",
+      "line": 682,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "LiveTurn",
+      "line": 699,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TaskListEntry",
+      "line": 713,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenFilters",
+      "line": 721,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenPrice",
+      "line": 722,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenTotals",
+      "line": 723,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenModelTotals",
+      "line": 738,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenDailyTotals",
+      "line": 739,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenModelOption",
+      "line": 740,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "TokenStatisticsData",
+      "line": 741,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ContextUsageSegment",
+      "line": 757,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "ContextUsage",
+      "line": 766,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "name": "DesktopPaths",
+      "line": 787,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/electron/attachments.ts",
+      "name": "ComposerAttachment",
+      "line": 5,
+      "kind": "interface"
+    },
+    {
+      "file": "ReverieCli-ui/src/view-bridge.ts",
+      "name": "BridgeRequestId",
+      "line": 18,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/view-bridge.ts",
+      "name": "BridgeMethod",
+      "line": 19,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/view-bridge.ts",
+      "name": "BridgeRejection",
+      "line": 20,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/view-bridge.ts",
+      "name": "BridgeVerdict",
+      "line": 23,
+      "kind": "type"
+    },
+    {
+      "file": "ReverieCli-ui/src/view-bridge.ts",
+      "name": "ViewChannelOptions",
+      "line": 27,
+      "kind": "type"
+    }
+  ],
+  "smallest_missing_evidence": [
+    "Source-bound actual samples for each action",
+    "Full delegated input schemas and validation rules",
+    "Streaming event ordering and request ownership",
+    "Cancellation delivery states and resource close/recovery checks"
+  ],
+  "sources": [
+    {
+      "file": "ReverieCli-py/reverie/sdk_bridge.py",
+      "sha256": "261dd8e334b57020ce78df3beac412802530379dbf123b3ad4a69294c59e1da4",
+      "blob_sha1": "ec2ca6e3c5968241014cb5d509ac2ae9a4fe38a9",
+      "bytes": 120166
+    },
+    {
+      "file": "ReverieCli-ui/electron/core-actions.ts",
+      "sha256": "7f18cde4b330f98affb868abc0d2ba5059829ef8455494e703aef831fc44ad76",
+      "blob_sha1": "14d0d330bb2bc50ec5d02911aa1795efcb5b053a",
+      "bytes": 10039
+    },
+    {
+      "file": "ReverieCli-ui/src/core-protocol.ts",
+      "sha256": "f6d23652f90077a6a74b305f1cc0b57418fedfcfd20ab80bc6d8362feb5ed9e2",
+      "blob_sha1": "a7c7748661bf6f4126da0dc1281c13f05e9aefae",
+      "bytes": 20891
+    },
+    {
+      "file": "ReverieCli-ui/src/types.ts",
+      "sha256": "57a797a1f191a44e93cb8901f5481e14181822ec52a53552275bab8baf282d4f",
+      "blob_sha1": "abda13e73b2623473b04277456a7a829f805419b",
+      "bytes": 21512
+    },
+    {
+      "file": "ReverieCli-ui/electron/attachments.ts",
+      "sha256": "69c59e8906ee11133f6af1f909854e5c793706fbb348259467dfa27df6c52c46",
+      "blob_sha1": "2fc181ef0c22ae68997af959d8cd6138d1fb6aa1",
+      "bytes": 4816
+    },
+    {
+      "file": "ReverieCli-ui/src/view-bridge.ts",
+      "sha256": "ef87ad09448cacdcc17e72a914bc31159fcc2c549f560c18dc3c931ba3a9df67",
+      "blob_sha1": "f828a83e9bdbfb58151142210a17a1734e25da32",
+      "bytes": 8327
+    }
+  ],
+  "static_declaration_origin_commit": "5725d076999a64a13f3d80b4235dc2d39b122022",
+  "origin_inventory_sha256": "d529c45292e49ec2069eb6f9312aa935279a1b88e071a3a977a18604fb8a9a28",
+  "source_snapshot_frozen": true,
+  "behavior_contracts_verified": false
+}

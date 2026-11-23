@@ -1,5 +1,7 @@
 # Reverie CLI
 
+The `main` branch is now implementing the **Rust 3.0.0** rewrite. The native workspace is [ReverieCli-rs](ReverieCli-rs/README.md); implementation and basic checks proceed here, with [remaining validation](tasks/rust-3.0/UNVERIFIED.md) listed separately. The final Python **2.5.5** project is frozen on [Reverie-Cli-py](https://github.com/Lin-Silver/Reverie-Cli/tree/Reverie-Cli-py). The Python feature descriptions and usage below describe that archived baseline until the corresponding Rust migration is complete.
+
 Start with the [documentation index](docs/README.md), [Desktop guide](docs/DESKTOP_GUIDE.md), and [version history](docs/changelog.md).
 
 

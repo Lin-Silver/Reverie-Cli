@@ -2,7 +2,7 @@ name: Build plugin release
 
 on:
   push:
-    branches: [main, codex/python-2.5.5-pure, codex/rust-3.0]
+    branches: [main]
     paths:
       - ".github/workflows/build-plugins.yml"
       - "plugins/**"
@@ -104,7 +104,7 @@ jobs:
 
   publish:
     needs: build
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -121,7 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_EVENT_NAME -notin @('push','workflow_dispatch')) {
+          if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_EVENT_NAME -ne 'workflow_dispatch') {
             throw 'Plugin publication is restricted to main'
           }
           $manifest = Get-Content release-assets\plugins-manifest.json -Raw | ConvertFrom-Json

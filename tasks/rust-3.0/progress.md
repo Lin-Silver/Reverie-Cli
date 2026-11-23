@@ -327,3 +327,15 @@ Build `45058606286` 的 Intel job `137319279679` 失败发生在 PyInstaller 准
 维护者最新指令：仅保留 `main` 与最终 Python `Reverie-Cli-py`，结束本地扩展测评，直接重写 Rust；其余测试给出云端提示词和一行一个编号点的未验证文档。已停止把阶段 0B 归因与观察器开销当作 Rust 开工阻塞。源码保存、分支收拢和实际实现接着执行，未取得的证据继续保持未验证。完整功能范围、真实 Cubism、本地语义、四平台等要求没有被占位实现代替。
 
 交接文档为 [未验证清单](UNVERIFIED.md) 与 [云端 Agent 提示词](CLOUD_VALIDATION_PROMPT.md)。Python 2.5.5 的正式版本、标签、Release、17 项资产及完整归档继续冻结，其他会话的未跟踪收尾文件保持原样。
+
+### R1-1：原生 Rust 入口与 JSONL 内核（2026-11-23 UTC）
+
+在主工作区 `G:\Reverie\Reverie-Cli\ReverieCli-rs` 建立协议、内核和 CLI crate，Edition 2024；仓库根工具链固定 Rust/Cargo 1.96.0。现有 `reverie.kernel.v1`、`sdk-bridge.v1`、平台／架构及 JSONL 请求 ID 保留；实际支持 `hello`、`shutdown`，其余迁移 action 明确返回错误。Context Engine 的 identity 标记 `available=false`，没有把尚未实现的引擎写成已可运行。
+
+实际 Windows release EXE 为 324,096 字节，独立 Node 检查 6 项通过：身份、版本、帮助、未知选项、UTF-8／BOM／中文 Emoji ID／坏 JSON／未知 action／关闭及 EOF。Cargo test 构建执行通过，本增量未另设 Rust 单元测试；Clippy `-D warnings` 通过，release 实际构建通过。证据位于 `.runtime/rust-3.0/R1-native-smoke.json`，不代表全部 SDK、终端、桌面或性能验收。
+
+首次链接失败的日志明确报告磁盘空间不足（G 盘仅约 76 KiB 可用）。仅将本任务新建的 Rust target 目录和源码引用 bundle 转到已使用的 C 盘任务目录，逐文件摘要／bundle 摘要一致，并在原路径保留 junction；没有移动 Python 源码或处理用户接手的历史缓存。随后锁定构建通过，G 盘约恢复 113 MiB 可用。
+
+本地仅保留 `main` 与 `Reverie-Cli-py`，旧分支完整历史保存在 `.git/branch-archives/20261123-rust-main/source-refs.bundle`，SHA-256 `a8b033581f27d82a78eb851aa01889405b5047e6504e4a2b3856b864d4b60235`，Git bundle verify 通过。远端分支将与本增量 main 推送一起按已记录 SHA 清理。
+
+main 的 CI 改为四平台 Rust 基本构建／检查与既有桌面测试，停止 Python 产品回归及发行构建。Rust candidate workflow 只提供只读 CI artifacts，暂不公开未完成产品；插件自动构建不自动更新 `plugins-latest`，公开仅允许 main 手动运行。正式 2.5.5 标签和资产未变；后续会话、Provider 与 Context Engine 接着实现。

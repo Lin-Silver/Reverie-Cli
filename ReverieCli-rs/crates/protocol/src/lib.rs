@@ -1,0 +1,93 @@
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const KERNEL_SCHEMA: &str = "reverie.kernel.v1";
+pub const BRIDGE_PROTOCOL: &str = "sdk-bridge.v1";
+
+#[derive(Debug, Deserialize)]
+pub struct Request {
+    #[serde(default)]
+    pub id: Value,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub payload: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Reply {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(flatten)]
+    pub fields: Map<String, Value>,
+}
+
+impl Reply {
+    pub fn new(id: Option<Value>, kind: &str, fields: Map<String, Value>) -> Self {
+        Self {
+            id,
+            kind: kind.into(),
+            fields,
+        }
+    }
+
+    pub fn error(id: Value, error: impl ToString) -> Self {
+        Self::new(
+            Some(id),
+            "error",
+            Map::from_iter([("error".into(), Value::String(error.to_string()))]),
+        )
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct KernelInfo {
+    pub schema: &'static str,
+    pub version: &'static str,
+    pub bridge_protocol: &'static str,
+    pub interface_version: &'static str,
+    pub platform: &'static str,
+    pub arch: &'static str,
+    pub frozen: bool,
+    pub implementation: &'static str,
+    pub release_status: &'static str,
+    pub context_engine: ContextIdentity,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContextIdentity {
+    pub backend: &'static str,
+    pub execution: &'static str,
+    pub available: bool,
+}
+
+pub fn kernel_info() -> KernelInfo {
+    KernelInfo {
+        schema: KERNEL_SCHEMA,
+        version: VERSION,
+        bridge_protocol: BRIDGE_PROTOCOL,
+        interface_version: "1.0",
+        platform: match std::env::consts::OS {
+            "windows" => "win32",
+            "macos" => "darwin",
+            other => other,
+        },
+        arch: match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "aarch64" => "arm64",
+            "x86" => "ia32",
+            other => other,
+        },
+        frozen: true,
+        implementation: "rust",
+        release_status: "development",
+        context_engine: ContextIdentity {
+            backend: "rust",
+            execution: "in-process",
+            available: false,
+        },
+    }
+}

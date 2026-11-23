@@ -1,4 +1,5 @@
 # Build outputs
+ReverieCli-rs/target/
 build/
 !/ReverieCli-ui/build/
 !/ReverieCli-ui/build/launchers/

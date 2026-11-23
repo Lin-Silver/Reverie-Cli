@@ -5,6 +5,7 @@ docs/verification/2026-10-28-dev-handoff/check-*.txt -whitespace
 docs/verification/2026-10-27-static-rich-routing/v6-*.log -whitespace
 
 # Frozen retrieval inputs and baseline identities retain their original bytes.
+/ReverieCli-rs/** text eol=lf
 /testdata/context-evaluation/** -text
 /tasks/rust-3.0/*baseline-v1.json -text
 

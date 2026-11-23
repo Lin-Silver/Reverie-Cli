@@ -133,6 +133,16 @@ def receives_point(window_id: str, x: int, y: int) -> bool:
     user32.WindowFromPoint.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
     user32.GetAncestor.restype = wintypes.HWND
-    handle = user32.WindowFromPoint(wintypes.POINT(x, y))
-    root = user32.GetAncestor(handle, 2) if handle else None  # GA_ROOT
-    return bool(root) and str(window_id) == 'w-' + str(root)
+    user32.SetThreadDpiAwarenessContext.argtypes = [wintypes.HANDLE]
+    user32.SetThreadDpiAwarenessContext.restype = wintypes.HANDLE
+    # Screenshot points are physical pixels, even when the Python thread is DPI-unaware.
+    previous = user32.SetThreadDpiAwarenessContext(-4)  # PER_MONITOR_AWARE_V2
+    if not previous:
+        raise failure('pointer', 'GEOMETRY_UNPROVEN', 'Cannot establish physical coordinates for window hit testing.')
+    try:
+        handle = user32.WindowFromPoint(wintypes.POINT(x, y))
+        root = user32.GetAncestor(handle, 2) if handle else None  # GA_ROOT
+        return bool(root) and str(window_id) == 'w-' + str(root)
+    finally:
+        if not user32.SetThreadDpiAwarenessContext(previous):
+            raise failure('pointer', 'GEOMETRY_UNPROVEN', 'Cannot restore the thread DPI context after window hit testing.')

@@ -257,3 +257,19 @@ Build `45058606286` 的 Intel job `137319279679` 失败发生在 PyInstaller 准
 旧 `84e3c92` 草稿的 17 项实际文件已全部下载，共 3844008076 字节，独立核对来源、manifest、checksums 和四平台 provenance。原源码 ZIP 22939498 字节，SHA-256 为 `9cd4a01c4f486cf5d1dfab04b96802b7a0a46a3b032788c97de6b7a0cf2dfedd`，CRC 及提交注释通过。这是旧来源的保全，未宣称新候选通过。main 与 `v2.5.5` 解引用仍为 `84e3c92c4c5a80e491e9da97b2e26735ece3a048`，草稿 `454761433` 未公开，滚动标签未变化。
 
 完整 Rust 主计划保持保留。Recall@10 的证据片段口径已确认；正式题集和成绩未冻结。纯 Python 正式重发、最终 Windows 实包与旧库接续、真实单屏四档 DPI、Python 正式归档和 Rust 实施继续等待必需前置。清理残留由用户处理，不再删除或作为独立阻塞；其他会话的收尾目录保持原样。
+
+### P3-11：最终资产独立验证与真实 125% DPI 缺陷修复（2026-11-23 UTC）
+
+来源 `3147b7b287fbc38ac87050219779e3f586c0eff3`，树 `1072df250f8882797b87043558f0c844ec5bb72e`，与本地、main 及候选分支一致。版本标签对象为 `dd3f3d6482bd49ed96059c2840741bec4fccf3ed`。main Test `45084957447` 八作业、标签 Build `45085155620` 的四平台及 publish 共五作业通过；重复 main Build `45084957562` 已取消，不计通过。草稿 ID `454850045` 为 v2.5.5、固定来源 SHA、draft=true、prerelease=false、17 项资产，尚未公开。滚动及插件标签未改变。
+
+全部 17 项实际文件独立下载，共 3844794469 字节，核对资产 ID、大小、GitHub digest、SHA256SUMS、发行清单及四个平台的内核身份。最终 Windows CLI SHA-256 为 `635f8ebb54ceae15a4ca2ed7fa4ab22e65cf7b940a89c68fad00dbbb2d6286fe`，实际报告 Context Engine 为 Python / in-process。CLI、三次 SDK 生命周期及 Context Engine JSONL 事务 6 项通过；旧 Rust 数据库一致性备份、Python 派生索引、实际旧 worker 恢复查询及损坏备份拒绝 9 项通过。用户明确选择 2.5.5 保留历史目录忽略兼容、3.0 再明确，最终程序相应 11 项行为检查通过，无需更改忽略实现。
+
+四份最终 native ZIP 的下载 digest、CRC、内部摘要及来源通过：各 P2 24/24、P3 28/28、rich 88/88、P4 31/31、隔离检查通过，输入各 60 样本。Windows、Linux、Apple Silicon、Intel 输入 p95 分别为 50.5、34.9、51.9、85.2 ms；Intel 原 max=443.8 ms 仍保留，门槛继续为原 p95≤100 ms。全部 model-quality samples=0，不证明真实模型质量或物理 DPI。
+
+使用该最终 EXE，经 SDK→Agent→ToolExecutor→Computer Use 进行真实硬件输入，独立 WinForms 夹具回读实际 DPI、控件物理边界、点击及拖拽计数。在 100% 下普通、最大化、真实拖拽吸附窗口均完成原图、裁剪、缩小及桌面截图的命中验证。旧驱动跨两次 prompt 使用图像导致旧图拒绝；修正为同一 prompt。桌面色标检测曾合并其他图标的相近颜色，已用同一失败 PNG 复现并改为连通区域识别。系统拒绝前台切换及跨工具协调超时的失败分别保留；测试界面协调的等待调整不改变产品操作超时、真实 DPI、坐标或效果断言。
+
+真实切到 125% 后，夹具回读 DPI 120，点击命中但拖拽以 TARGET_OCCLUDED / not_delivered 拒绝。只读现场对照确认同一物理端点 `(1159, 544)`：DPI 未感知线程命中设置窗口，逐显示器 V2 线程命中实际验收窗口；单纯改用 WindowFromPhysicalPoint 在本机仍未消除该差异，不能据函数名假定有效。已恢复系统 100%、原正常几何 `(544,178,716,499)` 及自有窗口原最小化状态。
+
+生产修复只限定 `receives_point`：临时使用 PER_MONITOR_AWARE_V2，成功、拒绝或异常均恢复原线程上下文；不能建立或恢复时以 GEOMETRY_UNPROVEN 拒绝输入。新增测试在旧代码复现 8 失败/4 通过；修复后与截图、操作、权限、生命周期及 runtime 相关测试共 108 通过（3.39 秒），包含四档、非默认及大句柄上下文、真实遮挡、无窗口、查询异常及切换失败。将逐显示器上下文故意改回 DPI 未感知的变异检查明确失败，恢复原源码摘要后新增 12 项再次通过，证据为 `dpi-mutation-verified.json`。官方依据为 [SetThreadDpiAwarenessContext](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext) 和 [高 DPI 桌面开发](https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows)。单元与源级对照不代替新候选四平台及四档最终程序验收。
+
+本轮原始证据、失败、测试 XML 和驱动留在已获准的 C 盘任务目录 `final-draft-v2.5.5-3147b7b/`，真实窗口及私有截图不上传 Git。旧草稿及 17 项资产须先保全再推进新的最终来源。纯 Python 正式公开、完整 Python 归档、0B 及 Rust 实施仍未完成；未改动独立 Engine、其他会话收尾目录或用户接手的清理残留。

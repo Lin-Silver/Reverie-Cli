@@ -1,0 +1,16 @@
+{
+  "schema": "tidelight.scene.v1",
+  "id": "harbor.west",
+  "dimension": "2.5D",
+  "spawn": {"position": [1.0, 0.0, 3.0], "safe_point": "ferry.landing"},
+  "entities": [
+    {"id": "instrument", "kind": "interactable", "position": [6.0, 0.0, 2.0], "state": {"powered": false}, "collision_layer": 4},
+    {"id": "fuse_box", "kind": "interactable", "position": [5.5, 0.0, 2.0], "requires_item": "wire.copper", "collision_layer": 4},
+    {"id": "north_gate", "kind": "gate", "position": [10.0, 0.0, 1.0], "state": {"open": false}, "collision_layer": 2},
+    {"id": "decorative_chain", "kind": "decoration", "position": [5.5, 0.4, 2.2], "collision_layer": 0},
+    {"id": "tourist_plaque", "kind": "decoy", "position": [7.0, 0.0, 2.0], "text": "04:20 — visitor illustration, not an original measurement", "collision_layer": 4},
+    {"id": "school.archivist", "kind": "npc", "position": [14.0, 0.0, 1.0], "accepts_item": "archive.bundle", "collision_layer": 4}
+  ],
+  "collision_layers": {"player": 1, "solid": 2, "interactable": 4, "water_trigger": 8},
+  "movement": {"plane": "XZ", "gravity_on_plane": false, "jump": false}
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "tidelight.save.v2",
+  "format_version": 2,
+  "required": ["format_version", "slot_id", "quest", "inventory", "safe_point"],
+  "quest": {
+    "instrument.powered": false,
+    "record.confirmed": false,
+    "signal.accepted": false,
+    "north_gate.open": false,
+    "archive.delivered": false
+  },
+  "inventory_reference": "resource_id",
+  "safe_point": "ferry.landing",
+  "migration_from_v1": {
+    "preserve_unknown_fields": true,
+    "key_rename": {"gate_unlocked": "north_gate.open"},
+    "new_flag_defaults": {"archive.delivered": false},
+    "backup_original_before_write": true,
+    "unsupported_future_version": "refuse_write_and_keep_original"
+  },
+  "write_policy": {
+    "validate_before_commit": true,
+    "staging": "same_directory",
+    "activate": "atomic_replace",
+    "keep_previous_valid_save": true
+  }
+}

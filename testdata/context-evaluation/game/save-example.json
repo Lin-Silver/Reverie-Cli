@@ -1,0 +1,16 @@
+{
+  "format_version": 2,
+  "slot_id": "example-a",
+  "quest": {
+    "instrument.powered": true,
+    "record.confirmed": true,
+    "signal.accepted": true,
+    "north_gate.open": true,
+    "archive.delivered": false
+  },
+  "inventory": ["archive.bundle", "warehouse.key"],
+  "safe_point": "north_gate.inside",
+  "audio_enabled": false,
+  "display_names": {"warehouse.key": "旧仓库钥匙"},
+  "completed": false
+}

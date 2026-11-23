@@ -1,0 +1,14 @@
+{
+  "schema": "tidelight.assets.v1",
+  "license": "MIT",
+  "entries": [
+    {"resource_id": "warehouse.key", "display_name": "红绳黑铁钥匙", "type": "quest_item", "opens": ["warehouse.door"], "icon": "warehouse-key.svg"},
+    {"resource_id": "wire.copper", "display_name": "铜线", "type": "quest_item", "used_by": ["fuse_box"], "consumed_on_success": true},
+    {"resource_id": "rope.green", "display_name": "绿绳", "type": "decoration", "consumed_on_success": false},
+    {"resource_id": "archive.bundle", "display_name": "灰色档案袋", "type": "quest_item", "used_by": ["school.archivist"], "icon": "archive.svg"},
+    {"resource_id": "record.17", "display_name": "十七日原始测潮记录", "type": "document", "location": "instrument", "water_limit_time": "04:05"},
+    {"resource_id": "lamp.white", "display_name": "航道白灯", "type": "signal", "meaning": "channel_open"},
+    {"resource_id": "lamp.red", "display_name": "故障红灯", "type": "signal", "required_flashes": 3, "meaning": "emergency"}
+  ],
+  "excluded_resources": ["live2d.model", "commercial.character.portrait"]
+}

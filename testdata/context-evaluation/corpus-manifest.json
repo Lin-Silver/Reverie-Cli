@@ -1,0 +1,128 @@
+{
+  "schema": "reverie.context-evaluation.supplemental-corpus.v1",
+  "license": "MIT",
+  "authoring": "Original retrieval test data authored for this repository; no third-party assets or private data",
+  "digest_convention": "Exact UTF-8 Git bytes with LF; inclusive 1-based lines",
+  "files": [
+    {
+      "path": "game/archive.svg",
+      "bytes": 311,
+      "sha256": "86202c83be73ea750a4df5a13408be49302bba822799274ae816f69b62ace9c2",
+      "lines": 5
+    },
+    {
+      "path": "game/assets.json",
+      "bytes": 1109,
+      "sha256": "998f3dbec4864d3c45942f617733d6339293b060e9e8b73cde44690df9a668ed",
+      "lines": 14
+    },
+    {
+      "path": "game/controls.json",
+      "bytes": 589,
+      "sha256": "ae293471a43acc00ea1cba80889fb85f0719a054b07ef0d6b6bd9d4f7d078e50",
+      "lines": 17
+    },
+    {
+      "path": "game/design.md",
+      "bytes": 1131,
+      "sha256": "cb4651bbf2f199abdbd41113c6f01272b02079ffe779377eede854b9b087c27e",
+      "lines": 24
+    },
+    {
+      "path": "game/export.md",
+      "bytes": 1074,
+      "sha256": "9d00c4fb3319b98b10a4a1ec488a940f1ce614ea8c2c361151bb3a3eba0afd3a",
+      "lines": 17
+    },
+    {
+      "path": "game/quest.md",
+      "bytes": 1278,
+      "sha256": "77045733d440905a5da0d05eafba4bb745b0c383eb77b2583267fc2b84aa74f1",
+      "lines": 28
+    },
+    {
+      "path": "game/save-example.json",
+      "bytes": 415,
+      "sha256": "2cb4b604d7d897fa1a15055f486dbfc67f7048ed9968911332d462339d5def45",
+      "lines": 16
+    },
+    {
+      "path": "game/save-schema.json",
+      "bytes": 838,
+      "sha256": "162422bc5202aded81822c3f6a03246925fda2ff339b2a98828214d0092fc77b",
+      "lines": 27
+    },
+    {
+      "path": "game/scene.json",
+      "bytes": 1125,
+      "sha256": "cd8710bbc6351b668c041795cda7b3e94ece7e3816a2ed74f1c3975d585fe134",
+      "lines": 16
+    },
+    {
+      "path": "game/signals.md",
+      "bytes": 845,
+      "sha256": "4a66b5cb0a75f0641d5bfc1e773c28ff1c344732e90d25ca8e840c7932c33994",
+      "lines": 15
+    },
+    {
+      "path": "game/warehouse-key.svg",
+      "bytes": 398,
+      "sha256": "ba3a4d16d2db18879a0cbf94e8a44eba1755c3fe5205b534774dfd4f56d9a1ee",
+      "lines": 5
+    },
+    {
+      "path": "novel/01-渡口.md",
+      "bytes": 1910,
+      "sha256": "fc3d7f67a6d689bda9ffba9493d6c359892a4cb5eb4b0d446e01e2a127064d71",
+      "lines": 15
+    },
+    {
+      "path": "novel/02-刻线.md",
+      "bytes": 1883,
+      "sha256": "cde9b90c1310e6a6ddd5f545d58485cea3ddf1e6625cb159ef723ee24231161a",
+      "lines": 15
+    },
+    {
+      "path": "novel/03-夜灯.md",
+      "bytes": 1952,
+      "sha256": "eeba54b50e213030db39b778fb185ff0672766188e9bc4f70f7ed440fe567b68",
+      "lines": 15
+    },
+    {
+      "path": "novel/04-票据.md",
+      "bytes": 1871,
+      "sha256": "bd145e0b7cfa40f2aa000731e1329c3379a11b3f8793594bea3adb3754b7faa0",
+      "lines": 15
+    },
+    {
+      "path": "novel/05-誊本.md",
+      "bytes": 1970,
+      "sha256": "f97080d017816e03df85fb8fb95299672cb10e879e8e3b72715793dee715b257",
+      "lines": 15
+    },
+    {
+      "path": "novel/06-借据.md",
+      "bytes": 1886,
+      "sha256": "a6d17c58671ea47c4e60c5637bd98d35176decaa70cf7a48ab4427ba83701b8d",
+      "lines": 15
+    },
+    {
+      "path": "novel/07-高堤.md",
+      "bytes": 1919,
+      "sha256": "579f8eca2a9afa6f601e3e95612cd0f5cc933b96ec3a674a55189a571d6b3bf3",
+      "lines": 15
+    },
+    {
+      "path": "novel/08-归档.md",
+      "bytes": 2068,
+      "sha256": "fca71b5901ea21587b5d3ea83c3611593bb775d74b04c089f389501df3781f58",
+      "lines": 17
+    },
+    {
+      "path": "README.md",
+      "bytes": 2744,
+      "sha256": "6b65295cacccf3e4035393b577dafa5ca66fbdf3f452eaf62f6c4803669a6c7e",
+      "lines": 52
+    }
+  ]
+}

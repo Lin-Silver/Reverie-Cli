@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Gray archive bag">
+  <path fill="#69747b" d="M12 16h40v40H12z"/>
+  <path fill="#d4dbe0" d="M20 8h24v14H20z"/>
+  <path fill="none" stroke="#283942" stroke-width="3" d="M20 32h24m-24 8h24m-24 8h14"/>
+</svg>

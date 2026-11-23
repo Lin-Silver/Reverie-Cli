@@ -1,0 +1,17 @@
+{
+  "schema": "tidelight.controls.v1",
+  "bindings": {
+    "move": {"keyboard": ["W", "A", "S", "D"], "gamepad": "left_stick"},
+    "interact": {"keyboard": ["E"], "gamepad": "south"},
+    "pause": {"keyboard": ["Escape"], "gamepad": "start"},
+    "inspect": {"keyboard": ["Tab"], "gamepad": "west"}
+  },
+  "accessibility": {
+    "required_audio_has_text": true,
+    "required_color_has_shape": true,
+    "hold_to_interact": false,
+    "text_scale": {"minimum": 1.0, "maximum": 2.0}
+  },
+  "display": {"camera": "isometric_orthographic", "gameplay_plane": "XZ"},
+  "jump_enabled": false
+}

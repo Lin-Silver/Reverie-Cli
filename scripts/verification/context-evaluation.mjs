@@ -49,7 +49,7 @@ function validateFragment(fragment, contextBytes) {
   return { ...fragment, textLines };
 }
 
-function covers(evidence, fragment, sourceCommit) {
+export function covers(evidence, fragment, sourceCommit) {
   if (fragment.repo_relative_path !== evidence.repo_relative_path || fragment.source_commit !== sourceCommit ||
       fragment.blob_sha1 !== evidence.blob_sha1 || fragment.file_sha256 !== evidence.file_sha256 ||
       fragment.start_line > evidence.start_line || fragment.end_line < evidence.end_line) return false;
@@ -61,8 +61,7 @@ function covers(evidence, fragment, sourceCommit) {
     stripLegacyTrailingWhitespace(fragment.textLines[offset + index]));
 }
 
-export function evaluateQuery(label, response, defaultSourceCommit) {
-  if (response.query_id !== label.id) throw new Error('Query identity mismatch');
+export function selectEvaluationFragments(response) {
   if (typeof response.context_string !== 'string' || !Array.isArray(response.fragments)) throw new Error('Missing actual context');
   const tokenEstimate = estimateTokens(response.context_string);
   if (tokenEstimate > TOKEN_BUDGET) throw new Error('Returned context exceeds historical token estimate budget');
@@ -84,15 +83,25 @@ export function evaluateQuery(label, response, defaultSourceCommit) {
     end_line: Math.min(fragment.end_line, fragment.start_line + FRAGMENT_LINES - 1),
     textLines: fragment.textLines.slice(0, FRAGMENT_LINES) }));
   const overlength = response.fragments.filter(fragment => fragment.end_line - fragment.start_line + 1 > FRAGMENT_LINES);
+  return { selected, unique, overlength, tokenEstimate };
+}
+
+export function validateEvidence(evidence) {
+  if (sha256(evidence.raw_excerpt) !== evidence.raw_utf8_sha256 ||
+      Buffer.byteLength(evidence.raw_excerpt, 'utf8') !== evidence.byte_length ||
+      lines(evidence.raw_excerpt).length !== evidence.end_line - evidence.start_line + 1) {
+    throw new Error('Frozen evidence integrity mismatch');
+  }
+}
+
+export function evaluateQuery(label, response, defaultSourceCommit) {
+  if (response.query_id !== label.id) throw new Error('Query identity mismatch');
+  const { selected, unique, overlength, tokenEstimate } = selectEvaluationFragments(response);
   const required = label.expected_evidence.filter(item => item.necessity === 'required');
   if (!required.length) throw new Error('A scored query needs required evidence');
   const hits = [];
   for (const [index, evidence] of required.entries()) {
-    if (sha256(evidence.raw_excerpt) !== evidence.raw_utf8_sha256 ||
-        Buffer.byteLength(evidence.raw_excerpt, 'utf8') !== evidence.byte_length ||
-        lines(evidence.raw_excerpt).length !== evidence.end_line - evidence.start_line + 1) {
-      throw new Error('Frozen evidence integrity mismatch');
-    }
+    validateEvidence(evidence);
     const rank = selected.findIndex(fragment => covers(evidence, fragment, evidence.source_commit || defaultSourceCommit));
     if (rank >= 0) hits.push({ required_index: index, rank: rank + 1 });
   }

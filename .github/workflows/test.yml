@@ -52,7 +52,7 @@ jobs:
       - name: Check package validation helpers
         run: node --test scripts/package-validation.node-test.mjs
       - name: Check frozen retrieval evaluation contract
-        run: node --test ../scripts/verification/context-evaluation.node-test.mjs
+        run: node --test ../scripts/verification/context-evaluation.node-test.mjs ../scripts/verification/context-ndcg.node-test.mjs ../scripts/verification/audit-python-baselines.node-test.mjs
       - name: Check desktop types
         run: npm run typecheck
       - name: Build desktop renderer

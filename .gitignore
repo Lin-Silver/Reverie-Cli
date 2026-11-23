@@ -34,6 +34,8 @@ reverie_cli.egg-info/
 *.spec
 !reverie.spec
 *.0
+!/tasks/rust-3.0/
+!/tasks/rust-3.0/**
 
 # Python caches
 __pycache__/

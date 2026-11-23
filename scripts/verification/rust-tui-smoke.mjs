@@ -164,6 +164,7 @@ try {
   terminal.resize(42, 12);
   terminal.write('HOLD\r');
   await wait(() => Boolean(held), 'pending HTTP request');
+  await wait(() => screenText().includes('PARTIAL_UI_REPLY😀') && database.prepare("SELECT group_concat(content, '') AS content FROM stream_chunks WHERE kind='assistant'").get().content === 'PARTIAL_UI_REPLY😀', 'native partial reply displayed and persisted before cancellation');
   terminal.write('\x03');
   await wait(() => database.prepare("SELECT count(*) AS count FROM task_runs WHERE state='cancelled'").get().count === 1 && !held, 'actual Ctrl+C cancellation');
   assert.equal(database.prepare("SELECT group_concat(content, '') AS content FROM stream_chunks WHERE kind='assistant'").get().content, 'PARTIAL_UI_REPLY😀');

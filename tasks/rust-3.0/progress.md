@@ -419,3 +419,9 @@ Rust Context Engine 新增 `symbol`、`file`、`search`、`dependencies`、`outl
 本机 Rust 测试共 23 项通过；修改后的 Context Engine 9 项、格式、Clippy `-D warnings` 和锁定 release 构建通过。最终 Windows EXE 为 16,854,528 字节，SHA-256 `e901e53fc5efff3eb87d69da8062525155284deda2c22de9f13a2c37e243f043`。实际 CLI／SDK 上下文 22 项、模型／工具／权限／项目隔离 16 项通过；常驻桌面桥接 6 项在本增量中通过。移除内容哈希拒绝条件后测试如预期失败，源码按原字节恢复。
 
 证据为 `.runtime/rust-3.0/context-smoke/case-ZLEWN1/report.json`、`run-smoke/case-aBzd1T/report.json`、`desktop-bridge-smoke/case-s9MFMs/report.json` 和 `context-mutation/report.json`。测试用严格权限配置显式启用 `strict_allow_read_only`；此前错误夹具、长路径失败及其报告保留。现有解析仍为 Python、JS、TS/TSX、Rust，完整语言、导入／别名、LSP、历史、记忆、本地语义与性能质量继续实施。`UNVERIFIED.md` 第 45 项记录这些边界，完整主计划保持原文。
+
+### R1-5 取消探针的实际接收边界（2026-11-23）
+
+提交 `4b1d087` 的 Test `45222023933` 中，文档、桌面、Windows、Linux、Intel Mac 通过；四平台 Context Engine 检查全部通过。Apple Silicon job `137858520999` 的终端部分输出取消断言失败：服务端写出数据后立即取消，Rust 可能尚未收到并保存该块，数据库为 null。探针现在先等实际终端显示及 SQLite 持久化均出现 `PARTIAL_UI_REPLY😀`，再发送 Ctrl+C；原取消后保留原文断言继续执行，没有更改产品的取消实现。
+
+本机原生 PTY 8 项通过，证据 `.runtime/rust-3.0/tui-smoke/case-RMxwfo/report.json`。该证据只证明 Windows 上修正后的检查；新来源的 Apple Silicon CI 仍待取得，旧失败不改称通过。

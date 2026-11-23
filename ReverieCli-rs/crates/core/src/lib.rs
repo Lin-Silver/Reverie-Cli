@@ -1,9 +1,16 @@
 use reverie_protocol::{Reply, Request, VERSION, kernel_info};
 use serde_json::{Map, Value, json};
-use std::{io, path::PathBuf};
+use std::{
+    collections::HashMap,
+    io,
+    path::PathBuf,
+    sync::{Arc, Mutex, MutexGuard, TryLockError},
+};
 
 pub mod config;
+pub mod host;
 pub mod models;
+pub mod provider;
 pub mod session;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -14,7 +21,7 @@ pub struct Kernel {
     pub project_data_dir: PathBuf,
     config: config::ConfigStore,
     sessions: Option<session::SessionStore>,
-    context: Option<reverie_context::ContextEngine>,
+    contexts: HashMap<PathBuf, Arc<Mutex<reverie_context::ContextEngine>>>,
     view_session: Option<String>,
     workspace_mode: bool,
 }
@@ -27,6 +34,11 @@ pub const ACTIONS: &[&str] = &[
     "indexWorkspace",
     "queryContext",
     "workspaceMentions",
+    "runPrompt",
+    "stopPrompt",
+    "resolveApproval",
+    "resolveUserInput",
+    "listTools",
     "getModelSources",
     "selectModel",
     "addStandardModel",
@@ -63,7 +75,7 @@ impl Kernel {
             project_data_dir,
             config,
             sessions: None,
-            context: None,
+            contexts: HashMap::new(),
             view_session: None,
             workspace_mode: false,
         })
@@ -92,20 +104,40 @@ impl Kernel {
     }
 
     pub fn context_status(&self) -> Value {
-        match &self.context {
-            Some(context) => context.status().unwrap_or_else(|error|json!({"ready":false,"available":true,"backend":"rust","error":error.to_string()})),
+        match self.contexts.get(&self.project_data_dir) {
+            Some(context) => match context.try_lock() {
+                Ok(context) => context.status().unwrap_or_else(|error|json!({"ready":false,"available":true,"backend":"rust","error":error.to_string()})),
+                Err(TryLockError::WouldBlock) => {
+                    let mut status = reverie_context::database_status(&self.project_data_dir.join("context/rust-3.0.sqlite3"))
+                        .unwrap_or_else(|_| json!({"ready":false,"backend":"rust","files":0,"symbols":0}));
+                    status["indexing"] = json!(true);
+                    status["available"] = json!(true);
+                    status["label"] = json!("Indexing");
+                    status
+                }
+                Err(error) => json!({"ready":false,"available":true,"backend":"rust","error":error.to_string()}),
+            },
             None => json!({"ready":false,"indexing":false,"files":0,"symbols":0,"backend":"rust","progress":0.0,"label":"On demand","automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
         }
     }
 
-    pub fn context_engine(&mut self) -> Result<&mut reverie_context::ContextEngine> {
-        if self.context.is_none() {
-            self.context = Some(reverie_context::ContextEngine::open(
+    pub fn shared_context(&mut self) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {
+        if !self.contexts.contains_key(&self.project_data_dir) {
+            let context = reverie_context::ContextEngine::open(
                 &self.project_root,
                 &self.project_data_dir.join("context/rust-3.0.sqlite3"),
-            )?);
+            )?;
+            self.contexts
+                .insert(self.project_data_dir.clone(), Arc::new(Mutex::new(context)));
         }
-        Ok(self.context.as_mut().unwrap())
+        Ok(self.contexts[&self.project_data_dir].clone())
+    }
+
+    pub fn context_engine(&mut self) -> Result<MutexGuard<'_, reverie_context::ContextEngine>> {
+        self.shared_context()?;
+        self.contexts[&self.project_data_dir]
+            .lock()
+            .map_err(|_| "Context Engine lock was poisoned.".into())
     }
 
     fn workspace(&self, config: &Value) -> Value {
@@ -124,7 +156,6 @@ impl Kernel {
         let project = config::canonical_project(std::path::Path::new(root))?;
         if project != self.project_root {
             self.sessions = None;
-            self.context = None;
             self.view_session = None;
             self.project_root = project;
             self.project_data_dir = self
@@ -146,11 +177,8 @@ impl Kernel {
             config::ConfigStore::new(&self.app_root)
         };
         let database = self.project_data_dir.join("context/rust-3.0.sqlite3");
-        if self.context.is_none() && database.is_file() {
-            self.context = Some(reverie_context::ContextEngine::open(
-                &self.project_root,
-                &database,
-            )?);
+        if !self.contexts.contains_key(&self.project_data_dir) && database.is_file() {
+            self.shared_context()?;
         }
         Ok(())
     }
@@ -194,8 +222,7 @@ impl Kernel {
             }
             "queryContext" => {
                 let query = string(payload, "query")?;
-                let context = self.context_engine()?;
-                let results = context.query(
+                let results = self.context_engine()?.query(
                     query,
                     payload["limit"].as_u64().unwrap_or(10) as usize,
                     payload["estimatedTokens"].as_u64().unwrap_or(12000) as usize,

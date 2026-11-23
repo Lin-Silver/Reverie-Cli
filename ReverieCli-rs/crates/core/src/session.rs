@@ -429,6 +429,84 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn history(&self, id: &str) -> Result<Vec<Value>> {
+        let metadata: String = self
+            .db
+            .query_row(
+                "SELECT metadata FROM conversations WHERE id=? AND deleted=0",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or("Conversation not found.")?;
+        let metadata: Value = serde_json::from_str(&metadata)?;
+        let start = metadata["active_context_start"]
+            .as_i64()
+            .unwrap_or(0)
+            .max(0);
+        let payloads: Vec<String> = self
+            .db
+            .prepare(
+                "SELECT payload FROM messages WHERE session_id=? AND sequence>=? ORDER BY sequence",
+            )?
+            .query_map(params![id, start], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(payloads
+            .into_iter()
+            .map(|payload| serde_json::from_str::<Value>(&payload).map(wire))
+            .collect::<serde_json::Result<_>>()?)
+    }
+
+    pub fn begin_run(
+        &mut self,
+        id: &str,
+        run_id: &str,
+        configuration: &Value,
+        configuration_revision: i64,
+        request: &Value,
+        user: &Value,
+    ) -> Result<()> {
+        let time = now();
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count: i64 = tx
+            .query_row(
+                "SELECT message_count FROM conversations WHERE id=? AND deleted=0",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or("Conversation not found.")?;
+        tx.execute("INSERT INTO task_runs(id,session_id,configuration_revision,configuration,execution_root,state,revision,result,created_at,updated_at,request) VALUES (?,?,?,?,?,'running',1,'{}',?,?,?)",params![run_id,id,configuration_revision,serde_json::to_string(configuration)?,self.scope["workspace_path"].as_str().ok_or("Workspace identity is missing.")?,time,time,serde_json::to_string(request)?])?;
+        insert_messages(&tx, id, count, std::slice::from_ref(user))?;
+        tx.execute("UPDATE conversations SET message_count=message_count+1,revision=revision+1,updated_at=? WHERE id=?",params![time,id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn finish_run(
+        &mut self,
+        id: &str,
+        run_id: &str,
+        state: &str,
+        result: &Value,
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if tx.execute("UPDATE task_runs SET state=?,result=?,revision=revision+1,updated_at=? WHERE id=? AND session_id=? AND state NOT IN ('completed','cancelled','failed')",params![state,serde_json::to_string(result)?,now(),run_id,id])? == 0 {return Err("Task is missing or already finalized.".into());}
+        tx.execute("INSERT INTO conversation_read_states VALUES (?,1) ON CONFLICT(session_id) DO UPDATE SET unread=1",[id])?;
+        if state == "completed" {
+            tx.execute(
+                "DELETE FROM stream_chunks WHERE session_id=? AND run_id=?",
+                params![id, run_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn clear_stream(&self, id: &str, run_id: &str) -> Result<()> {
         self.db.execute(
             "DELETE FROM stream_chunks WHERE session_id=? AND run_id=?",

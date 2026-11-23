@@ -19,7 +19,7 @@ export function startBridge(executable, cwd, appRoot) {
     if(value.type === 'ready' && value.id === undefined) {readyResolve(value); return;}
     const waiter = pending.get(value.id);
     if(!waiter) return;
-    if(value.type === 'event') {waiter.events.push(value); return;}
+    if(value.type === 'event' || value.type === 'prompt.event') {waiter.events.push(value); return;}
     pending.delete(value.id);
     clearTimeout(waiter.timer);
     waiter.resolve({...value, events: waiter.events});

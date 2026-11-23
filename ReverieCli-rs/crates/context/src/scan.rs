@@ -98,6 +98,14 @@ pub fn relative_path(path: &Path) -> Result<String> {
 }
 
 pub fn files(root: &Path, options: &ScanOptions) -> Result<Vec<FileEntry>> {
+    files_with_cancel(root, options, &|| false)
+}
+
+pub fn files_with_cancel(
+    root: &Path,
+    options: &ScanOptions,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<FileEntry>> {
     let mut builder = GitignoreBuilder::new(root);
     for rule in &options.rules {
         builder.add_line(None, rule)?;
@@ -128,6 +136,9 @@ pub fn files(root: &Path, options: &ScanOptions) -> Result<Vec<FileEntry>> {
         .build();
     let mut files = Vec::new();
     for item in walk {
+        if cancelled() {
+            return Err("Context indexing cancelled.".into());
+        }
         let entry = item?;
         if !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;

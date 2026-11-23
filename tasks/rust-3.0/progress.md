@@ -6,9 +6,9 @@
 
 最终纯 Python 2.5.5 已公开并完整归档：来源 `070fa25b07692c90c56a6b00a9a969ff2abb7804`，树 `b7835e45d0cea95e9e5b0790d24b7604c7681002`，正式 Release `454958491`，17 项资产。Python 剩余真实 DPI 验收获维护者明确延后，保持未验证；Rust 四档真实 DPI 门槛保留。最终来源、实包和公开源码核对见 [Python 基线](python-baseline.md)。
 
-已从同一来源建立 `codex/rust-3.0` 隔离工作区并附加到本会话。托管创建在 Git 过滤器发现时超时，原生 Git 创建成功；未改动既有 checkout 的未跟踪收尾资料。G 盘仅约 118 MiB 可用，开发工作区与后续构建、语料、缓存均置于本会话的 C 盘工作区。此时尚未创建 `ReverieCli-rs` 的实现。
+维护者最新决定已执行：本地和 GitHub 仅保留 `main`、`Reverie-Cli-py` 两个分支。Rust 在 `G:\Reverie\Reverie-Cli\ReverieCli-rs` 的主线上直接实施；原分支历史已验证归档。原生入口、配置与会话、基础 Context Engine 已提交，OpenAI Chat 兼容 HTTP／SSE、实际文件工具、询问、审批与取消按新的可运行增量接入。既有 Python 收尾资料保持原样。G 盘约 109 MiB 可用，Rust target 通过已核实的 junction 使用本任务 C 盘缓存。
 
-当前顺序：完成最终 Python 的性能补测、归因和轻量基线，再推进 Rust 首条完整运行链。48 题、130 required 和 23 supplementary 已独立复核并冻结；每题 30 次的源码 API 质量采集、评分和独立审计完成，基础宏平均 21.8750%、难例 5.2604%。源码 API 索引诊断冷/热各 30 次完成，实包预热完整索引正在重新测量，GUI、完整检索链、归因及轻量仍待完成。预算固定为字符数÷4的 12,000 估算 tokens、原生片段前 72 行、完整覆盖和逐题宏平均。ORT 1.31.0 三平台包及 Windows API 24 已核验；Intel 同版本固定源码本轮仍无法取得，其对阶段 1 开工顺序的影响已向维护者提问。详见 [阶段 0B](phase0B.md)。每一步只在对应检查通过后记录完成。
+当前重点是 Rust 实施。本地执行必要构建、基本回归和实际进程检查，扩展测评交由云端，见 [未验证清单](UNVERIFIED.md) 与 [验证提示词](CLOUD_VALIDATION_PROMPT.md)。已完成的 48×30 质量和 960 次基础检索、启动、索引及内存记录继续保留；其原始合同见 [阶段 0B](phase0B.md)。性能归因、Intel ORT 同版本源码和完整产品验收不再阻塞当前不依赖 ORT 的实施。未取得的证据继续列为未验证。
 
 ## 接手快照（2026-11-22）
 
@@ -28,9 +28,9 @@
 | P2 纯 Python Context Engine | 最终 `070fa25` 实际 EXE 的 CLI/SDK/Context Engine 6项、旧库备份恢复9项、历史忽略兼容11项通过；第一方 Context Engine 为 Python / in-process | 原始证据与实际程序摘要对应；历史实现和旧失败保留 |
 | P3 Python 重验与重发 | 最终 Test、四平台 native Build及17项实际下载核对通过；稳定草稿已公开；完整 Python 归档同源；真实 DPI 按维护者明确决定延后并保持未验证 | 源码/标签/资产/内核身份一致；公开说明披露原失败、零真实模型质量样本及未验证边界 |
 | 0A 只读整理 | 候选快照清单与语料草案已整理；未冻结正式基线 | SDK/类型/语料草案与来源 SHA 对应，详见 [阶段 0A](phase0A.md) |
-| 0B 正式基线 | 发行、协议、语料已固定；48×30 源码 API 质量采集与审计完成；正式性能补测及轻量继续进行 | 冷/热各至少 30 样本、耗时分解及轻量；原文、评分和独立审计分别保存 |
-| 1 Rust 首条链路 | 分支与隔离工作区就绪，功能待实施 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
-| 2 Context Engine | 待实施 | 完整结构/基础/本地语义链与性能质量门槛 |
+| 0B 正式基线 | 已取得的发行、协议、语料、48×30 质量与性能记录已保全；剩余测评移交云端 | 缺失证据逐项记录，不阻塞实施 |
+| 1 Rust 首条链路 | 原生入口、配置、会话及基础模型／文件执行可运行；滚动终端和 Electron 接着实施 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
+| 2 Context Engine | 同进程结构／基础检索首增量已实施；完整引用、语义与性能待完成 | 完整结构/基础/本地语义链与性能质量门槛 |
 | 3 模式与平台 | 待实施 | 全模式与实际平台工作流 |
 | 4 生态与界面 | 待实施 | 四市场/通用组件/真实 OAuth/更新/GUI/TUI/询问与换行 |
 | 独立组件 | 待实施 | Gamer 四作品/类型矩阵/导出与 Live2D 原生渲染/许可 |
@@ -355,3 +355,13 @@ main 的 CI 改为四平台 Rust 基本构建／检查与既有桌面测试，�
 本地全 Rust 基本测试 8 passed，Clippy -D warnings 通过，release 构建通过。实际 Windows CLI／SDK 16 项 Context Engine 检查通过，验证持久增量、旧内容拒绝、重命名、中文后半章证据、72 行上限、路径和重启就绪；同一新程序的原 session smoke 20 次请求通过。证据 .runtime/rust-3.0/context-smoke/case-792W33/report.json、session-smoke/case-nEQ5QY/report.json。
 
 首个结构／基础引擎已可运行，但完整语言、引用／依赖／历史图、语义模型与神经重排、跨平台实际运行和正式质量／性能仍继续实施或待验收；未将基础通过写成整个 Context Engine 完成。原 Python 索引与归档未修改，完整版计划继续保留。
+
+### R1-3 首增量：模型、文件工具与任务生命周期（2026-11-23 UTC）
+
+同一 Rust KernelHost 接入 OpenAI Chat 兼容 HTTP／JSON／SSE，保留分块 UTF-8、CR／LF／CRLF、流式 reasoning、工具参数增量和完成标记。实际文件工具支持读取、列出、查看、创建、精确替换及插入；覆盖写入先保留原字节，原子替换保留文件权限。SDK 在输入顺序中登记运行，随后并发执行；同会话拒绝重入，重复 run ID 被拒绝，停止与 EOF 能取消网络等待。每次运行固定自己的项目、配置、会话连接和共用索引，切换项目不会把结果写进另一个数据库。
+
+新增三选项加自定义回答的非阻塞用户询问；显式空回答、无效审批和错误归属不会消耗待确认请求。Strict 支持 once／session／deny／message，自定义拒绝原文返回模型，session 批准限同项目、同会话和本次内核运行。流式正文与 reasoning 写入恢复记录，截断／取消不能伪装为完成；取消前未开始的剩余工具明确记为 not_started。索引取消使用事务回滚，后台索引避免占用模型运行所需的全局状态锁。
+
+本地基本 Rust 测试 11 passed，Clippy `-D warnings`、格式及 release 构建通过。最终本轮 Windows EXE 为 14,853,632 字节；实际入口 6 项、会话 20 次请求、Context Engine 16 项、模型执行 14 项通过。证据为 `.runtime/rust-3.0/R1-3-entry-smoke.json`、`session-smoke/case-w51rPX/report.json`、`context-smoke/case-2bAxRr/report.json`、`run-smoke/case-v8b5m4/report.json`。模型执行使用回环 HTTP 协议夹具，Rust 实际执行文件操作；不证明外部真实模型质量、全部 Provider、完整 GUI／TUI或正式性能。此前主线 `28eaf0c` 的四平台 Test 已独立回读成功，新执行检查加入相同四平台 CI。
+
+Python 2.5.5 归档和正式发布保持冻结。Rust 下一增量继续滚动终端、Electron 和后续全功能迁移；扩展测评使用既有一行一个编号点的文档，完整主计划未缩减。

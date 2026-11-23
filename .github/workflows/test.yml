@@ -84,3 +84,5 @@ jobs:
         run: node scripts/verification/rust-session-smoke.mjs
       - name: Run actual Context Engine checks
         run: node scripts/verification/rust-context-smoke.mjs
+      - name: Run actual model protocol, tools, approvals and cancellation checks
+        run: node scripts/verification/rust-run-smoke.mjs

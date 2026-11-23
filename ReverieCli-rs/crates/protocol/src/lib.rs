@@ -28,6 +28,25 @@ pub struct SessionInfo {
     pub message_count: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PromptResult {
+    pub success: bool,
+    pub prompt: String,
+    pub output_text: String,
+    pub thinking_text: String,
+    pub error: String,
+    pub mode: String,
+    pub model_display_name: String,
+    pub provider_label: String,
+    pub session_id: String,
+    pub session_name: String,
+    pub run_id: String,
+    pub state: String,
+    pub duration_seconds: f64,
+    pub ui_events: Vec<Value>,
+    pub activity_events: Vec<Value>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Request {
     #[serde(default)]

@@ -76,8 +76,17 @@ impl ContextEngine {
     }
 
     pub fn index(&mut self, rebuild: bool) -> Result<Value> {
+        self.index_with_cancel(rebuild, &|| false)
+    }
+
+    pub fn index_with_cancel(
+        &mut self,
+        rebuild: bool,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<Value> {
         let started = Instant::now();
-        let candidates = scan::files(&self.root, &scan::default_options(&self.root)?)?;
+        let candidates =
+            scan::files_with_cancel(&self.root, &scan::default_options(&self.root)?, cancelled)?;
         let scanned = candidates.len();
         let state = catalog::state(self.catalog.connection())?;
         let (changed, removed) = if rebuild {
@@ -99,6 +108,9 @@ impl ContextEngine {
             let update = (|| {
                 self.catalog.apply(&removed, &[])?;
                 for file in changed {
+                    if cancelled() {
+                        return Err("Context indexing cancelled.".into());
+                    }
                     let document = self.parsers.document(&self.root, file)?;
                     if document.body.is_some() {
                         indexed += 1;
@@ -106,6 +118,9 @@ impl ContextEngine {
                         skipped += 1;
                     }
                     self.catalog.apply(&[], &[document])?;
+                }
+                if cancelled() {
+                    return Err("Context indexing cancelled.".into());
                 }
                 Ok::<_, Box<dyn std::error::Error + Send + Sync>>(self.catalog.commit()?.revision)
             })();
@@ -231,6 +246,46 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
         fs::create_dir_all(&root).unwrap();
         tempfile::tempdir_in(root).unwrap()
+    }
+
+    #[test]
+    fn cancelled_incremental_update_rolls_back_partial_catalog_changes() {
+        let dir = directory();
+        let project = dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("a.txt"), "original a").unwrap();
+        fs::write(project.join("b.txt"), "original b").unwrap();
+        let database = dir.path().join("context.sqlite3");
+        let mut engine = ContextEngine::open(&project, &database).unwrap();
+        let revision = engine.index(false).unwrap()["revision"].clone();
+        fs::write(project.join("a.txt"), "changed a").unwrap();
+        fs::write(project.join("b.txt"), "changed b").unwrap();
+        let checks = std::cell::Cell::new(0);
+        assert!(
+            engine
+                .index_with_cancel(false, &|| {
+                    checks.set(checks.get() + 1);
+                    checks.get() >= 5
+                })
+                .is_err()
+        );
+        assert_eq!(engine.status().unwrap()["revision"], revision);
+        fs::write(project.join("a.txt"), "original a").unwrap();
+        fs::write(project.join("b.txt"), "original b").unwrap();
+        assert_eq!(
+            engine.query("original a", 10, 12000).unwrap()[0].content,
+            "original a"
+        );
+        drop(engine);
+        let mut engine = ContextEngine::open(&project, &database).unwrap();
+        fs::write(project.join("b.txt"), "successful retry").unwrap();
+        assert!(
+            engine.index(false).unwrap()["revision"].as_i64().unwrap() > revision.as_i64().unwrap()
+        );
+        assert_eq!(
+            engine.query("successful retry", 10, 12000).unwrap()[0].content,
+            "successful retry"
+        );
     }
 
     #[test]

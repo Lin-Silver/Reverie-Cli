@@ -24,7 +24,7 @@ function eventLifecycleKey(event: Record<string, unknown>): string {
 
   const eventType = String(event.event ?? event.type ?? "").trim().toLowerCase();
   const toolCallId = String(event.tool_call_id ?? "").trim();
-  if (toolCallId && ["tool_start", "tool_result"].includes(eventType)) {
+  if (toolCallId && ["tool_start", "tool_progress", "tool_result"].includes(eventType)) {
     return `tool:${toolCallId}`;
   }
   return "";
@@ -34,8 +34,12 @@ function mergeLifecycleEvent(previous: Record<string, unknown>, incoming: Record
   const type = String(incoming.event ?? incoming.type ?? "");
   const previousType = String(previous.event ?? previous.type ?? "");
   const finished = ["tool_result", "model_response", "model_error"];
-  if (finished.includes(previousType) && ["tool_start", "model_request"].includes(type)) return previous;
+  if (finished.includes(previousType) && ["tool_start", "tool_progress", "model_request"].includes(type)) return previous;
   const event = { ...previous, ...incoming };
+  if (type === "tool_progress") {
+    event.output = String(previous.output ?? "") + String(incoming.text ?? "");
+    event.status = "working";
+  }
   if (finished.includes(type)) {
     event.status = incoming.status ?? (type === "model_error" || incoming.success === false ? "error" : "success");
   }

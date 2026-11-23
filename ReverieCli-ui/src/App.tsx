@@ -5629,6 +5629,11 @@ export default function App() {
         if (runtime) runtime.question = event as UserInputRequest;
         setSessionStates(current => ({...current,[eventOwner]:"question"}));
       }
+      if (type === "run.control" && event.state === "running") {
+        if (runtime) { runtime.approval = null; runtime.question = null; }
+        setSessionStates(current => ({ ...current, [eventOwner]: "running" }));
+        if (eventOwner === currentOwner) { setApproval(null); setQuestion(null); }
+      }
       if (eventOwner !== currentOwner) return;
       if (type === "user.question") { setQuestion(event as UserInputRequest); return; }
       if (runtime?.running) acceptLiveEvents.current = true;

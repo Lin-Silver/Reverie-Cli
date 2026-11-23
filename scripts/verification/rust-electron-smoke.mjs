@@ -18,6 +18,7 @@ for(const directory of [projectRoot,path.join(appRoot,'.reverie'),runtimeRoot])f
 // A real, independent Git fixture prevents the surrounding repository from owning this project.
 fs.writeFileSync(path.join(projectRoot,'.gitignore'),'.reverie/\n');
 fs.writeFileSync(path.join(projectRoot,'fixture.txt'),'Independent desktop workspace\n');
+fs.writeFileSync(path.join(projectRoot,'command.mjs'),"console.log('COMMAND_LIVE😀'); setTimeout(()=>console.log('COMMAND_FINAL😀'),2000);\n");
 for(const args of [['init','--initial-branch=main'],['add','.gitignore','fixture.txt'],['-c','user.name=Reverie verification','-c','user.email=verification@localhost','commit','-m','Independent desktop fixture']]) {
   execFileSync('git',args,{cwd:projectRoot,windowsHide:true,stdio:'ignore'});
 }
@@ -38,8 +39,9 @@ const server = http.createServer(async(request,response)=>{
     else if(prompt==='WAIT'){event({content:'partial waiting output 😀'});held.add(response);response.once('close',()=>held.delete(response));return;}
     else {
       const question=prompt==='QUESTION';
-      const args=question?{question:'选择实现方式？',reason:'明确用户偏好',options:['A','B','C']}:{path:'desktop-output.txt',content:fileContent};
-      event({tool_calls:[{index:0,id:`desktop-${Date.now()}`,type:'function',function:{name:question?'userInput':'create_file',arguments:JSON.stringify(args)}}]},'tool_calls');
+      const command=prompt==='COMMAND';
+      const args=question?{question:'选择实现方式？',reason:'明确用户偏好',options:['A','B','C']}:command?{command:`"${process.execPath}" command.mjs`,timeout:10}:{path:'desktop-output.txt',content:fileContent};
+      event({tool_calls:[{index:0,id:`desktop-${Date.now()}`,type:'function',function:{name:question?'userInput':command?'command_exec':'create_file',arguments:JSON.stringify(args)}}]},'tool_calls');
     }
     response.end('data: [DONE]\n\n');
   }catch(error){fixtureFailure=error;response.destroy(error);}

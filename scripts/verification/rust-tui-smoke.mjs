@@ -26,6 +26,7 @@ const project = path.join(root, '工作区😀');
 const appRoot = path.join(root, 'application');
 fs.mkdirSync(project, {recursive: true});
 fs.mkdirSync(path.join(appRoot, '.reverie'), {recursive: true});
+fs.writeFileSync(path.join(project, 'terminal-command.mjs'), "console.log('COMMAND_TERMINAL_PROGRESS😀'); setTimeout(()=>console.log('COMMAND_TERMINAL_FINISHED'),1000);\n");
 const prompts = [];
 const requests = [];
 const checks = [];
@@ -43,9 +44,9 @@ function finish(response, text) {
 }
 const server = http.createServer(async (request, response) => {
   try {
-    let bytes = '';
-    for await (const chunk of request) bytes += chunk;
-    const body = JSON.parse(bytes);
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     requests.push(body);
     response.writeHead(200, {'content-type': 'text/event-stream'});
     const last = body.messages.at(-1);
@@ -62,6 +63,9 @@ const server = http.createServer(async (request, response) => {
       response.once('close', () => {held = undefined;});
     } else if (prompt === 'QUESTION' || prompt === 'HEADLESS_QUESTION') {
       frame(response, {choices: [{delta: {tool_calls: [{index: 0, id: `question-${requests.length}`, function: {name: 'userInput', arguments: JSON.stringify({question: 'Choose an implementation', reason: 'fixture-question', options: ['Option A', 'Option B', 'Option C']})}}]}, finish_reason: 'tool_calls'}]});
+      response.end('data: [DONE]\n\n');
+    } else if (prompt === 'COMMAND') {
+      frame(response, {choices: [{delta: {tool_calls: [{index: 0, id: `command-${requests.length}`, function: {name: 'command_exec', arguments: JSON.stringify({command: `"${process.execPath}" terminal-command.mjs`, timeout: 5})}}]}, finish_reason: 'tool_calls'}]});
       response.end('data: [DONE]\n\n');
     } else if (prompt === 'WRITE') {
       frame(response, {choices: [{delta: {tool_calls: [{index: 0, id: `write-${requests.length}`, function: {name: 'create_file', arguments: JSON.stringify({path: 'must-not-exist.txt', content: 'denied fixture'})}}]}, finish_reason: 'tool_calls'}]});
@@ -138,6 +142,11 @@ try {
   await wait(() => completedCount() === 3, 'custom question completion');
   assert.match(messageRows().filter(message => message.role === 'Reverie').at(-1).content, /CUSTOM_REPLY😀/);
   checks.push('Three options and a fourth custom answer through the shared kernel');
+  terminal.write('COMMAND\r');
+  await wait(() => screenText().includes('COMMAND_TERMINAL_PROGRESS😀'), 'actual command progress in terminal scrollback');
+  assert.equal(completedCount(), 3, 'Command output was only shown after completion');
+  await wait(() => completedCount() === 4, 'native terminal command completion');
+  checks.push('Actual command output reaches terminal scrollback before completion');
   terminal.write('/model\r');
   await wait(() => screenText().includes('Choose model'), 'model panel');
   terminal.write('\x1b');
@@ -147,7 +156,7 @@ try {
   terminal.write('WRITE\r');
   await wait(() => screenText().includes('Approve create_file?'), 'approval panel');
   terminal.write('PLEASE_DO_NOT_WRITE\r');
-  await wait(() => completedCount() === 4, 'custom approval denial');
+  await wait(() => completedCount() === 5, 'custom approval denial');
   assert(!fs.existsSync(path.join(project, 'must-not-exist.txt')));
   assert.match(messageRows().filter(message => message.role === 'Reverie').at(-1).content, /PLEASE_DO_NOT_WRITE/);
   checks.push('Model panel, per-conversation Strict and custom denial with no file side effect');

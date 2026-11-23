@@ -446,6 +446,12 @@ impl Tui {
                     event["event"]["tool_name"].as_str().unwrap_or("tool")
                 );
             }
+            Some("ui.event") if event["event"]["type"] == "tool_progress" => {
+                self.screen.feed(
+                    &mut self.pending,
+                    event["event"]["text"].as_str().unwrap_or_default(),
+                )?;
+            }
             _ => {}
         }
         Ok(())

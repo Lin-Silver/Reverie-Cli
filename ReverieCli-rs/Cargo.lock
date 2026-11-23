@@ -1980,12 +1980,18 @@ dependencies = [
 name = "reverie-platform"
 version = "3.0.0-dev"
 dependencies = [
+ "chrono",
  "globset",
+ "libc",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+ "tokio-util",
  "uuid",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

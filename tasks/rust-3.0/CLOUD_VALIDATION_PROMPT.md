@@ -10,6 +10,8 @@
 
 新增四种模型协议的基本检查为 node scripts/verification/rust-provider-smoke.mjs：运行实际 Rust HTTP、文件工具及持久化，不能把测试用不透明签名当成真实模型签名验证。Linux／macOS 运行 PTY 前须用 npm_config_build_from_source=true npm rebuild node-pty --prefix ReverieCli-ui 生成原生验证依赖；这是第三方 node-pty 的构建准备，客户端不依赖该构建时的 Python。原 CI 的缺模块和 posix_spawnp 失败保留，不通过跳过终端用例使其通过。
 
+新增原生命令检查为 `node scripts/verification/rust-command-smoke.mjs`，须运行当前来源的真实 Rust 程序，验证实际 argv、stdin、双路 Unicode、输出上限、权限／审计、取消、超时、正常退出后的后代回收；平台的脚本审查是启发式策略，不能改称系统级沙箱。桌面探针已增加命令进度的单卡片和审批后运行状态，终端探针增加完成前可见输出；应根据 `run.finished` 判断完成，运行中可输入的 composer 不应被当作已结束证据。提交 `5a479f8` 的四平台 CI 现已回读通过，后续命令代码仍须按其实际新来源独立验证。
+
 1. 执行 Rust 锁定构建、测试、格式和 Clippy：`cargo fmt --manifest-path ReverieCli-rs/Cargo.toml --all -- --check`、`cargo test --manifest-path ReverieCli-rs/Cargo.toml --workspace --locked`、`cargo clippy --manifest-path ReverieCli-rs/Cargo.toml --workspace --all-targets --locked -- -D warnings`、`cargo build --manifest-path ReverieCli-rs/Cargo.toml --release --locked`；缺少工作区时明确记录缺失，不能伪造命令成功。
 2. 对实际构建的程序运行 `node scripts/verification/rust-smoke.mjs`、`node scripts/verification/rust-session-smoke.mjs`、`node scripts/verification/rust-context-smoke.mjs`、`node scripts/verification/rust-run-smoke.mjs`、`node scripts/verification/rust-tui-smoke.mjs`，以及帮助、版本、`--kernel-info`、`--context-engine` 和 `--sdk-bridge`；先 `npm ci --prefix ReverieCli-ui --ignore-scripts` 准备实际 PTY 和 headless xterm。检查 UTF-8 JSONL、请求 ID、事件到最终响应、实际文件工具、审批和自定义回答、并发项目隔离、取消、EOF 和正常关闭，确认第一方运行进程树不依赖 Python。本地 HTTP 模型夹具只能证明协议及真实 Rust 工具行为，不证明外部真实模型的质量或服务兼容。扩展终端探针设置 `REVERIE_TUI_SPLIT_HOST_MARKERS=1`，核对跨 host write 的边界；本机 ConPTY 已实测失败，不能将正常完整边界通过改称该扩展用例通过。
 3. 比对 `sdk-protocol-baseline-v1.json`、`component-protocol-baseline-v1.json` 的全部协议与生命周期；按实际已实现 action 执行配置、独立会话、原文持久化、Provider、流式响应和真实工具链。

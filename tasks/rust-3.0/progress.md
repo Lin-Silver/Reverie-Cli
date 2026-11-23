@@ -395,3 +395,15 @@ HTTP 在收到输出前执行有限重试，保留 Python 的 1／3／5／7／15
 本机基本 Rust 测试 18 passed，格式、Clippy -D warnings、锁定 release 构建与前端类型／生产构建通过。新 Windows EXE 为 16,308,224 字节，SHA-256 为 8039dae2bf5bb546f2de64f3954e8a0d871dd0bdf0982e7ee47b90af053d2f62。四协议 SSE／JSON、认证头、输出前 503 重试、原生文件写入、思考状态返回、截断不重试及新进程恢复共 13 条实际链路通过，原模型／工具／审批／取消 14 条检查也通过。证据为 .runtime/rust-3.0/provider-smoke/case-G2r3ZJ/report.json 和 run-smoke/case-SV5Ugj/report.json。使用回环协议夹具和测试用不透明签名，不证明真实服务、签名有效性、全 Provider 库存、账户授权或全部模型参数兼容。
 
 上一提交 cde4e6e 的 Test 45198749225 中，文档、桌面和 Windows 通过；其他三平台的原生构建、入口、会话、上下文、模型、类型和常驻桥接均通过，终端检查失败。Linux 日志明确缺 pty.node；两种 Mac 报 posix_spawnp failed，具体根因不能仅凭日志认定。CI 为 POSIX 增加从源码构建第三方 node-pty 验证依赖，保持原终端检查和断言；新来源仍须真实 CI 验证。完整性能与产品验收继续由云端清单承接，没有改动 Python 归档或正式发行。
+
+### R3 原生命令首增量及界面进度（2026-11-23）
+
+独立回读提交 `5a479f8` 的 Test `45206236771`：文档、桌面、Windows x64、Linux x64、macOS arm64 和 Intel x64 六个 job 全部通过，POSIX 原生 node-pty 修复已有实际 CI 证据。后续命令增量的四平台结果须按新来源另计。
+
+Rust 实施 `command_exec` 与 shell／terminal／run_command 别名，保留工作目录、关闭 stdin、脚本审查、工具链环境和项目审计。增加管道逐段审查、Git 全局选项与附带值校验、双路异步 UTF-8 输出及每路 50,000 字符保留；Windows 使用 Job Object，Unix 使用独立进程组。取消、超时、正常完成均回收后代，已执行命令保存输出和真实状态；未启动及无法确认的交付分开记录。权限拒绝也进入审计。脚本审查是启发式策略，未宣称操作系统沙箱。
+
+GUI 将命令进度与最终结果合并为一个工具卡片，终端在命令完成前显示实际输出。普通回答与权限等待器结束后发送权威运行状态，清除侧栏过期等待标记。修正窗口探针：运行中可用的输入框不能证明任务完成，现以实际 `run.finished` 判断；窗口中已核对审批后的运行状态和单卡片输出。
+
+本机基本 Rust 测试 19 passed，格式、Clippy -D warnings、锁定 release 构建、生成类型与桌面生产构建通过；GUI 定向 18 项通过。Windows EXE 为 16,574,464 字节，SHA-256 `10e073b502cfa75a4ed89c48913a5421231267e52c78d36fba603db0ebd6f875`。实际命令 13 项、既有模型／工具／权限 14 项、终端 8 项、Electron 窗口 5 项通过。移除命令操作符拒绝条件后，定向测试如预期失败；恢复源码后原测试通过。
+
+证据为 `.runtime/rust-3.0/command-smoke/case-kE4j3I/report.json`、`run-smoke/case-gMujBv/report.json`、`tui-smoke/case-ZtnlCA/report.json`、`electron-smoke/case-1u6KFl/report.json` 和 `command-mutation/report.json`。之前的探针失败及截图仍保留，不能改称通过。命令已加入四平台只读 CI；其全部工具链、编码、逃逸进程、Job 分配失败、系统级隔离和完整产品验收列在 UNVERIFIED.md 第 44 项。完整 Context Engine、模式、市场、原生平台、Gamer、Live2D 和正式资产继续实施。

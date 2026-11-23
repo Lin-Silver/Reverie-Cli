@@ -29,6 +29,19 @@ const turn: LiveTurn = {
 };
 
 describe("live stream batching", () => {
+  it("appends command chunks to one working tool and rejects progress after completion", () => {
+    const start = { event: "tool_start", tool_call_id: "command-1", tool_name: "command_exec", arguments: { command: "node build.mjs" } };
+    let current = mergeLiveTurnBatch({ ...turn, events: [], segments: [] }, { ...emptyLiveTurnBatch(), events: [start] });
+    for (const text of ["编译😀\n", "same", "same"]) {
+      current = mergeLiveTurnBatch(current, { ...emptyLiveTurnBatch(), events: [{ event: "tool_progress", tool_call_id: "command-1", text }] });
+    }
+    expect(current.events).toMatchObject([{ tool_name: "command_exec", status: "working", output: "编译😀\nsamesame" }]);
+    expect(current.segments).toHaveLength(1);
+    current = mergeLiveTurnBatch(current, { ...emptyLiveTurnBatch(), events: [{ event: "tool_result", tool_call_id: "command-1", success: false, output: "partial command output", status: "cancelled" }] });
+    const late = mergeLiveTurnBatch(current, { ...emptyLiveTurnBatch(), events: [{ event: "tool_progress", tool_call_id: "command-1", text: "late" }] });
+    expect(late.events).toEqual(current.events);
+    expect(late.segments).toEqual(current.segments);
+  });
   it("keeps tool arguments and closes working state when a result omits status", () => {
     const start = { event: "tool_start", tool_call_id: "list-1", tool_name: "task_manager", arguments: { action: "list" }, status: "working" };
     const existing = mergeLiveTurnBatch({ ...turn, events: [], segments: [] }, { ...emptyLiveTurnBatch(), events: [start] });

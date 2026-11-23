@@ -579,7 +579,7 @@ impl KernelHost {
                 return Ok(turn.content);
             }
             for (index, call) in turn.tool_calls {
-                let result = if control.cancel.is_cancelled() {
+                let mut result = if control.cancel.is_cancelled() {
                     ToolResult::not_started("Run cancelled before this tool started.")
                 } else {
                     match serde_json::from_str::<Value>(&call.arguments) {
@@ -598,7 +598,20 @@ impl KernelHost {
                         Err(_) => ToolResult::fail("Tool arguments must be valid JSON."),
                     }
                 };
-                let activity = json!({"event":"tool_end","type":"tool_result","tool_name":call.name,"tool_call_id":call.id,"success":result.success,"output":result.output,"error":result.error,"status":result.status,"data":result.data});
+                if reverie_platform::command::is_command(&call.name)
+                    && result.data["delivery"].is_null()
+                {
+                    result.data["delivery"] = json!("not_started");
+                    let arguments =
+                        serde_json::from_str::<Value>(&call.arguments).unwrap_or(Value::Null);
+                    if let Err(error) = reverie_platform::command::audit(
+                        &run.data,
+                        json!({"event":"command_blocked","allowed":false,"command":arguments["command"],"cwd":arguments["cwd"],"run_id":run.id,"session_id":run.session,"reason":result.error,"delivery":"not_started"}),
+                    ) {
+                        result.data["audit_error"] = json!(error.to_string());
+                    }
+                }
+                let activity = json!({"event":"tool_result","type":"tool_result","tool_name":call.name,"tool_call_id":call.id,"success":result.success,"output":result.output,"error":result.error,"status":result.status,"data":result.data});
                 emit(json!({"type":"ui.event","event":activity}));
                 run.activities.push(activity);
                 let tool = json!({"role":"tool","tool_call_id":call.id,"name":call.name,"content":serde_json::to_string(&result)?});
@@ -660,6 +673,7 @@ impl KernelHost {
             lock(&control.questions)?.remove(&id);
             let answer = answer?;
             lock(&run.store)?.set_running_state(&run.session, &run.id, "running")?;
+            emit(json!({"type":"run.control","state":"running"}));
             if answer["cancelled"] == true {
                 return Err("User cancelled the question.".into());
             }
@@ -701,6 +715,7 @@ impl KernelHost {
             lock(&control.approvals)?.remove(&id);
             let answer = answer?;
             lock(&run.store)?.set_running_state(&run.session, &run.id, "running")?;
+            emit(json!({"type":"run.control","state":"running"}));
             match answer["decision"].as_str() {
                 Some("once") => {}
                 Some("session") => {
@@ -729,6 +744,22 @@ impl KernelHost {
                 .and_then(|path| std::path::Path::new(path).strip_prefix(&run.root).ok())
         {
             arguments["path"] = json!(run.execution_root.join(path));
+        }
+        if reverie_platform::command::is_command(&call.name) {
+            if run.root != run.execution_root
+                && let Some(path) = args["cwd"]
+                    .as_str()
+                    .and_then(|path| std::path::Path::new(path).strip_prefix(&run.root).ok())
+            {
+                arguments["cwd"] = json!(run.execution_root.join(path));
+            }
+            return Ok(reverie_platform::command::execute(
+                &arguments,
+                &run.execution_root,
+                &run.data,
+                &control.cancel,
+                &|stream, text| emit(json!({"type":"ui.event","event":{"event":"tool_progress","kind":"tool_progress","type":"tool_progress","tool_name":call.name,"tool_call_id":call.id,"stream":stream,"text":text}})),
+            ).await);
         }
         Ok(reverie_platform::execute(
             &call.name,

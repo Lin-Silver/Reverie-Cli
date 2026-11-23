@@ -92,6 +92,8 @@ jobs:
         run: node scripts/verification/rust-run-smoke.mjs
       - name: Run actual provider protocol and signed-state checks
         run: node scripts/verification/rust-provider-smoke.mjs
+      - name: Run actual workspace commands and process-tree cleanup checks
+        run: node scripts/verification/rust-command-smoke.mjs
       - name: Install native terminal check dependencies
         run: npm ci --prefix ReverieCli-ui --ignore-scripts
       - name: Build the native terminal verification dependency

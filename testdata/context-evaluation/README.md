@@ -40,13 +40,25 @@ geometry and structured text.
   identity, complete-file digest, excerpt digest and exact UTF-8 bytes.
 - Evaluate only evidence actually returned by the application.
 - Each returned fragment has at most 72 lines and the total context has at
-  most 12,000 tokens. Preserve order, remove exact duplicate fragments, then
+  most 12,000 estimated tokens, using the frozen Python formula
+  `floor(Unicode character count / 4)`. Preserve order, remove exact duplicate fragments, then
   evaluate the first ten.
 - A hit must completely cover the required evidence and match its content
   version. Supplementary passages do not enter the required Recall denominator.
 - Keep development queries separate from independent acceptance labels.
 - Freeze inputs before observing retrieval scores. Do not revise labels,
   relevance spans or applicability after seeing a candidate's failures.
+
+The independently reviewed acceptance set is [queries-v1.json](queries-v1.json):
+48 questions, with 12 per domain, and 130 required plus 23 supplementary spans.
+Each domain contains four basic and eight hard questions, and six questions
+in each language. Hard-query scores use equal-weight per-question macro
+averages, with domain results reported separately.
+
+[frozen-corpus-v1.json](frozen-corpus-v1.json) binds the complete 1,588-file
+search input to its Git objects and byte digests. It records the 42 declared
+CRLF exports separately from canonical Git bytes. The query labels and this
+manifest belong outside the isolated search input.
 
 Corpus authoring and validation may use ordinary tools. Evaluation itself must
 not execute scripts contained in the indexed corpus.

@@ -188,6 +188,7 @@ try {
   fs.writeFileSync(path.join(root, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({passed: true, checks: checks.length, report: path.join(root, 'report.json')}));
 } catch (error) {
+  console.error(JSON.stringify({error:String(error),terminalExit,prompts,terminal_tail:stripVTControlCharacters(output).slice(-3500)}));
   fs.writeFileSync(path.join(root, 'failure.json'), JSON.stringify({passed: false, checks, prompts, error: String(error), stack: error.stack, terminalExit}, null, 2) + '\n');
   fs.writeFileSync(path.join(root, 'fixture-requests.json'), JSON.stringify(requests, null, 2) + '\n');
   throw error;

@@ -109,3 +109,11 @@ jobs:
         run: node scripts/verification/rust-desktop-bridge-smoke.mjs
       - name: Run actual scrolling terminal and single-prompt checks
         run: node scripts/verification/rust-tui-smoke.mjs
+      - name: Preserve failed native verification evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-failure-${{ matrix.os }}-${{ matrix.arch }}-${{ github.sha }}
+          path: .runtime/rust-3.0/
+          include-hidden-files: true
+          if-no-files-found: ignore

@@ -29,7 +29,7 @@
 | P3 Python 重验与重发 | 最终 Test、四平台 native Build及17项实际下载核对通过；稳定草稿已公开；完整 Python 归档同源；真实 DPI 按维护者明确决定延后并保持未验证 | 源码/标签/资产/内核身份一致；公开说明披露原失败、零真实模型质量样本及未验证边界 |
 | 0A 只读整理 | 候选快照清单与语料草案已整理；未冻结正式基线 | SDK/类型/语料草案与来源 SHA 对应，详见 [阶段 0A](phase0A.md) |
 | 0B 正式基线 | 已取得的发行、协议、语料、48×30 质量与性能记录已保全；剩余测评移交云端 | 缺失证据逐项记录，不阻塞实施 |
-| 1 Rust 首条链路 | 原生入口、配置、会话及基础模型／文件执行可运行；滚动终端和 Electron 接着实施 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
+| 1 Rust 首条链路 | 原生入口、配置、会话、基础模型／文件执行和滚动终端可运行；Electron 接着实施 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
 | 2 Context Engine | 同进程结构／基础检索首增量已实施；完整引用、语义与性能待完成 | 完整结构/基础/本地语义链与性能质量门槛 |
 | 3 模式与平台 | 待实施 | 全模式与实际平台工作流 |
 | 4 生态与界面 | 待实施 | 四市场/通用组件/真实 OAuth/更新/GUI/TUI/询问与换行 |
@@ -365,3 +365,13 @@ main 的 CI 改为四平台 Rust 基本构建／检查与既有桌面测试，�
 本地基本 Rust 测试 11 passed，Clippy `-D warnings`、格式及 release 构建通过。最终本轮 Windows EXE 为 14,853,632 字节；实际入口 6 项、会话 20 次请求、Context Engine 16 项、模型执行 14 项通过。证据为 `.runtime/rust-3.0/R1-3-entry-smoke.json`、`session-smoke/case-w51rPX/report.json`、`context-smoke/case-2bAxRr/report.json`、`run-smoke/case-v8b5m4/report.json`。模型执行使用回环 HTTP 协议夹具，Rust 实际执行文件操作；不证明外部真实模型质量、全部 Provider、完整 GUI／TUI或正式性能。此前主线 `28eaf0c` 的四平台 Test 已独立回读成功，新执行检查加入相同四平台 CI。
 
 Python 2.5.5 归档和正式发布保持冻结。Rust 下一增量继续滚动终端、Electron 和后续全功能迁移；扩展测评使用既有一行一个编号点的文档，完整主计划未缩减。
+
+### R1-5 首增量：滚动终端和单次运行入口（2026-11-23）
+
+新增 Ratatui 内联视口，保留原终端滚动历史并直接调用 KernelHost；包含字素编辑、多行、输入历史、流式输出、模型／会话菜单、询问、自定义回答、Strict 审批、运行中排队和取消。单次 `--prompt`／管道／`--json` 入口使用同一内核，需要用户回答或批准时取消并返回失败。旧 Python 分支和发布未改动。
+
+实际 ConPTY 先复现多行粘贴误发送，定位为普通 Windows 按键后端吞掉边界。VT 模式配合直接控制台记录读取保留标记和 UTF-16 字符；撤去曾导致正常退出挂起的 stdin 线程。实际伪终端输出流通过 headless xterm 解释，避免把光标增量输出简单去除 ANSI 后当作完整画面。
+
+本机基本 Rust 测试 13 passed；格式、Clippy `-D warnings`、release 构建通过。Windows EXE 为 15,900,160 字节；实际终端 7 项、入口 6 项、会话 20 次请求、Context Engine 16 项和模型执行 14 项通过。证据为 `.runtime/rust-3.0/tui-smoke/case-IobuoQ/report.json`、`session-smoke/case-ZQLmod/report.json`、`context-smoke/case-viMtft/report.json`、`run-smoke/case-KvmM33/report.json`。它们使用回环模型及实际 Rust 工具，不能证明真实服务质量或完整 GUI／TUI。跨 host write 拆分粘贴边界的 ConPTY 扩展用例仍失败，原失败保留并列入未验证清单，不能通过修改正常用例的名称掩盖。
+
+独立回读 `79359e7` 的 GitHub Test：Windows、Linux、Intel Mac 和桌面／文档通过，Apple Silicon 因测试假定备份目录顺序失败。修复提交 `31b533c` 改为核对两份原文，未减弱备份断言；四平台结果由后续实际 CI 核对。新终端基本检查加入同一四平台只读 CI，Electron 共用常驻内核和完整功能接着实施。

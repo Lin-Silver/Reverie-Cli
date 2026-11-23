@@ -86,3 +86,7 @@ jobs:
         run: node scripts/verification/rust-context-smoke.mjs
       - name: Run actual model protocol, tools, approvals and cancellation checks
         run: node scripts/verification/rust-run-smoke.mjs
+      - name: Install native terminal check dependencies
+        run: npm ci --prefix ReverieCli-ui --ignore-scripts
+      - name: Run actual scrolling terminal and single-prompt checks
+        run: node scripts/verification/rust-tui-smoke.mjs

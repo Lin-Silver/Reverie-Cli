@@ -46,6 +46,7 @@
     "@types/node": "24.10.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@xterm/headless": "6.0.0",
     "concurrently": "9.2.1",
     "cross-env": "10.1.0",
     "electron": "41.2.1",

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/protocol", "crates/core", "crates/cli"]
+members = ["crates/protocol", "crates/core", "crates/context", "crates/cli"]
 resolver = "3"
 
 [workspace.package]
@@ -20,6 +20,7 @@ chrono = "=0.4.45"
 tempfile = "=3.27.0"
 reverie-protocol = { path = "crates/protocol" }
 reverie-core = { path = "crates/core" }
+reverie-context = { path = "crates/context" }
 
 [profile.release]
 lto = "thin"

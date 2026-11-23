@@ -14,6 +14,7 @@ pub struct Kernel {
     pub project_data_dir: PathBuf,
     config: config::ConfigStore,
     sessions: Option<session::SessionStore>,
+    context: Option<reverie_context::ContextEngine>,
     view_session: Option<String>,
     workspace_mode: bool,
 }
@@ -23,6 +24,9 @@ pub const ACTIONS: &[&str] = &[
     "initialize",
     "getState",
     "getContextStatus",
+    "indexWorkspace",
+    "queryContext",
+    "workspaceMentions",
     "getModelSources",
     "selectModel",
     "addStandardModel",
@@ -59,6 +63,7 @@ impl Kernel {
             project_data_dir,
             config,
             sessions: None,
+            context: None,
             view_session: None,
             workspace_mode: false,
         })
@@ -87,11 +92,24 @@ impl Kernel {
     }
 
     pub fn context_status(&self) -> Value {
-        json!({"ready":false,"indexing":false,"files":0,"symbols":0,"backend":"rust","progress":0.0,"label":"Not indexed","automatic_retrieval":false,"available":false})
+        match &self.context {
+            Some(context) => context.status().unwrap_or_else(|error|json!({"ready":false,"available":true,"backend":"rust","error":error.to_string()})),
+            None => json!({"ready":false,"indexing":false,"files":0,"symbols":0,"backend":"rust","progress":0.0,"label":"On demand","automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
+        }
+    }
+
+    pub fn context_engine(&mut self) -> Result<&mut reverie_context::ContextEngine> {
+        if self.context.is_none() {
+            self.context = Some(reverie_context::ContextEngine::open(
+                &self.project_root,
+                &self.project_data_dir.join("context/rust-3.0.sqlite3"),
+            )?);
+        }
+        Ok(self.context.as_mut().unwrap())
     }
 
     fn workspace(&self, config: &Value) -> Value {
-        json!({"project_root":self.project_root,"project_name":self.project_root.file_name().unwrap_or_default().to_string_lossy(),"project_data_dir":self.project_data_dir,"config_path":self.config.path,"mode":config["mode"].as_str().unwrap_or("reverie"),"active_source":config["active_model_source"].as_str().unwrap_or("standard"),"active_model":models::active_summary(config),"index_ready":false,"context_engine":self.context_status()})
+        json!({"project_root":self.project_root,"project_name":self.project_root.file_name().unwrap_or_default().to_string_lossy(),"project_data_dir":self.project_data_dir,"config_path":self.config.path,"mode":config["mode"].as_str().unwrap_or("reverie"),"active_source":config["active_model_source"].as_str().unwrap_or("standard"),"active_model":models::active_summary(config),"index_ready":self.context_status()["ready"],"context_engine":self.context_status()})
     }
 
     fn state(&mut self) -> Result<Value> {
@@ -106,6 +124,7 @@ impl Kernel {
         let project = config::canonical_project(std::path::Path::new(root))?;
         if project != self.project_root {
             self.sessions = None;
+            self.context = None;
             self.view_session = None;
             self.project_root = project;
             self.project_data_dir = self
@@ -126,6 +145,13 @@ impl Kernel {
         } else {
             config::ConfigStore::new(&self.app_root)
         };
+        let database = self.project_data_dir.join("context/rust-3.0.sqlite3");
+        if self.context.is_none() && database.is_file() {
+            self.context = Some(reverie_context::ContextEngine::open(
+                &self.project_root,
+                &database,
+            )?);
+        }
         Ok(())
     }
 
@@ -156,6 +182,37 @@ impl Kernel {
                 "context.status",
                 json!({"context_engine":self.context_status()}),
             )),
+            "indexWorkspace" => {
+                let result = self
+                    .context_engine()?
+                    .index(payload["force"].as_bool().unwrap_or(false))?;
+                let config = self.config.effective()?;
+                Ok((
+                    "workspace.indexed",
+                    json!({"result":result,"workspace":self.workspace(&config)}),
+                ))
+            }
+            "queryContext" => {
+                let query = string(payload, "query")?;
+                let context = self.context_engine()?;
+                let results = context.query(
+                    query,
+                    payload["limit"].as_u64().unwrap_or(10) as usize,
+                    payload["estimatedTokens"].as_u64().unwrap_or(12000) as usize,
+                )?;
+                Ok((
+                    "context.results",
+                    json!({"results":results,"context_engine":self.context_status()}),
+                ))
+            }
+            "workspaceMentions" => {
+                let query = payload["query"].as_str().unwrap_or_default();
+                let paths = self
+                    .context_engine()?
+                    .paths(query, payload["limit"].as_u64().unwrap_or(80) as u32)?;
+                let mentions:Vec<Value>=paths.into_iter().map(|path|json!({"name":path.rsplit('/').next().unwrap_or(&path),"path":path,"kind":"file"})).collect();
+                Ok(("workspace.mentions", json!({"mentions":mentions})))
+            }
             "listSessions" => Ok((
                 "sessions",
                 json!({"sessions":self.session_store()?.list()?}),

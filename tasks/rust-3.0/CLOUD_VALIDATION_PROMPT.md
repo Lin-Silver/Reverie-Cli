@@ -9,7 +9,7 @@
 按以下顺序工作：
 
 1. 执行 Rust 锁定构建、测试、格式和 Clippy：`cargo fmt --manifest-path ReverieCli-rs/Cargo.toml --all -- --check`、`cargo test --manifest-path ReverieCli-rs/Cargo.toml --workspace --locked`、`cargo clippy --manifest-path ReverieCli-rs/Cargo.toml --workspace --all-targets --locked -- -D warnings`、`cargo build --manifest-path ReverieCli-rs/Cargo.toml --release --locked`；缺少工作区时明确记录缺失，不能伪造命令成功。
-2. 对实际构建的程序运行 `node scripts/verification/rust-smoke.mjs`、`node scripts/verification/rust-session-smoke.mjs`，以及帮助、版本、`--kernel-info` 和 `--sdk-bridge`；检查 UTF-8 JSONL、请求 ID、事件到最终响应、取消、EOF 和正常关闭，确认第一方运行进程树不依赖 Python。
+2. 对实际构建的程序运行 `node scripts/verification/rust-smoke.mjs`、`node scripts/verification/rust-session-smoke.mjs`、`node scripts/verification/rust-context-smoke.mjs`，以及帮助、版本、`--kernel-info`、`--context-engine` 和 `--sdk-bridge`；检查 UTF-8 JSONL、请求 ID、事件到最终响应、取消、EOF 和正常关闭，确认第一方运行进程树不依赖 Python。
 3. 比对 `sdk-protocol-baseline-v1.json`、`component-protocol-baseline-v1.json` 的全部协议与生命周期；按实际已实现 action 执行配置、独立会话、原文持久化、Provider、流式响应和真实工具链。
 4. 运行 `node --test scripts/verification/context-evaluation.node-test.mjs scripts/verification/context-ndcg.node-test.mjs scripts/verification/audit-python-baselines.node-test.mjs`；读取冻结语料与标签摘要，不能修改题干、证据、切块和返回预算以改善分数。
 5. 冻结题集共 48 题、四领域各 12，16 basic／32 hard；每题 30 次。每个原生片段评价只计前 72 行，完整原文保留，按完整原文去除完全重复片段后取前 10；预算使用 Python 历史 Unicode 字符数÷4 的向下取整估算 12,000 tokens。证据须完全覆盖且文件、位置、内容版本一致；逐题取 30 次 Recall 均值后宏平均，分领域、范围及波动另报。

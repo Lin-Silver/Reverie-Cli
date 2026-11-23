@@ -110,7 +110,7 @@ pub fn kernel_info() -> KernelInfo {
         context_engine: ContextIdentity {
             backend: "rust",
             execution: "in-process",
-            available: false,
+            available: true,
         },
     }
 }

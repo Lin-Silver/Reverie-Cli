@@ -347,3 +347,11 @@ main 的 CI 改为四平台 Rust 基本构建／检查与既有桌面测试，�
 本地 cargo test --workspace --locked：4 passed；Clippy --all-targets --locked -- -D warnings 通过；实际 release 构建通过。Windows release EXE 为 2,532,864 字节。实际入口 6 项检查通过，JSONL 配置与会话 20 次请求检查通过；后者验证两个会话独立配置、未知配置保留、原字节备份、旧修订拒绝、删除确认、重启、73 条消息分页、Reverie 角色及数据库备份读回。证据为 .runtime/rust-3.0/R1-2-entry-smoke.json 和 .runtime/rust-3.0/session-smoke/case-reivU8/report.json。
 
 这是基础运行证据；全部 Provider、旧布局迁移／完整恢复、任务配置历史、fork／rewind、真实模型及完整产品仍继续实施或待独立验收。四平台 CI 已加入同一实际 session smoke；本地仅有 Windows 本轮运行证据。Python 归档、正式标签、Release 和资产不变；其它会话的未跟踪 closeout 文件保持原样。
+
+### R1-4 首增量：同进程 Context Engine（2026-11-23 UTC）
+
+新增 crates/context，原索引的 catalog／parser／scan／search／text／SQL 以固定 f029496 来源恢复并记录 MIT 来源，未恢复外部 worker 或 Python 适配器。3.0 使用独立 schema 2 数据库，持久正文与源文件 SHA-256；首次覆盖 Python、JavaScript、TypeScript／TSX、Rust 符号及其余受支持文本的最多 72 行重叠证据片段。基础词法、路径、原文字串／中文召回、内容修订和上下文估算预算已接 CLI／SDK。Git ignore 遍历保留排除父目录的规则，嵌套 .gitignore 的文件重新纳入行为通过。
+
+本地全 Rust 基本测试 8 passed，Clippy -D warnings 通过，release 构建通过。实际 Windows CLI／SDK 16 项 Context Engine 检查通过，验证持久增量、旧内容拒绝、重命名、中文后半章证据、72 行上限、路径和重启就绪；同一新程序的原 session smoke 20 次请求通过。证据 .runtime/rust-3.0/context-smoke/case-792W33/report.json、session-smoke/case-nEQ5QY/report.json。
+
+首个结构／基础引擎已可运行，但完整语言、引用／依赖／历史图、语义模型与神经重排、跨平台实际运行和正式质量／性能仍继续实施或待验收；未将基础通过写成整个 Context Engine 完成。原 Python 索引与归档未修改，完整版计划继续保留。

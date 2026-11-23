@@ -82,3 +82,5 @@ jobs:
         run: node scripts/verification/rust-smoke.mjs
       - name: Run actual configuration and session checks
         run: node scripts/verification/rust-session-smoke.mjs
+      - name: Run actual Context Engine checks
+        run: node scripts/verification/rust-context-smoke.mjs

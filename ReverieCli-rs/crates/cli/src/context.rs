@@ -1,0 +1,46 @@
+use reverie_context::{ContextEngine, Result};
+use serde_json::json;
+use std::path::Path;
+
+const HELP: &str = "Usage:\n  reverie --context-engine index <workspace> <database>\n  reverie --context-engine search <database> <query> [limit]\n  reverie --context-engine paths <database> <prefix> [limit]\n  reverie --context-engine status <database>\n  reverie --context-engine --version";
+
+pub fn run(args: &[String]) -> Result<()> {
+    let output = match args {
+        [] => {
+            println!("{HELP}");
+            return Ok(());
+        }
+        [option] if option == "--help" || option == "-h" => {
+            println!("{HELP}");
+            return Ok(());
+        }
+        [option] if option == "--version" => {
+            json!({"version":reverie_protocol::VERSION,"backend":"rust","execution":"in-process"})
+        }
+        [operation, root, database] if operation == "index" => {
+            ContextEngine::open(Path::new(root), Path::new(database))?.index(false)?
+        }
+        [operation, database] if operation == "status" => {
+            reverie_context::database_status(Path::new(database))?
+        }
+        [operation, database, input, rest @ ..]
+            if rest.len() <= 1 && ["search", "chunks", "paths"].contains(&operation.as_str()) =>
+        {
+            let limit = rest
+                .first()
+                .map(|limit| limit.parse::<u32>())
+                .transpose()?
+                .unwrap_or(10)
+                .clamp(1, 200);
+            let engine = ContextEngine::from_database(Path::new(database))?;
+            if operation == "paths" {
+                json!(engine.paths(input, limit)?)
+            } else {
+                json!(engine.query(input, limit as usize, 12000)?)
+            }
+        }
+        _ => return Err(HELP.into()),
+    };
+    println!("{}", serde_json::to_string(&output)?);
+    Ok(())
+}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { estimateTokens, evaluateQuery, evaluateSet } from './context-evaluation.mjs';
+import { estimateTokens, evaluateQuery, evaluateSet, evaluateRepeatedSet } from './context-evaluation.mjs';
 
 const commit = 'a'.repeat(40), blob = 'b'.repeat(40), fileHash = 'c'.repeat(64);
 const digest = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
@@ -67,11 +67,29 @@ test('metadata cannot reorder a later hit ahead of actual returned distractors',
   assert.throws(() => evaluateQuery(label, value, commit), /returned fragment order/);
 });
 
-test('the 72-line bound is enforced independently of relevance', () => {
-  const long = Array.from({ length: 73 }, (_, i) => `line ${i}`).join('\n');
-  assert.throws(() => evaluateQuery(label, response('Q1', [{ start: 1, text: long }]), commit), /line bound/);
-  const bounded = response('Q1', [{ start: 1, text: long.split('\n').slice(0, 72).join('\n') }]);
-  assert.doesNotThrow(() => evaluateQuery(label, bounded, commit));
+test('only the first 72 lines count while the original long fragment stays intact', () => {
+  const long = Array.from({ length: 93 }, (_, i) => `line ${i + 1}`).join('\n');
+  const value = response('Q1', [{ start: 1, text: long }]);
+  const original = JSON.stringify(value);
+  const lastCovered = { ...label, expected_evidence: [evidence(70, 'line 70\nline 71\nline 72\n')] };
+  const beyond = { ...label, expected_evidence: [evidence(72, 'line 72\nline 73\n')] };
+  const result = evaluateQuery(lastCovered, value, commit);
+  assert.equal(result.recall_at_10, 1);
+  assert.equal(evaluateQuery(beyond, value, commit).recall_at_10, 0);
+  assert.equal(result.overlength_fragments, 1);
+  assert.equal(result.actual_fragment_bounds_passed, false);
+  assert.equal(JSON.stringify(value), original);
+});
+
+test('exact deduplication uses complete originals before the 72-line cap', () => {
+  const rows = Array.from({ length: 74 }, (_, i) => `line ${i + 1}`);
+  const distinct = [{ start: 1, text: rows.slice(0, 73).join('\n') }, { start: 1, text: rows.join('\n') }];
+  const fillers = Array.from({ length: 8 }, (_, i) => ({ start: i + 100, text: `distractor ${i}` }));
+  const relevant = { start: 10, text: 'if ready:\n    do_work()\n    save()' };
+  const result = evaluateQuery(label, response('Q1', [...distinct, ...fillers, relevant]), commit);
+  assert.equal(result.unique_fragments, 11);
+  assert.equal(result.recall_at_10, 0);
+  assert.equal(result.overlength_fragments, 2);
 });
 
 test('historical token estimates count Unicode characters, including emoji', () => {
@@ -106,6 +124,37 @@ test('missing or duplicate query outputs cannot disappear from an aggregate', ()
   const set = { source_commit: commit, queries: [label] };
   assert.throws(() => evaluateSet(set, []), /Incomplete/);
   assert.throws(() => evaluateSet(set, [response('Q1', []), response('Q1', [])]), /Duplicate/);
+});
+
+test('thirty trials are averaged per question before the macro average', () => {
+  const first = { ...label, expected_evidence: [evidence(10, 'first\n')] };
+  const second = { ...label, id: 'Q2', domain: 'doc', expected_evidence:
+    Array.from({ length: 4 }, (_, i) => evidence(i + 20, `fact ${i}\n`)) };
+  const observations = Array.from({ length: 30 }, (_, index) => [
+    { ...response('Q1', index < 10 ? [{ start: 10, text: 'first' }] : []), trial: index + 1 },
+    { ...response('Q2', index < 20 ? [{ start: 20, text: 'fact 0\nfact 1\nfact 2\nfact 3' }] : []), trial: index + 1 },
+  ]).flat().reverse();
+  const result = evaluateRepeatedSet({ source_commit: commit, queries: [first, second] }, observations);
+  assert.equal(result.trials_per_query, 30);
+  assert.equal(result.observations, 60);
+  assert.equal(result.hard_recall_at_10_macro, .5);
+  assert.equal(result.results[0].recall_at_10_mean, 1 / 3);
+  assert.equal(result.results[1].recall_at_10_mean, 2 / 3);
+  assert.deepEqual(result.results[0].recall_at_10_range, [0, 1]);
+  assert.ok(Math.abs(result.results[0].recall_at_10_population_stddev - Math.sqrt(2 / 9)) < 1e-12);
+  assert.equal(result.domains.code.hard_recall_at_10_macro, 1 / 3);
+  assert.equal(result.domains.doc.hard_recall_at_10_macro, 2 / 3);
+  assert.equal(result.results[0].trials.length, 30);
+  assert.equal(result.ndcg_at_10, null);
+});
+
+test('every frozen question needs thirty distinct, identified trials', () => {
+  const labels = { source_commit: commit, queries: [label] };
+  const all = Array.from({ length: 30 }, (_, i) => ({ ...response('Q1', []), trial: i + 1 }));
+  assert.throws(() => evaluateRepeatedSet(labels, all.slice(1)), /Incomplete/);
+  assert.throws(() => evaluateRepeatedSet(labels, [...all.slice(0, 29), all[0]]), /Duplicate/);
+  assert.throws(() => evaluateRepeatedSet(labels, [{ ...all[0], trial: 0 }, ...all.slice(1)]), /trial/);
+  assert.throws(() => evaluateRepeatedSet(labels, [{ ...all[0], query_id: 'unlabelled' }, ...all.slice(1)]), /query/);
 });
 
 test('altered frozen evidence is rejected before computing recall', () => {

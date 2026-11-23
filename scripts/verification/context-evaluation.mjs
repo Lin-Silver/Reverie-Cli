@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 export const TOKEN_BUDGET = 12000;
 export const FRAGMENT_LINES = 72;
 export const TOP_K = 10;
+export const QUALITY_TRIALS = 30;
 export const estimateTokens = text => Math.floor(Array.from(text).length / 4);
 const sha256 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 const stripLegacyTrailingWhitespace = text => text.replace(
@@ -38,8 +39,7 @@ function returnedLines(fragment, contextBytes) {
 
 function validateFragment(fragment, contextBytes) {
   if (!Number.isSafeInteger(fragment.start_line) || !Number.isSafeInteger(fragment.end_line) ||
-      fragment.start_line < 1 || fragment.end_line < fragment.start_line ||
-      fragment.end_line - fragment.start_line + 1 > FRAGMENT_LINES) throw new Error('Invalid fragment line bound');
+      fragment.start_line < 1 || fragment.end_line < fragment.start_line) throw new Error('Invalid fragment line bound');
   for (const [field, length] of [['source_commit', 40], ['blob_sha1', 40], ['file_sha256', 64]]) {
     if (!new RegExp(`^[a-f0-9]{${length}}$`).test(fragment[field] ?? '')) throw new Error(`Missing content identity: ${field}`);
   }
@@ -78,7 +78,12 @@ export function evaluateQuery(label, response, defaultSourceCommit) {
       fragment.file_sha256, fragment.start_line, fragment.end_line, fragment.textLines]);
     if (!seen.has(key)) { seen.add(key); unique.push(fragment); }
   }
-  const selected = unique.slice(0, TOP_K);
+  // The maintainer-approved cap applies to evaluation only. Deduplicate the
+  // complete originals above; preserve their bytes, boundaries and ordering.
+  const selected = unique.slice(0, TOP_K).map(fragment => ({ ...fragment,
+    end_line: Math.min(fragment.end_line, fragment.start_line + FRAGMENT_LINES - 1),
+    textLines: fragment.textLines.slice(0, FRAGMENT_LINES) }));
+  const overlength = response.fragments.filter(fragment => fragment.end_line - fragment.start_line + 1 > FRAGMENT_LINES);
   const required = label.expected_evidence.filter(item => item.necessity === 'required');
   if (!required.length) throw new Error('A scored query needs required evidence');
   const hits = [];
@@ -96,6 +101,9 @@ export function evaluateQuery(label, response, defaultSourceCommit) {
     recall_at_10: hits.length / required.length, hit_evidence: hits,
     returned_fragments: response.fragments.length, unique_fragments: unique.length,
     evaluated_fragments: selected.length, token_estimate: tokenEstimate,
+    overlength_fragments: overlength.length, actual_fragment_bounds_passed: !overlength.length,
+    overlength_originals: overlength.map(fragment => ({ path: fragment.repo_relative_path,
+      start_line: fragment.start_line, end_line: fragment.end_line })),
     unicode_characters: Array.from(response.context_string).length };
 }
 
@@ -122,11 +130,60 @@ export function evaluateSet(labels, responses) {
   }));
   return { schema: 'reverie.context-evaluation.scores.v1', aggregation: 'equal-weight per-query macro average',
     budget: { max_lines: FRAGMENT_LINES, estimated_tokens: TOKEN_BUDGET, top_k_after_exact_deduplication: TOP_K,
-      estimator: 'floor(unicode_character_count / 4)' },
+      estimator: 'floor(unicode_character_count / 4)',
+      fragment_cap: 'evaluate the first 72 lines; exact deduplication uses complete originals' },
     queries: results.length, domains,
     basic_recall_at_10_macro: mean(results.filter(result => result.family === 'basic').map(result => result.recall_at_10)),
     hard_recall_at_10_macro: mean(results.filter(result => result.family === 'hard').map(result => result.recall_at_10)),
     ndcg_at_10: null, ndcg_status: 'not computed by this evidence coverage evaluator', results };
+}
+
+export function evaluateRepeatedSet(labels, responses) {
+  const queryIds = new Set(labels.queries.map(query => query.id));
+  const trials = Array.from({ length: QUALITY_TRIALS }, () => []);
+  const seen = new Set();
+  for (const response of responses) {
+    if (!queryIds.has(response.query_id)) throw new Error('Unknown repeated query identity');
+    if (!Number.isSafeInteger(response.trial) || response.trial < 1 || response.trial > QUALITY_TRIALS) {
+      throw new Error('Invalid repeated trial identity');
+    }
+    const key = JSON.stringify([response.query_id, response.trial]);
+    if (seen.has(key)) throw new Error('Duplicate repeated query trial');
+    seen.add(key);
+    trials[response.trial - 1].push(response);
+  }
+  if (!queryIds.size || seen.size !== labels.queries.length * QUALITY_TRIALS) {
+    throw new Error('Incomplete thirty-trial evaluation query set');
+  }
+  const scores = trials.map(items => evaluateSet(labels, items));
+  const range = values => values.length ? [Math.min(...values), Math.max(...values)] : null;
+  const results = labels.queries.map((query, index) => {
+    const rows = scores.map((score, trial) => ({ trial: trial + 1, ...score.results[index] }));
+    const values = rows.map(row => row.recall_at_10);
+    const average = mean(values);
+    return { query_id: query.id, domain: query.domain, family: query.family, query_language: query.query_language,
+      required: rows[0].required, trials_per_query: rows.length,
+      recall_at_10_mean: average, recall_at_10_range: range(values),
+      recall_at_10_population_stddev: Math.sqrt(mean(values.map(value => (value - average) ** 2))),
+      overlength_runs: rows.filter(row => !row.actual_fragment_bounds_passed).length, trials: rows };
+  });
+  const averageFamily = (group, family) => mean(group.filter(row => row.family === family).map(row => row.recall_at_10_mean));
+  const domains = Object.fromEntries([...new Set(results.map(row => row.domain))].map(domain => {
+    const group = results.filter(row => row.domain === domain);
+    return [domain, { queries: group.length,
+      basic_recall_at_10_macro: averageFamily(group, 'basic'), hard_recall_at_10_macro: averageFamily(group, 'hard'),
+      basic_macro_range: range(scores.map(score => score.domains[domain].basic_recall_at_10_macro).filter(value => value !== null)),
+      hard_macro_range: range(scores.map(score => score.domains[domain].hard_recall_at_10_macro).filter(value => value !== null)) }];
+  }));
+  return { schema: 'reverie.context-evaluation.repeated-scores.v1',
+    aggregation: 'mean Recall per question over 30 trials, then equal-weight per-question macro average',
+    queries: results.length, observations: responses.length, trials_per_query: QUALITY_TRIALS,
+    budget: scores[0].budget, domains,
+    basic_recall_at_10_macro: averageFamily(results, 'basic'), hard_recall_at_10_macro: averageFamily(results, 'hard'),
+    basic_macro_range: range(scores.map(score => score.basic_recall_at_10_macro).filter(value => value !== null)),
+    hard_macro_range: range(scores.map(score => score.hard_recall_at_10_macro).filter(value => value !== null)),
+    actual_fragment_bounds_passed: results.every(result => result.overlength_runs === 0),
+    ndcg_at_10: null, ndcg_status: scores[0].ndcg_status, results };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -136,7 +193,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const labels = JSON.parse(labelBytes);
   if (labels.status !== 'frozen_after_independent_cross_review') throw new Error('Freeze independently reviewed labels before scoring');
   const responseBytes = fs.readFileSync(responsePath);
-  const result = { ...evaluateSet(labels, JSON.parse(responseBytes)),
+  const responses = JSON.parse(responseBytes);
+  const score = responses.some(response => 'trial' in response) ? evaluateRepeatedSet : evaluateSet;
+  const result = { ...score(labels, responses),
     labels_sha256: sha256(labelBytes), responses_sha256: sha256(responseBytes) };
   fs.writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\n');
   process.stdout.write(JSON.stringify({ queries: result.queries, basic_recall_at_10_macro: result.basic_recall_at_10_macro,

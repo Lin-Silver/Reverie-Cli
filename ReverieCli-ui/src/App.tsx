@@ -2619,8 +2619,8 @@ function SettingControl({ item, update }: { item: SettingItem; update: (key: str
       </select>
     );
   }
-  if (item.kind === "int") {
-    return <input type="number" value={Number(item.value ?? 0)} min={item.min} max={item.max} step={item.step ?? 1} onChange={(event) => update(item.key, Number(event.target.value))} />;
+  if (item.kind === "int" || item.kind === "float") {
+    return <input type="number" value={Number(item.value ?? 0)} min={item.min} max={item.max} step={item.step ?? (item.kind === "float" ? 0.1 : 1)} onChange={(event) => update(item.key, Number(event.target.value))} />;
   }
   if (item.kind === "text" || item.kind === "url") {
     return <TextSettingControl item={item} update={update} />;

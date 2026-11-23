@@ -90,8 +90,15 @@ jobs:
         run: node scripts/verification/rust-context-smoke.mjs
       - name: Run actual model protocol, tools, approvals and cancellation checks
         run: node scripts/verification/rust-run-smoke.mjs
+      - name: Run actual provider protocol and signed-state checks
+        run: node scripts/verification/rust-provider-smoke.mjs
       - name: Install native terminal check dependencies
         run: npm ci --prefix ReverieCli-ui --ignore-scripts
+      - name: Build the native terminal verification dependency
+        if: runner.os != 'Windows'
+        env:
+          npm_config_build_from_source: "true"
+        run: npm rebuild node-pty --prefix ReverieCli-ui
       - name: Build Electron bridge
         run: npm run build:main --prefix ReverieCli-ui
       - name: Run actual desktop bridge and task recovery checks

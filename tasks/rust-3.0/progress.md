@@ -385,3 +385,13 @@ Rust 协议生成前端的会话、结果及询问类型。类型验证读取 Ca
 本机基本 Rust 测试 15 passed，格式、Clippy `-D warnings`、锁定 release 构建和生成类型一致性通过；桌面定向 33 项、类型／翻译及生产构建通过。Windows 程序为 16,041,472 字节，SHA-256 `849cd6c682825130222ee57ed59f65fa24d983960f98b10e479a68408d3b3482`。实际入口 6 项、会话 20 次请求、模型执行 14 项、常驻桌面桥接 6 项通过。真实 Electron 窗口的 4 条流程通过，包含键盘提示、第四项多行回答、询问状态、Strict 先批准后写原文字节、实时输出、停止及中断保存；页面截图已检查，渲染错误为空。
 
 证据为 `.runtime/rust-3.0/R1-6-entry-smoke.json`、`session-smoke/case-2hWN8o/report.json`、`run-smoke/case-GtwKou/report.json`、`desktop-bridge-smoke/case-Vlipua/report.json`、`electron-smoke/case-aQQsyt/report.json`。窗口、协议与实际 Rust 工具使用回环模型，未证明外部真实服务、全模式、完整桌面或正式包验收。CI 加入四平台桥接运行及类型一致性，文档验证迁为 Node；开发增量只验证和生成 artifacts，不改变 Python 标签及发行。两分支和公开 2.5.5 身份已再次从 GitHub 核对。
+
+### R1-3 第二增量：四种原生模型协议和输出前重试（2026-11-23）
+
+Rust 增加 Anthropic Messages、OpenAI Responses 和 Gemini generateContent／streamGenerateContent，与原 Chat Completions 共用 HTTP、取消和 SSE 分帧。分别转换系统消息、图片／音频内容和工具结果；保留 Anthropic 思考签名、Gemini 原始部位的 thoughtSignature 及 Responses 原生输出与不透明推理，按协议和模型身份接续，不重复添加工具调用。完成记录缺失或输出截断时失败并保留原文；已经接收输出后不重新发起模型请求。
+
+HTTP 在收到输出前执行有限重试，保留 Python 的 1／3／5／7／15 秒基数、可配置次数与初始倍率，以及 Retry-After 秒数／日期。不同协议分别使用 Bearer、x-api-key 或 x-goog-api-key；密钥支持环境变量且不进入公开响应。API 超时、重试、倍率及代理可以通过现有 setSetting 管理；桌面数值控件支持小数倍率。独立实现依据及已查阅的官方协议记录在 crates/core/src/provider/SOURCES.md。
+
+本机基本 Rust 测试 18 passed，格式、Clippy -D warnings、锁定 release 构建与前端类型／生产构建通过。新 Windows EXE 为 16,308,224 字节，SHA-256 为 8039dae2bf5bb546f2de64f3954e8a0d871dd0bdf0982e7ee47b90af053d2f62。四协议 SSE／JSON、认证头、输出前 503 重试、原生文件写入、思考状态返回、截断不重试及新进程恢复共 13 条实际链路通过，原模型／工具／审批／取消 14 条检查也通过。证据为 .runtime/rust-3.0/provider-smoke/case-G2r3ZJ/report.json 和 run-smoke/case-SV5Ugj/report.json。使用回环协议夹具和测试用不透明签名，不证明真实服务、签名有效性、全 Provider 库存、账户授权或全部模型参数兼容。
+
+上一提交 cde4e6e 的 Test 45198749225 中，文档、桌面和 Windows 通过；其他三平台的原生构建、入口、会话、上下文、模型、类型和常驻桥接均通过，终端检查失败。Linux 日志明确缺 pty.node；两种 Mac 报 posix_spawnp failed，具体根因不能仅凭日志认定。CI 为 POSIX 增加从源码构建第三方 node-pty 验证依赖，保持原终端检查和断言；新来源仍须真实 CI 验证。完整性能与产品验收继续由云端清单承接，没有改动 Python 归档或正式发行。

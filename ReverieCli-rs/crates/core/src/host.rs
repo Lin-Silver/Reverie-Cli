@@ -562,6 +562,9 @@ impl KernelHost {
             if !turn.reasoning.is_empty() {
                 assistant["reasoning_content"] = json!(turn.reasoning);
             }
+            if let Some(native) = turn.native {
+                assistant["provider_content"] = native;
+            }
             lock(&run.store)?.append(
                 &run.session,
                 &format!("{}:assistant:{iteration}", run.id),

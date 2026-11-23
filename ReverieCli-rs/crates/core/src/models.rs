@@ -168,6 +168,16 @@ pub fn validate_setting(key: &str, value: &Value) -> Result<()> {
             Ok(())
         }
         "stream_responses" | "auto_index" if value.is_boolean() => Ok(()),
+        "api_timeout" if value.as_u64().is_some_and(|value| value > 0) => Ok(()),
+        "api_max_retries" if value.as_u64().is_some() => Ok(()),
+        "api_initial_backoff"
+            if value
+                .as_f64()
+                .is_some_and(|value| value.is_finite() && value >= 0.0) =>
+        {
+            Ok(())
+        }
+        "api_proxy" if value.is_string() => Ok(()),
         "max_context_tokens" if value.as_u64().is_some_and(|v| v > 0) => Ok(()),
         "thinking_output_style"
             if value
@@ -188,6 +198,9 @@ pub fn validate_setting(key: &str, value: &Value) -> Result<()> {
 }
 
 pub fn settings(config: &Value, path: &std::path::Path, workspace_mode: bool) -> Value {
-    let items: Vec<Value> = ["mode","stream_responses","auto_index","max_context_tokens","thinking_output_style","tool_output_style"].iter().map(|key| json!({"name":key,"key":key,"kind":if config[*key].is_boolean(){"bool"}else if config[*key].is_number(){"int"}else{"choice"},"description":"","value":config[*key],"choices":if *key=="mode" {json!(["reverie","atlas","writer","aio","gamer"])}else{Value::Null}})).collect();
+    let items: Vec<Value> = ["mode","stream_responses","auto_index","max_context_tokens","thinking_output_style","tool_output_style","api_timeout","api_max_retries","api_initial_backoff","api_proxy"].iter().map(|key| {
+        let value=config.get(*key).cloned().unwrap_or_else(||match *key {"api_timeout"=>json!(60),"api_max_retries"=>json!(5),"api_initial_backoff"=>json!(1.0),"api_proxy"=>json!(""),_=>Value::Null});
+        json!({"name":key,"key":key,"kind":if *key=="api_proxy"{"text"}else if *key=="api_initial_backoff"{"float"}else if value.is_boolean(){"bool"}else if value.is_number(){"int"}else{"choice"},"description":"","value":value,"choices":match *key {"mode"=>json!(["reverie","atlas","writer","aio","gamer"]),"thinking_output_style"=>json!(["hidden","compact","full"]),"tool_output_style"=>json!(["minimal","compact","condensed","full"]),_=>Value::Null}})
+    }).collect();
     json!({"items":items,"config_path":path,"workspace_mode":workspace_mode})
 }

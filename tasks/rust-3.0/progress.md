@@ -435,3 +435,13 @@ Context Engine 增加固定版本的 C/C++、C#、Go、Java、Zig、HTML/CSS、L
 本机 Rust 工作区 27 项、格式、Clippy `-D warnings`、锁定 release 构建、生成协议类型通过。实际 parser CLI 13 项、Context CLI／SDK 22 项、模型／工具／权限／项目隔离 16 项、原生 PTY 8 项通过；文档检查为 49 文档、259 本地链接、0 错误。Windows EXE 为 29,920,256 字节，SHA-256 `3790fa51c0f6f8d5a0327f06e5a5e71f329f0d90855de7db20fc228cc3b2dc20`，交接时重新读取文件摘要一致。反转解析版本重建条件后定向测试 exit 101，恢复原字节后 lookup 测试通过。
 
 证据为 `.runtime/rust-3.0/parser-smoke/case-nWb65W/report.json`、`context-smoke/case-4nBAC0/report.json`、`run-smoke/case-7eCORM/report.json`、`tui-smoke/case-RMxwfo/report.json` 和 `parser-mutation/report.json`。最初 Go／Zig 同文件 stem 夹具触发歧义拒绝，其失败保留；改用独立 stem，并另有同名歧义回归。新的 parser probe 已接入四平台只读 CI，结果须对应新提交分别核对；不把本机基本检查当作全语言、性能或完整产品验收。Python 2.5.5、归档分支、正式标签和 Release 保持冻结，完整 3.0 主计划仍为 49,215 字节。
+
+### R2 本地语义资源的校验与暂存（2026-11-23）
+
+新增独立版本资源目录，提供 `--context-engine resources-verify <directory> <manifest-sha256>` 和 `resources-stage <store> <directory> <manifest-sha256>`。清单从同一已核对字节解析，固定 E5／BGE 修订、384 维、512 最大模型输入及 ORT 1.31.0/API 24；验证全部模型、tokenizer、runtime 和许可资产大小／SHA-256、原生文件系统／架构、链接及路径穿越／冲突。复制后重验，既有暂存目录损坏时拒绝复用。该增量仅暂存，明确 `activated=false`，没有将格式校验冒充模型健康。
+
+本机资源行为 2 项、Clippy `-D warnings`、锁定 release 构建通过；实际 CLI 4 项通过，证据 `.runtime/rust-3.0/resources-smoke/case-eopxlS/report.json`。夹具格式头和测试模型字节不证明真实运行库或神经推理。模型生产、加载和激活接着实施；扩展更新、并发和完整恢复继续由未验证清单记录。
+
+实际重新读取官方固定 HF 修订：E5 `614241f` 与 BGE `2cfc18c` 的模型卡标 MIT，官方 FP32 ONNX 分别 470,268,510／1,112,459,588 字节，LF​​S SHA-256 保存在本地元数据；E5 专用 AVX-512 INT8 不作为通用基线。既有 ORT 官方 NuGet 及 Windows DLL 再次计算 SHA-256，分别与 `7e35fdb4f5adb62f01e60798e2e5ed05108f5fbbe1cca03fbcc37903cf7c5e3b`、`0c42dc4e278f0968fdf9ebf1b1e54a74c657a9942e70803e453c91993451cf4c` 一致；这不是本轮模型推理或数字签名通过。
+
+`b38e130` 的 Apple Silicon grammar 13 项、Context 22 项通过，终端此次在碎片粘贴完成前 exit 1，未执行到取消断言；根因未知。已通过 `e43be94` 在失败时输出终端尾部并上传本任务原始 CI 证据，保留原断言。不能把这次不同阶段的失败当作之前取消问题已修复的证明。

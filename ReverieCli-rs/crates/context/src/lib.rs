@@ -4,6 +4,7 @@ mod catalog;
 mod graph;
 mod inspect;
 mod parsing;
+pub mod resources;
 pub mod scan;
 pub mod search;
 mod text;

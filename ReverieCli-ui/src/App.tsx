@@ -3,6 +3,7 @@ import { FloatingMenu } from "./FloatingMenu";
 import { AiOPanel } from './AiOPanel';
 import { VirtualSessionList } from './VirtualSessionList';
 import { ApiKeyEnvironmentField } from "./ApiKeyEnvironmentField";
+import {ContextEngineView,DEFAULT_CONTEXT_DRAFT,type ContextResourceDraft} from './ContextEngineView';
 import { parseComputerResult } from "./computer-result";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
 import { StarterActions, WelcomeHeader } from "./StartPage";
@@ -745,6 +746,7 @@ function Sidebar({
         <button type="button" className={view === "plugins" ? "active" : ""} onClick={() => setView("plugins")}>
           <Plug size={16} /> {t("插件")}
         </button>
+        <button type="button" className={view === "context" ? "active" : ""} onClick={() => setView("context")}><Database size={16}/>{t('上下文引擎')}</button>
         <button type="button" className={view === "recovery" ? "active" : ""} onClick={() => setView("recovery")}>
           <ArchiveRestore size={16} /> {t("恢复")}
         </button>
@@ -1071,7 +1073,7 @@ function Topbar({
   const reasoning = activeSource?.selected_reasoning;
   const reasoningOptions = reasoning?.options ?? [];
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
-  const viewLabels: Record<ViewId, string> = { chat: "对话", tools: "工具", subagents: "SubAgents", rats: "RATS", tasks: "RTP 任务", skills: "技能", plugins: "插件", recovery: "恢复", settings: "设置" };
+  const viewLabels: Record<ViewId, string> = { chat: "对话", tools: "工具", subagents: "SubAgents", rats: "RATS", tasks: "RTP 任务", skills: "技能", plugins: "插件", recovery: "恢复", settings: "设置",context:'上下文引擎' };
   useEffect(() => {
     const closeMenus = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -5076,6 +5078,7 @@ export default function App() {
   const [desktopPaths, setDesktopPaths] = useState<DesktopPaths | null>(null);
   const [bootError, setBootError] = useState("");
   const [view, setView] = useState<ViewId>("chat");
+  const [contextDrafts,setContextDrafts]=useState<Record<string,ContextResourceDraft>>({});
   const [settingsTarget,setSettingsTarget]=useState<'conversation'|'workspace'>('conversation');
   const [session, setSession] = useState<SessionState | null>(null);
   const [sessionBusy, setSessionBusy] = useState(false);
@@ -7168,6 +7171,7 @@ export default function App() {
     if (view === "rats") return <RatsView />;
     if (view === "tasks") return <RtpTasksView preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
     if (view === "subagents") return <SubagentsView />;
+    if(view==='context')return <ContextEngineView key={state.workspace.project_root} projectRoot={state.workspace.project_root} engine={state.workspace.context_engine} draft={contextDrafts[state.workspace.project_root]??DEFAULT_CONTEXT_DRAFT} updateDraft={draft=>setContextDrafts(current=>({...current,[state.workspace.project_root]:draft}))} updateEngine={engine=>setState(current=>current?.workspace.project_root===state.workspace.project_root?{...current,workspace:{...current.workspace,context_engine:engine,index_ready:engine.ready}}:current)}/>;
     const requiredAction = {skills:"listSkills",plugins:"listPlugins",recovery:"rollbackCheckpoint"}[view as "skills"|"plugins"|"recovery"];
     if (requiredAction && state.capabilities && !state.capabilities.actions.includes(requiredAction)) return <div className="empty-row" role="status">{t("这个功能正在迁移到 Rust 内核，完成后会在这里启用。")}</div>;
     if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
@@ -7176,7 +7180,7 @@ export default function App() {
     if (view === "settings") return <>{(!state.capabilities || state.capabilities.actions.includes("aioState")) && <AiOPanel open={(id,root)=>void (root?navigateToSession(root,id,'aio'):openSession(id,'aio'))}/>}<label className="settings-card">配置范围 <select aria-label="配置范围" value={settingsTarget} onChange={event=>setSettingsTarget(event.target.value as 'conversation'|'workspace')}><option value="conversation">当前对话配置</option><option value="workspace">工作区默认配置（用于新对话）</option></select></label><SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} /></>;
     return <ChatView controls={inputControls} session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name, projectRoot, assistantId }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
         updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} question={question} resolveQuestion={resolveQuestion} questionDrafts={questionDrafts.current} contextUsage={contextUsage} loadHistoryPage={loadHistoryPage} />;
-  }, [inputControls, state, view, settingsTarget, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, question, resolveQuestion, contextUsage, t]);
+  }, [contextDrafts, inputControls, state, view, settingsTarget, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, question, resolveQuestion, contextUsage, t]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;

@@ -1,5 +1,6 @@
 import type { CoreActionName } from "../electron/core-actions";
 import type { ComposerAttachment } from "../electron/attachments";
+import type {SemanticDevice,SemanticResourcesState} from './generated/core-types';
 import type {
   ContextUsage,
   TokenFilters,
@@ -30,6 +31,8 @@ import type {
 } from "./types";
 
 type EmptyPayload = Record<never, never>;
+type ContextOperationPayload={operationId?:string;expectedRevision?:number;device?:SemanticDevice;threads?:number};
+type SemanticEnvelope=Envelope<'context.resources',{semantic:SemanticResourcesState;operation_id?:string;health?:Record<string,unknown>;pending_restart?:boolean}>;
 export interface AiOState {assistant_id:'aio';mainline_id:string;enabled:boolean;proactive:boolean;paused:boolean;tasks:Array<{id:string;branch:string;workspace:string;state:string;revision:number}>}
 type Envelope<Type extends string, Body extends object> = { id?: string | number | null; type: Type } & Body;
 /** Every custom-provider mutation answers with the record it touched plus fresh state. */
@@ -118,6 +121,17 @@ interface CoreRequestMap {
   getConversationConfig: { payload: { sessionId: string; configuration?: Record<string, unknown>; revision?: number }; response: Envelope<"conversation.config", { configuration: Record<string, unknown>; revision: number; error: string; models: ModelSourcesState; workspace: WorkspaceState; settings: SettingsState }> };
   getFileChanges: { payload: { sessionId: string }; response: Envelope<"file.changes", { session_id: string; changes: FileChange[] }> };
   getContextStatus: { payload: EmptyPayload; response: Envelope<"context.status", { context_engine: NonNullable<WorkspaceState["context_engine"]> }> };
+  getSemanticResources:{payload:EmptyPayload;response:SemanticEnvelope};
+  installSemanticResources:{payload:ContextOperationPayload&{directory:string;manifestSha256:string};response:SemanticEnvelope};
+  selectSemanticResources:{payload:ContextOperationPayload&{manifestSha256:string};response:SemanticEnvelope};
+  rollbackSemanticResources:{payload:ContextOperationPayload;response:SemanticEnvelope};
+  disableSemanticResources:{payload:ContextOperationPayload;response:SemanticEnvelope};
+  removeSemanticResources:{payload:ContextOperationPayload&{manifestSha256:string;confirmed:true};response:SemanticEnvelope};
+  warmSemanticResources:{payload:ContextOperationPayload;response:SemanticEnvelope};
+  unloadSemanticModels:{payload:ContextOperationPayload;response:SemanticEnvelope};
+  indexSemanticWorkspace:{payload:ContextOperationPayload&{force?:boolean};response:Envelope<'context.semantic-indexed',{result:Record<string,unknown>;context_engine:NonNullable<WorkspaceState['context_engine']>;semantic:SemanticResourcesState;operation_id:string}>};
+  stopContextOperation:{payload:{operationId:string};response:Envelope<'context.control',{operation_id:string;state:string}>};
+  queryContext:{payload:ContextOperationPayload&{query:string;strategy?:'auto'|'basic'|'hybrid';limit?:number;estimatedTokens?:number};response:Envelope<'context.results',{results:Array<{file_path:string;start_line:number;end_line:number;content:string;content_hash:string;revision:number;sources:string[]}>;context_engine:NonNullable<WorkspaceState['context_engine']>;retrieval:Record<string,unknown>;operation_id:string}>};
   getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: ContextUsage | null }> };
   revealProviderSecret: { payload: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }; response: Envelope<"provider.secret", { value: string }> };
   listApiKeyEnvironmentVariables: { payload: Record<string, never>; response: Envelope<"provider.environment", { names: string[] }> };

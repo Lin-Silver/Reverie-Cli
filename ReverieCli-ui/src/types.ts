@@ -1,4 +1,6 @@
-export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings";
+import type {SemanticResourcesState} from './generated/core-types';
+
+export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings" | "context";
 
 export interface SubagentSpecRecord {
   id: string;
@@ -202,6 +204,9 @@ export interface WorkspaceState {
     progress: number;
     label: string;
     automatic_retrieval: boolean;
+    revision?:number;
+    semantic?:SemanticResourcesState;
+    semantic_index?:{generation:number;revision:number;resource_digest:string;vectors:number;contract_version:number}|null;
   };
 }
 

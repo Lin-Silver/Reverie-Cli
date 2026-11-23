@@ -22,7 +22,9 @@ async function type(selector,text) {
   await win.webContents.insertText(text);
 }
 async function prompt(text) {
+  await wait(`!document.querySelector('.send-behavior') && !document.querySelector('.approval-panel') && document.querySelector('.composer textarea')?.value===''`,'The prior desktop turn did not finish delivery and restore its empty composer');
   await type('.composer textarea',text);
+  await wait(`document.querySelector('.composer textarea')?.value===${JSON.stringify(text)}`,'The native keyboard prompt did not reach the editor');
   win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'});
   win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
 }
@@ -42,6 +44,45 @@ app.whenReady().then(async()=>{
     const paths = await evaluate('window.reverie.paths()');
     fs.writeFileSync(path.join(options.outputRoot,'desktop-paths.json'),JSON.stringify(paths,null,2));
     checks.push('Real Electron window, renderer, preload and Rust initialization');
+    if(options.semantic) {
+      const contextButton=`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='上下文引擎')`;
+      await evaluate(`${contextButton}.click()`);
+      await wait('!!document.querySelector(".context-engine-page") && document.querySelectorAll(".context-fields input").length===3','The actual Context Engine page did not open');
+      await type('.context-fields label:first-child input',options.semantic.directory);
+      await type('.context-fields label:nth-child(2) input',options.semantic.digest);
+      await evaluate(`Array.from(document.querySelectorAll('.context-engine-page button')).find(button=>button.textContent.trim()==='安装并启用').click()`);
+      await wait(`window.__reverieProbeEvents.some(event=>event?.type==='context.progress' && event.action==='installSemanticResources')`,'The GUI did not start native resource validation');
+      await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='对话').click()`);
+      await wait(`window.__reverieProbeEvents.some(event=>event?.type==='context.progress' && event.action==='installSemanticResources' && event.phase==='finished')`,'The native resource install did not finish while viewing the conversation');
+      await evaluate(`${contextButton}.click()`);
+      await wait(`document.querySelector('.context-fields label:first-child input')?.value===${JSON.stringify(options.semantic.directory)} && document.querySelector('.context-fields label:nth-child(2) input')?.value===${JSON.stringify(options.semantic.digest)}`,'Resource input drafts did not survive page navigation');
+      await wait(`Array.from(document.querySelectorAll('.context-resources code')).some(code=>code.textContent===${JSON.stringify(options.semantic.digest)})`,'The installed native resource did not appear in the page');
+      await screenshot('context-resources.png');
+      checks.push('Actual context page, offline resource validation and activation with drafts preserved while navigating');
+      await wait(`Array.from(document.querySelectorAll('.context-engine-page button')).find(button=>button.textContent.trim()==='更新语义索引')?.disabled===false`,'The semantic index control stayed disabled');
+      await evaluate(`Array.from(document.querySelectorAll('.context-engine-page button')).find(button=>button.textContent.trim()==='更新语义索引').click()`);
+      await wait(`window.__reverieProbeEvents.some(event=>event?.type==='context.progress' && event.action==='indexSemanticWorkspace' && event.phase==='finished')`,'The GUI did not finish the actual semantic index');
+      const query='How can I restore player progress after closing the game?';
+      await type('.context-query textarea',query);
+      await wait(`document.querySelector('.context-query button[type=submit]')?.disabled===false`,'The actual retrieval control stayed disabled');
+      await evaluate(`document.querySelector('.context-query button[type=submit]').click()`);
+      await wait(`document.querySelector('.context-evidence pre')?.textContent.includes('恢复冒险进度')`,'Actual local vector and reranking evidence did not render');
+      await evaluate(`document.querySelector('.context-evidence').scrollIntoView({block:'center'})`);
+      await screenshot('context-evidence.png');
+      await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='对话').click()`);
+      await evaluate(`${contextButton}.click()`);
+      await wait(`document.querySelector('.context-query textarea')?.value===${JSON.stringify(query)} && document.querySelector('.context-evidence pre')?.textContent.includes('恢复冒险进度')`,'Query drafts or actual results were lost after page navigation');
+      checks.push('Actual semantic index and neural evidence display with query drafts and results preserved');
+      await wait(`Array.from(document.querySelectorAll('.context-resources button')).some(button=>button.textContent.trim()==='删除' && !button.disabled)`,'The restored page did not load its managed resources');
+      await evaluate(`Array.from(document.querySelectorAll('.context-resources button')).find(button=>button.textContent.trim()==='删除').click()`);
+      await wait(`document.querySelector('dialog.context-remove')?.open===true`,'Resource removal did not require its explicit dialog');
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+      await wait(`!document.querySelector('dialog.context-remove')`,'Escape did not dismiss the native modal dialog');
+      const unchanged=await evaluate(`window.reverie.request('getSemanticResources',{})`);
+      if(unchanged.semantic.active.manifest_sha256!==options.semantic.digest)throw new Error('Cancelling the removal dialog changed the resource activation.');
+      checks.push('Keyboard cancellation of explicit resource removal without altering the active bundle');
+      await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='对话').click()`);
+    }
     await prompt('QUESTION');
     await wait('document.querySelectorAll(".user-question-panel input[type=radio]").length === 4','Four explicit answer choices did not appear');
     await wait('Array.from(document.querySelectorAll(".session-state")).some(item => item.textContent === "等待回答")','The user question was mislabeled as a permission approval');
@@ -65,6 +106,7 @@ app.whenReady().then(async()=>{
     checks.push('Actual strict approval and native complete file write');
     await prompt('COMMAND');
     await wait('!!document.querySelector(".approval-panel:not(.user-question-panel)")','The command bypassed its separate approval');
+    await wait(`document.querySelector('.approval-panel')?.innerText.includes('command_exec')`,'The displayed approval did not belong to the current command');
     await evaluate(`Array.from(document.querySelectorAll('.approval-panel button')).find(button=>button.textContent.trim()==='同意').click()`);
     await wait('Array.from(document.querySelectorAll(".activity-group")).some(group=>group.innerText.includes("command_exec"))','The command activity did not appear');
     await evaluate('Array.from(document.querySelectorAll(".activity-group")).filter(group=>group.innerText.includes("command_exec")).forEach(group=>{group.open=true})');
@@ -84,6 +126,8 @@ app.whenReady().then(async()=>{
     await wait('window.__reverieProbeEvents.some(event=>event?.type==="run.finished" && event.state==="cancelled")','The stopped run did not finalize cancellation');
     const saved = await evaluate(`window.reverie.request('getSession',{sessionId:${JSON.stringify(session)},projectRoot:${JSON.stringify(options.projectRoot)},select:false})`);
     if(!saved.session.interrupted_streams.some(stream=>stream.content.includes('partial waiting output')))throw new Error('Cancelled native stream was lost.');
+    const submitted=saved.session.messages.filter(message=>message.role==='user').map(message=>message.content);
+    if(JSON.stringify(submitted)!==JSON.stringify(['QUESTION','WRITE','COMMAND','WAIT']))throw new Error('The native desktop submitted a duplicated or unexpected user turn: '+JSON.stringify(submitted));
     checks.push('Live output, targeted stop and persisted interrupted text');
     await screenshot('finished.png');
     fs.writeFileSync(path.join(options.outputRoot,'report.json'),JSON.stringify({passed:true,scope:'actual Electron and native Rust with a loopback model; no external service or full product acceptance',checks,errors,paths},null,2)+'\n');
@@ -94,5 +138,11 @@ app.whenReady().then(async()=>{
     if(win&&!win.isDestroyed())await screenshot('failed.png').catch(()=>{});
     console.error(error);
     process.exitCode=1;
-  } finally { app.quit(); }
+  } finally {
+    if(win&&!win.isDestroyed()) {
+      const events=await evaluate('window.__reverieProbeEvents || []').catch(()=>[]);
+      fs.writeFileSync(path.join(options.outputRoot,'core-events.json'),JSON.stringify(events,null,2)+'\n');
+    }
+    app.quit();
+  }
 });

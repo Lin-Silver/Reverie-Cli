@@ -15,6 +15,7 @@ interface ReverieDesktopApi {
   notify(payload: { title: string; body: string }): Promise<void>;
   onEvent(listener: (message: JsonRecord) => void): () => void;
   selectWorkspace(): Promise<string | null>;
+  selectSemanticBundle():Promise<string|null>;
   switchWorkspace(projectRoot: string): Promise<string | null>;
   deleteWorkspace(projectRoot: string): Promise<{ projectRoot: string; deletedSessions: number; preferences: UiPreferences } | null>;
   selectAttachment(projectRoot?: string): Promise<ComposerAttachment | null>;

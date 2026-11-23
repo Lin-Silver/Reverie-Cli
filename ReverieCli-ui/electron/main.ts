@@ -781,6 +781,13 @@ ipcMain.handle("desktop:switch-workspace", async (_event, projectRoot: string) =
   return activateWorkspace(String(projectRoot ?? ""));
 });
 
+ipcMain.handle("desktop:select-semantic-bundle",async()=>{
+  if (!mainWindow) return null;
+  const preferences=normalizeUiPreferences((await readDesktopSettings()).ui);
+  const result=await dialog.showOpenDialog(mainWindow,{title:localizedUiText(preferences.language,"选择语义资源包目录","Choose a semantic resource bundle"),properties:["openDirectory"]});
+  return result.canceled?null:result.filePaths[0]??null;
+});
+
 ipcMain.handle("desktop:delete-workspace", async (_event, projectRoot: string) => {
   if (!mainWindow || !bridge) return null;
   const requestedProject = String(projectRoot ?? "").trim();

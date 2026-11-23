@@ -3,7 +3,7 @@
 const CORE_INITIALIZE_TIMEOUT_MS = 300_000;
 
 export function coreRequestTimeoutMs(action: string): number {
-  if (action === "runPrompt" || action === "resumePrompt" || action === "indexWorkspace") return 0;
+  if (["runPrompt","resumePrompt","indexWorkspace","indexSemanticWorkspace","installSemanticResources","selectSemanticResources","rollbackSemanticResources","warmSemanticResources","queryContext","removeSemanticResources"].includes(action)) return 0;
   // callViewTool runs the kernel's gated ToolExecutor behind the human approval
   // gate (up to the kernel's ~300s wait), so it must stream like a prompt rather
   // than trip the ordinary 60s transport deadline mid-approval.

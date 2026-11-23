@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld("reverie", {
   },
   selectWorkspace: () =>
     ipcRenderer.invoke("desktop:select-workspace") as Promise<string | null>,
+  selectSemanticBundle:()=>ipcRenderer.invoke("desktop:select-semantic-bundle") as Promise<string|null>,
   switchWorkspace: (projectRoot: string) =>
     ipcRenderer.invoke("desktop:switch-workspace", projectRoot) as Promise<string | null>,
   deleteWorkspace: (projectRoot: string) =>

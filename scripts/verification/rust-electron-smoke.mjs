@@ -52,6 +52,12 @@ fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({model
   mode:'reverie',auto_index:false,stream_responses:true,security:{permission_mode:'strict',permission_level:'full_control'}}));
 fs.writeFileSync(path.join(runtimeRoot,'desktop-settings.json'),JSON.stringify({projectRoot,coreAppRoot:appRoot,ui:{language:'zh-CN',startupMode:'gui',uiVariant:'classic',classicTheme:'dark'}}));
 const options={uiRoot,runtimeRoot,projectRoot,outputRoot:root,answer,fileContent,outputFile};
+if(process.argv[3]||process.argv[4]) {
+  if(!process.argv[3]||!process.argv[4])throw new Error('Supply both a real semantic bundle and its manifest SHA-256.');
+  options.semantic={directory:path.resolve(process.argv[3]),digest:process.argv[4]};
+  fs.writeFileSync(path.join(projectRoot,'saving.md'),'# 恢复冒险进度\n退出前把玩家进度和背包写入本地文件；下次启动时读取文件恢复上次的状态。\n');
+  fs.writeFileSync(path.join(projectRoot,'menu.md'),'# 界面外观\n背景为蓝色渐变，按钮文字是白色。\n');
+}
 const optionsFile=path.join(root,'probe-config.json');fs.writeFileSync(optionsFile,JSON.stringify(options));
 let child;
 let timer;

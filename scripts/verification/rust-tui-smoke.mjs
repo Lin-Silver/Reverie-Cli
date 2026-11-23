@@ -31,7 +31,11 @@ const prompts = [];
 const requests = [];
 const checks = [];
 let terminal;
-const displayReplies = display.onData(bytes => terminal?.write(bytes));
+let cursorRepliesEnabled = true;
+const displayReplies = display.onData(bytes => {
+  if (!cursorRepliesEnabled && /^\x1b\[\d+;\d+R$/.test(bytes)) return;
+  terminal?.write(bytes);
+});
 let output = '';
 let terminalExit;
 let held;
@@ -109,6 +113,9 @@ try {
   terminal.onExit(value => {terminalExit = value;});
   await wait(() => stripVTControlCharacters(output).includes('Use /help for commands') && screenText().includes('Reverie CLI'), 'native terminal startup');
   assert(!output.includes('\x1b[?1049h'));
+  // A busy bracketed-paste parser can withhold CPR. The renderer must keep its
+  // known cursor instead of synchronously querying the input channel mid-run.
+  cursorRepliesEnabled = false;
   checks.push('Actual scrolling viewport without an alternate screen');
   const pasted = 'PASTED_FIRST😀\nPASTED_SECOND';
   terminal.write(`\x1b[200~${pasted}\x1b[201~`);

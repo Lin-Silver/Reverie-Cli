@@ -445,3 +445,11 @@ Context Engine 增加固定版本的 C/C++、C#、Go、Java、Zig、HTML/CSS、L
 实际重新读取官方固定 HF 修订：E5 `614241f` 与 BGE `2cfc18c` 的模型卡标 MIT，官方 FP32 ONNX 分别 470,268,510／1,112,459,588 字节，LF​​S SHA-256 保存在本地元数据；E5 专用 AVX-512 INT8 不作为通用基线。既有 ORT 官方 NuGet 及 Windows DLL 再次计算 SHA-256，分别与 `7e35fdb4f5adb62f01e60798e2e5ed05108f5fbbe1cca03fbcc37903cf7c5e3b`、`0c42dc4e278f0968fdf9ebf1b1e54a74c657a9942e70803e453c91993451cf4c` 一致；这不是本轮模型推理或数字签名通过。
 
 `b38e130` 的 Apple Silicon grammar 13 项、Context 22 项通过，终端此次在碎片粘贴完成前 exit 1，未执行到取消断言；根因未知。已通过 `e43be94` 在失败时输出终端尾部并上传本任务原始 CI 证据，保留原断言。不能把这次不同阶段的失败当作之前取消问题已修复的证明。
+
+### R1-5 滚动渲染的光标读取修复（2026-11-23）
+
+`4fd82a7` 的 Apple Silicon 失败现场显示首条原文回复之后 `The cursor position could not be read within a normal duration`，实际程序 exit 1。Ratatui inline 清理／缩放会查询 Crossterm 光标；POSIX 查询从输入通道等待 CPR，与正在解析的 bracketed paste 共用该通道。新增 backend 首次读取真实位置，随后根据实际输出、显式移动、Unicode 宽度、换行滚动和窗口尺寸记录光标；raw mode 不回显输入，所有渲染位置由本进程控制。未改为全屏、未关闭 paste 或删除原输入／取消断言。
+
+本机光标及实际 inline 行为 2 项、Clippy、锁定 release 构建通过。原生 PTY 8 项通过，探针启动后故意停止回复 CPR，仍完成多行粘贴、询问、命令、审批、缩放、取消及退出。证据 `.runtime/rust-3.0/tui-smoke/case-6I068F/report.json`；反转缓存选择后回归 exit 101，恢复原字节后两项通过，记录 `cursor-mutation.json`。首次 inline 断言误将写出新行之后的光标当作旧 editor 光标，已按实际库行为区分写行及下一帧 editor 位置，保留原失败日志。
+
+这是 Windows 实际 PTY 和定向行为证据；Apple Silicon 根因修复须按新来源 CI 验证，真实键盘、完整终端及窗口宽度矩阵继续未验证。当前同时开发的本地推理代码尚未包含在本次终端提交；其实际模型证据单独记录。

@@ -1,5 +1,6 @@
 use super::{
     Panel,
+    cursor_backend::CursorBackend,
     input::{Input, display_text, wrapped},
 };
 use crossterm::{
@@ -34,7 +35,7 @@ impl Drop for Mode {
 }
 
 pub struct Screen {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    terminal: Terminal<CursorBackend<CrosstermBackend<Stdout>>>,
     _mode: Mode,
 }
 impl Screen {
@@ -54,7 +55,7 @@ impl Screen {
         }
         let rows = terminal::size()?.1;
         let terminal = Terminal::with_options(
-            CrosstermBackend::new(io::stdout()),
+            CursorBackend::new(CrosstermBackend::new(io::stdout())),
             TerminalOptions {
                 viewport: Viewport::Inline(rows.saturating_sub(1).clamp(3, 12)),
             },

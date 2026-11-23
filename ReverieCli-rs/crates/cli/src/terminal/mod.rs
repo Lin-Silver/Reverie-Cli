@@ -1,3 +1,4 @@
+mod cursor_backend;
 mod input;
 mod input_events;
 mod screen;

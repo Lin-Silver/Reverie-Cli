@@ -53,6 +53,7 @@ struct Run {
     rules: String,
     store: Mutex<crate::session::SessionStore>,
     context: Option<Arc<Mutex<reverie_context::ContextEngine>>>,
+    context_key: PathBuf,
     reasoning: String,
     activities: Vec<Value>,
 }
@@ -298,6 +299,7 @@ impl KernelHost {
         let mut messages = store.history(&session)?;
         let history_count = messages.len();
         let no_index = payload["noIndex"].as_bool().unwrap_or(false);
+        let context_key = kernel.context_key_for(&execution_root);
         let context = if !no_index && config["auto_index"].as_bool().unwrap_or(true) {
             Some(kernel.shared_context_for(&execution_root)?)
         } else {
@@ -336,6 +338,7 @@ impl KernelHost {
             .join("\n\n"),
             store: Mutex::new(store),
             context,
+            context_key,
             reasoning: String::new(),
             activities: Vec::new(),
         })
@@ -737,6 +740,37 @@ impl KernelHost {
         if control.cancel.is_cancelled() {
             return Err("Run cancelled before tool execution.".into());
         }
+        if [
+            "codebase-retrieval",
+            "codebase_retrieval",
+            "retrieve_codebase",
+            "repo_context",
+        ]
+        .contains(&call.name.as_str())
+        {
+            let engine = match &run.context {
+                Some(engine) => engine.clone(),
+                None => {
+                    lock(&self.kernel)?.shared_context_at(&run.execution_root, &run.context_key)?
+                }
+            };
+            let arguments = args.clone();
+            let cancel = control.cancel.clone();
+            let details = tokio::task::spawn_blocking(move || -> Result<Value> {
+                let mut engine = lock(&engine)?;
+                engine.index_with_cancel(false, &|| cancel.is_cancelled())?;
+                if cancel.is_cancelled() {
+                    return Err("Run cancelled during context lookup.".into());
+                }
+                engine.lookup(&arguments)
+            })
+            .await??;
+            let metadata = json!({"backend":"rust","query_type":details["query_type"],"revision":details["revision"],"symbol":details["symbol"]["qualified_name"],"file":details["file"].as_str().or_else(||details["symbol"]["file_path"].as_str()),"line":details["symbol"]["start_line"]});
+            return Ok(ToolResult::ok(
+                serde_json::to_string_pretty(&details)?,
+                metadata,
+            ));
+        }
         let mut arguments = args.clone();
         if run.root != run.execution_root
             && let Some(path) = args["path"]
@@ -772,6 +806,7 @@ impl KernelHost {
 
 pub fn tool_catalog() -> Vec<Value> {
     let mut tools = reverie_platform::tools();
+    tools.push(json!({"type":"function","function":{"name":"codebase-retrieval","description":"Inspect the active workspace before repository-dependent answers or edits. Use task for a broad bounded evidence workset, then symbol, file, search, outline or dependencies. Evidence includes content hashes and at most 72 source lines. Dependency targets distinguish lexical matches, inference, ambiguity and unresolved names. Memory and LSP queries are still being migrated.","parameters":{"type":"object","properties":{"query_type":{"type":"string","enum":["symbol","file","search","dependencies","outline","explore","task"]},"query":{"type":"string"},"include_source":{"type":"boolean","default":true},"include_dependencies":{"type":"boolean","default":true},"max_depth":{"type":"integer","minimum":0,"default":2},"filter_kind":{"type":"string","default":"all"},"direction":{"type":"string","enum":["incoming","outgoing","both"]},"limit":{"type":"integer","default":20},"max_files":{"type":"integer","default":6},"max_symbols":{"type":"integer","default":12},"max_tokens":{"type":"integer","default":12000},"include_history":{"type":"boolean"},"include_memory":{"type":"boolean"},"active_files":{"type":"array","items":{"type":"string"}},"changed_files":{"type":"array","items":{"type":"string"}}},"required":["query_type","query"]}}}));
     tools.push(json!({"type":"function","function":{"name":"userInput","description":"Ask a concise clarification with up to three options and a custom answer. Wait for the user's explicit response; this does not approve workspace tools.","parameters":{"type":"object","properties":{"question":{"type":"string"},"reason":{"type":"string"},"options":{"type":"array","items":{"type":"string"},"maxItems":3},"multiple":{"type":"boolean"}},"required":["question","reason"]}}}));
     tools
 }

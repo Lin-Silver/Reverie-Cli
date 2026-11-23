@@ -1,4 +1,4 @@
-use crate::catalog::{Chunk, Document};
+use crate::catalog::{Chunk, Document, Reference};
 use crate::scan::{FileEntry, Result, hash_bytes};
 use crate::text::source_text;
 use std::collections::{HashMap, HashSet};
@@ -68,6 +68,7 @@ impl Parsers {
             file,
             body: None,
             chunks: Vec::new(),
+            references: Vec::new(),
         };
         if document.file.size > MAX_BODY_BYTES {
             return Ok(document);
@@ -97,7 +98,7 @@ impl Parsers {
             .to_string_lossy()
             .replace(['/', '\\'], ".");
         if let Some(syntax) = Syntax::from_extension(&extension) {
-            document.chunks = self.code(syntax, &module, &body)?;
+            (document.chunks, document.references) = self.code(syntax, &module, &body)?;
         } else if matches!(extension.as_str(), "md" | "mdx") {
             document.chunks = headings(&module, &body);
         }
@@ -113,13 +114,20 @@ impl Parsers {
                 signature: String::new(),
                 documentation: String::new(),
                 body: lines[start..end].join("\n"),
+                language: extension.clone(),
+                parent: None,
             });
         }
         document.body = Some(body);
         Ok(document)
     }
 
-    fn code(&mut self, syntax: Syntax, module: &str, source: &str) -> Result<Vec<Chunk>> {
+    fn code(
+        &mut self,
+        syntax: Syntax,
+        module: &str,
+        source: &str,
+    ) -> Result<(Vec<Chunk>, Vec<Reference>)> {
         let (language, query) = match self.queries.entry(syntax) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -138,10 +146,13 @@ impl Parsers {
         let mut results = cursor.matches(query, tree.root_node(), bytes);
         let mut seen = HashSet::new();
         let mut chunks = Vec::new();
+        let mut references = Vec::new();
+        let mut seen_references = HashSet::new();
         while let Some(found) = results.next() {
             let mut definition = None;
             let mut name = None;
             let mut docs = Vec::new();
+            let mut reference = None;
             for capture in found.captures {
                 let label = query.capture_names()[capture.index as usize];
                 match label {
@@ -151,13 +162,61 @@ impl Parsers {
                         if let Some(kind) = label.strip_prefix("definition.") {
                             definition = Some((capture.node, kind));
                         }
+                        if let Some(kind) = label.strip_prefix("reference.") {
+                            reference = Some((capture.node, kind));
+                        }
                     }
+                }
+            }
+            if let (Some((node, kind)), Some(name)) = (reference, name) {
+                let reference_node = if node.kind() == "arguments" {
+                    node.parent().unwrap_or(node)
+                } else {
+                    node
+                };
+                let target = reference_node
+                    .child_by_field_name("function")
+                    .or_else(|| reference_node.child_by_field_name("constructor"))
+                    .and_then(|function| function.utf8_text(bytes).ok())
+                    .unwrap_or(name);
+                let enclosing = enclosing_scope(node, bytes);
+                let owner = if kind == "implementation" {
+                    let implementing = reference_node
+                        .child_by_field_name("type")
+                        .and_then(|node| node.utf8_text(bytes).ok())
+                        .unwrap_or_default();
+                    [module, &enclosing, implementing]
+                        .into_iter()
+                        .filter(|scope| !scope.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(".")
+                } else if enclosing.is_empty() {
+                    module.to_owned()
+                } else {
+                    format!("{module}.{enclosing}")
+                };
+                let line = (node.start_position().row + 1) as u32;
+                if seen_references.insert((owner.clone(), target, kind, line)) {
+                    references.push(Reference {
+                        source: owner,
+                        target: target.to_owned(),
+                        kind: match kind {
+                            "call" => "CALLS",
+                            "implementation" => "IMPLEMENTS",
+                            _ => "REFERENCES",
+                        }
+                        .into(),
+                        line,
+                    });
                 }
             }
             let (Some((node, kind)), Some(name)) = (definition, name) else {
                 continue;
             };
-            if name.is_empty() || !seen.insert((node.start_byte(), node.end_byte(), name)) {
+            if name.is_empty()
+                || chunks.len() >= 512
+                || !seen.insert((node.start_byte(), node.end_byte(), name))
+            {
                 continue;
             }
             let enclosing = enclosing_scope(node, bytes);
@@ -172,7 +231,7 @@ impl Parsers {
                 "enum_item" => "ENUM",
                 "trait_item" => "TRAIT",
                 "type_item" => "TYPE_ALIAS",
-                _ if kind == "function" && !enclosing.is_empty() && syntax == Syntax::Python => {
+                _ if kind == "function" && python_method(node) && syntax == Syntax::Python => {
                     "METHOD"
                 }
                 _ => kind,
@@ -192,13 +251,29 @@ impl Parsers {
                     .collect(),
                 documentation: docs.join("\n").chars().take(8192).collect(),
                 body: source.chars().take(49_152).collect(),
+                language: match syntax {
+                    Syntax::Python => "python",
+                    Syntax::JavaScript => "javascript",
+                    Syntax::TypeScript | Syntax::Tsx => "typescript",
+                    Syntax::Rust => "rust",
+                }
+                .into(),
+                parent: (!enclosing.is_empty()).then(|| format!("{module}.{enclosing}")),
             });
-            if chunks.len() == 512 {
-                break;
-            }
         }
-        Ok(chunks)
+        Ok((chunks, references))
     }
+}
+
+fn python_method(mut node: Node<'_>) -> bool {
+    while let Some(parent) = node.parent() {
+        match parent.kind() {
+            "class_definition" => return true,
+            "function_definition" => return false,
+            _ => node = parent,
+        }
+    }
+    false
 }
 
 fn enclosing_scope(mut node: Node<'_>, source: &[u8]) -> String {
@@ -207,6 +282,10 @@ fn enclosing_scope(mut node: Node<'_>, source: &[u8]) -> String {
         let field = match parent.kind() {
             "class_definition"
             | "class_declaration"
+            | "function_definition"
+            | "function_declaration"
+            | "function_item"
+            | "method_definition"
             | "mod_item"
             | "trait_item"
             | "namespace_declaration" => "name",
@@ -252,6 +331,8 @@ fn headings(module: &str, body: &str) -> Vec<Chunk> {
             signature: title.to_owned(),
             documentation: String::new(),
             body: String::new(),
+            language: "markdown".into(),
+            parent: None,
         });
         if chunks.len() == 512 {
             break;

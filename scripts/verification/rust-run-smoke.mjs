@@ -14,11 +14,13 @@ const root = fs.mkdtempSync(path.join(directory, 'case-'));
 const appRoot = path.join(root, 'application');
 const project = path.join(root, '工作区😀');
 const otherProject = path.join(root, 'second-workspace');
-for (const folder of [project, otherProject, path.join(appRoot, '.reverie')]) fs.mkdirSync(folder, {recursive: true});
+const executionProject = path.join(root, 'execution-workspace');
+for (const folder of [project, otherProject, executionProject, path.join(appRoot, '.reverie')]) fs.mkdirSync(folder, {recursive: true});
 const source = 'exact first line\r\n中文😀\nfinal line';
 fs.writeFileSync(path.join(project, 'input.txt'), source);
 fs.writeFileSync(path.join(project, 'evidence.txt'), 'unique_first_project_evidence');
 fs.writeFileSync(path.join(otherProject, 'evidence.txt'), 'unique_second_project_evidence');
+fs.writeFileSync(path.join(executionProject, 'evidence.txt'), 'unique_execution_project_evidence');
 const held = new Map();
 const requests = [];
 const checks = [];
@@ -66,7 +68,8 @@ const server = http.createServer(async (request, response) => {
     }
     let name;
     let args;
-    if (prompt === 'READ') {name = 'file_ops'; args = {operation: 'read', path: 'input.txt'};}
+    if (prompt.startsWith('CONTEXT:')) {name = 'codebase-retrieval'; args = JSON.parse(prompt.slice(8));}
+    else if (prompt === 'READ') {name = 'file_ops'; args = {operation: 'read', path: 'input.txt'};}
     else if (prompt.startsWith('WRITE:')) {name = 'create_file'; args = {path: prompt.slice(6), content: source};}
     else if (prompt === 'QUESTION') {name = 'userInput'; args = {question: '选择实现方式？', reason: 'fixture-requirements', options: ['A', 'B', 'C']};}
     else if (prompt === 'BAD_JSON') {name = 'create_file'; args = '{broken';}
@@ -135,6 +138,12 @@ try {
   assert.equal(result.result.success, true);
   assert.equal(fs.readFileSync(path.join(project, 'created.txt'), 'utf8'), source);
   passed('Actual atomic workspace file creation');
+  const contextReadOnly = await create('explicit context on demand', {auto_index: false, security: {permission_level: 'read_only', permission_mode: 'strict', strict_allow_read_only: true}});
+  result = await run(contextReadOnly, `CONTEXT:${JSON.stringify({query_type:'file',query:'./evidence.txt'})}`, 'context-read-only', {noIndex:true});
+  assert.equal(result.result.success,true);assert.equal(result.events.some(reply=>reply.event.type==='approval.request'),false);
+  const evidence = JSON.parse(result.result.output_text.slice('完成\n'.length));
+  assert.equal(evidence.evidence[0].content,'unique_first_project_evidence');assert.equal(evidence.evidence[0].content_hash.length,64);
+  passed('Explicit native codebase retrieval indexes on demand under read-only permission without an approval');
   const readOnly = await create('read-only', {security: {permission_level: 'read_only', permission_mode: 'default'}});
   result = await run(readOnly, 'WRITE:denied.txt', 'deny-1');
   assert.match(result.result.output_text, /^拒绝/);
@@ -197,6 +206,16 @@ try {
   assert.equal(secondPage.messages.length, 2);
   assert.equal(secondPage.messages.at(-1).content, '实际协议回复😀\nSECOND');
   passed('Concurrent projects keep their own configuration, context and transcript stores');
+  running = run(contextReadOnly, 'HOLD:CONTEXT', 'held-context', {noIndex:true,executionRoot:executionProject});
+  await waitEvent('held-context','assistant.delta');
+  await request('initialize',{projectRoot:otherProject},'state');
+  const pendingContext = held.get('HOLD:CONTEXT');
+  event(pendingContext.response,{choices:[{delta:{tool_calls:[{index:0,id:`context-call-${++toolSequence}`,type:'function',function:{name:'codebase-retrieval',arguments:JSON.stringify({query_type:'file',query:'evidence.txt'})}}]},finish_reason:'tool_calls'}]});
+  pendingContext.response.end('data: [DONE]\n\n');
+  result = await running;
+  assert.equal(result.result.success,true);assert(result.result.output_text.includes('unique_execution_project_evidence'));
+  assert(!result.result.output_text.includes('unique_second_project_evidence'));assert(!result.result.output_text.includes('unique_first_project_evidence'));
+  passed('Delayed native context tools retain the original execution root while another project is selected');
   const nonstream = await create('JSON response', {stream_responses: false});
   assert.equal((await run(nonstream, 'READ', 'json-1', {noIndex: true})).result.output_text, `完成\n${source}`);
   passed('Nonstream JSON response and tool continuation');

@@ -6,7 +6,7 @@
 
 最终纯 Python 2.5.5 已公开并完整归档：来源 `070fa25b07692c90c56a6b00a9a969ff2abb7804`，树 `b7835e45d0cea95e9e5b0790d24b7604c7681002`，正式 Release `454958491`，17 项资产。Python 剩余真实 DPI 验收获维护者明确延后，保持未验证；Rust 四档真实 DPI 门槛保留。最终来源、实包和公开源码核对见 [Python 基线](python-baseline.md)。
 
-维护者最新决定已执行：本地和 GitHub 仅保留 `main`、`Reverie-Cli-py` 两个分支。Rust 在 `G:\Reverie\Reverie-Cli\ReverieCli-rs` 的主线上直接实施；原分支历史已验证归档。原生入口、配置与会话、基础 Context Engine 已提交，OpenAI Chat 兼容 HTTP／SSE、实际文件工具、询问、审批与取消按新的可运行增量接入。既有 Python 收尾资料保持原样。G 盘约 109 MiB 可用，Rust target 通过已核实的 junction 使用本任务 C 盘缓存。
+维护者最新决定已执行：本地和 GitHub 仅保留 `main`、`Reverie-Cli-py` 两个分支。Rust 在 `G:\Reverie\Reverie-Cli\ReverieCli-rs` 的主线上直接实施；原分支历史已验证归档。原生入口、配置与会话、四种模型协议、实际文件／命令工具、询问、审批、取消和 Electron 接入已有基本运行证据。Context Engine 正在补齐结构、引用和证据工具。既有 Python 收尾资料保持原样。Rust target 继续使用已核实的 C 盘 junction；本轮只读复核 G 盘约 13.2 GiB 可用，本会话未清理用户接手的缓存。
 
 当前重点是 Rust 实施。本地执行必要构建、基本回归和实际进程检查，扩展测评交由云端，见 [未验证清单](UNVERIFIED.md) 与 [验证提示词](CLOUD_VALIDATION_PROMPT.md)。已完成的 48×30 质量和 960 次基础检索、启动、索引及内存记录继续保留；其原始合同见 [阶段 0B](phase0B.md)。性能归因、Intel ORT 同版本源码和完整产品验收不再阻塞当前不依赖 ORT 的实施。未取得的证据继续列为未验证。
 
@@ -29,8 +29,8 @@
 | P3 Python 重验与重发 | 最终 Test、四平台 native Build及17项实际下载核对通过；稳定草稿已公开；完整 Python 归档同源；真实 DPI 按维护者明确决定延后并保持未验证 | 源码/标签/资产/内核身份一致；公开说明披露原失败、零真实模型质量样本及未验证边界 |
 | 0A 只读整理 | 候选快照清单与语料草案已整理；未冻结正式基线 | SDK/类型/语料草案与来源 SHA 对应，详见 [阶段 0A](phase0A.md) |
 | 0B 正式基线 | 已取得的发行、协议、语料、48×30 质量与性能记录已保全；剩余测评移交云端 | 缺失证据逐项记录，不阻塞实施 |
-| 1 Rust 首条链路 | 原生入口、配置、会话、基础模型／文件执行和滚动终端可运行；Electron 接着实施 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
-| 2 Context Engine | 同进程结构／基础检索首增量已实施；完整引用、语义与性能待完成 | 完整结构/基础/本地语义链与性能质量门槛 |
+| 1 Rust 首条链路 | 原生入口、配置、会话、四种模型协议、文件／命令、滚动终端与 Electron 基本链路可运行；完整功能继续迁移 | 同一 Rust 内核驱动 CLI、SDK、桌面及真实 Provider/工具/会话 |
+| 2 Context Engine | 同进程结构／基础检索、符号元数据、引用查询和模型证据工具已实施；完整语言／引用、语义与性能待完成 | 完整结构/基础/本地语义链与性能质量门槛 |
 | 3 模式与平台 | 待实施 | 全模式与实际平台工作流 |
 | 4 生态与界面 | 待实施 | 四市场/通用组件/真实 OAuth/更新/GUI/TUI/询问与换行 |
 | 独立组件 | 待实施 | Gamer 四作品/类型矩阵/导出与 Live2D 原生渲染/许可 |
@@ -407,3 +407,15 @@ GUI 将命令进度与最终结果合并为一个工具卡片，终端在命令�
 本机基本 Rust 测试 19 passed，格式、Clippy -D warnings、锁定 release 构建、生成类型与桌面生产构建通过；GUI 定向 18 项通过。Windows EXE 为 16,574,464 字节，SHA-256 `10e073b502cfa75a4ed89c48913a5421231267e52c78d36fba603db0ebd6f875`。实际命令 13 项、既有模型／工具／权限 14 项、终端 8 项、Electron 窗口 5 项通过。移除命令操作符拒绝条件后，定向测试如预期失败；恢复源码后原测试通过。
 
 证据为 `.runtime/rust-3.0/command-smoke/case-kE4j3I/report.json`、`run-smoke/case-gMujBv/report.json`、`tui-smoke/case-ZtnlCA/report.json`、`electron-smoke/case-1u6KFl/report.json` 和 `command-mutation/report.json`。之前的探针失败及截图仍保留，不能改称通过。命令已加入四平台只读 CI；其全部工具链、编码、逃逸进程、Job 分配失败、系统级隔离和完整产品验收列在 UNVERIFIED.md 第 44 项。完整 Context Engine、模式、市场、原生平台、Gamer、Live2D 和正式资产继续实施。
+
+### R2 结构元数据、引用与实际证据工具（2026-11-23）
+
+独立回读提交 `9ca0212` 的 Test `45214080600`：文档、桌面、Windows x64、Linux x64、macOS arm64 和 Intel x64 六个 job 全部通过。该 CI 证明上一命令增量，后续来源分别验收。
+
+Rust Context Engine 新增 `symbol`、`file`、`search`、`dependencies`、`outline`、`explore`、`task` 查询，保留符号名字、签名、文档、语言、父子作用域和引用位置。静态引用明确标识词法匹配、接收者推断、唯一名字推断、歧义和未解析；不能把这些推断当作语言服务器的定义解析。源文件及已解析引用目标按内容哈希复核，变更后拒绝旧证据。CLI 提供 `--context-engine lookup <database> <request-json>`，内核注册 `codebase-retrieval` 及既有别名，关闭自动索引时仍能按显式工具请求建立索引。运行任务固定原执行目录和索引存储，另一项目被选中后不会改变该绑定。
+
+索引开发 schema 2 升至 3 前通过 SQLite 保存一致性备份，旧修订和派生索引保留到成功重建；取消、重启和备份恢复已有基本证据。测试实际发现并修复 Windows 只读句柄刷盘失败，以及深层执行索引超过 MAX_PATH 无法打开的问题。这是 Rust 开发索引迁移，不能代替最终用户 Python 数据迁移的完整验收。
+
+本机 Rust 测试共 23 项通过；修改后的 Context Engine 9 项、格式、Clippy `-D warnings` 和锁定 release 构建通过。最终 Windows EXE 为 16,854,528 字节，SHA-256 `e901e53fc5efff3eb87d69da8062525155284deda2c22de9f13a2c37e243f043`。实际 CLI／SDK 上下文 22 项、模型／工具／权限／项目隔离 16 项通过；常驻桌面桥接 6 项在本增量中通过。移除内容哈希拒绝条件后测试如预期失败，源码按原字节恢复。
+
+证据为 `.runtime/rust-3.0/context-smoke/case-ZLEWN1/report.json`、`run-smoke/case-aBzd1T/report.json`、`desktop-bridge-smoke/case-s9MFMs/report.json` 和 `context-mutation/report.json`。测试用严格权限配置显式启用 `strict_allow_read_only`；此前错误夹具、长路径失败及其报告保留。现有解析仍为 Python、JS、TS/TSX、Rust，完整语言、导入／别名、LSP、历史、记忆、本地语义与性能质量继续实施。`UNVERIFIED.md` 第 45 项记录这些边界，完整主计划保持原文。

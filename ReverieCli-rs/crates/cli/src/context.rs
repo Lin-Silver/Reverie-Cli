@@ -2,7 +2,7 @@ use reverie_context::{ContextEngine, Result};
 use serde_json::json;
 use std::path::Path;
 
-const HELP: &str = "Usage:\n  reverie --context-engine index <workspace> <database>\n  reverie --context-engine search <database> <query> [limit]\n  reverie --context-engine paths <database> <prefix> [limit]\n  reverie --context-engine status <database>\n  reverie --context-engine --version";
+const HELP: &str = "Usage:\n  reverie --context-engine index <workspace> <database>\n  reverie --context-engine search <database> <query> [limit]\n  reverie --context-engine paths <database> <prefix> [limit]\n  reverie --context-engine lookup <database> <request-json>\n  reverie --context-engine status <database>\n  reverie --context-engine --version\n\nlookup query_type: symbol, file, search, dependencies, outline, explore, task";
 
 pub fn run(args: &[String]) -> Result<()> {
     let output = match args {
@@ -22,6 +22,10 @@ pub fn run(args: &[String]) -> Result<()> {
         }
         [operation, database] if operation == "status" => {
             reverie_context::database_status(Path::new(database))?
+        }
+        [operation, database, request] if operation == "lookup" => {
+            ContextEngine::from_database(Path::new(database))?
+                .lookup(&serde_json::from_str(request)?)?
         }
         [operation, database, input, rest @ ..]
             if rest.len() <= 1 && ["search", "chunks", "paths"].contains(&operation.as_str()) =>

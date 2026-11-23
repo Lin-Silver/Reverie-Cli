@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const APPLICATION_ID: i64 = 0x52564345; // RVCE
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -21,6 +21,18 @@ pub struct Chunk {
     pub documentation: String,
     #[serde(default)]
     pub body: String,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Reference {
+    pub source: String,
+    pub target: String,
+    pub kind: String,
+    pub line: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,12 +43,15 @@ pub struct Document {
     pub body: Option<String>,
     #[serde(default)]
     pub chunks: Vec<Chunk>,
+    #[serde(default)]
+    pub references: Vec<Reference>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct State {
     pub root: String,
     pub revision: i64,
+    pub analysis_version: i64,
 }
 
 pub struct Catalog {
@@ -58,19 +73,24 @@ fn check_schema(db: &Connection) -> Result<()> {
 }
 
 pub fn open_readonly(path: &Path) -> Result<Connection> {
-    let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let db = Connection::open_with_flags(path.canonicalize()?, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     db.busy_timeout(Duration::from_secs(10))?;
     check_schema(&db)?;
     Ok(db)
 }
 
 pub fn state(db: &Connection) -> rusqlite::Result<State> {
-    db.query_row("SELECT root, revision FROM state WHERE id=1", [], |row| {
-        Ok(State {
-            root: row.get(0)?,
-            revision: row.get(1)?,
-        })
-    })
+    db.query_row(
+        "SELECT root, revision, analysis_version FROM state WHERE id=1",
+        [],
+        |row| {
+            Ok(State {
+                root: row.get(0)?,
+                revision: row.get(1)?,
+                analysis_version: row.get(2)?,
+            })
+        },
+    )
 }
 
 pub fn files(db: &Connection) -> rusqlite::Result<Vec<FileEntry>> {
@@ -94,6 +114,18 @@ impl Catalog {
         {
             std::fs::create_dir_all(parent)?;
         }
+        // Canonical parents retain Windows' extended path prefix for nested
+        // execution indexes instead of passing a MAX_PATH-limited SQLite name.
+        let database_path = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+            .canonicalize()?
+            .join(
+                path.file_name()
+                    .ok_or("Context database needs a filename.")?,
+            );
+        let path = database_path.as_path();
         let mut db = Connection::open(path)?;
         db.busy_timeout(Duration::from_secs(30))?;
         if pragma(&db, "application_id")? == 0 {
@@ -108,7 +140,35 @@ impl Catalog {
                     return Err("Refusing to overwrite an unrelated SQLite database".into());
                 }
                 transaction.execute_batch(include_str!("schema.sql"))?;
+                transaction.execute_batch(include_str!("references.sql"))?;
                 transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
+                transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            }
+            transaction.commit()?;
+        }
+        if pragma(&db, "application_id")? == APPLICATION_ID && pragma(&db, "user_version")? == 2 {
+            let transaction = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if pragma(&transaction, "user_version")? == 2 {
+                // A second read connection copies the latest committed snapshot while
+                // BEGIN IMMEDIATE prevents another writer from changing that snapshot.
+                let backup = tempfile::Builder::new()
+                    .prefix("rust-context-v2-before-")
+                    .suffix(".sqlite3")
+                    .tempfile_in(
+                        path.parent()
+                            .filter(|parent| !parent.as_os_str().is_empty())
+                            .unwrap_or(Path::new(".")),
+                    )?;
+                let (file, backup_path) = backup.keep()?;
+                drop(file);
+                let snapshot = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+                snapshot.backup("main", &backup_path, None::<fn(rusqlite::backup::Progress)>)?;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&backup_path)?
+                    .sync_all()?;
+                transaction.execute_batch(include_str!("migrate-v2.sql"))?;
+                transaction.execute_batch(include_str!("references.sql"))?;
                 transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
             transaction.commit()?;
@@ -149,7 +209,7 @@ impl Catalog {
         }
         if replace {
             self.db.execute_batch(
-                "DELETE FROM chunk_search; DELETE FROM content_search; DELETE FROM chunks; DELETE FROM files;",
+                "DELETE FROM symbol_references; DELETE FROM chunk_search; DELETE FROM content_search; DELETE FROM chunks; DELETE FROM files;",
             )?;
         }
         if current.root.is_empty() {
@@ -184,6 +244,9 @@ impl Catalog {
         self.db.prepare_cached("DELETE FROM chunk_search WHERE rowid IN (SELECT rowid FROM chunks WHERE file_rowid=?1)")?.execute([rowid])?;
         self.db
             .prepare_cached("DELETE FROM content_search WHERE rowid=?1")?
+            .execute([rowid])?;
+        self.db
+            .prepare_cached("DELETE FROM symbol_references WHERE file_rowid=?1")?
             .execute([rowid])?;
         self.db
             .prepare_cached("DELETE FROM chunks WHERE file_rowid=?1")?
@@ -222,7 +285,26 @@ impl Catalog {
             .execute(params![rowid, body, subwords(&[body], 768)])?;
         for chunk in document.chunks.iter().take(512) {
             self.insert_chunk(rowid, chunk)?;
+            if let Some(parent) = &chunk.parent {
+                self.insert_reference(
+                    rowid,
+                    &Reference {
+                        source: parent.clone(),
+                        target: chunk.symbol.clone(),
+                        kind: "CONTAINS".into(),
+                        line: chunk.start_line,
+                    },
+                )?;
+            }
         }
+        for reference in &document.references {
+            self.insert_reference(rowid, reference)?;
+        }
+        Ok(())
+    }
+
+    fn insert_reference(&self, file_rowid: i64, reference: &Reference) -> Result<()> {
+        self.db.prepare_cached("INSERT OR IGNORE INTO symbol_references(file_rowid,source_symbol,target_text,kind,line) VALUES (?1,?2,?3,?4,?5)")?.execute(params![file_rowid,reference.source,reference.target,reference.kind,reference.line])?;
         Ok(())
     }
 
@@ -241,11 +323,13 @@ impl Catalog {
                 | "STRUCT"
                 | "TRAIT"
                 | "TYPE_ALIAS"
+                | "VARIABLE"
+                | "CONSTANT"
         ) {
             return Ok(());
         }
-        let rowid = self.db.prepare_cached("INSERT INTO chunks(file_rowid,symbol,kind,start_line,end_line,body) VALUES (?1,?2,?3,?4,?5,?6)")?
-            .insert(params![file_rowid, chunk.symbol, chunk.kind, chunk.start_line.max(1), chunk.end_line.max(1),chunk.body])?;
+        let rowid = self.db.prepare_cached("INSERT INTO chunks(file_rowid,symbol,kind,start_line,end_line,body,name,signature,documentation,language,parent_symbol) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)")?
+            .insert(params![file_rowid, chunk.symbol, chunk.kind, chunk.start_line.max(1), chunk.end_line.max(1),chunk.body,chunk.name,chunk.signature,chunk.documentation,chunk.language,chunk.parent])?;
         let name = [
             chunk.symbol.as_str(),
             &chunk.name,
@@ -265,8 +349,11 @@ impl Catalog {
         if self.db.is_autocommit() {
             return Err("Context index update has not started".into());
         }
-        self.db
-            .execute("UPDATE state SET revision=revision+1 WHERE id=1", [])?;
+        self.db.execute(
+            "UPDATE state SET revision=revision+1,analysis_version=1 WHERE id=1",
+            [],
+        )?;
+        crate::graph::resolve(&self.db)?;
         let current = state(&self.db)?;
         self.db.execute_batch("COMMIT")?;
         self.rebuilding = false;

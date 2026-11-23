@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod catalog;
+mod graph;
+mod inspect;
 mod parsing;
 pub mod scan;
 pub mod search;
@@ -66,12 +68,16 @@ impl ContextEngine {
         let state = catalog::state(db)?;
         let files: i64 = db.query_row("SELECT count(*) FROM files", [], |row| row.get(0))?;
         let symbols: i64 = db.query_row(
-            "SELECT count(*) FROM chunks WHERE kind!='MODULE'",
+            "SELECT count(*) FROM chunks WHERE kind!='MODULE' OR signature!=''",
             [],
             |row| row.get(0),
         )?;
+        let references: i64 =
+            db.query_row("SELECT count(*) FROM symbol_references", [], |row| {
+                row.get(0)
+            })?;
         Ok(
-            json!({"ready":state.revision>0,"indexing":false,"files":files,"symbols":symbols,"backend":"rust","revision":state.revision,"progress":if state.revision>0{100}else{0},"label":if state.revision>0{"Ready"}else{"Not indexed"},"automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
+            json!({"ready":state.revision>0,"indexing":false,"files":files,"symbols":symbols,"references":references,"analysis_version":state.analysis_version,"structure_ready":state.analysis_version>=1 && state.revision>0,"backend":"rust","revision":state.revision,"progress":if state.revision>0{100}else{0},"label":if state.revision>0{"Ready"}else{"Not indexed"},"automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
         )
     }
 
@@ -89,6 +95,7 @@ impl ContextEngine {
             scan::files_with_cancel(&self.root, &scan::default_options(&self.root)?, cancelled)?;
         let scanned = candidates.len();
         let state = catalog::state(self.catalog.connection())?;
+        let rebuild = rebuild || state.analysis_version < 1;
         let (changed, removed) = if rebuild {
             (candidates, Vec::new())
         } else {
@@ -181,12 +188,7 @@ impl ContextEngine {
                 [&hit.file_path],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            let bytes = std::fs::read(self.root.join(&hit.file_path))?;
-            if scan::hash_bytes(&bytes) != hash {
-                return Err(
-                    format!("Context file changed since indexing: {}", hit.file_path).into(),
-                );
-            }
+            inspect::verify_file(&self.root, &hit.file_path, &hash)?;
             let start = hit.start_line.unwrap_or(1);
             let lines: Vec<&str> = body.lines().collect();
             let end = hit
@@ -233,7 +235,7 @@ pub fn database_status(database: &Path) -> Result<Value> {
     let db = catalog::open_readonly(database)?;
     let state = catalog::state(&db)?;
     Ok(
-        json!({"backend":"rust","root":state.root,"revision":state.revision,"ready":state.revision>0,"files":db.query_row("SELECT count(*) FROM files",[],|row|row.get::<_,i64>(0))?,"symbols":db.query_row("SELECT count(*) FROM chunks WHERE kind!='MODULE'",[],|row|row.get::<_,i64>(0))?}),
+        json!({"backend":"rust","root":state.root,"revision":state.revision,"ready":state.revision>0,"files":db.query_row("SELECT count(*) FROM files",[],|row|row.get::<_,i64>(0))?,"symbols":db.query_row("SELECT count(*) FROM chunks WHERE kind!='MODULE' OR signature!=''",[],|row|row.get::<_,i64>(0))?}),
     )
 }
 

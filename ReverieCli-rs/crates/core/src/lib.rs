@@ -134,20 +134,32 @@ impl Kernel {
         &mut self,
         root: &std::path::Path,
     ) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {
-        let key = if root == self.project_root {
+        let key = self.context_key_for(root);
+        self.shared_context_at(root, &key)
+    }
+
+    fn context_key_for(&self, root: &std::path::Path) -> PathBuf {
+        if root == self.project_root {
             self.project_data_dir.clone()
         } else {
             self.project_data_dir
                 .join("executions")
                 .join(config::project_name(root))
-        };
-        if !self.contexts.contains_key(&key) {
+        }
+    }
+
+    fn shared_context_at(
+        &mut self,
+        root: &std::path::Path,
+        key: &std::path::Path,
+    ) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {
+        if !self.contexts.contains_key(key) {
             let context =
                 reverie_context::ContextEngine::open(root, &key.join("context/rust-3.0.sqlite3"))?;
             self.contexts
-                .insert(key.clone(), Arc::new(Mutex::new(context)));
+                .insert(key.to_owned(), Arc::new(Mutex::new(context)));
         }
-        Ok(self.contexts[&key].clone())
+        Ok(self.contexts[key].clone())
     }
 
     pub fn context_engine(&mut self) -> Result<MutexGuard<'_, reverie_context::ContextEngine>> {

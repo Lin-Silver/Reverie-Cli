@@ -1,9 +1,10 @@
 CREATE TABLE state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     root TEXT NOT NULL,
-    revision INTEGER NOT NULL
+    revision INTEGER NOT NULL,
+    analysis_version INTEGER NOT NULL
 );
-INSERT INTO state VALUES (1, '', 0);
+INSERT INTO state VALUES (1, '', 0, 1);
 
 CREATE TABLE files (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +27,12 @@ CREATE TABLE chunks (
     kind TEXT NOT NULL,
     start_line INTEGER NOT NULL,
     end_line INTEGER NOT NULL,
-    body TEXT NOT NULL
+    body TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    signature TEXT NOT NULL DEFAULT '',
+    documentation TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT '',
+    parent_symbol TEXT
 );
 CREATE INDEX chunks_by_file ON chunks(file_rowid);
 CREATE VIRTUAL TABLE chunk_search USING fts5(

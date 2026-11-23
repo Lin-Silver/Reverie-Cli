@@ -56,11 +56,18 @@ pub fn tools() -> Vec<Value> {
 }
 
 pub fn is_read_only(name: &str, args: &Value) -> bool {
-    (name == "file_ops"
-        && matches!(
-            args["operation"].as_str(),
-            Some("read" | "list" | "exists" | "info")
-        ))
+    [
+        "codebase-retrieval",
+        "codebase_retrieval",
+        "retrieve_codebase",
+        "repo_context",
+    ]
+    .contains(&name)
+        || (name == "file_ops"
+            && matches!(
+                args["operation"].as_str(),
+                Some("read" | "list" | "exists" | "info")
+            ))
         || (name == "str_replace_editor" && args["command"] == "view")
 }
 

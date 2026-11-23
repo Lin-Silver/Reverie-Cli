@@ -74,11 +74,15 @@ pub fn run() -> io::Result<()> {
         };
         let event_output = output.clone();
         let event_id = request.id.clone();
-        let event_host = host.clone();
+        let event_host = Arc::downgrade(&host);
         let event_failure = failure.clone();
         let sink: EventSink = Arc::new(move |event| {
             let reply = Reply::new(
-                Some(event_id.clone()),
+                if event["automatic"].as_bool() == Some(true) {
+                    None
+                } else {
+                    Some(event_id.clone())
+                },
                 "prompt.event",
                 Map::from_iter([("event".into(), event)]),
             );
@@ -86,7 +90,9 @@ pub fn run() -> io::Result<()> {
                 if let Ok(mut failed) = event_failure.lock() {
                     *failed = Some(error.to_string());
                 }
-                event_host.cancel_all();
+                if let Some(host) = event_host.upgrade() {
+                    host.cancel_all();
+                }
             }
         });
         if request.action == "runPrompt" {

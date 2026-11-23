@@ -192,7 +192,12 @@ mod tests {
         let reopened = restore(&bytes, &hash, 3).unwrap();
         let matches = reopened.search(&vector, 3).unwrap();
         assert_eq!(matches.keys[0], 13);
-        assert_eq!(matches.distances, [0.0, 1.0, 1.0]);
+        for (actual, expected) in matches.distances.iter().zip([0.0, 1.0, 1.0]) {
+            assert!(
+                (actual - expected).abs() <= f32::EPSILON,
+                "Cosine distance {actual} differs from {expected} by more than one f32 epsilon"
+            );
+        }
         let mut remaining = matches.keys[1..].to_vec();
         remaining.sort();
         assert_eq!(remaining, [42, 91]);

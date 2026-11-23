@@ -8,6 +8,8 @@
 
 按以下顺序工作：
 
+原生后台监听增加 `node scripts/verification/rust-context-watch-smoke.mjs <实际程序> <真实资源目录> <manifest-sha256>`。验证原生文件事件、嵌套目录替换和忽略规则变化、结构与语义修订追赶、暂停恢复、项目范围取消、上一完整代际保护、进程重启和不兼容语义库隔离。GUI 自动更新开关与 `/context watch on|off` 使用同一 `auto_index` 设置。Windows 基本结果不能替代 Linux/macOS、网络文件系统、事件溢出或完整并发故障矩阵。
+
 新增四种模型协议的基本检查为 node scripts/verification/rust-provider-smoke.mjs：运行实际 Rust HTTP、文件工具及持久化，不能把测试用不透明签名当成真实模型签名验证。Linux／macOS 运行 PTY 前须用 npm_config_build_from_source=true npm rebuild node-pty --prefix ReverieCli-ui 生成原生验证依赖；这是第三方 node-pty 的构建准备，客户端不依赖该构建时的 Python。原 CI 的缺模块和 posix_spawnp 失败保留，不通过跳过终端用例使其通过。
 
 新增原生命令检查为 `node scripts/verification/rust-command-smoke.mjs`，须运行当前来源的真实 Rust 程序，验证实际 argv、stdin、双路 Unicode、输出上限、权限／审计、取消、超时、正常退出后的后代回收；平台的脚本审查是启发式策略，不能改称系统级沙箱。桌面探针已增加命令进度的单卡片和审批后运行状态，终端探针增加完成前可见输出；应根据 `run.finished` 判断完成，运行中可输入的 composer 不应被当作已结束证据。提交 `5a479f8` 和 `9ca0212` 的四平台 Test 现已回读通过，后续代码仍须按其实际新来源独立验证。

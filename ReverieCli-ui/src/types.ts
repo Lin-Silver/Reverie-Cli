@@ -1,4 +1,4 @@
-import type {SemanticResourcesState} from './generated/core-types';
+import type {ContextWatchState,SemanticResourcesState} from './generated/core-types';
 
 export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings" | "context";
 
@@ -206,6 +206,8 @@ export interface WorkspaceState {
     automatic_retrieval: boolean;
     revision?:number;
     semantic?:SemanticResourcesState;
+    watcher?:ContextWatchState;
+    semantic_index_error?:string;
     semantic_index?:{generation:number;revision:number;resource_digest:string;vectors:number;contract_version:number}|null;
   };
 }

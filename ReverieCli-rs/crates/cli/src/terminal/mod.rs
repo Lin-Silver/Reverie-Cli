@@ -417,6 +417,16 @@ impl Tui {
                     event["total"].as_u64().unwrap_or(0)
                 );
             }
+            Some("context.progress")
+                if event["automatic"] == true
+                    && self.active.is_none()
+                    && self.background.is_none() =>
+            {
+                self.status = format!(
+                    "Background context {} · /context watch off",
+                    event["phase"].as_str().unwrap_or("working")
+                );
+            }
             Some("assistant.delta") => self.screen.feed(
                 &mut self.pending,
                 event["text"].as_str().unwrap_or_default(),

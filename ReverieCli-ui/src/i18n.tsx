@@ -9,6 +9,9 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "自动更新索引": "Automatically update indexes",
+  "文件变化后自动更新结构索引和本地语义索引。": "Update structural and local semantic indexes when files change.",
+  "正在监听文件变化": "Watching for file changes",
   "不可用": "Unavailable",
   "正在加载…": "Loading…",
   "自动": "Automatic",

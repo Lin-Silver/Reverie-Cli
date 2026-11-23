@@ -8,4 +8,5 @@ export type SemanticDevice = "cpu" | "cuda" | "direct_ml" | "core_ml";
 export type SemanticSelection = { manifest_sha256: string, version: string, device: SemanticDevice, threads: number, };
 export type SemanticResourceRecord = { manifest_sha256: string, version: string, platform: string, architecture: string, bytes: number, active: boolean, removal_pending: boolean, integrity: string, };
 export type ContextOperation = { operation_id: string, action: string, project_root: string, phase: string, completed: number, total: number, };
+export type ContextWatchState = { enabled: boolean, status: string, backend: string, project_root: string, revision: number, semantic_revision: number, manifest_sha256: string | null, operation: ContextOperation | null, error: string, };
 export type SemanticResourcesState = { available: boolean, status: string, revision?: number, active: SemanticSelection | null, previous: SemanticSelection | null, models: JsonValue, error: string, pending_restart: Array<string>, records?: Array<SemanticResourceRecord>, inventory_errors?: Array<string>, operations?: Array<ContextOperation>, };

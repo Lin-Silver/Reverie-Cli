@@ -9,6 +9,7 @@ use std::{
 
 pub mod config;
 mod context_jobs;
+mod context_watch;
 pub mod host;
 pub mod models;
 pub mod provider;
@@ -24,6 +25,7 @@ pub struct Kernel {
     config: config::ConfigStore,
     sessions: Option<session::SessionStore>,
     contexts: HashMap<PathBuf, Arc<Mutex<reverie_context::ContextEngine>>>,
+    monitors: HashMap<PathBuf, context_watch::ContextMonitor>,
     semantic: Arc<semantic_resources::SemanticResources>,
     view_session: Option<String>,
     workspace_mode: bool,
@@ -96,6 +98,7 @@ impl Kernel {
             config,
             sessions: None,
             contexts: HashMap::new(),
+            monitors: HashMap::new(),
             semantic,
             view_session: None,
             workspace_mode: false,
@@ -141,7 +144,70 @@ impl Kernel {
             None => json!({"ready":false,"indexing":false,"files":0,"symbols":0,"backend":"rust","progress":0.0,"label":"On demand","automatic_retrieval":true,"available":true,"semantic":{"available":false,"status":"resource_not_installed"}}),
         };
         status["semantic"] = self.semantic.status();
+        if let Some(monitor) = self.monitors.get(&self.project_data_dir) {
+            status["watcher"] = monitor.status();
+        }
         status
+    }
+
+    fn ensure_monitor_at(
+        &mut self,
+        key: &std::path::Path,
+        root: &std::path::Path,
+        engine: Arc<Mutex<reverie_context::ContextEngine>>,
+        configuration: &std::path::Path,
+        lifetime: &tokio_util::sync::CancellationToken,
+        sink: host::EventSink,
+    ) -> Result<()> {
+        let enabled = config::ConfigStore::at(configuration.to_owned()).effective()?["auto_index"]
+            .as_bool()
+            .unwrap_or(true);
+        if !enabled || lifetime.is_cancelled() {
+            if let Some(monitor) = self.monitors.get(key) {
+                monitor.stop();
+            }
+            return Ok(());
+        }
+        if self.monitors.get(key).is_none_or(|monitor| {
+            monitor.is_stopped() || monitor.configuration.as_path() != configuration
+        }) {
+            let monitor = context_watch::ContextMonitor::start(
+                root.to_owned(),
+                engine,
+                self.semantic.clone(),
+                configuration.to_owned(),
+                lifetime.child_token(),
+                sink,
+            )?;
+            self.monitors.insert(key.to_owned(), monitor);
+        }
+        Ok(())
+    }
+
+    fn sync_current_monitor(
+        &mut self,
+        lifetime: &tokio_util::sync::CancellationToken,
+        sink: host::EventSink,
+    ) -> Result<()> {
+        let key = self.project_data_dir.clone();
+        let root = self.project_root.clone();
+        let enabled = self.effective_config(None)?["auto_index"]
+            .as_bool()
+            .unwrap_or(true);
+        let configuration = self.config.path.clone();
+        if !enabled {
+            for monitor in self
+                .monitors
+                .values()
+                .filter(|monitor| monitor.configuration == configuration)
+            {
+                monitor.stop();
+            }
+        }
+        let Some(engine) = self.contexts.get(&key).cloned() else {
+            return Ok(());
+        };
+        self.ensure_monitor_at(&key, &root, engine, &configuration, lifetime, sink)
     }
 
     pub fn shared_context(&mut self) -> Result<Arc<Mutex<reverie_context::ContextEngine>>> {

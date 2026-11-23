@@ -4,6 +4,7 @@ export const CORE_RESPONSE_CONTRACT = {
   wstyleCommand: { type: "wstyle.result", required: ["success", "output", "error", "data", "session_id"] },
   listCommands: { type: "commands", required: ["commands"] },
   listTools: { type: "tools", required: ["tools"] },
+  listSettings: { type: "settings", required: ["settings"] },
   listSkills: { type: "skills", required: ["skills"] },
   listPlugins: { type: "plugins", required: ["plugins"] },
   ratsState: { type: "rats.state", required: ["rats"] },

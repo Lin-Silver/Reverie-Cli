@@ -39,6 +39,24 @@ impl Tui {
             {
                 return result.map(|_| ());
             }
+        } else {
+            let state = self.request("getSemanticResources", json!({})).await?;
+            let root = self.host.project_root()?.to_string_lossy().into_owned();
+            if let Some(operation) = state["semantic"]["operations"]
+                .as_array()
+                .and_then(|operations| {
+                    operations.iter().find(|operation| {
+                        operation["action"] == "watchWorkspace" && operation["project_root"] == root
+                    })
+                })
+                .and_then(|operation| operation["operation_id"].as_str())
+            {
+                self.request(
+                    "stopContextOperation",
+                    json!({"operationId":operation,"projectRoot":root}),
+                )
+                .await?;
+            }
         }
         Ok(())
     }
@@ -96,7 +114,12 @@ impl Tui {
                 self.screen.print(&serde_json::to_string_pretty(&resources)? )?;
             }
             Some("stop"|"cancel")=>self.stop_context_operation().await?,
-            Some("help")=>self.screen.print("/context status · index · semantic · warm · unload · rollback · disable · stop\n/context install <bundle-directory> <manifest-sha256> [cpu|cuda|direct_ml|core_ml]\n/context select <manifest-sha256> [device]\n/context remove <manifest-sha256> (asks before removal)\n/context search <query> (auto hybrid when resources and index are ready)")?,
+            Some("watch")=>{
+                let enabled=match args.get(1).map(String::as_str) {Some("on")=>true,Some("off")=>false,_=>return Err("Use /context watch on or /context watch off.".into())};
+                self.request("setSetting",json!({"key":"auto_index","value":enabled})).await?;
+                self.screen.print(if enabled {"Automatic context updates enabled."} else {"Automatic context updates paused."})?;
+            }
+            Some("help")=>self.screen.print("/context status · index · semantic · warm · unload · rollback · disable · stop\n/context watch on|off\n/context install <bundle-directory> <manifest-sha256> [cpu|cuda|direct_ml|core_ml]\n/context select <manifest-sha256> [device]\n/context remove <manifest-sha256> (asks before removal)\n/context search <query> (auto hybrid when resources and index are ready)")?,
             Some("index")=>self.start_context_operation("indexWorkspace",json!({}))?,
             Some("semantic")=>self.start_context_operation("indexSemanticWorkspace",json!({}))?,
             Some("warm")=>self.start_context_operation("warmSemanticResources",json!({}))?,

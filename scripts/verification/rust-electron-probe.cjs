@@ -1,4 +1,4 @@
-const {app, BrowserWindow} = require('electron');
+const {app, BrowserWindow, ipcMain} = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const options = JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
@@ -7,6 +7,24 @@ fs.mkdirSync(path.join(options.runtimeRoot,'user-data'),{recursive:true});
 app.setPath('userData',path.join(options.runtimeRoot,'user-data'));
 process.env.REVERIE_DESKTOP_RUNTIME_ROOT = options.runtimeRoot;
 process.argv = [process.execPath,options.uiRoot,'--gui','--project',options.projectRoot];
+const contextRequests=[];
+const registerHandler=ipcMain.handle.bind(ipcMain);
+ipcMain.handle=(channel,handler)=>registerHandler(channel,channel==='core:request'?async(event,...args)=>{
+  const request={action:args[0],payload:args[1]};
+  const tracked=/Semantic|Context|Settings|Setting/.test(String(request?.action||''));
+  const record=tracked?{action:request.action,payload:request.payload,started:Date.now()}:null;
+  if(record)contextRequests.push(record);
+  try {
+    const reply=await handler(event,...args);
+    if(record)Object.assign(record,{finished:Date.now(),type:reply?.type,error:reply?.error});
+    return reply;
+  } catch(error) {
+    if(record)Object.assign(record,{finished:Date.now(),error:String(error)});
+    throw error;
+  } finally {
+    fs.writeFileSync(path.join(options.outputRoot,'context-requests.json'),JSON.stringify(contextRequests,null,2));
+  }
+}:handler);
 require(path.join(options.uiRoot,'dist-electron/main.js'));
 const delay = milliseconds => new Promise(resolve=>setTimeout(resolve,milliseconds));
 const checks = [];
@@ -73,6 +91,21 @@ app.whenReady().then(async()=>{
       await evaluate(`${contextButton}.click()`);
       await wait(`document.querySelector('.context-query textarea')?.value===${JSON.stringify(query)} && document.querySelector('.context-evidence pre')?.textContent.includes('恢复冒险进度')`,'Query drafts or actual results were lost after page navigation');
       checks.push('Actual semantic index and neural evidence display with query drafts and results preserved');
+      const beforeWatch = await evaluate("window.reverie.request('getContextStatus',{}).then(response=>response.context_engine.revision)");
+      await wait("document.querySelector('.context-engine-page input[type=checkbox]')?.disabled===false",'The automatic index control did not become available');
+      await evaluate("document.querySelector('.context-engine-page input[type=checkbox]').click()");
+      await wait("window.reverie.request('getContextStatus',{}).then(response=>response.context_engine.watcher?.status==='watching')",'The actual GUI did not enable native file observation');
+      fs.appendFileSync(path.join(options.projectRoot,'saving.md'),'新的进度字段记录已经收集的钥匙。\n');
+      await wait(`window.reverie.request('getContextStatus',{}).then(response=>response.context_engine.revision>${Number(beforeWatch)} && response.context_engine.watcher?.semantic_revision===response.context_engine.revision && response.context_engine.watcher.status==='watching')`,'The GUI did not receive the automatically updated semantic generation');
+      await wait("document.querySelector('.context-query button[type=submit]')?.disabled===false",'Retrieval stayed disabled after the automatic update');
+      await evaluate("document.querySelector('.context-query button[type=submit]').click()");
+      await wait("document.querySelector('.context-evidence pre')?.textContent.includes('已经收集的钥匙')",'The GUI query did not return automatically refreshed source evidence');
+      if(!await evaluate("window.__reverieProbeEvents.some(event=>event?.automatic===true && event.phase==='embedding')"))throw new Error('No native automatic embedding event reached the renderer.');
+      await evaluate("document.querySelector('.context-engine-page input[type=checkbox]').click()");
+      await wait("window.reverie.request('getContextStatus',{}).then(response=>response.context_engine.watcher?.enabled===false && !response.context_engine.watcher.operation)",'The GUI did not pause native observation');
+      await evaluate("document.querySelector('.context-section').scrollIntoView({block:'start'})");
+      await screenshot('context-watcher.png');
+      checks.push('Actual GUI pause/resume controls, automatic native embedding events and current neural evidence');
       await wait(`Array.from(document.querySelectorAll('.context-resources button')).some(button=>button.textContent.trim()==='删除' && !button.disabled)`,'The restored page did not load its managed resources');
       await evaluate(`Array.from(document.querySelectorAll('.context-resources button')).find(button=>button.textContent.trim()==='删除').click()`);
       await wait(`document.querySelector('dialog.context-remove')?.open===true`,'Resource removal did not require its explicit dialog');
@@ -101,7 +134,7 @@ app.whenReady().then(async()=>{
     await screenshot('approval.png');
     await evaluate(`Array.from(document.querySelectorAll('.approval-panel button')).find(button=>button.textContent.trim()==='同意').click()`);
     await wait('!document.querySelector(".approval-panel") && window.__reverieProbeEvents.filter(event=>event?.type==="run.finished" && event.state==="completed").length===2','The approved native tool did not finish');
-    for(let i=0;i<100 && !fs.existsSync(options.outputFile);i++)await delay(25);
+    await wait("!document.querySelector('.send-behavior') && document.querySelector('.composer textarea')?.value===''",'The approved write did not finish desktop integration and delivery');
     if(fs.readFileSync(options.outputFile,'utf8')!==options.fileContent)throw new Error('The actual tool did not preserve complete file bytes.');
     checks.push('Actual strict approval and native complete file write');
     await prompt('COMMAND');

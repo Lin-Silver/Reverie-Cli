@@ -31,7 +31,7 @@ const server=http.createServer(async(request,response)=>{
   }catch(error){serverFailure=error;response.destroy(error);}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({models:[{model:'semantic-fixture',profile_id:'semantic-profile',provider:'openai-chat',base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'fixture-only'}],active_model_source:'standard',active_model_index:0,mode:'reverie',auto_index:true,stream_responses:false,security:{permission_level:'full_control',permission_mode:'default'}}));
+fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({models:[{model:'semantic-fixture',profile_id:'semantic-profile',provider:'openai-chat',base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'fixture-only'}],active_model_source:'standard',active_model_index:0,mode:'reverie',auto_index:false,stream_responses:false,security:{permission_level:'full_control',permission_mode:'default'}}));
 const activation=path.join(appRoot,'.reverie/resources/semantic/active.json');
 function event(operation,phase) {return bridge.events.find(message=>message.event?.operation_id===operation&&message.event?.phase===phase);}
 async function until(predicate,timeout=30000) {const end=Date.now()+timeout;while(Date.now()<end){if(serverFailure)throw serverFailure;if(predicate())return;await delay(5);}throw Error('Native semantic operation did not reach its observed boundary.');}
@@ -69,6 +69,7 @@ try {
   const basic=await request('queryContext',{query:'恢复',strategy:'basic'},'context.results');assert.equal(basic.retrieval.strategy,'basic');
   checks.push('Run shared SDK structural, vector, fusion and neural retrieval with explicit basic selection');
   const session=(await request('createSession',{name:'Semantic tool checks'},'session.created')).session;
+  await request('setSetting',{sessionId:session.id,key:'auto_index',value:true},'setting.updated');
   const tool=await request('runPrompt',{sessionId:session.id,prompt:`TOOL:${question}`,stream:false},'prompt.result');
   assert.equal(tool.result.success,true);const result=JSON.parse(tool.result.output_text);const task=JSON.parse(result.output);assert.equal(task.components.semantic,true);assert(task.evidence.some(hit=>hit.file_path==='saving.md'));
   checks.push('Supply actual neural evidence to the Agent and its explicit codebase task tool');

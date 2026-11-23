@@ -20,3 +20,4 @@ tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 reqwest.workspace = true
+notify = "=9.0.0"

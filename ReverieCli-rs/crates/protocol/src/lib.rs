@@ -101,6 +101,20 @@ pub struct ContextOperation {
     pub total: usize,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ContextWatchState {
+    pub enabled: bool,
+    pub status: String,
+    pub backend: String,
+    pub project_root: String,
+    #[ts(type = "number")]
+    pub revision: i64,
+    #[ts(type = "number")]
+    pub semantic_revision: i64,
+    pub manifest_sha256: Option<String>,
+    pub operation: Option<ContextOperation>,
+    pub error: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SemanticResourcesState {
     pub available: bool,
     pub status: String,
@@ -130,6 +144,7 @@ pub fn typescript_types() -> String {
         SemanticSelection::decl(),
         SemanticResourceRecord::decl(),
         ContextOperation::decl(),
+        ContextWatchState::decl(),
         SemanticResourcesState::decl(),
     ];
     format!(

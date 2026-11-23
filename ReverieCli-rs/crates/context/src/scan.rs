@@ -106,34 +106,12 @@ pub fn files_with_cancel(
     options: &ScanOptions,
     cancelled: &impl Fn() -> bool,
 ) -> Result<Vec<FileEntry>> {
-    let mut builder = GitignoreBuilder::new(root);
-    for rule in &options.rules {
-        builder.add_line(None, rule)?;
-    }
-    let ignore = builder.build()?;
+    let walk = walk(root, options)?;
     let extensions: HashSet<&str> = options
         .extensions
         .iter()
         .map(|item| item.trim_start_matches('.'))
         .collect();
-    let walk = WalkBuilder::new(root)
-        .follow_links(false)
-        .hidden(false)
-        .parents(false)
-        .git_global(false)
-        .require_git(false)
-        .add_custom_ignore_filename(".reverieignore")
-        .sort_by_file_name(|a, b| a.cmp(b))
-        .filter_entry(move |entry| {
-            if entry.depth() == 0 {
-                return true;
-            }
-            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-            !ignore
-                .matched_path_or_any_parents(entry.path(), is_dir)
-                .is_ignore()
-        })
-        .build();
     let mut files = Vec::new();
     for item in walk {
         if cancelled() {
@@ -175,6 +153,61 @@ pub fn files_with_cancel(
         });
     }
     Ok(files)
+}
+
+pub fn watch_directories(
+    root: &Path,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<std::path::PathBuf>> {
+    let mut directories = Vec::new();
+    for entry in walk(root, &default_options(root)?)? {
+        if cancelled() {
+            return Err("Context directory discovery cancelled.".into());
+        }
+        let entry = entry?;
+        if entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            directories.push(entry.into_path());
+        }
+    }
+    Ok(directories)
+}
+
+pub fn watch_event_relevant(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    !relative.components().any(|component| match component {
+        Component::Normal(name) => IGNORE_DIRS
+            .iter()
+            .any(|ignored| name == std::ffi::OsStr::new(ignored)),
+        _ => true,
+    })
+}
+
+fn walk(root: &Path, options: &ScanOptions) -> Result<ignore::Walk> {
+    let mut builder = GitignoreBuilder::new(root);
+    for rule in &options.rules {
+        builder.add_line(None, rule)?;
+    }
+    let ignore = builder.build()?;
+    Ok(WalkBuilder::new(root)
+        .follow_links(false)
+        .hidden(false)
+        .parents(false)
+        .git_global(false)
+        .require_git(false)
+        .add_custom_ignore_filename(".reverieignore")
+        .sort_by_file_name(|a, b| a.cmp(b))
+        .filter_entry(move |entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
+            !ignore
+                .matched_path_or_any_parents(entry.path(), is_dir)
+                .is_ignore()
+        })
+        .build())
 }
 
 pub fn hash_bytes(bytes: &[u8]) -> String {

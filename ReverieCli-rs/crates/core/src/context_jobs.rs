@@ -51,6 +51,8 @@ pub struct PendingContextJob {
     resources: Arc<SemanticResources>,
     expected: u64,
     workspace: Value,
+    monitor_key: PathBuf,
+    monitor_configuration: PathBuf,
 }
 fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>> {
     mutex
@@ -185,6 +187,8 @@ impl KernelHost {
         }
         let config = kernel.effective_config(None)?;
         let workspace = kernel.workspace(&config);
+        let monitor_key = kernel.project_data_dir.clone();
+        let monitor_configuration = kernel.config.path.clone();
         drop(kernel);
         let id = payload
             .operation_id
@@ -216,6 +220,8 @@ impl KernelHost {
             resources,
             expected,
             workspace,
+            monitor_key,
+            monitor_configuration,
         })
     }
     pub async fn complete_context_job(
@@ -226,12 +232,53 @@ impl KernelHost {
     ) -> Reply {
         let operation = job.id.clone();
         let control = job.control.clone();
-        let result = tokio::task::spawn_blocking(move || job.execute(&sink)).await;
+        let monitor = job.engine.clone().map(|engine| {
+            (
+                job.monitor_key.clone(),
+                control.root.clone(),
+                engine,
+                job.monitor_configuration.clone(),
+            )
+        });
+        let resource_changed = [
+            "installSemanticResources",
+            "selectSemanticResources",
+            "rollbackSemanticResources",
+            "disableSemanticResources",
+            "removeSemanticResources",
+        ]
+        .contains(&control.action.as_str());
+        let job_sink = sink.clone();
+        let result = tokio::task::spawn_blocking(move || job.execute(&job_sink)).await;
         if let Ok(mut jobs) = self.context_jobs.lock() {
             jobs.remove(&operation);
         }
         match result {
             Ok(Ok((kind, mut value))) => {
+                if let Ok(mut kernel) = self.kernel.lock() {
+                    if let Some((key, root, engine, configuration)) = monitor {
+                        if let Err(error) = kernel.ensure_monitor_at(
+                            &key,
+                            &root,
+                            engine,
+                            &configuration,
+                            &self.context_cancel,
+                            sink,
+                        ) {
+                            value["watcher_error"] = json!(error.to_string());
+                        }
+                        if let Some(monitor) = kernel.monitors.get(&key)
+                            && value.get("context_engine").is_some()
+                        {
+                            value["context_engine"]["watcher"] = monitor.status();
+                        }
+                    }
+                    if resource_changed {
+                        for monitor in kernel.monitors.values() {
+                            monitor.wake();
+                        }
+                    }
+                }
                 value["operation_id"] = json!(operation);
                 Reply::new(
                     Some(id),
@@ -253,7 +300,15 @@ impl KernelHost {
     pub(crate) fn semantic_inventory(&self) -> Result<(&'static str, Value)> {
         let resources = lock(&self.kernel)?.semantic.clone();
         let mut semantic = resources.inventory();
-        semantic["operations"]=json!(lock(&self.context_jobs)?.iter().map(|(id,control)|json!({"operation_id":id,"action":control.action,"project_root":control.root,"phase":lock(&control.phase).map(|phase|phase.clone()).unwrap_or_else(|_|"error".into()),"completed":control.completed.load(Ordering::Relaxed),"total":control.total.load(Ordering::Relaxed)})).collect::<Vec<_>>());
+        let mut operations = lock(&self.context_jobs)?.iter().map(|(id,control)|json!({"operation_id":id,"action":control.action,"project_root":control.root,"phase":lock(&control.phase).map(|phase|phase.clone()).unwrap_or_else(|_|"error".into()),"completed":control.completed.load(Ordering::Relaxed),"total":control.total.load(Ordering::Relaxed)})).collect::<Vec<_>>();
+        operations.extend(
+            lock(&self.kernel)?
+                .monitors
+                .values()
+                .filter_map(|monitor| monitor.operation())
+                .map(|operation| json!(operation)),
+        );
+        semantic["operations"] = json!(operations);
         Ok(("context.resources", json!({"semantic":semantic})))
     }
     pub(crate) fn stop_context_job(&self, payload: &Value) -> Result<(&'static str, Value)> {
@@ -261,9 +316,29 @@ impl KernelHost {
             .as_str()
             .ok_or("Context operation identity is required.")?;
         let jobs = lock(&self.context_jobs)?;
-        let control = jobs
-            .get(id)
-            .ok_or("Context operation is no longer active.")?;
+        let Some(control) = jobs.get(id) else {
+            drop(jobs);
+            let kernel = lock(&self.kernel)?;
+            let project = payload["projectRoot"]
+                .as_str()
+                .map(|root| crate::config::canonical_project(std::path::Path::new(root)))
+                .transpose()?;
+            let monitor = kernel.monitors.values().find(|monitor| {
+                monitor.operation().is_some_and(|operation| {
+                    operation.operation_id == id
+                        && project
+                            .as_ref()
+                            .is_none_or(|root| root.to_string_lossy() == operation.project_root)
+                })
+            });
+            if monitor.is_some_and(|monitor| monitor.cancel_operation(id)) {
+                return Ok((
+                    "context.control",
+                    json!({"operation_id":id,"state":"stopping"}),
+                ));
+            }
+            return Err("Context operation is no longer active.".into());
+        };
         if payload["projectRoot"]
             .as_str()
             .map(|root| crate::config::canonical_project(std::path::Path::new(root)))

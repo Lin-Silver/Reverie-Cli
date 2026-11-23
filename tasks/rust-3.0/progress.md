@@ -477,3 +477,11 @@ Electron 增加上下文页，管理真实资源、模型预热、索引、检�
 证据：`.runtime/rust-3.0/semantic-sdk-smoke/case-lNDsQ3/report.json`、`tui-smoke/case-SUl9nk/report.json`、`electron-semantic-smoke/case-sCghcc/report.json`。终端原失败 `case-ObUoCe`／`case-Ke1PtO` 及桌面 `case-i4heEL`／`case-qHsW4X` 保留。桌面旧探针只等待内核完成事件或重载页的草稿，早于宿主交付或资源列表加载；现等待完整交付和实际控件，保存事件并核对提交序列恰为 QUESTION／WRITE／COMMAND／WAIT。真实窗口截图已检查，最终 renderer 错误为空。
 
 这些证据使用真实 Windows CPU 模型和本地协议夹具，不证明外部模型、冻结 Recall、预热 p95、全部更新故障或四平台语义验收。ANN 与自动语义追赶接着实施，其他模式、平台、市场、Gamer、Live2D 和正式发行仍保留完整范围。Python 2.5.5 与归档保持冻结，本地和 GitHub 仍只有 main／Reverie-Cli-py；用户接手的缓存没有清理。当前只读磁盘余量为 G 盘 5,506,064,384 字节、C 盘 244,620,632,064 字节，不能用旧余量替代现在值。
+
+### R2 原生后台监听与语义追赶（2026-11-23）
+
+接续原未提交增量，notify 9.0.0 原生目录事件驱动结构索引和语义代际追赶。GUI 自动更新开关与终端 `/context watch on|off` 使用同一持久设置。目录替换与忽略规则变更重新登记监听，资源激活唤醒相关项目；后台事件不复用已结束的请求 ID，停止按项目和操作 ID 取消，关闭回收监听线程。损坏或不兼容语义库原文保留，基础证据仍可取得。适用 CC0 文本与包哈希已核对。
+
+本机 Rust 38 项、格式、Clippy、锁定 release 构建、桌面类型／翻译、类型生成一致性、生产构建及桥接定向 12 项通过。实际模型监听 6 项、PTY 9 项和第二次 Electron 窗口 9 项通过；报告和程序身份见 phase2.md。首次窗口 case-5kW1Xf 的安装在 20 秒内未完成，原因尚未确定，原失败及后续单独 SDK 诊断保留；补充探针请求记录后交云端继续定位。未把第二次通过当作首次原因已修复。
+
+当前已独立回读 GitHub：仅 main 与 Reverie-Cli-py；归档分支仍为 070fa25，正式 v2.5.5 为已公开的 Release 454958491，17 项资产。源码提交不触发 latest／plugins-latest 发布。Python 源码、版本标签及用户接手的缓存未修改；未提交的 tasks/python-2.5.5-closeout 资料保留。继续实施 Skills 发现、按需正文／资源读取及会话固定；完整范围保持原计划。

@@ -54,6 +54,7 @@ struct Run {
     store: Mutex<crate::session::SessionStore>,
     context: Option<Arc<Mutex<reverie_context::ContextEngine>>>,
     context_key: PathBuf,
+    monitor_configuration: PathBuf,
     semantic: Option<Arc<crate::semantic_resources::ModelVersion>>,
     semantic_error: Option<String>,
     reasoning: String,
@@ -71,6 +72,7 @@ pub struct KernelHost {
     clients: Mutex<HashMap<String, Arc<ProviderClient>>>,
     grants: Mutex<HashMap<(PathBuf, String), SessionGrants>>,
     pub(crate) context_jobs: Mutex<HashMap<String, Arc<crate::context_jobs::ContextControl>>>,
+    pub(crate) context_cancel: CancellationToken,
 }
 
 impl KernelHost {
@@ -81,10 +83,12 @@ impl KernelHost {
             clients: Mutex::new(HashMap::new()),
             grants: Mutex::new(HashMap::new()),
             context_jobs: Mutex::new(HashMap::new()),
+            context_cancel: CancellationToken::new(),
         }
     }
 
     pub fn cancel_all(&self) {
+        self.context_cancel.cancel();
         if let Ok(active) = self.active.lock() {
             for control in active.values() {
                 control.cancel.cancel();
@@ -143,7 +147,43 @@ impl KernelHost {
                 json!({"mode":"reverie","tools":tool_catalog().into_iter().map(|tool|json!({"name":tool["function"]["name"],"description":tool["function"]["description"],"parameters":tool["function"]["parameters"],"kind":"built-in","category":if tool["function"]["name"]=="userInput"{"interaction"}else{"files"},"aliases":[],"tags":[],"traits":[],"supported_modes":["reverie"],"required":tool["function"]["parameters"]["required"],"properties":tool["function"]["parameters"]["properties"].as_object().map(|properties|properties.keys().collect::<Vec<_>>()).unwrap_or_default()})).collect::<Vec<_>>()}),
             )),
             _ => match lock(&self.kernel) {
-                Ok(mut kernel) => return kernel.dispatch(request),
+                Ok(mut kernel) => {
+                    let action = request.action.clone();
+                    let mut reply = kernel.dispatch(request);
+                    if reply.kind != "error" && action != "shutdown" {
+                        if let Err(error) = kernel.sync_current_monitor(&self.context_cancel, sink)
+                        {
+                            reply
+                                .fields
+                                .insert("watcher_error".into(), json!(error.to_string()));
+                        }
+                        let watcher = kernel
+                            .monitors
+                            .get(&kernel.project_data_dir)
+                            .map(|monitor| monitor.status());
+                        if let Some(watcher) = watcher {
+                            if let Some(target) = reply.fields.get_mut("context_engine") {
+                                target["watcher"] = watcher.clone();
+                            }
+                            if let Some(target) = reply
+                                .fields
+                                .get_mut("workspace")
+                                .and_then(|workspace| workspace.get_mut("context_engine"))
+                            {
+                                target["watcher"] = watcher.clone();
+                            }
+                            if let Some(target) = reply
+                                .fields
+                                .get_mut("state")
+                                .and_then(|state| state.get_mut("workspace"))
+                                .and_then(|workspace| workspace.get_mut("context_engine"))
+                            {
+                                target["watcher"] = watcher;
+                            }
+                        }
+                    }
+                    return reply;
+                }
                 Err(error) => return Reply::error(id, error),
             },
         };
@@ -360,6 +400,7 @@ impl KernelHost {
             store: Mutex::new(store),
             context,
             context_key,
+            monitor_configuration: kernel.config.path.clone(),
             semantic,
             semantic_error,
             reasoning: String::new(),
@@ -578,6 +619,18 @@ impl KernelHost {
                     hit.content
                 ));
             }
+        }
+        if !run.no_index
+            && let Some(engine) = run.context.as_ref()
+        {
+            lock(&self.kernel)?.ensure_monitor_at(
+                &run.context_key,
+                &run.execution_root,
+                engine.clone(),
+                &run.monitor_configuration,
+                &self.context_cancel,
+                sink.clone(),
+            )?;
         }
         run.messages.insert(0,json!({"role":"system","content":format!("You are Reverie, an assistant working in {}. Execute workspace tools in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\nWorkspace evidence:{}",run.root.display(),run.execution_root.display(),run.rules,context)}));
         let catalog = tool_catalog();

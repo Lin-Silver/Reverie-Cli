@@ -18,6 +18,10 @@ function screenText() {
   const buffer = display.buffer.active;
   return Array.from({length: buffer.length}, (_, index) => buffer.getLine(index).translateToString(true)).join('\n');
 }
+function viewportText() {
+  const buffer=display.buffer.active;
+  return Array.from({length:display.rows},(_,index)=>buffer.getLine(buffer.viewportY+index)?.translateToString(true)||'').join('\n');
+}
 const executable = path.resolve(process.argv[2] || `ReverieCli-rs/target/release/reverie${process.platform === 'win32' ? '.exe' : ''}`);
 const directory = path.resolve(process.argv[3] || '.runtime/rust-3.0/tui-smoke');
 fs.mkdirSync(directory, {recursive: true});
@@ -167,9 +171,12 @@ try {
   await wait(() => completedCount() === 5, 'custom approval denial');
   assert(!fs.existsSync(path.join(project, 'must-not-exist.txt')));
   assert.match(messageRows().filter(message => message.role === 'Reverie').at(-1).content, /PLEASE_DO_NOT_WRITE/);
+  await wait(()=>viewportText().includes('tui-fixture')&&!viewportText().includes('Approve create_file?')&&!viewportText().includes('Reverie is working'),'terminal result delivery after approval');
   checks.push('Model panel, per-conversation Strict and custom denial with no file side effect');
   display.resize(42, 12);
+  const beforeResize=output.length;
   terminal.resize(42, 12);
+  await wait(()=>output.length>beforeResize&&viewportText().includes('Enter send'),'actual terminal redraw after resize');
   terminal.write('HOLD\r');
   await wait(() => Boolean(held), 'pending HTTP request');
   await wait(() => screenText().includes('PARTIAL_UI_REPLY😀') && database.prepare("SELECT group_concat(content, '') AS content FROM stream_chunks WHERE kind='assistant'").get().content === 'PARTIAL_UI_REPLY😀', 'native partial reply displayed and persisted before cancellation');

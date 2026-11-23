@@ -95,8 +95,12 @@ impl ContextEngine {
             db.query_row("SELECT count(*) FROM symbol_references", [], |row| {
                 row.get(0)
             })?;
+        let (semantic_index, semantic_error) = match self.semantic_status() {
+            Ok(state) => (json!(state), String::new()),
+            Err(error) => (Value::Null, error.to_string()),
+        };
         Ok(
-            json!({"ready":state.revision>0,"indexing":false,"files":files,"symbols":symbols,"references":references,"analysis_version":state.analysis_version,"structure_ready":state.analysis_version>=ANALYSIS_VERSION && state.revision>0,"backend":"rust","revision":state.revision,"progress":if state.revision>0{100}else{0},"label":if state.revision>0{"Ready"}else{"Not indexed"},"automatic_retrieval":true,"available":true,"semantic_index":self.semantic_status()?,"semantic":{"available":false,"status":"resource_not_installed"}}),
+            json!({"ready":state.revision>0,"indexing":false,"files":files,"symbols":symbols,"references":references,"analysis_version":state.analysis_version,"structure_ready":state.analysis_version>=ANALYSIS_VERSION && state.revision>0,"backend":"rust","revision":state.revision,"progress":if state.revision>0{100}else{0},"label":if state.revision>0{"Ready"}else{"Not indexed"},"automatic_retrieval":true,"available":true,"semantic_index":semantic_index,"semantic_index_error":semantic_error,"semantic":{"available":false,"status":"resource_not_installed"}}),
         )
     }
 

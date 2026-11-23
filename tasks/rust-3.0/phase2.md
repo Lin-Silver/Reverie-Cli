@@ -21,3 +21,9 @@
 原生最近邻已改为 USearch 2.26.6 的 HNSW／Cosine／F32 图，连接数 16、构建及查询扩展 128、有限候选扩展后稳定排序；默认 NumKong／OpenMP 关闭。图与向量同事务提交、附 SHA-256，常驻内核的 fork 共享已校验图。语义 schema 1 先一致性备份再迁移至 2，向量合同 1 和旧身份保持。自动语义追赶、完整并发／恢复和原生推理即时取消继续实施；完整质量、ANN 召回损失、四平台推理及 Intel 同版本 ORT 源码仍为未验证项。
 
 本机 ANN 增量：工作区 37 项、Clippy、锁定 release 构建与原生入口 6 项通过。实际 Windows 程序为 33,777,664 字节、SHA-256 `93fab89c1d36303c613d9c9b487dd4167ef8bbfa464dea1a6b3ca8f03d896918`，真实 E5／BGE 7 项报告在 `.runtime/rust-3.0/ann-smoke/case-0Vpl3y/report.json`。新增数据库用例验证 schema 1 的取消、备份恢复、旧向量／证据身份保留、图缓存复用、损坏拒绝和重建；这不是完整性能或四平台验收。
+
+原生后台监听已接入同一内核：notify 文件事件按 Git 忽略目录发现监听范围，结构索引先提交，语义代际随后追赶。暂停使用持久 `auto_index` 设置，取消绑定项目和操作 ID，关闭释放线程及原生监听句柄。自动事件不复用已结束请求 ID；资源激活后唤醒相关监听，正在运行的操作仍持有原资源。语义库版本不兼容时保留该数据库并继续提供基础证据。
+
+本机工作区 38 项、格式、Clippy `-D warnings`、锁定 release 构建、桌面类型与翻译、生成协议一致性、生产构建、桌面桥接定向 12 项和实际 PTY 9 项通过。实际 Windows E5/BGE/HNSW 监听检查 6 项通过，报告 `.runtime/rust-3.0/context-watch-smoke/case-3nFdmA/report.json`；PTY 报告 `.runtime/rust-3.0/tui-smoke/case-QTYuUt/report.json`。这些结果仅证明对应基本行为，完整平台、网络文件系统、性能、质量和并发仍在未验证清单中。
+
+实际 Electron 窗口第二次 9 项通过，报告 `.runtime/rust-3.0/electron-watch-smoke/case-GG0L3v/report.json`，界面截图已检查。首次 `case-5kW1Xf` 在探针 20 秒内未观察到安装完成；之后同一程序对同一工作区通过 SDK 安装用了 6.21 秒，第二次窗口通过，尚不足以确定首次原因。原日志与截图保留，探针补充实际 Context IPC 参数和失败记录，问题继续列为未验证。该增量 Windows EXE 为 34,235,392 字节，SHA-256 `3957ece0024d226afde27942ae7e49b4196b60305b8c92626dfecc5033ee57ee`。

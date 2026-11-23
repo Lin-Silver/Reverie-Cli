@@ -38,6 +38,17 @@ def _identity(kind: str, target: dict) -> tuple:
             target.get('process_instance') if kind == 'window' else None)
 
 
+def _display_state(runtime) -> tuple:
+    displays = runtime.command('list-displays')['data']
+    if not displays or any(not display.get('id') or not display.get('bounds')
+                           or not isinstance(display.get('scale'), (int, float))
+                           or isinstance(display.get('scale'), bool)
+                           or not math.isfinite(display['scale']) or display['scale'] <= 0
+                           for display in displays):
+        raise failure('pointer', 'GEOMETRY_UNPROVEN', 'Cannot establish display identity and scale for screenshot coordinates.')
+    return tuple(_identity('display', display) for display in sorted(displays, key=lambda display: display['id']))
+
+
 def frame_bounds(window_id: str) -> dict | None:
     """WGC captures the visible DWM frame, excluding invisible resize borders."""
     if sys.platform != 'win32':
@@ -56,13 +67,14 @@ def frame_bounds(window_id: str) -> dict | None:
 def capture(runtime, parameters: dict) -> dict:
     from PIL import Image
     kind, target = _inventory(runtime, parameters)
+    display_state = _display_state(runtime)
     args = [f"--screen={parameters['screen']}"] if kind == 'display' else ['--window-id=' + target['id']]
     data = runtime.command('screenshot', args)['data']
     image = Image.open(io.BytesIO(base64.b64decode(data['data'], validate=True))).convert('RGB')
     original_width, original_height = image.size
     _, after = _inventory(runtime, parameters)
-    if _identity(kind, target) != _identity(kind, after):
-        raise failure('screenshot', 'STALE_IMAGE', 'Target moved or changed while the screenshot was captured; capture again.')
+    if _identity(kind, target) != _identity(kind, after) or display_state != _display_state(runtime):
+        raise failure('screenshot', 'STALE_IMAGE', 'Target or display identity, geometry or scale changed while the screenshot was captured; capture again.')
     capture_bounds = frame_bounds(target['id']) if kind == 'window' else target['bounds']
     if not capture_bounds or (capture_bounds['width'], capture_bounds['height']) != image.size:
         candidate = target['bounds']
@@ -84,7 +96,8 @@ def capture(runtime, parameters: dict) -> dict:
     record = {'kind': kind, 'target': target, 'scope': dict(parameters), 'captured_at': time.monotonic(),
               'width': image.width, 'height': image.height, 'region': region,
               'original_width': original_width, 'original_height': original_height,
-              'path': str(path), 'model_visible': True, 'capture_bounds': capture_bounds}
+              'path': str(path), 'model_visible': True, 'capture_bounds': capture_bounds,
+              'display_state': display_state}
     runtime.images[image_id] = record
     while len(runtime.images) > 64:
         runtime.images.pop(next(iter(runtime.images)))
@@ -108,6 +121,8 @@ def point(runtime, image_id: str, x, y, *, vision: bool = True) -> tuple[int, in
     kind, current = _inventory(runtime, record['scope'])
     if _identity(kind, current) != _identity(record['kind'], record['target']):
         raise failure('pointer', 'STALE_IMAGE', 'Target identity, position or size changed. Capture again before acting.')
+    if _display_state(runtime) != record['display_state']:
+        raise failure('pointer', 'STALE_IMAGE', 'Display identity, geometry or scale changed. Capture again before acting.')
     if kind == 'window' and current.get('is_focused') is False:
         raise failure('pointer', 'TARGET_NOT_FOCUSED', 'Focus the target window, then capture it again before coordinate input.')
     bounds, crop = record.get('capture_bounds'), record['region']

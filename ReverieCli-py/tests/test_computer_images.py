@@ -29,6 +29,7 @@ class _Runtime:
             "bounds": {"x": 100, "y": 200, "width": 400, "height": 200},
         }
         self.windows = [self.window]
+        self.displays = [{"id": "display-1", "bounds": deepcopy(self.window["bounds"]), "scale": 1.0}]
         self.commands = []
         image = Image.new("RGB", (400, 200), "#3572aa")
         encoded = BytesIO()
@@ -39,6 +40,8 @@ class _Runtime:
         self.commands.append(command)
         if command == "list-windows":
             data = deepcopy(self.windows)
+        elif command == "list-displays":
+            data = deepcopy(self.displays)
         elif command == "screenshot":
             data = {
                 "data": self.png, "format": "png", "width": 400,
@@ -184,3 +187,92 @@ def test_unproven_capture_geometry_is_viewable_but_cannot_control_pointer(tmp_pa
     with pytest.raises(NativeDesktopError) as error:
         point(runtime, data['image_id'], 0, 0)
     assert error.value.envelope['error']['code'] == 'GEOMETRY_UNPROVEN'
+
+
+@pytest.mark.parametrize("before,after", [(1.0, 1.25), (1.25, 1.0), (1.25, 1.5), (1.5, 2.0), (2.0, 1.0)])
+def test_display_scale_change_invalidates_fixed_bounds_window_image(tmp_path, before, after):
+    runtime = _Runtime(tmp_path)
+    runtime.displays[0]["scale"] = before
+    bounds = deepcopy(runtime.window["bounds"])
+    data = _capture(runtime)
+    runtime.displays[0]["scale"] = after
+
+    with pytest.raises(NativeDesktopError) as error:
+        point(runtime, data["image_id"], 15, 25)
+
+    assert runtime.window["bounds"] == bounds
+    assert error.value.envelope["error"]["code"] == "STALE_IMAGE"
+    assert error.value.envelope["error"]["disposition"]["delivery"] == "not_delivered"
+    assert "display" in error.value.envelope["error"]["message"].lower()
+
+
+def test_display_change_during_window_capture_requires_recapture(tmp_path, monkeypatch):
+    runtime = _Runtime(tmp_path)
+    original_command = runtime.command
+
+    def command(name, *args, **kwargs):
+        result = original_command(name, *args, **kwargs)
+        if name == "screenshot":
+            runtime.displays[0]["scale"] = 1.25
+        return result
+
+    monkeypatch.setattr(runtime, "command", command)
+    with pytest.raises(NativeDesktopError) as error:
+        _capture(runtime)
+
+    assert error.value.envelope["error"]["code"] == "STALE_IMAGE"
+    assert runtime.images == {}
+
+
+def test_fresh_window_image_after_scale_change_remains_usable(tmp_path):
+    runtime = _Runtime(tmp_path)
+    old = _capture(runtime)
+    runtime.displays[0]["scale"] = 1.5
+    fresh = _capture(runtime)
+
+    with pytest.raises(NativeDesktopError):
+        point(runtime, old["image_id"], 15, 25)
+    assert point(runtime, fresh["image_id"], 15, 25) == (115, 225)
+
+
+@pytest.mark.parametrize("field,changed", [("id", "display-replaced"), ("bounds", {"x": -400, "y": 0, "width": 400, "height": 200})])
+def test_display_identity_or_position_change_invalidates_window_image(tmp_path, field, changed):
+    runtime = _Runtime(tmp_path)
+    data = _capture(runtime)
+    runtime.displays[0][field] = changed
+
+    with pytest.raises(NativeDesktopError) as error:
+        point(runtime, data["image_id"], 15, 25)
+    assert error.value.envelope["error"]["code"] == "STALE_IMAGE"
+
+
+def test_display_inventory_order_does_not_invalidate_window_image(tmp_path):
+    runtime = _Runtime(tmp_path)
+    runtime.displays.append({"id": "display-2", "bounds": {"x": 500, "y": 0, "width": 400, "height": 200}, "scale": 1.25})
+    data = _capture(runtime)
+    runtime.displays.reverse()
+
+    assert point(runtime, data["image_id"], 15, 25) == (115, 225)
+
+
+def test_lost_display_geometry_prevents_coordinate_delivery(tmp_path):
+    runtime = _Runtime(tmp_path)
+    data = _capture(runtime)
+    runtime.displays = []
+
+    with pytest.raises(NativeDesktopError) as error:
+        point(runtime, data["image_id"], 15, 25)
+    assert error.value.envelope["error"]["code"] == "GEOMETRY_UNPROVEN"
+    assert error.value.envelope["error"]["disposition"]["delivery"] == "not_delivered"
+
+
+@pytest.mark.parametrize("scale", [None, 0, float("nan"), float("inf"), True])
+def test_unproven_display_scale_prevents_coordinate_delivery(tmp_path, scale):
+    runtime = _Runtime(tmp_path)
+    data = _capture(runtime)
+    runtime.displays[0]["scale"] = scale
+
+    with pytest.raises(NativeDesktopError) as error:
+        point(runtime, data["image_id"], 15, 25)
+    assert error.value.envelope["error"]["code"] == "GEOMETRY_UNPROVEN"
+    assert error.value.envelope["error"]["disposition"]["delivery"] == "not_delivered"

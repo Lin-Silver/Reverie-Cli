@@ -273,3 +273,17 @@ Build `45058606286` 的 Intel job `137319279679` 失败发生在 PyInstaller 准
 生产修复只限定 `receives_point`：临时使用 PER_MONITOR_AWARE_V2，成功、拒绝或异常均恢复原线程上下文；不能建立或恢复时以 GEOMETRY_UNPROVEN 拒绝输入。新增测试在旧代码复现 8 失败/4 通过；修复后与截图、操作、权限、生命周期及 runtime 相关测试共 108 通过（3.39 秒），包含四档、非默认及大句柄上下文、真实遮挡、无窗口、查询异常及切换失败。将逐显示器上下文故意改回 DPI 未感知的变异检查明确失败，恢复原源码摘要后新增 12 项再次通过，证据为 `dpi-mutation-verified.json`。官方依据为 [SetThreadDpiAwarenessContext](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext) 和 [高 DPI 桌面开发](https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows)。单元与源级对照不代替新候选四平台及四档最终程序验收。
 
 本轮原始证据、失败、测试 XML 和驱动留在已获准的 C 盘任务目录 `final-draft-v2.5.5-3147b7b/`，真实窗口及私有截图不上传 Git。旧草稿及 17 项资产须先保全再推进新的最终来源。纯 Python 正式公开、完整 Python 归档、0B 及 Rust 实施仍未完成；未改动独立 Engine、其他会话收尾目录或用户接手的清理残留。
+
+### P3-12：固定物理边界下的真实缩放失效修复（2026-11-23 UTC）
+
+来源 `6567ab1afdc5ffd51f37d340c7da3b24fc4dca1b`，树 `6ad65618b44abb1f4a7e07458496a0bbab67da0c`。已回读开发 Test `45094399569` 八作业成功、Build `45094399574` 四平台成功且发布作业 skipped。Windows 候选 ZIP 的下载 digest、CRC 和内部摘要核对通过，实际 EXE SHA-256 为 `6da9976d4410d2b1569a362bc497e0d5388f3d0f0334d088f0b31ab9b8fbb1eb`，四项 Windows 资产与对应 native provenance 一致。该 EXE 的真实 125% 缩小图点击和拖拽四项通过，证明此前命中检测修复在该实际程序有效；不代表四档完整验收完成。
+
+最初固定边界夹具仍被 WinForms 自动缩放，未满足测试前提；跨工具协调超时、前台切换被拒绝、输入会话关闭、图像过期等失败均保留。修改自有夹具以关闭自动缩放并在真实 DPI 事件结束后恢复常量物理边界，独立回读确认 DPI 120→96、窗口始终为 `(220,180,900,520)`。旧 EXE 使用约 84.15 秒前的图像实际投递点击，计数 0→1，确认显示缩放未绑定到窗口截图。这是产品缺陷的实包证据，不是模拟结果。
+
+现有原生 `list-displays` 实测返回同一显示器及物理边界、scale 1.0 和 1.25。生产修复仅在截图模块增加显示身份、物理边界和缩放快照：捕获前后及每次坐标输入前复核；显示顺序变化不误拒绝，几何或缩放无法证明时以 GEOMETRY_UNPROVEN 拒绝。继续保留图像可见性、寿命、目标身份、窗口 frame、真实遮挡和权限检查。无新增依赖、常驻监听或后台进程，原生读取仍受既有超时与取消约束。
+
+新增行为回归在旧生产代码上 10 失败、23 通过；修复后相关截图、命中、操作、runtime 和适配器 115 项通过（2.72 秒）。代码审查故意反转显示状态比较条件，五个缩放回归全部失败，随后按原字节恢复并核对摘要，再次完成 115 项通过；记录为 `dpi-scale-mutation-verified.json`。只说明对应回归有效，不代替四平台 CI 或最终程序。
+
+通过隔离 SDK→Agent→ToolExecutor→Computer Use 的源码进程及现有原生后端重跑真实 125%→100% 固定边界场景，七项通过：约 93.98 秒前的旧图以 STALE_IMAGE / not_delivered 拒绝，独立计数不变，重新截图的点击和拖拽各增加一次并校验实际坐标。系统恢复 100% / DPI 96。该报告明确标为源码链路；Python 启动器摘要不能作为发行 EXE 摘要，也未将 `real_four_scale_dpi_verified` 改为 true。
+
+原始包、失败、夹具源码、审查记录与独立聚合验证留在已获准的 C 盘任务目录 `candidate-6567ab1/`，聚合结果为 `dpi-fixed-bounds-verified.json`。main 和正式标签仍为 `3147b7b`，草稿 `454850045` 未公开；新的修复候选尚待四平台、最终草稿和四档实包验收。完整 Rust 主计划、全部功能和性能门槛继续保留。目录忽略的历史兼容决定已同步，Python 正式归档、阶段 0B 和 Rust 实施仍未开始；未修改独立 Engine、其他会话收尾目录或用户接手的清理内容。

@@ -146,6 +146,85 @@ pub struct SkillLookupRequest {
     pub force_refresh: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketKind {
+    Git,
+    Manifest,
+    Directory,
+    McpRegistry,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct MarketSource {
+    pub id: String,
+    pub name: String,
+    pub kind: MarketKind,
+    pub location: String,
+    pub manifest_path: String,
+    pub builtin: bool,
+    pub enabled: bool,
+    pub status: String,
+    pub error: String,
+    pub content_sha256: String,
+    pub source_commit: String,
+    pub entry_count: usize,
+    pub next_cursor: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct MarketEntry {
+    pub id: String,
+    pub market_id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub source_kind: String,
+    pub manifest: Value,
+    pub catalog_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct MarketsState {
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub sources: Vec<MarketSource>,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+pub struct AddMarketRequest {
+    pub name: String,
+    pub kind: MarketKind,
+    pub location: String,
+    #[ts(optional)]
+    pub manifest_path: Option<String>,
+    #[ts(optional, type = "number")]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+pub struct SetMarketEnabledRequest {
+    pub market_id: String,
+    pub enabled: bool,
+    #[ts(optional, type = "number")]
+    pub expected_revision: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+pub struct MarketRequest {
+    pub market_id: String,
+    #[ts(optional)]
+    pub cursor: Option<String>,
+    #[ts(optional)]
+    pub query: Option<String>,
+    #[ts(optional)]
+    pub offset: Option<usize>,
+    #[ts(optional)]
+    pub limit: Option<usize>,
+    #[ts(optional, type = "number")]
+    pub expected_revision: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticDevice {
@@ -231,6 +310,13 @@ pub fn typescript_types() -> String {
         SkillsState::decl(),
         SkillLookupOperation::decl(),
         SkillLookupRequest::decl(),
+        MarketKind::decl(),
+        MarketSource::decl(),
+        MarketEntry::decl(),
+        MarketsState::decl(),
+        AddMarketRequest::decl(),
+        SetMarketEnabledRequest::decl(),
+        MarketRequest::decl(),
         SemanticDevice::decl(),
         SemanticSelection::decl(),
         SemanticResourceRecord::decl(),

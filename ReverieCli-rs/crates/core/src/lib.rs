@@ -11,6 +11,7 @@ pub mod config;
 mod context_jobs;
 mod context_watch;
 pub mod host;
+mod markets;
 pub mod models;
 pub mod provider;
 pub mod semantic_resources;
@@ -64,6 +65,13 @@ pub const ACTIONS: &[&str] = &[
     "pinSkill",
     "unpinSkill",
     "clearPinnedSkills",
+    "listMarkets",
+    "addMarket",
+    "removeMarket",
+    "setMarketEnabled",
+    "queryMarket",
+    "refreshMarket",
+    "stopMarketRefresh",
     "getModelSources",
     "selectModel",
     "addStandardModel",
@@ -330,6 +338,26 @@ impl Kernel {
             self.configure_project(root)?;
         }
         match action {
+            "listMarkets" => Ok((
+                "markets",
+                json!({"markets":markets::state(&self.app_root)?}),
+            )),
+            "addMarket" => Ok((
+                "market.updated",
+                markets::add(&self.app_root, serde_json::from_value(payload.clone())?)?,
+            )),
+            "removeMarket" => Ok((
+                "market.updated",
+                markets::remove(&self.app_root, serde_json::from_value(payload.clone())?)?,
+            )),
+            "queryMarket" => Ok((
+                "market.entries",
+                markets::entries(&self.app_root, &serde_json::from_value(payload.clone())?)?,
+            )),
+            "setMarketEnabled" => Ok((
+                "market.updated",
+                markets::set_enabled(&self.app_root, serde_json::from_value(payload.clone())?)?,
+            )),
             "listSkills" | "refreshSkills" | "inspectSkill" | "lookupSkill" | "pinSkill"
             | "unpinSkill" | "clearPinnedSkills" => self.handle_skills(action, payload),
             "initialize" => {

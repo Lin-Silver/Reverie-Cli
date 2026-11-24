@@ -1,6 +1,6 @@
 import type { CoreActionName } from "../electron/core-actions";
 import type { ComposerAttachment } from "../electron/attachments";
-import type {SemanticDevice,SemanticResourcesState,SkillLookupRequest} from './generated/core-types';
+import type {SemanticDevice,SemanticResourcesState,SkillLookupRequest,AddMarketRequest,SetMarketEnabledRequest,MarketRequest,MarketsState,MarketSource,MarketEntry} from './generated/core-types';
 import type {
   ContextUsage,
   TokenFilters,
@@ -187,6 +187,13 @@ interface CoreRequestMap {
   clearPinnedSkills: { payload: {draft?:boolean}; response: SkillPinEnvelope };
   inspectSkill: { payload: { skill: string }; response: Envelope<"skill.inspect", { record: SkillDetail | null }> };
   lookupSkill: { payload: SkillLookupRequest; response: Envelope<"skill.lookup", { data: Record<string, unknown> }> };
+  listMarkets: { payload: EmptyPayload; response: Envelope<"markets", {markets: MarketsState}> };
+  addMarket: { payload: AddMarketRequest; response: Envelope<"market.updated", {source: MarketSource; markets: MarketsState}> };
+  removeMarket: { payload: MarketRequest; response: Envelope<"market.updated", {market_id: string; markets: MarketsState}> };
+  setMarketEnabled: { payload: SetMarketEnabledRequest; response: Envelope<"market.updated", {source: MarketSource; markets: MarketsState}> };
+  queryMarket: { payload: MarketRequest; response: Envelope<"market.entries", {source: MarketSource; items: MarketEntry[]; total: number; offset: number; next_offset: number|null; markets: MarketsState}> };
+  refreshMarket: { payload: MarketRequest; response: CoreResponse<"queryMarket"> };
+  stopMarketRefresh: { payload: {market_id: string}; response: Envelope<"market.control", {market_id: string; cancelled: boolean}> };
   indexWorkspace: { payload: EmptyPayload; response: Envelope<"workspace.indexed", { result: Record<string, unknown>; workspace: WorkspaceState }> };
   rollbackCheckpoint: { payload: { checkpointId: string; confirmed: true }; response: Envelope<"rollback.result", { result: Record<string, unknown>; recovery: RecoveryState }> };
   workspaceMentions: { payload: { query: string; limit: number }; response: Envelope<"workspace.mentions", { query: string; items: WorkspaceMention[]; elapsed_ms: number; context_engine: NonNullable<WorkspaceState["context_engine"]> }> };

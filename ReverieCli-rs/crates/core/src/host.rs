@@ -73,6 +73,7 @@ pub struct KernelHost {
     active: Mutex<HashMap<String, Arc<RunControl>>>,
     clients: Mutex<HashMap<String, Arc<ProviderClient>>>,
     grants: Mutex<HashMap<(PathBuf, String), SessionGrants>>,
+    market_jobs: Mutex<HashMap<String, CancellationToken>>,
     pub(crate) context_jobs: Mutex<HashMap<String, Arc<crate::context_jobs::ContextControl>>>,
     pub(crate) context_cancel: CancellationToken,
 }
@@ -84,6 +85,7 @@ impl KernelHost {
             active: Mutex::new(HashMap::new()),
             clients: Mutex::new(HashMap::new()),
             grants: Mutex::new(HashMap::new()),
+            market_jobs: Mutex::new(HashMap::new()),
             context_jobs: Mutex::new(HashMap::new()),
             context_cancel: CancellationToken::new(),
         }
@@ -116,6 +118,21 @@ impl KernelHost {
         }
         let id = request.id.clone();
         let result = match request.action.as_str() {
+            "refreshMarket" => {
+                let refresh = self.refresh_market(&request.payload).await;
+                refresh.map(|value| ("market.entries", value))
+            }
+            "stopMarketRefresh" => (|| -> Result<_> {
+                let name = request.payload["market_id"]
+                    .as_str()
+                    .ok_or("market_id is required.")?;
+                let jobs = lock(&self.market_jobs)?;
+                let job = jobs
+                    .get(name)
+                    .ok_or("Marketplace refresh is no longer active.")?;
+                job.cancel();
+                Ok(("market.control", json!({"market_id":name,"cancelled":true})))
+            })(),
             "getSemanticResources" => self.semantic_inventory(),
             "stopContextOperation" => self.stop_context_job(&request.payload),
             "runPrompt" => match self.begin_prompt(&request.payload) {
@@ -194,6 +211,53 @@ impl KernelHost {
                 Some(id),
                 kind,
                 fields.as_object().cloned().unwrap_or_default(),
+            ),
+            Err(error) => Reply::error(id, error),
+        }
+    }
+
+    async fn refresh_market(&self, payload: &Value) -> Result<Value> {
+        let pending = self.begin_market_refresh(payload)?;
+        self.finish_market_refresh(pending).await
+    }
+
+    pub fn begin_market_refresh(
+        &self,
+        payload: &Value,
+    ) -> Result<(PathBuf, reverie_protocol::MarketRequest, CancellationToken)> {
+        let request: reverie_protocol::MarketRequest = serde_json::from_value(payload.clone())?;
+        let app = lock(&self.kernel)?.app_root.clone();
+        let token = self.context_cancel.child_token();
+        {
+            let mut jobs = lock(&self.market_jobs)?;
+            if jobs.contains_key(&request.market_id) {
+                return Err("This marketplace is already refreshing.".into());
+            }
+            jobs.insert(request.market_id.clone(), token.clone());
+        }
+        Ok((app, request, token))
+    }
+
+    async fn finish_market_refresh(
+        &self,
+        (app, request, token): (PathBuf, reverie_protocol::MarketRequest, CancellationToken),
+    ) -> Result<Value> {
+        let id = request.market_id.clone();
+        let result = crate::markets::refresh(&app, request, &token).await;
+        lock(&self.market_jobs)?.remove(&id);
+        result
+    }
+
+    pub async fn complete_market_refresh(
+        &self,
+        id: Value,
+        pending: (PathBuf, reverie_protocol::MarketRequest, CancellationToken),
+    ) -> Reply {
+        match self.finish_market_refresh(pending).await {
+            Ok(value) => Reply::new(
+                Some(id),
+                "market.entries",
+                value.as_object().cloned().unwrap_or_default(),
             ),
             Err(error) => Reply::error(id, error),
         }

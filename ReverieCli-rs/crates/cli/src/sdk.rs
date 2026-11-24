@@ -115,6 +115,26 @@ pub fn run() -> io::Result<()> {
                     task_host.cancel_all();
                 }
             }));
+        } else if request.action == "refreshMarket" {
+            let pending = match host.begin_market_refresh(&request.payload) {
+                Ok(pending) => pending,
+                Err(error) => {
+                    write(&output, &Reply::error(request.id, error))?;
+                    continue;
+                }
+            };
+            let task_host = host.clone();
+            let task_output = output.clone();
+            let task_failure = failure.clone();
+            tasks.push(runtime.spawn(async move {
+                let reply = task_host.complete_market_refresh(request.id, pending).await;
+                if let Err(error) = write(&task_output, &reply) {
+                    if let Ok(mut failure) = task_failure.lock() {
+                        *failure = Some(error.to_string());
+                    }
+                    task_host.cancel_all();
+                }
+            }));
         } else if KernelHost::is_context_action(&request.action) {
             let pending = match host.begin_context_job(&request.action, &request.payload) {
                 Ok(pending) => pending,

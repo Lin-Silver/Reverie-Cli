@@ -88,6 +88,8 @@ jobs:
         run: node scripts/verification/rust-session-smoke.mjs
       - name: Run standalone native skills and conversation policy checks
         run: node scripts/verification/rust-skills-smoke.mjs
+      - name: Run native market source, cache, Git and cancellation checks
+        run: node scripts/verification/rust-markets-smoke.mjs
       - name: Run actual Context Engine checks
         run: node scripts/verification/rust-context-smoke.mjs
       - name: Run actual native parser checks

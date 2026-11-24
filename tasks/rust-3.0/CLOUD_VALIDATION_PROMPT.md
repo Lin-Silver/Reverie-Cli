@@ -8,6 +8,8 @@
 
 按以下顺序工作：
 
+市场来源增加 `node scripts/verification/rust-markets-smoke.mjs`，检查四个按需来源、手动目录/固定 Git/HTTP/MCP Registry、不同清单共用仓库、分页与 cursor、清单 SHA-256、来源版本、损坏缓存保留、并发修改、取消及重启。来源中的 command 只作元数据，不得执行；不得把目录内容哈希当成发布者签名。Windows 隔离 Git/HTTP 检查不替代四个远端完整原生下载、包安装、许可、OAuth 和更新验收。`dcb99f4` 的六个 CI job 已回读通过，市场新增来源仍须按实际提交另验。
+
 原生 Skills 增加 `node scripts/verification/rust-skills-smoke.mjs`，须将最终程序连同相邻 `builtin_skills` 用于独立部署。检查已有两个上游清单的 25 个摘要与许可、注册目录、用户/工作区同名优先级、Gamer 模式限制、YAML 及显式调用策略、Unicode 全正文分块、引用文本边界、会话/草稿/重启和修订保护。固定正文在模型请求前完整加载，记录正文 SHA-256/字符数/complete；缺失、空正文及整个强制块超 128,000 字符必须阻止执行且不请求模型。随后验证全部模式、分叉/轮换、插件来源、真实模型遵循和完整平台矩阵；这段原生 Skills 增量不代表市场、OAuth、Hooks 或自动更新已经完成。
 
 原生后台监听增加 `node scripts/verification/rust-context-watch-smoke.mjs <实际程序> <真实资源目录> <manifest-sha256>`。验证原生文件事件、嵌套目录替换和忽略规则变化、结构与语义修订追赶、暂停恢复、项目范围取消、上一完整代际保护、进程重启和不兼容语义库隔离。GUI 自动更新开关与 `/context watch on|off` 使用同一 `auto_index` 设置。Windows 基本结果不能替代 Linux/macOS、网络文件系统、事件溢出或完整并发故障矩阵。

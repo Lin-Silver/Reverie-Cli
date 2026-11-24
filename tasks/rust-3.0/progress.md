@@ -505,3 +505,15 @@ GitHub 原主线 `b5168c4` 的 Test `45262872338` 回读为 success，仅证明�
 提交 `196ccf7` 的 Test `45298506537` 在 Linux job `138124861874` 和 Apple Silicon job `138124861892` 的桌面桥接检查失败。读取实际 Linux 日志确认旧第 89 行还要求 `state.skills.available === false`，该字段来自未迁移占位状态；原生 Skills 已返回完整协议字段。检查改为实际工作区包和内置 `photo-to-3d` 均被发现、count 等于 records 长度、初始 pins 为空，并继续执行原有全部会话、隔离、恢复和询问断言。
 
 本机当前实际 EXE 的桌面桥接 6 项通过，报告 `.runtime/rust-3.0/desktop-bridge-smoke/case-BgPpak/report.json`。原 CI 失败与资产保留；不把此 Windows 通过写成新的 Linux/Mac 已通过。本次仅修正验收契约，没有跳过旧会话检查或改变产品行为；新来源的 CI 结果另行回读。
+
+### R4 市场来源、目录和可取消下载（2026-11-23）
+
+接续未提交的市场代码，四个官方来源默认按需读取；支持手动 Git、HTTP 清单、目录和 MCP Registry，保留清单原文、固定 Git 提交、SHA-256、组件元数据、命名空间、版本和分页。不同清单共用同一 Git 对象仓库。网络刷新不占用内核状态锁；SDK 在读取后先登记、再后台执行，取消与关闭能继续接收，独立来源的并发修改不会误使成功结果失效。损坏刷新保留上次目录，陈旧修订、错误 cursor、危险相对路径、嵌入凭据和被篡改的 Git 来源参数被拒绝。
+
+当前公开 Anthropic 官方插件、Skills 和 OpenAI 插件清单已由 GitHub connector 回读，分别为 317、5、65 个目录条目；MCP Registry 的官方 OpenAPI 已取回，确认 v0.1、100 条上限、按名字/版本文本排序和 nextCursor 契约。具体 blob 与实现来源见 crates/core/src/markets/SOURCES.md。这是目录来源证据，不代表插件安装、许可授权、业务命令或 OAuth 已通过。
+
+本机最终 release 构建、格式、Clippy `-D warnings`、生成类型、桌面类型/翻译、4 项 IPC 边界检查和文档链接检查通过。实际 Windows EXE 为 35,959,296 字节，SHA-256 `9353c89c87cc13376ef7de82e0ec1bfa831d230ed7e6a5f984d25942a68b750a`；SDK 市场 8 项、既有桌面桥接 6 项通过，报告 `.runtime/rust-3.0/markets-smoke/case-U21Eem/report.json` 和 `desktop-bridge-smoke/case-cxEmRl/report.json`。HTTP/Git 行为使用实际 Rust 和隔离协议夹具，不证明四个远端完整目录的原生下载或完整安装生态。
+
+已独立回读 `dcb99f4` 的 Test `45300290068`，文档、桌面、Windows、Linux、两种 Mac 六个 job 全部 success，仅证明该来源。市场检查已加入相同只读 CI；本增量的新来源结果另计。main 与 Reverie-Cli-py、冻结 070fa25 及正式 2.5.5 标签已再次核对。GUI/TUI 市场接入、统一安装/组件管理、MCP/Connector 与全部模式继续实施。
+
+维护者已明确授权最多三名子代理并行实施内核/模式、扩展/MCP 和 GUI 接入，由主会话统一整合、提交与推送，不创建额外分支。

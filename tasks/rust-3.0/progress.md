@@ -499,3 +499,9 @@ Rust 构建生成程序旁的 `builtin_skills` 与注册清单，桌面和只读
 实际最终程序的独立部署/SDK Skills 10 项、PTY 10 项及 Electron 窗口 6 项通过。证据为 `.runtime/rust-3.0/skills-smoke/case-70or6R/report.json`、`tui-smoke/case-nhMiL6/report.json`、`electron-smoke/case-a6qGf8/report.json` 和 `skills-resource-migration.json`；窗口截图已检查，renderer errors 为空。前两个 Skills 探针的 canonical Gamer 名称拒绝及随后未完成模式工作流拒绝均保留：前者补齐原名字/别名兼容，后者调整隔离夹具先验证模式目录、再回到已实现的 Reverie 执行，不宣称完整 Gamer 工作流通过。
 
 GitHub 原主线 `b5168c4` 的 Test `45262872338` 回读为 success，仅证明该来源；本增量四平台新来源须由 CI 独立核对。归档分支及正式 v2.5.5 标签仍为 `070fa25`，没有移动；Python 收尾的两个未跟踪文档继续保留，不混入 Rust 提交。完整市场、MCP/OAuth、插件组件、全部模式、性能、Gamer、原生 Live2D 和正式发行继续按完整计划实施。详见 phase4.md 与 UNVERIFIED.md 第 53 项。
+
+### R4 桌面桥接验收随真实 Skills 实现更新（2026-11-23）
+
+提交 `196ccf7` 的 Test `45298506537` 在 Linux job `138124861874` 和 Apple Silicon job `138124861892` 的桌面桥接检查失败。读取实际 Linux 日志确认旧第 89 行还要求 `state.skills.available === false`，该字段来自未迁移占位状态；原生 Skills 已返回完整协议字段。检查改为实际工作区包和内置 `photo-to-3d` 均被发现、count 等于 records 长度、初始 pins 为空，并继续执行原有全部会话、隔离、恢复和询问断言。
+
+本机当前实际 EXE 的桌面桥接 6 项通过，报告 `.runtime/rust-3.0/desktop-bridge-smoke/case-BgPpak/report.json`。原 CI 失败与资产保留；不把此 Windows 通过写成新的 Linux/Mac 已通过。本次仅修正验收契约，没有跳过旧会话检查或改变产品行为；新来源的 CI 结果另行回读。

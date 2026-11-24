@@ -1,9 +1,9 @@
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 
-export function startBridge(executable, cwd, appRoot) {
+export function startBridge(executable, cwd, appRoot, environment = {}) {
   const child = spawn(executable, ['--sdk-bridge'], {cwd, windowsHide: true,
-    env: {...process.env, REVERIE_APP_ROOT: appRoot}, stdio: ['pipe', 'pipe', 'pipe']});
+    env: {...process.env, ...environment, REVERIE_APP_ROOT: appRoot}, stdio: ['pipe', 'pipe', 'pipe']});
   const pending = new Map();
   const events = [];
   let sequence = 0;

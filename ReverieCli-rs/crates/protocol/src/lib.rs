@@ -62,6 +62,90 @@ pub struct UserQuestion {
     pub multiple: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillRecord {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub summary: String,
+    pub path: String,
+    pub scope: String,
+    pub root: String,
+    pub plugin_id: String,
+    pub allow_implicit_invocation: bool,
+    pub pinned: bool,
+    pub shadowed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillIssue {
+    pub name: String,
+    pub path: String,
+    pub scope: String,
+    pub root: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillShadow {
+    pub name: String,
+    pub scope: String,
+    pub root: String,
+    pub path: String,
+    pub winner_scope: String,
+    pub winner_root: String,
+    pub winner_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PinnedSkillsState {
+    pub max: usize,
+    pub keys: Vec<String>,
+    pub names: Vec<String>,
+    pub unresolved: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillsState {
+    #[ts(optional)]
+    pub mode: Option<String>,
+    pub count: usize,
+    pub invalid_count: usize,
+    pub shadowed_count: usize,
+    pub records: Vec<SkillRecord>,
+    pub pinned: PinnedSkillsState,
+    pub errors: Vec<SkillIssue>,
+    pub shadowed: Vec<SkillShadow>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillLookupOperation {
+    List,
+    Search,
+    Inspect,
+    ReadResource,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillLookupRequest {
+    pub operation: SkillLookupOperation,
+    #[ts(optional)]
+    pub query: Option<String>,
+    #[ts(optional)]
+    pub skill_name: Option<String>,
+    #[ts(optional)]
+    pub resource_path: Option<String>,
+    #[ts(optional)]
+    pub max_results: Option<usize>,
+    #[ts(optional)]
+    pub max_body_chars: Option<usize>,
+    #[ts(optional)]
+    pub body_offset: Option<usize>,
+    #[ts(optional)]
+    pub force_refresh: Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticDevice {
@@ -140,6 +224,13 @@ pub fn typescript_types() -> String {
         SessionInfo::decl(),
         PromptResult::decl(),
         UserQuestion::decl(),
+        SkillRecord::decl(),
+        SkillIssue::decl(),
+        SkillShadow::decl(),
+        PinnedSkillsState::decl(),
+        SkillsState::decl(),
+        SkillLookupOperation::decl(),
+        SkillLookupRequest::decl(),
         SemanticDevice::decl(),
         SemanticSelection::decl(),
         SemanticResourceRecord::decl(),

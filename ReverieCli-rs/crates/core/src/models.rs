@@ -113,7 +113,7 @@ pub fn capture(config: &Value) -> Value {
             .get(*key)
             .map(|value| (key.to_string(), without_secrets(value)))
     }));
-    json!({"version":1,"model_ref":{"source":config["active_model_source"].as_str().unwrap_or("standard"),"model":model.and_then(|m|m["model"].as_str()).unwrap_or_default(),"profile_id":model.and_then(|m|m["profile_id"].as_str()).unwrap_or_default()},"settings":settings,"provider_settings":{},"model_settings":{},"rules":"","pinned_skills":[],"plugins":{}})
+    json!({"version":1,"model_ref":{"source":config["active_model_source"].as_str().unwrap_or("standard"),"model":model.and_then(|m|m["model"].as_str()).unwrap_or_default(),"profile_id":model.and_then(|m|m["profile_id"].as_str()).unwrap_or_default()},"settings":settings,"provider_settings":{},"model_settings":{},"rules":"","pinned_skills":config.get("pinned_skills").cloned().unwrap_or_else(||json!([])),"plugins":{}})
 }
 
 pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
@@ -127,6 +127,17 @@ pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
         return Err(format!("Provider source {source} has not yet been migrated.").into());
     }
     let mut config = defaults.clone();
+    let pins = snapshot
+        .get("pinned_skills")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    if pins
+        .as_array()
+        .is_none_or(|pins| pins.iter().any(|pin| !pin.is_string()))
+    {
+        return Err("Conversation skill pins must be an array of names.".into());
+    }
+    config["pinned_skills"] = pins;
     config["active_model_source"] = json!(source);
     let reference = &snapshot["model_ref"];
     if let Some(model) = reference["model"].as_str().filter(|s| !s.is_empty()) {
@@ -161,9 +172,18 @@ pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
 pub fn validate_setting(key: &str, value: &Value) -> Result<()> {
     match key {
         "mode"
-            if value
-                .as_str()
-                .is_some_and(|v| ["reverie", "atlas", "writer", "aio", "gamer"].contains(&v)) =>
+            if value.as_str().is_some_and(|v| {
+                [
+                    "reverie",
+                    "atlas",
+                    "reverie-atlas",
+                    "writer",
+                    "aio",
+                    "gamer",
+                    "reverie-gamer",
+                ]
+                .contains(&v)
+            }) =>
         {
             Ok(())
         }

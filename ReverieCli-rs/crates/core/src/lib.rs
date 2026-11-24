@@ -15,6 +15,8 @@ pub mod models;
 pub mod provider;
 pub mod semantic_resources;
 pub mod session;
+mod skill_actions;
+mod skills;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -26,6 +28,7 @@ pub struct Kernel {
     sessions: Option<session::SessionStore>,
     contexts: HashMap<PathBuf, Arc<Mutex<reverie_context::ContextEngine>>>,
     monitors: HashMap<PathBuf, context_watch::ContextMonitor>,
+    skill_catalogs: HashMap<(PathBuf, String), Arc<skills::SkillCatalog>>,
     semantic: Arc<semantic_resources::SemanticResources>,
     view_session: Option<String>,
     workspace_mode: bool,
@@ -54,6 +57,13 @@ pub const ACTIONS: &[&str] = &[
     "resolveApproval",
     "resolveUserInput",
     "listTools",
+    "listSkills",
+    "refreshSkills",
+    "inspectSkill",
+    "lookupSkill",
+    "pinSkill",
+    "unpinSkill",
+    "clearPinnedSkills",
     "getModelSources",
     "selectModel",
     "addStandardModel",
@@ -99,6 +109,7 @@ impl Kernel {
             sessions: None,
             contexts: HashMap::new(),
             monitors: HashMap::new(),
+            skill_catalogs: HashMap::new(),
             semantic,
             view_session: None,
             workspace_mode: false,
@@ -261,10 +272,11 @@ impl Kernel {
     fn state(&mut self) -> Result<Value> {
         let config = self.effective_config(self.view_session.clone().as_deref())?;
         let sessions = self.session_store()?.list()?;
+        let skills = self.skills_state(self.view_session.clone().as_deref(), false)?;
         Ok(
             json!({"protocol_version":1,"core":{"version":VERSION,"interface_version":"1.0","implementation":"rust","release_status":"development"},"workspace":self.workspace(&config),"models":models::sources(&config),"settings":models::settings(&config,&self.config.path,self.workspace_mode),"sessions":sessions,"capabilities":{"actions":ACTIONS},
                 "plugins":{"summary":{"available":false,"status":"migration_pending"},"records":[]},
-                "skills":{"available":false,"status":"migration_pending","count":0,"invalid_count":0,"shadowed_count":0,"records":[],"pinned":{"max":5,"names":[],"keys":[],"unresolved":[]},"errors":[],"shadowed":[]},
+                "skills":skills,
                 "commands":{"available":false,"status":"migration_pending","sections":[],"items":[]},
                 "recovery":{"available":false,"status":"migration_pending","summary":{"available":false},"operations":[],"checkpoints":[]}}),
         )
@@ -318,6 +330,8 @@ impl Kernel {
             self.configure_project(root)?;
         }
         match action {
+            "listSkills" | "refreshSkills" | "inspectSkill" | "lookupSkill" | "pinSkill"
+            | "unpinSkill" | "clearPinnedSkills" => self.handle_skills(action, payload),
             "initialize" => {
                 let root = self.project_root.to_string_lossy().into_owned();
                 self.configure_project(&root)?;
@@ -412,15 +426,21 @@ impl Kernel {
             )),
             "createSession" => {
                 let defaults = self.config.effective()?;
-                let metadata =
-                    Map::from_iter([("runtime_config".into(), models::capture(&defaults))]);
+                let pins = self.pinned_skills(None)?;
+                let mut snapshot = models::capture(&defaults);
+                snapshot["pinned_skills"] = json!(pins);
+                let metadata = Map::from_iter([
+                    ("runtime_config".into(), snapshot),
+                    ("pinned_skills".into(), json!(pins)),
+                ]);
                 let page = self
                     .session_store()?
                     .create(payload["name"].as_str(), metadata)?;
                 self.view_session = Some(page.id.clone());
+                let skills = self.skills_state(Some(&page.id), false)?;
                 Ok((
                     "session.created",
-                    json!({"session":page,"sessions":self.session_store()?.list()?}),
+                    json!({"session":page,"sessions":self.session_store()?.list()?,"skills":skills}),
                 ))
             }
             "getSession" => {
@@ -437,9 +457,10 @@ impl Kernel {
                 if payload["markRead"].as_bool().unwrap_or(false) {
                     self.session_store()?.mark_read(&id)?;
                 }
+                let skills = self.skills_state(Some(&id), false)?;
                 Ok((
                     "session",
-                    json!({"session":page,"sessions":self.session_store()?.list()?}),
+                    json!({"session":page,"sessions":self.session_store()?.list()?,"skills":skills}),
                 ))
             }
             "renameSession" => {

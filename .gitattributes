@@ -10,9 +10,9 @@ docs/verification/2026-10-27-static-rich-routing/v6-*.log -whitespace
 /tasks/rust-3.0/*baseline-v1.json -text
 
 # Imported upstream bytes are covered by elayadesign-source.json checksums.
-ReverieCli-py/reverie/builtin_skills/design-to-motion/** -text -whitespace
-ReverieCli-py/reverie/builtin_skills/landing-page-design/** -text -whitespace
-ReverieCli-py/reverie/builtin_skills/ELAYA_LICENSE -text -whitespace
+ReverieCli-rs/resources/builtin_skills/design-to-motion/** -text -whitespace
+ReverieCli-rs/resources/builtin_skills/landing-page-design/** -text -whitespace
+ReverieCli-rs/resources/builtin_skills/ELAYA_LICENSE -text -whitespace
 
 # Preserve RuiC Skill bytes and the UPSTREAM.json checksums across checkouts.
 plugins/blender/skills/ruic-card-skill/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

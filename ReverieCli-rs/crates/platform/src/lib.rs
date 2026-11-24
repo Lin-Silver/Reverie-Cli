@@ -61,6 +61,9 @@ pub fn is_read_only(name: &str, args: &Value) -> bool {
         "codebase_retrieval",
         "retrieve_codebase",
         "repo_context",
+        "skill_lookup",
+        "skill_search",
+        "skills_help",
     ]
     .contains(&name)
         || (name == "file_ops"

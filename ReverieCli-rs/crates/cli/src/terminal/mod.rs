@@ -3,6 +3,7 @@ mod cursor_backend;
 mod input;
 mod input_events;
 mod screen;
+mod skills;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use input::{Input, display_text};
@@ -235,7 +236,7 @@ impl Tui {
         match args.first().map(String::as_str) {
             Some("/quit" | "/exit" | "/q") => { self.stop().await?; self.quitting = true; }
             Some("/stop" | "/cancel") => self.stop().await?,
-            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env]\n/session new [name] · /sessions · /settings\n/permission default|strict|auto_check · /context index\n/stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
+            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env]\n/session new [name] · /sessions · /settings\n/permission default|strict|auto_check · /context index · /skills help\n/stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
             Some("/model") if args.get(1).is_some_and(|value| value == "add") => {
                 let model = args.get(2).ok_or("Supply a model id and base URL.")?;
                 let base = args.get(3).ok_or("Supply a model base URL.")?;
@@ -281,6 +282,7 @@ impl Tui {
                 self.refresh().await?;
             }
             Some("/context")=>self.context_command(&args[1..]).await?,
+            Some("/skills" | "/skill")=>self.skills_command(&args[1..]).await?,
             _ => return Err("Unknown command. Use /help.".into()),
         }
         Ok(())

@@ -55,6 +55,8 @@ struct Run {
     context: Option<Arc<Mutex<reverie_context::ContextEngine>>>,
     context_key: PathBuf,
     monitor_configuration: PathBuf,
+    skills: Mutex<Arc<crate::skills::SkillCatalog>>,
+    pinned_skills: Vec<String>,
     semantic: Option<Arc<crate::semantic_resources::ModelVersion>>,
     semantic_error: Option<String>,
     reasoning: String,
@@ -319,11 +321,17 @@ impl KernelHost {
         let session = if let Some(id) = payload["sessionId"].as_str().filter(|id| !id.is_empty()) {
             id.to_owned()
         } else {
+            let pins = kernel.pinned_skills(None)?;
+            let mut snapshot = models::capture(&defaults);
+            snapshot["pinned_skills"] = json!(pins);
             kernel
                 .session_store()?
                 .create(
                     None,
-                    Map::from_iter([("runtime_config".into(), models::capture(&defaults))]),
+                    Map::from_iter([
+                        ("runtime_config".into(), snapshot),
+                        ("pinned_skills".into(), json!(pins)),
+                    ]),
                 )?
                 .id
         };
@@ -351,6 +359,15 @@ impl KernelHost {
             Some(root) => crate::config::canonical_project(std::path::Path::new(root))?,
             None => root.clone(),
         };
+        let pinned_skills = kernel.pinned_skills(Some(&session))?;
+        if pinned_skills.len() > crate::skills::MAX_PINNED {
+            return Err("A conversation can pin at most four skills.".into());
+        }
+        let skills = kernel.skill_catalog_at(
+            &execution_root,
+            config["mode"].as_str().unwrap_or("reverie"),
+            true,
+        )?;
         let data = kernel.project_data_dir.clone();
         let mut store = crate::session::SessionStore::open(&data, &root)?;
         let mut messages = store.history(&session)?;
@@ -401,6 +418,8 @@ impl KernelHost {
             context,
             context_key,
             monitor_configuration: kernel.config.path.clone(),
+            skills: Mutex::new(skills),
+            pinned_skills,
             semantic,
             semantic_error,
             reasoning: String::new(),
@@ -574,6 +593,18 @@ impl KernelHost {
             event["run_id"] = json!(run.id);
             sink(event);
         };
+        let (skill_guidance, loaded_skills) =
+            lock(&run.skills)?.guidance(&run.pinned_skills, &run.prompt)?;
+        if !loaded_skills.is_empty() {
+            let names = loaded_skills
+                .iter()
+                .filter_map(|record| record["name"].as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let activity = json!({"event":"skills_loaded","type":"skills_loaded","category":"Skills","message":"Required Skills loaded for this turn","detail":names,"meta":serde_json::to_string(&loaded_skills)?,"records":loaded_skills,"status":"completed"});
+            emit(json!({"type":"ui.event","event":activity}));
+            run.activities.push(activity);
+        }
         let mut context = String::new();
         if !run.no_index
             && let Some(engine) = &run.context
@@ -632,7 +663,7 @@ impl KernelHost {
                 sink.clone(),
             )?;
         }
-        run.messages.insert(0,json!({"role":"system","content":format!("You are Reverie, an assistant working in {}. Execute workspace tools in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\nWorkspace evidence:{}",run.root.display(),run.execution_root.display(),run.rules,context)}));
+        run.messages.insert(0,json!({"role":"system","content":format!("You are Reverie, an assistant working in {}. Execute workspace tools in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\n{}\nWorkspace evidence:{}",run.root.display(),run.execution_root.display(),run.rules,skill_guidance,context)}));
         let catalog = tool_catalog();
         for iteration in 0..64 {
             if control.cancel.is_cancelled() {
@@ -839,6 +870,23 @@ impl KernelHost {
         if control.cancel.is_cancelled() {
             return Err("Run cancelled before tool execution.".into());
         }
+        if ["skill_lookup", "skill_search", "skills_help"].contains(&call.name.as_str()) {
+            let request: reverie_protocol::SkillLookupRequest =
+                serde_json::from_value(args.clone())?;
+            if request.force_refresh == Some(true) {
+                *lock(&run.skills)? = lock(&self.kernel)?.skill_catalog_at(
+                    &run.execution_root,
+                    run.config["mode"].as_str().unwrap_or("reverie"),
+                    true,
+                )?;
+            }
+            let catalog = lock(&run.skills)?.clone();
+            let details = catalog.model_lookup(&request, &run.pinned_skills, &run.prompt)?;
+            return Ok(ToolResult::ok(
+                serde_json::to_string_pretty(&details)?,
+                details,
+            ));
+        }
         if [
             "codebase-retrieval",
             "codebase_retrieval",
@@ -920,6 +968,7 @@ impl KernelHost {
 
 pub fn tool_catalog() -> Vec<Value> {
     let mut tools = reverie_platform::tools();
+    tools.push(crate::skills::tool_definition());
     tools.push(json!({"type":"function","function":{"name":"codebase-retrieval","description":"Inspect the active workspace before repository-dependent answers or edits. Use task for a broad bounded evidence workset, then symbol, file, search, outline or dependencies. Evidence includes content hashes and at most 72 source lines. Dependency targets distinguish lexical matches, inference, ambiguity and unresolved names. Memory and LSP queries are still being migrated.","parameters":{"type":"object","properties":{"query_type":{"type":"string","enum":["symbol","file","search","dependencies","outline","explore","task"]},"query":{"type":"string"},"include_source":{"type":"boolean","default":true},"include_dependencies":{"type":"boolean","default":true},"max_depth":{"type":"integer","minimum":0,"default":2},"filter_kind":{"type":"string","default":"all"},"direction":{"type":"string","enum":["incoming","outgoing","both"]},"limit":{"type":"integer","default":20},"max_files":{"type":"integer","default":6},"max_symbols":{"type":"integer","default":12},"max_tokens":{"type":"integer","default":12000},"include_history":{"type":"boolean"},"include_memory":{"type":"boolean"},"active_files":{"type":"array","items":{"type":"string"}},"changed_files":{"type":"array","items":{"type":"string"}}},"required":["query_type","query"]}}}));
     tools.push(json!({"type":"function","function":{"name":"userInput","description":"Ask a concise clarification with up to three options and a custom answer. Wait for the user's explicit response; this does not approve workspace tools.","parameters":{"type":"object","properties":{"question":{"type":"string"},"reason":{"type":"string"},"options":{"type":"array","items":{"type":"string"},"maxItems":3},"multiple":{"type":"boolean"}},"required":["question","reason"]}}}));
     tools

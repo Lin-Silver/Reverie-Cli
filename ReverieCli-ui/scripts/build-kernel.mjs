@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,7 @@ mkdirSync(kernelDirectory, {recursive: true});
 mkdirSync(generatedDirectory, {recursive: true});
 const staged = path.join(kernelDirectory, executableName);
 copyFileSync(executable, staged);
+cpSync(path.join(metadata.target_directory, 'release/builtin_skills'), path.join(kernelDirectory, 'builtin_skills'), {recursive:true});
 if (process.platform !== 'win32') chmodSync(staged, 0o755);
 copyFileSync(path.join(repositoryRoot, 'LICENSE'), path.join(kernelDirectory, 'LICENSE.txt'));
 const sha256 = createHash('sha256').update(readFileSync(staged)).digest('hex');

@@ -55,5 +55,6 @@ jobs:
           name: rust-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
           path: |
             ReverieCli-rs/target/release/${{ matrix.binary }}
+            ReverieCli-rs/target/release/builtin_skills/
             .runtime/rust-candidate/native-smoke.json
           if-no-files-found: error

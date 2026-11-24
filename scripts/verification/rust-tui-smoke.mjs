@@ -32,6 +32,9 @@ fs.mkdirSync(project, {recursive: true});
 fs.mkdirSync(path.join(appRoot, '.reverie'), {recursive: true});
 fs.writeFileSync(path.join(project, 'terminal-command.mjs'), "console.log('COMMAND_TERMINAL_PROGRESS😀'); setTimeout(()=>console.log('COMMAND_TERMINAL_FINISHED'),1000);\n");
 fs.writeFileSync(path.join(project, 'terminal-context.md'), '# terminal_context_marker\n共享 Rust 内核返回的终端证据。\n');
+fs.mkdirSync(path.join(project, '.agents/skills/tui-native-skill'), {recursive:true});
+fs.writeFileSync(path.join(project, '.agents/skills/tui-native-skill/SKILL.md'), '---\nname: tui-native-skill\ndescription: Native terminal fixture.\n---\nTUI_SKILL_BODY中文😀\n');
+fs.writeFileSync(path.join(project, '.agents/skills/tui-native-skill/reference.md'), 'TUI_REFERENCE中文😀\n');
 const prompts = [];
 const requests = [];
 const checks = [];
@@ -122,6 +125,13 @@ try {
   // known cursor instead of synchronously querying the input channel mid-run.
   cursorRepliesEnabled = false;
   checks.push('Actual scrolling viewport without an alternate screen');
+  terminal.write('/skill tui-native-skill\r');
+  await wait(() => screenText().includes('Skill pinned: tui-native-skill'), 'conversation skill pin');
+  terminal.write('/skills inspect tui-native-skill\r');
+  await wait(() => screenText().includes('TUI_SKILL_BODY中文😀'), 'complete native skill instructions');
+  terminal.write('/skills resource tui-native-skill reference.md\r');
+  await wait(() => screenText().includes('TUI_REFERENCE中文😀'), 'native packaged skill resource');
+  checks.push('Native /skills pin, complete instructions and packaged resources through the shared kernel');
   const pasted = 'PASTED_FIRST😀\nPASTED_SECOND';
   terminal.write(`\x1b[200~${pasted}\x1b[201~`);
   await delay(200);

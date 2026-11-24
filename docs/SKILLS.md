@@ -1,5 +1,13 @@
 # Skills 使用与边界
 
+## Rust 3.0 当前迁移
+
+`main` 的内置资源已迁入 `ReverieCli-rs/resources/builtin_skills`。Rust 构建把资源及注册清单放在原生程序旁的 `builtin_skills`，Electron 携带同一目录；这一链路不调用 Python。`/skills` 和 `/skill` 提供目录、搜索、完整正文及文本资源读取、固定和解除固定，桌面 Skills 页与输入框使用同一内核状态。
+
+固定项保存到所属会话或项目草稿。内核在每轮开始前完整加载固定正文，记录正文 SHA-256、字符数及 `complete`；缺失、空正文或整个强制说明块超过 128,000 字符时阻止执行。未固定技能仍按需分块读取。真实模型是否遵循流程、全部模式、插件来源、自动更新和跨平台完整验收继续列在 [未验证清单](../tasks/rust-3.0/UNVERIFIED.md)；当前实现与基本运行证据见 [阶段 4](../tasks/rust-3.0/phase4.md)。
+
+## Python 2.5.5 历史说明
+
 按 2026-10-05 的本地代码核对。Skill 是磁盘上的工作流说明，不是独立可执行服务。工具、SDK、模型、模式或授权依赖仍须可用。
 
 ## 发现与读取
@@ -38,7 +46,7 @@ Desktop 输入 `/skill ` 即显示候选；选择后变成“必须使用”标�
 
 ## 内置设计 Skills
 
-从 [emilkowalski/skills](https://github.com/emilkowalski/skills) 固定于 `e8a175de22ae1e49370fc144c1f3bb9aeedf988d`，14 个包及支持文件随 Reverie 打包，保留 MIT 许可与 [来源 / 文件哈希](../ReverieCli-py/reverie/builtin_skills/emilkowalski-source.json)：
+从 [emilkowalski/skills](https://github.com/emilkowalski/skills) 固定于 `e8a175de22ae1e49370fc144c1f3bb9aeedf988d`，14 个包及支持文件随 Reverie 打包，保留 MIT 许可与 [来源 / 文件哈希](../ReverieCli-rs/resources/builtin_skills/emilkowalski-source.json)：
 
 | Skill | 主要用途 |
 | --- | --- |

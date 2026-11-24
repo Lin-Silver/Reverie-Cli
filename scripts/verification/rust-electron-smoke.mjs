@@ -15,6 +15,8 @@ const projectRoot = path.join(root,'project');
 const appRoot = path.join(root,'application');
 const runtimeRoot = path.join(root,'desktop-runtime');
 for(const directory of [projectRoot,path.join(appRoot,'.reverie'),runtimeRoot])fs.mkdirSync(directory,{recursive:true});
+fs.mkdirSync(path.join(projectRoot,'.agents/skills/desktop-native-skill'),{recursive:true});
+fs.writeFileSync(path.join(projectRoot,'.agents/skills/desktop-native-skill/SKILL.md'),'---\nname: desktop-native-skill\ndescription: Native desktop skills fixture.\n---\nDesktop instructions preserve their original source.\n');
 // A real, independent Git fixture prevents the surrounding repository from owning this project.
 fs.writeFileSync(path.join(projectRoot,'.gitignore'),'.reverie/\n');
 fs.writeFileSync(path.join(projectRoot,'fixture.txt'),'Independent desktop workspace\n');

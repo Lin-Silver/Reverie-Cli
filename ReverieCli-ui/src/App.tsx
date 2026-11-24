@@ -2528,7 +2528,7 @@ function SkillsView({
           {visible.map((record) => (
             <div
               className={`plugin-card ${record.pinned ? "skill-card-pinned" : ""} ${record.shadowed ? "skill-card-shadowed" : ""}`}
-              key={record.key || record.path}
+              key={record.path || record.key}
             >
               <div className="plugin-icon"><Sparkles size={18} /></div>
               <div className="plugin-main">
@@ -5974,8 +5974,10 @@ export default function App() {
   const unresolvedSkills = useMemo(() => skillsState?.pinned.unresolved ?? [], [skillsState]);
 
   const refreshSkills = useCallback(async () => {
+    const owner={...draftOwner.current};
     try {
-      const response = await window.reverie.request("refreshSkills", {});
+      const response = await window.reverie.request("refreshSkills", {projectRoot:owner.root,...(owner.id===NEW_SESSION_DRAFT_ID?{draft:true}:{sessionId:owner.id}),...(owner.assistantId==='aio'?{assistantId:'aio' as const}:{})});
+      if(ownerKey(owner.root,owner.id,owner.assistantId)!==ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId))return;
       setState((current) => current ? { ...current, skills: response.skills } : current);
       toast(t("技能目录已刷新"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }

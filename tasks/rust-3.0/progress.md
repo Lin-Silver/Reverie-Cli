@@ -485,3 +485,17 @@ Electron 增加上下文页，管理真实资源、模型预热、索引、检�
 本机 Rust 38 项、格式、Clippy、锁定 release 构建、桌面类型／翻译、类型生成一致性、生产构建及桥接定向 12 项通过。实际模型监听 6 项、PTY 9 项和第二次 Electron 窗口 9 项通过；报告和程序身份见 phase2.md。首次窗口 case-5kW1Xf 的安装在 20 秒内未完成，原因尚未确定，原失败及后续单独 SDK 诊断保留；补充探针请求记录后交云端继续定位。未把第二次通过当作首次原因已修复。
 
 当前已独立回读 GitHub：仅 main 与 Reverie-Cli-py；归档分支仍为 070fa25，正式 v2.5.5 为已公开的 Release 454958491，17 项资产。源码提交不触发 latest／plugins-latest 发布。Python 源码、版本标签及用户接手的缓存未修改；未提交的 tasks/python-2.5.5-closeout 资料保留。继续实施 Skills 发现、按需正文／资源读取及会话固定；完整范围保持原计划。
+
+### R4 原生 Skills、完整固定正文与同一 GUI/TUI 状态（2026-11-23）
+
+接续原未提交 Skills 增量，迁移 629 份内置资源到 Rust 资源目录，保留全部原 Git blob；原 Python `__init__.py` 留作未迁移源码，不参与第一方 Rust 构建。初次暂存归一化了三份 ELAYA 文件的换行，已从来源 `b5168c4f458a8fc913c83ffb23ec77537aebf37e` 恢复原字节，并跟随迁移更新 .gitattributes；资源审计结果为 0 个摘要差异。两个原上游清单共 25 个资产 SHA-256 和许可文件也通过独立部署检查。
+
+Rust 构建生成程序旁的 `builtin_skills` 与注册清单，桌面和只读 CI 候选携带同一资源目录。原生发现、YAML 多行描述、同名优先级、显式调用策略、Gamer 专用 Engine Skill、搜索、Unicode 全文分块和受限引用读取已接入。会话/草稿固定使用持久 metadata/运行配置及修订保护，切换和重启后独立恢复，失效项保留到用户释放。刷新固定发起时的项目/会话，后台任务不受桌面切换影响；前端 Skill 类型由 Rust 生成。
+
+最终 Python 源码要求每轮由内核完整加载固定正文。接续代码最初只提供元数据指导，已补齐主正文加载及正文 SHA-256、字符数、complete 的活动记录。整个强制说明块使用原 Python 的 128,000 字符上限，缺失、空正文和超预算在实际模型请求前拒绝；未固定项仍按需 inspect，引用/脚本不会自动执行或扩展工具权限。终端兼容 `/skill <name>`、pin/use、unpin/remove 和正文/资源管理；桌面页面、草稿和 composer 共用同一固定状态。
+
+本机已完成工作区 39 项基础检查；随后修改强制加载后，相关核心 14 项、格式、Clippy `-D warnings`、锁定 release 构建和生成类型一致性再通过。桌面类型/翻译、生产 renderer/Electron 构建及定向 8 项交互测试通过；该定向运行按 Skills 名称筛选，118 个无关案例未在本机重复运行。最终 Windows EXE 为 35,567,616 字节，SHA-256 `cb17da9bdf50aab48e50241fdb0498c6d10b2b6e714f91556e3b413b15f04ff1`。这是提交前工作区构建身份，正式资产来源另计。
+
+实际最终程序的独立部署/SDK Skills 10 项、PTY 10 项及 Electron 窗口 6 项通过。证据为 `.runtime/rust-3.0/skills-smoke/case-70or6R/report.json`、`tui-smoke/case-nhMiL6/report.json`、`electron-smoke/case-a6qGf8/report.json` 和 `skills-resource-migration.json`；窗口截图已检查，renderer errors 为空。前两个 Skills 探针的 canonical Gamer 名称拒绝及随后未完成模式工作流拒绝均保留：前者补齐原名字/别名兼容，后者调整隔离夹具先验证模式目录、再回到已实现的 Reverie 执行，不宣称完整 Gamer 工作流通过。
+
+GitHub 原主线 `b5168c4` 的 Test `45262872338` 回读为 success，仅证明该来源；本增量四平台新来源须由 CI 独立核对。归档分支及正式 v2.5.5 标签仍为 `070fa25`，没有移动；Python 收尾的两个未跟踪文档继续保留，不混入 Rust 提交。完整市场、MCP/OAuth、插件组件、全部模式、性能、Gamer、原生 Live2D 和正式发行继续按完整计划实施。详见 phase4.md 与 UNVERIFIED.md 第 53 项。

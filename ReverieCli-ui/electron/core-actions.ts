@@ -6,6 +6,7 @@ export const CORE_RESPONSE_CONTRACT = {
   listTools: { type: "tools", required: ["tools"] },
   listSettings: { type: "settings", required: ["settings"] },
   listSkills: { type: "skills", required: ["skills"] },
+  lookupSkill: { type: "skill.lookup", required: ["data"] },
   listPlugins: { type: "plugins", required: ["plugins"] },
   ratsState: { type: "rats.state", required: ["rats"] },
   ratsStateCached: { type: "rats.state", required: ["rats"] },

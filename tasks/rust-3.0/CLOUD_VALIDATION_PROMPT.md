@@ -8,6 +8,8 @@
 
 按以下顺序工作：
 
+原生 Skills 增加 `node scripts/verification/rust-skills-smoke.mjs`，须将最终程序连同相邻 `builtin_skills` 用于独立部署。检查已有两个上游清单的 25 个摘要与许可、注册目录、用户/工作区同名优先级、Gamer 模式限制、YAML 及显式调用策略、Unicode 全正文分块、引用文本边界、会话/草稿/重启和修订保护。固定正文在模型请求前完整加载，记录正文 SHA-256/字符数/complete；缺失、空正文及整个强制块超 128,000 字符必须阻止执行且不请求模型。随后验证全部模式、分叉/轮换、插件来源、真实模型遵循和完整平台矩阵；这段原生 Skills 增量不代表市场、OAuth、Hooks 或自动更新已经完成。
+
 原生后台监听增加 `node scripts/verification/rust-context-watch-smoke.mjs <实际程序> <真实资源目录> <manifest-sha256>`。验证原生文件事件、嵌套目录替换和忽略规则变化、结构与语义修订追赶、暂停恢复、项目范围取消、上一完整代际保护、进程重启和不兼容语义库隔离。GUI 自动更新开关与 `/context watch on|off` 使用同一 `auto_index` 设置。Windows 基本结果不能替代 Linux/macOS、网络文件系统、事件溢出或完整并发故障矩阵。
 
 新增四种模型协议的基本检查为 node scripts/verification/rust-provider-smoke.mjs：运行实际 Rust HTTP、文件工具及持久化，不能把测试用不透明签名当成真实模型签名验证。Linux／macOS 运行 PTY 前须用 npm_config_build_from_source=true npm rebuild node-pty --prefix ReverieCli-ui 生成原生验证依赖；这是第三方 node-pty 的构建准备，客户端不依赖该构建时的 Python。原 CI 的缺模块和 posix_spawnp 失败保留，不通过跳过终端用例使其通过。

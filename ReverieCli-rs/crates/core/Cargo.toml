@@ -21,3 +21,5 @@ tokio.workspace = true
 tokio-util.workspace = true
 reqwest.workspace = true
 notify = "=9.0.0"
+serde-saphyr = { version = "=2.2.0", default-features = false, features = ["deserialize"] }
+walkdir = "=2.5.0"

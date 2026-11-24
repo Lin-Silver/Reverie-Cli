@@ -1,4 +1,5 @@
-import type {ContextWatchState,SemanticResourcesState} from './generated/core-types';
+import type {ContextWatchState,SemanticResourcesState,SkillRecord,SkillsState} from './generated/core-types';
+export type {SkillRecord,PinnedSkillsState,SkillsState} from './generated/core-types';
 
 export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings" | "context";
 
@@ -524,42 +525,6 @@ export interface PluginRecord {
 export interface PluginsState {
   summary: Record<string, unknown>;
   records: PluginRecord[];
-}
-
-export interface SkillRecord {
-  key: string;
-  name: string;
-  description: string;
-  summary: string;
-  path: string;
-  scope: string;
-  root: string;
-  plugin_id: string;
-  allow_implicit_invocation: boolean;
-  pinned: boolean;
-  /** Another root already claims this name, so a lookup can never reach this file. */
-  shadowed: boolean;
-}
-
-/** A pinned skill is mandatory for every turn until it is released. */
-export interface PinnedSkillsState {
-  max: number;
-  keys: string[];
-  names: string[];
-  /** Pins whose SKILL.md has since disappeared from disk. */
-  unresolved: string[];
-}
-
-export interface SkillsState {
-  mode?: string;
-  count: number;
-  invalid_count: number;
-  /** Skills hidden by a same-name skill in a higher-precedence root. */
-  shadowed_count: number;
-  records: SkillRecord[];
-  pinned: PinnedSkillsState;
-  errors: Record<string, unknown>[];
-  shadowed: Record<string, unknown>[];
 }
 
 export interface SkillDetail extends SkillRecord {

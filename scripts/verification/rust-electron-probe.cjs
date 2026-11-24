@@ -11,7 +11,7 @@ const contextRequests=[];
 const registerHandler=ipcMain.handle.bind(ipcMain);
 ipcMain.handle=(channel,handler)=>registerHandler(channel,channel==='core:request'?async(event,...args)=>{
   const request={action:args[0],payload:args[1]};
-  const tracked=/Semantic|Context|Settings|Setting/.test(String(request?.action||''));
+  const tracked=/Semantic|Context|Settings|Setting|Skill/.test(String(request?.action||''));
   const record=tracked?{action:request.action,payload:request.payload,started:Date.now()}:null;
   if(record)contextRequests.push(record);
   try {
@@ -62,6 +62,15 @@ app.whenReady().then(async()=>{
     const paths = await evaluate('window.reverie.paths()');
     fs.writeFileSync(path.join(options.outputRoot,'desktop-paths.json'),JSON.stringify(paths,null,2));
     checks.push('Real Electron window, renderer, preload and Rust initialization');
+    await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='技能').click()`);
+    await wait('!!document.querySelector(".skills-page") && document.body.innerText.includes("desktop-native-skill") && document.body.innerText.includes("photo-to-3d")','The native skill catalog did not reach the actual Skills page');
+    await type('.skills-page input','desktop-native-skill');
+    await evaluate(`Array.from(document.querySelectorAll('.skills-page .plugin-card')).find(card=>card.innerText.includes('desktop-native-skill')).querySelector('.plugin-toggles button').click()`);
+    await wait(`document.querySelector('.skills-page .skill-chip')?.innerText.includes('desktop-native-skill')`,'The native draft pin did not appear');
+    await screenshot('native-skills.png');
+    await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='对话').click()`);
+    await wait(`Array.from(document.querySelectorAll('.skill-chip')).some(chip=>chip.innerText.includes('desktop-native-skill'))`,'The same pin did not reach the composer');
+    checks.push('Native built-in and workspace Skills page, filtering, draft pin and the same composer state');
     if(options.semantic) {
       const contextButton=`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='上下文引擎')`;
       await evaluate(`${contextButton}.click()`);

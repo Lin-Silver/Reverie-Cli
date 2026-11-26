@@ -890,7 +890,8 @@ mod tests {
     fn model_review_and_extraction_validate_evidence_without_mutating_sources() {
         let app = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
-        let p = root.path();
+        let project = crate::config::canonical_project(root.path()).unwrap();
+        let p = project.as_path();
         writer::execute(&json!({"action":"bootstrap","novel_id":"book","title":"Book","brief":"An original short story","target_chars":1000,"chapter_target_chars":1000}),p,&json!({})).unwrap();
         let novel = p.join("novels/book");
         let source = novel.join("chapters/chapter-0001.md");

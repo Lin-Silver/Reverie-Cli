@@ -11,7 +11,7 @@ import {createPluginFixture} from './rust-plugin-fixture.mjs';
 
 const require=createRequire(import.meta.url),repo=process.cwd();
 const pty=require(path.join(repo,'ReverieCli-ui/node_modules/node-pty')),{Terminal}=require(path.join(repo,'ReverieCli-ui/node_modules/@xterm/headless'));
-const executable=path.resolve(process.argv[2]||'ReverieCli-rs/target/release/reverie.exe');
+const executable=path.resolve(process.argv[2]||path.join('ReverieCli-rs','target','release',process.platform==='win32'?'reverie.exe':'reverie'));
 const executableSha256=crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),executableSize=fs.statSync(executable).size;
 const directory=path.resolve(process.argv[3]||'.runtime/rust-3.0/plugins-tui-smoke');fs.mkdirSync(directory,{recursive:true});
 const root=fs.mkdtempSync(path.join(directory,'case-')),fixture=createPluginFixture(repo,root),display=new Terminal({allowProposedApi:true,cols:100,rows:30,scrollback:2000});
@@ -70,7 +70,7 @@ try {
   await bridge.request('shutdown');assert.equal((await bridge.closed).code,0);
   checks.push('Confirmed removal and normal CLI/bridge shutdown leave no hook execution marker');
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),executableSha256,'The executable changed during verification');
-  const report={schema:'reverie.rust-plugins-tui-smoke.v1',passed:true,verified_at:new Date().toISOString(),executable,sha256:executableSha256,size:executableSize,root,checks,scope:'Actual Rust executable, ConPTY, isolated local extension and loopback archive cancellation; no public packages, user extension execution, real OAuth, physical input/DPI, other platforms or release acceptance.'};
+  const report={schema:'reverie.rust-plugins-tui-smoke.v1',passed:true,verified_at:new Date().toISOString(),platform:process.platform,executable,sha256:executableSha256,size:executableSize,root,checks,scope:'Actual Rust executable, native PTY, isolated local extension and loopback archive cancellation; no public packages, user extension execution, real OAuth, physical input/DPI or release acceptance.'};
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({passed:true,checks:checks.length,report:path.join(root,'report.json')}));
 }catch(error){failure=error;fs.writeFileSync(path.join(root,'failure.json'),JSON.stringify({passed:false,error:String(error.stack||error),checks,terminalExit},null,2));console.error(error);}
 finally{fs.writeFileSync(path.join(root,'terminal.txt'),output);fs.writeFileSync(path.join(root,'screen.txt'),screenText());displayReplies.dispose();display.dispose();if(terminal&&!terminalExit)terminal.kill();if(bridge&&bridge.child.exitCode===null)bridge.child.kill();for(const response of held)response.destroy();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

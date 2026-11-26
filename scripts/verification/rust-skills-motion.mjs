@@ -76,6 +76,9 @@ export async function verifyMotion({bridge, project, assets, appState, motionCal
   assert(preview.passed, JSON.stringify(preview.findings));
   const evidence = JSON.parse(fs.readFileSync(path.join(project,preview.report),'utf8'));
   assert.equal(evidence.browser.version,preview.browser);
+  if (process.env.REVERIE_MOTION_BROWSER) {
+    assert.equal(fs.realpathSync.native(evidence.browser.executable),fs.realpathSync.native(process.env.REVERIE_MOTION_BROWSER));
+  }
   const viewport = preview.viewports[0];
   assert(viewport.animations > 0 && viewport.frames.length > 1 && viewport.visual.motionEnergy > 0);
   assert.equal(viewport.reducedMotion.mediaMatched,true);

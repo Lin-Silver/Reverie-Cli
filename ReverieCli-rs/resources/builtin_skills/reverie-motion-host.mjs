@@ -67,7 +67,22 @@ childProcess.spawn = (file, argv, options) => {
   // Chromium writes files itself. A fresh directory prevents it from following
   // pre-existing workspace links within its profile.
   const fresh = fs.mkdtempSync(path.join(parent, 'run-'));
-  return spawn(browser, argv.map(arg => arg === profile ? '--user-data-dir=' + fresh : arg), options);
+  const identity = fs.lstatSync(fresh, {bigint:true});
+  const child = spawn(browser, argv.map(arg => arg === profile ? '--user-data-dir=' + fresh : arg), options);
+  child.once('exit', () => {
+    // Browser helpers can inherit these handles and keep the Node CLI alive
+    // after Chromium exits. No more CDP messages can arrive from that browser.
+    for (const pipe of child.stdio) pipe?.destroy?.();
+  });
+  child.once('close', () => {
+    const current = fs.lstatSync(fresh, {bigint:true, throwIfNoEntry:false});
+    if (current?.isDirectory() && current.dev === identity.dev && current.ino === identity.ino
+        && fs.realpathSync.native(fresh) === fresh) {
+      try { fs.rmSync(fresh, {recursive:true, maxRetries:3, retryDelay:100}); }
+      catch (error) { process.stderr.write(`Could not remove Motion preview profile: ${error.message}\n`); }
+    }
+  });
+  return child;
 };
 syncBuiltinESMExports();
 if (tool) {

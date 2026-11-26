@@ -16,6 +16,9 @@ regex = "=1.13.2"
 tokio.workspace = true
 tokio-util.workspace = true
 chrono.workspace = true
+sha2.workspace = true
+dunce = "=1.0.5"
+url = "=2.5.9"
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.191"

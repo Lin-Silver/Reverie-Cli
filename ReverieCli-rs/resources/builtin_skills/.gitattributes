@@ -14,3 +14,4 @@ pick-ui-library/** -text -whitespace
 prototype/** -text -whitespace
 review-animations/** -text -whitespace
 write-swift/** -text -whitespace
+reverie-motion/** -text -whitespace

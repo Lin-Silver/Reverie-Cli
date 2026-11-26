@@ -13,6 +13,7 @@ build/
 !/ReverieCli-ui/build/windows/reverie-path.ps1
 dist/
 **/bin/
+!/ReverieCli-rs/resources/builtin_skills/reverie-motion/runtime/bin/
 **/obj/
 search-mcp/
 _embedded_tmp/

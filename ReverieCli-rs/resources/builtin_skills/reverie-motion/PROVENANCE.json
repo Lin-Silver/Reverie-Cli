@@ -1,0 +1,129 @@
+{
+  "schema": "reverie-motion.provenance.v1",
+  "generated_at": "2026-11-26T07:01:01.890Z",
+  "upstream": {
+    "repository": "https://github.com/Yuan-ManX/open-motion",
+    "commit": "1c93d99b064e8674f244a8f24227358ec6f61618",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2026 Yuan-Man"
+  },
+  "vendored_files": [
+    {
+      "path": "src/agent/motionAutoFix.ts",
+      "sha256": "2440dacdefabac918dd71fc05eb33a00f3ae81c4c9671c2a58ee59c412141e1e",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionCritique.ts",
+      "sha256": "b1f83c6a8721f074f8d14a70d56e7ed62344b30255878bb79879befdfd305eec",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionGenome.ts",
+      "sha256": "dbb9d31ef29ea5b85c4420683980f76ce6a28d3720914fe4c1021602e6d3b663",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionIntelligence.ts",
+      "sha256": "896985ae0b73222c9b908652878b9db83af73bb07b6bb800ce2c8b150260f1d6",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionLineage.ts",
+      "sha256": "f7469ffd44266ddc0ced8760f4abf9c8cf05d4b4ac771bca837354fdd49eac70",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionStorytelling.ts",
+      "sha256": "a7f921880fd2ab7f2678069cba0cea546c5bdf443f3f800fd28cdf3d0211def6",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionStyleTransfer.ts",
+      "sha256": "b697225b25d1e3e7f0d9a9c81389f29e5ccc0cd16668e4845c15f7d98d83dd04",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/agent/motionSynthesis.ts",
+      "sha256": "e548ef709acb716966ed0a60301445a2d88f6815204fca51c39b4a3037cc08d5",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/motion/accessibility.ts",
+      "sha256": "7d8aaef25ff1ff33c6f598be5e428abd56ac338dd7c0c326009a247ab66a187a",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/motion/analysis.ts",
+      "sha256": "bfb3e5b4566da5145b31044661f545ebc6e671666708eec83f9a37006976d96c",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/motion/motionVariantGenerator.ts",
+      "sha256": "15112c985dbc2c4262f0a638e26c4284926be32a4dadda8c7bc15a14bb221de2",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/motion/performance.ts",
+      "sha256": "e7b835b3203bee359cdce163034d50c9714dc744896e91088818cd5610370844",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/shared/motion/easing.ts",
+      "sha256": "ab88217c63a2850cae31471a02b93f7005377bc53bee690e06ae33ee782a3dc6",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/shared/motion/index.ts",
+      "sha256": "053166c1f897aef629714108f4752e4990542c53e747fb27fb61292b057c79ac",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/shared/motion/spec.ts",
+      "sha256": "9feeb4ee27443b9e8f477ff24b2108059175ca708cc33f07c810f2d1a4cc9dea",
+      "modified": false,
+      "included_in_bundle": true
+    },
+    {
+      "path": "src/shared/motion/transform.ts",
+      "sha256": "4f76c7304864a59ef3d388a99af90435071d816eb94181f2bb66cbdf7d06b021",
+      "modified": false,
+      "included_in_bundle": true
+    }
+  ],
+  "build_only_files": [
+    {
+      "path": "upstream/entry.ts",
+      "role": "re-export entry (Reverie Motion)",
+      "sha256": "eee99c3804473a77655c560299a9e5473a24c88a0946df113bd4a0585c6bc3bd"
+    },
+    {
+      "path": "upstream/shims/zod-inert.ts",
+      "role": "inert zod stand-in (Reverie Motion)",
+      "sha256": "cefc4b2edad1e4d861cfb23675bb830b51b397b8a528d67d131a90be1b051abe"
+    }
+  ],
+  "bundler": {
+    "name": "esbuild",
+    "version": "0.28.2"
+  },
+  "output": {
+    "path": "runtime/vendor/openmotion.mjs",
+    "sha256": "98c0430b10a9ea1d0b5e50392eae0f27f893adbb7e759b651c11d861eefcfe4b",
+    "bytes": 170655
+  }
+}

@@ -6,6 +6,14 @@
 
 固定项保存到所属会话或项目草稿。内核在每轮开始前完整加载固定正文，记录正文 SHA-256、字符数及 `complete`；缺失、空正文或整个强制说明块超过 128,000 字符时阻止执行。未固定技能仍按需分块读取。真实模型是否遵循流程、全部模式、插件来源、自动更新和跨平台完整验收继续列在 [未验证清单](../tasks/rust-3.0/UNVERIFIED.md)；当前实现与基本运行证据见 [阶段 4](../tasks/rust-3.0/phase4.md)。
 
+每轮模型请求携带所有符合隐式调用条件的技能摘要。目录没有单独的总字符数或 token 上限。同名技能只列出当前模式下优先级最高的一份。模型本身的上下文窗口仍决定整轮请求能容纳多少内容。
+
+### 内置 Reverie Motion
+
+对动画任务调用 `skill_lookup` 检查 `reverie-motion`。内置版本的 `inspect` 结果含有绝对路径 `runtime_entry`。将该值放在引号中，直接运行 `node "<runtime_entry>" doctor --project . --launch`，随后用同一入口执行 design、preview 和 export。预览需要本机安装 Chromium、Chrome 或 Edge。原版正文和参考文件保留上游的安装说明，内置部署可直接运行。
+
+内核检查注册清单、原包的 30 个文件及宿主保护脚本，再以当前会话的 `command_exec` 权限启动 Node。输出位于命令工作目录内，`--input` 接受工作区 JSON。预览使用宿主发现的浏览器，支持工作区文件和本地 HTTP 目标。用户级安装、独立 MCP 服务、模型指定的浏览器程序及远程预览不属于这个内置命令入口。原包许可和版本见 [来源记录](../ReverieCli-rs/resources/builtin_skills/reverie-motion/PROVENANCE.json) 和 [第三方声明](../ReverieCli-rs/resources/builtin_skills/reverie-motion/NOTICE.md)。
+
 ## Python 2.5.5 历史说明
 
 按 2026-10-05 的本地代码核对。Skill 是磁盘上的工作流说明，不是独立可执行服务。工具、SDK、模型、模式或授权依赖仍须可用。

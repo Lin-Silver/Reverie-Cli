@@ -1,7 +1,10 @@
+mod builtin;
 mod policy;
 mod process_tree;
 
 use crate::{Result, ToolResult, workspace_path};
+use builtin::MOTION_ENTRY;
+pub use builtin::motion_entry;
 use policy::Invocation;
 use process_tree::ProcessTree;
 use serde_json::{Value, json};
@@ -299,6 +302,12 @@ async fn execute_prepared(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     environment(&mut command, invocation, root, data)?;
+    if invocation.executor == "builtin_motion" {
+        command
+            .env_remove("NODE_OPTIONS")
+            .env_remove("NODE_PATH")
+            .env("REVERIE_BUILTIN_WORKSPACE", root.canonicalize()?);
+    }
     if cancel.is_cancelled() {
         return Ok(ToolResult::not_started(
             "Command cancelled before execution.",

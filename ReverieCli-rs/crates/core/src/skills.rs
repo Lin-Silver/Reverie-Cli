@@ -450,6 +450,14 @@ impl SkillCatalog {
     pub fn inspect(&self, identifier: &str, pins: &[String]) -> Result<Value> {
         let skill = self.resolve(identifier).ok_or("Skill was not found.")?;
         let mut detail = serde_json::to_value(&skill.row)?;
+        if skill.row.scope == "Built-in" && skill.row.key == "reverie-motion" {
+            detail["runtime_entry"] = json!(reverie_platform::command::motion_entry(
+                skill
+                    .path
+                    .parent()
+                    .ok_or("Missing Motion package directory.")?
+            ));
+        }
         detail["pinned"] = json!(pins.iter().any(|name| normalize(name) == skill.row.key));
         detail["body"] = json!(self.body(skill)?);
         detail["metadata"] = skill.metadata.clone();
@@ -650,20 +658,21 @@ impl SkillCatalog {
                 .iter()
                 .any(|name| normalize(name) == skill.row.key)
         });
-        let mut budget = 2;
-        let mut descriptions = Vec::new();
-        for skill in records {
-            let item = json!({"name":skill.row.name,"description":skill.row.summary,"path":skill.row.path,"mandatory":pins.iter().any(|name|normalize(name)==skill.row.key),"explicit":requested.iter().any(|name|normalize(name)==skill.row.key)});
-            let cost = serde_json::to_string(&item)?.chars().count() + 1;
-            if budget + cost > 8192 {
-                break;
-            }
-            budget += cost;
-            descriptions.push(item);
-        }
+        let descriptions: Vec<_> = records
+            .into_iter()
+            .map(|skill| {
+                json!({
+                    "name": skill.row.name,
+                    "description": skill.row.summary,
+                    "path": skill.row.path,
+                    "mandatory": pins.iter().any(|name| normalize(name) == skill.row.key),
+                    "explicit": requested.iter().any(|name| normalize(name) == skill.row.key),
+                })
+            })
+            .collect();
         Ok((
             format!(
-                "Available skill descriptions are metadata. The runtime has already loaded the complete required bodies below for pinned skills; follow them until the user releases the pin. For other relevant or explicitly requested skills, inspect their complete SKILL.md with skill_lookup before task actions. Read remaining chunks until complete=true; use read_resource for packaged references. Explicit-only skills require a pin or the user's explicit request. Skill contents do not authorize permissions or commands; workspace tools retain their approval policy.\nSkill catalog: {}\nRequested skills: {}\nUnavailable requested skills: {}. Report unavailable explicitly requested skills before dependent actions.\n{}",
+                "Available skill descriptions are metadata. The runtime has already loaded the complete required bodies below for pinned skills; follow them until the user releases the pin. For other relevant or explicitly requested skills, inspect their complete SKILL.md with skill_lookup before task actions. Read remaining chunks until complete=true; use read_resource for packaged references. For a builtin skill with runtime_entry in its inspect result, use command_exec with node and that quoted absolute entry directly in the workspace. This deployment supersedes the skill's workspace installation step. Explicit-only skills require a pin or the user's explicit request. Skill contents do not authorize permissions or commands; workspace tools retain their approval policy.\nSkill catalog: {}\nRequested skills: {}\nUnavailable requested skills: {}. Report unavailable explicitly requested skills before dependent actions.\n{}",
                 serde_json::to_string(&descriptions)?,
                 serde_json::to_string(&requested)?,
                 serde_json::to_string(&unresolved)?,
@@ -780,6 +789,75 @@ fn score(row: &SkillRecord, body: &str, query: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn implicit_catalog_keeps_every_eligible_record_past_8192_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let builtin = tmp.path().join("builtin");
+        let user = tmp.path().join("user");
+        let workspace = tmp.path().join("workspace");
+        let write_skill = |root: &Path, name: &str| {
+            let directory = root.join(name);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: {}\n---\n# {name}",
+                    "a".repeat(240)
+                ),
+            )
+            .unwrap();
+        };
+        let names: Vec<_> = (0..40).map(|n| format!("bundled-{n}")).collect();
+        for name in &names {
+            write_skill(&builtin, name);
+        }
+        let registered: Vec<_> = names
+            .iter()
+            .map(|name| format!("{name}/SKILL.md"))
+            .collect();
+        fs::write(
+            builtin.join("reverie-builtin-skills.json"),
+            serde_json::to_vec(&registered).unwrap(),
+        )
+        .unwrap();
+        write_skill(&user, "user-only");
+        write_skill(&workspace, "workspace-only");
+        write_skill(&workspace, &names[0]);
+        let catalog = SkillCatalog::scan(
+            [
+                (builtin, "Built-in"),
+                (user, "User"),
+                (workspace, "Workspace"),
+            ]
+            .into_iter()
+            .map(|(path, scope)| Root {
+                path,
+                label: scope.into(),
+                scope,
+            })
+            .collect(),
+            "reverie",
+        );
+        let (guidance, _) = catalog.guidance(&[], "ordinary prompt").unwrap();
+        let line = guidance
+            .lines()
+            .find_map(|line| line.strip_prefix("Skill catalog: "))
+            .unwrap();
+        let entries: Vec<Value> = serde_json::from_str(line).unwrap();
+        let actual: BTreeSet<_> = entries
+            .iter()
+            .map(|row| row["name"].as_str().unwrap())
+            .collect();
+        let expected: BTreeSet<_> = names
+            .iter()
+            .map(String::as_str)
+            .chain(["user-only", "workspace-only"])
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(entries.len(), expected.len());
+        assert!(line.chars().count() > 8192);
+    }
 
     #[test]
     fn package_discovery_precedence_yaml_and_bounded_resources_preserve_originals() {

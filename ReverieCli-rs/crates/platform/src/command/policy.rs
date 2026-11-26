@@ -175,7 +175,7 @@ fn validate_argument(token: &str, key: &str, cwd: &Path, root: &Path) -> Result<
     Ok(())
 }
 
-fn validate_segment(tokens: &[Token], root: &Path, cwd: &Path) -> Result<()> {
+fn validate_segment(tokens: &[Token], root: &Path, cwd: &Path, builtin: bool) -> Result<()> {
     let first = tokens.first().ok_or("Empty command pipeline stage.")?;
     let key = executable_key(&first.text);
     if [
@@ -226,7 +226,7 @@ fn validate_segment(tokens: &[Token], root: &Path, cwd: &Path) -> Result<()> {
     if ["invoke-expression", "invoke-command", "start-process"].contains(&key.as_str()) {
         return Err("Dynamic PowerShell execution is disabled. Invoke a reviewed workspace script directly.".into());
     }
-    for token in tokens.iter().skip(1) {
+    for (index, token) in tokens.iter().enumerate().skip(1) {
         let lower = token.text.to_ascii_lowercase();
         if [
             "-c",
@@ -257,7 +257,9 @@ fn validate_segment(tokens: &[Token], root: &Path, cwd: &Path) -> Result<()> {
         ) {
             return Err("The command flag performs a terminal move/delete operation.".into());
         }
-        validate_argument(&token.text, &key, cwd, root)?;
+        if !(builtin && index == 1) {
+            validate_argument(&token.text, &key, cwd, root)?;
+        }
     }
     let script = if ["python", "py", "node", "bash", "sh", "zsh"].contains(&key.as_str()) {
         if tokens.iter().any(|token| token.text == "-m") {
@@ -293,12 +295,16 @@ fn validate_segment(tokens: &[Token], root: &Path, cwd: &Path) -> Result<()> {
         return Err("PowerShell must use a reviewed workspace file or the version option.".into());
     }
     if let Some(script) = script {
-        let path = workspace_path(
-            root,
-            cwd.join(&script.text)
-                .to_str()
-                .ok_or("Script path must be Unicode.")?,
-        )?;
+        let path = if builtin {
+            PathBuf::from(&script.text)
+        } else {
+            workspace_path(
+                root,
+                cwd.join(&script.text)
+                    .to_str()
+                    .ok_or("Script path must be Unicode.")?,
+            )?
+        };
         if path.is_file() {
             let bytes = fs::read(path)?;
             let content = String::from_utf8_lossy(&bytes);
@@ -349,10 +355,28 @@ pub fn prepare(command: &str, root: &Path, cwd: &str) -> Result<Invocation> {
     if powershell && command.contains(['$', '`', '{', '}']) {
         return Err("PowerShell interpolation and script blocks are disabled. Use a reviewed workspace script.".into());
     }
-    for segment in tokens.split(|token| token.operator) {
-        validate_segment(segment, root, &cwd)?;
+    let mut guard = None;
+    if tokens[0].text == "node"
+        && let Some(script) = tokens.get(1)
+    {
+        let operand = Path::new(&script.text);
+        if operand.is_absolute() && operand.ends_with(super::MOTION_ENTRY) {
+            let exe = std::env::current_exe()?;
+            guard = super::builtin::motion_guard(
+                exe.parent().ok_or("Missing executable directory.")?,
+                operand,
+            )?;
+        }
     }
-    let argv = if powershell {
+    for segment in tokens.split(|token| token.operator) {
+        validate_segment(segment, root, &cwd, guard.is_some())?;
+    }
+    let builtin = guard.is_some();
+    let argv = if let Some((guard, entry)) = guard {
+        let mut argv = vec![super::builtin::node(root)?, "--import".into(), guard, entry];
+        argv.extend(tokens.into_iter().skip(2).map(|token| token.text));
+        argv
+    } else if powershell {
         let pipeline = tokens
             .iter()
             .map(|token| {
@@ -383,7 +407,9 @@ pub fn prepare(command: &str, root: &Path, cwd: &str) -> Result<Invocation> {
     };
     Ok(Invocation {
         argv,
-        executor: if powershell {
+        executor: if builtin {
+            "builtin_motion"
+        } else if powershell {
             "powershell"
         } else {
             "subprocess"

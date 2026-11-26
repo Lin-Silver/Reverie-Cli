@@ -85,7 +85,9 @@ try {
   const hello = await bridge.request('hello');
   assert.equal(hello.kernel.implementation,'rust');
   assert.equal(bridge.supports('runPrompt'),true);
-  assert.equal(bridge.supports('listPlugins'),false);
+  assert.equal(bridge.supports('listPlugins'),true);
+  assert.equal((await bridge.request('listPlugins')).type,'plugins');
+  assert.equal(bridge.supports('unknownFixtureAction'),false);
   const state = (await request('initialize',{projectRoot:first})).state;
   assert.equal(state.core.implementation,'rust');
   assert.equal(state.skills.count,state.skills.records.length);

@@ -1,0 +1,36 @@
+.connectors-page {display:grid;gap:20px;min-width:0;}
+.connectors-page>.page-heading,.connector-detail>header,.connector-dialog>header {display:flex;justify-content:space-between;align-items:flex-start;gap:16px;}
+.connector-actions {display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+.connector-help {margin:0;color:var(--muted);font-size:var(--font-small);}
+.connector-configuration,.connector-selection,.connector-detail,.connector-pending,.connector-result,.connector-diagnostics {padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--panel);min-width:0;}
+.connector-configuration summary,.connector-capabilities summary,.connector-diagnostics summary {cursor:pointer;color:var(--text-2);}
+.connector-configuration fieldset {display:grid;gap:14px;border:0;padding:0;margin:16px 0 0;min-width:0;}
+.connector-configuration label,.connector-dialog>label,.connector-capability-forms label {display:grid;gap:6px;color:var(--text-2);font-size:var(--font-small);}
+.connectors-page :is(input:not([type=checkbox]),textarea,select),.connector-dialog :is(input:not([type=checkbox]),textarea,select) {width:100%;min-width:0;padding:9px 10px;border:1px solid var(--border-strong);border-radius:7px;background:var(--panel-2);color:var(--text);font:inherit;}
+.connectors-page textarea {resize:vertical;min-height:70px;font-family:monospace;}
+.connectors-layout {display:grid;grid-template-columns:minmax(200px,280px) minmax(0,1fr);gap:16px;min-width:0;}
+.connector-selection {display:grid;align-self:start;gap:10px;}
+.connector-search {display:flex;align-items:center;gap:8px;min-width:0;}
+.connector-selector {display:grid;gap:6px;padding:12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);text-align:left;cursor:pointer;overflow-wrap:anywhere;}
+.connector-selector.selected {border-color:var(--accent);background:var(--accent-bg);}
+.connector-selector small,.connector-detail>header>span {font-size:var(--font-small);color:var(--muted);}
+.connector-detail {display:grid;align-content:start;gap:18px;}
+.connector-detail :is(h2,h3),.connector-dialog h2 {margin:0 0 10px;}
+.connector-identity {display:grid;gap:10px;margin:0;font-size:var(--font-small);}
+.connector-identity>div {display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px;}
+.connector-identity dt {color:var(--muted);}.connector-identity dd {margin:0;overflow-wrap:anywhere;}
+.connector-controls {display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
+.connector-controls label {display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:var(--font-small);}
+.connector-capability-forms {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+.connector-capability-forms form {display:grid;align-content:start;gap:10px;min-width:0;}
+.connector-operation {display:flex;justify-content:space-between;align-items:center;gap:12px;overflow-wrap:anywhere;}
+.connectors-page pre,.connector-dialog pre {margin:10px 0 0;padding:12px;background:var(--panel-2);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--font-small);}
+.connectors-page .connector-error {color:var(--danger);}
+.connector-pending {display:grid;gap:16px;}.connector-pending article {display:grid;gap:8px;padding:12px;border:1px solid var(--border);border-radius:8px;min-width:0;}
+.connectors-page code,.connector-dialog code {overflow-wrap:anywhere;}
+.connector-dialog {width:min(800px,calc(100vw - 32px));max-height:90vh;overflow:auto;padding:24px;border:1px solid var(--border-strong);border-radius:14px;background:var(--panel);color:var(--text);box-shadow:var(--shadow);display:grid;gap:16px;}
+.connector-dialog>fieldset {display:grid;gap:10px;border:1px solid var(--border);border-radius:8px;padding:12px;min-width:0;}
+.connector-dialog .connector-check,.connectors-page .connector-check {display:flex;align-items:center;gap:10px;}
+.connector-dialog footer {display:flex;justify-content:flex-end;gap:10px;}
+@media(max-width:950px){.connectors-layout{grid-template-columns:minmax(0,1fr);}.connector-selection{grid-template-columns:repeat(2,minmax(0,1fr));}.connector-search{grid-column:1 / -1;}.connectors-page>.page-heading{flex-wrap:wrap;}}
+@media(max-width:650px){.connector-selection,.connector-capability-forms{grid-template-columns:minmax(0,1fr);}.connector-identity>div{grid-template-columns:minmax(0,1fr);gap:4px;}.connector-dialog{padding:16px;}}

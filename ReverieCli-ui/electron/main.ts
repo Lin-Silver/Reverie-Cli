@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { appendFile, copyFile, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
   findRepositoryCoreRoot,
@@ -123,7 +123,7 @@ function awaitDirectory(directory: string): void {
 function internalKernelPath(): string {
   return app.isPackaged
     ? packagedKernelPath(process.execPath)
-    : path.resolve(uiRoot, "..", "ReverieCli-rs", "target", "release", kernelExecutableName());
+    : path.resolve(uiRoot, "..", process.env.CARGO_TARGET_DIR || "ReverieCli-rs/target", "release", kernelExecutableName());
 }
 
 let activeKernelPath = internalKernelPath();
@@ -290,6 +290,7 @@ let bridge: CoreBridge | null = null;
 const terminals = new TerminalManager(message => mainWindow?.webContents.send("core:event", message));
 const journal = new RunJournal();
 const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string; assistantId?: 'aio' }>();
+const compactions = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; assistantId?: 'aio' }>();
 const workerPool = new WorkerPool<CoreBridge>(4, worker => worker.stop("Idle kernel released.", true));
 const approvalOwners = new Map<string, string>();
 const questionOwners = new Map<string, string>();
@@ -549,6 +550,26 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
     if (!samePath(ref.projectRoot, bridge.getProjectRoot())) throw new Error("View workspace is no longer selected.");
     payload.projectRoot = ref.projectRoot;
   }
+  if (action === "compactContext") {
+    const worker = bridge;
+    const root = path.resolve(String(payload.projectRoot || worker.getProjectRoot()));
+    const sessionId = String(payload.sessionId || "");
+    const assistantId = payload.assistantId === "aio" ? "aio" : undefined;
+    const runId = typeof payload.runId === "string" ? payload.runId : randomUUID();
+    if (!sessionId || !/^[A-Za-z0-9_-]{1,128}$/.test(runId)) throw new Error("Compacting requires a conversation and valid operation identity.");
+    if (compactions.has(runId) || coordinator.find(root, sessionId, assistantId) || [...compactions.values()].some(item => item.sessionId === sessionId && item.assistantId === assistantId && (assistantId === "aio" || samePath(item.root, root)))) throw new Error("A run is already active for this conversation.");
+    const operation = { worker, root, sessionId, runId, assistantId } as const;
+    compactions.set(runId, operation);
+    try {
+      return assertCoreResponse(action, await worker.request(action, { ...payload, projectRoot: root, sessionId, runId }, message => {
+        const event = message.event;
+        if (!event || typeof event !== "object" || Array.isArray(event)) return;
+        mainWindow?.webContents.send("core:event", { ...message, event: { ...event, assistant_id: assistantId } });
+      }));
+    } finally {
+      if (compactions.get(runId) === operation) compactions.delete(runId);
+    }
+  }
   if (["runPrompt", "resumePrompt", "callViewTool"].includes(action)) {
     const admin = bridge; const root = attachmentRoot(String(payload.projectRoot || admin.getProjectRoot())); const sessionId = String(payload.sessionId || "");
     const viewCall = action === "callViewTool";
@@ -652,6 +673,15 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
   }
   if (["stopPrompt", "steerPrompt", "pausePrompt", "continuePrompt"].includes(action)) {
     const root = path.resolve(String(payload.projectRoot || bridge.getProjectRoot())); const sessionId = String(payload.sessionId || "");
+    if (action === "stopPrompt" && typeof payload.runId === "string") {
+      const operation = compactions.get(payload.runId);
+      if (operation) {
+        if (operation.sessionId !== sessionId || !samePath(operation.root, root) || operation.assistantId !== (payload.assistantId === "aio" ? "aio" : undefined)) throw new Error("Compaction belongs to a different project or conversation.");
+        return assertCoreResponse(action, await operation.worker.request(action, { ...payload, projectRoot: operation.root, sessionId: operation.sessionId, runId: operation.runId }));
+      }
+      const selected = coordinator.find(root, sessionId, payload.assistantId === "aio" ? "aio" : undefined);
+      if (!selected || executors.get(selected.id)?.runId !== payload.runId) throw new Error("The selected run is no longer active.");
+    }
     if (action === "stopPrompt" && coordinator.cancelQueued(root, sessionId,payload.assistantId==='aio'?'aio':undefined)) return { type: "run.control", state: "cancelled", run_id: "" };
     const entry = coordinator.find(root, sessionId,payload.assistantId==='aio'?'aio':undefined); const executor = entry ? executors.get(entry.id) : undefined;
     if (entry && !executor && action === "stopPrompt") { stopBeforeStart.add(entry.id); return { type:"run.control",state:"stopping",run_id:"" }; }

@@ -139,11 +139,14 @@ try {
   assert.equal(fs.readFileSync(path.join(project, 'created.txt'), 'utf8'), source);
   passed('Actual atomic workspace file creation');
   const contextReadOnly = await create('explicit context on demand', {auto_index: false, security: {permission_level: 'read_only', permission_mode: 'strict', strict_allow_read_only: true}});
-  result = await run(contextReadOnly, `CONTEXT:${JSON.stringify({query_type:'file',query:'./evidence.txt'})}`, 'context-read-only', {noIndex:true});
-  assert.equal(result.result.success,true);assert.equal(result.events.some(reply=>reply.event.type==='approval.request'),false);
+  const contextTask = run(contextReadOnly, `CONTEXT:${JSON.stringify({query_type:'file',query:'./evidence.txt'})}`, 'context-read-only', {noIndex:true});
+  const contextApproval = await waitEvent('context-read-only', 'approval.request');
+  await request('resolveApproval',{approvalId:contextApproval.approval_id,decision:'once'},'approval.resolved');
+  result = await contextTask;
+  assert.equal(result.result.success,true);assert.equal(result.events.some(reply=>reply.event.type==='approval.request'),true);
   const evidence = JSON.parse(result.result.output_text.slice('完成\n'.length));
   assert.equal(evidence.evidence[0].content,'unique_first_project_evidence');assert.equal(evidence.evidence[0].content_hash.length,64);
-  passed('Explicit native codebase retrieval indexes on demand under read-only permission without an approval');
+  passed('Explicit native codebase retrieval indexes on demand after explicit strict approval under read-only permission');
   const readOnly = await create('read-only', {security: {permission_level: 'read_only', permission_mode: 'default'}});
   result = await run(readOnly, 'WRITE:denied.txt', 'deny-1');
   assert.match(result.result.output_text, /^拒绝/);
@@ -212,6 +215,9 @@ try {
   const pendingContext = held.get('HOLD:CONTEXT');
   event(pendingContext.response,{choices:[{delta:{tool_calls:[{index:0,id:`context-call-${++toolSequence}`,type:'function',function:{name:'codebase-retrieval',arguments:JSON.stringify({query_type:'file',query:'evidence.txt'})}}]},finish_reason:'tool_calls'}]});
   pendingContext.response.end('data: [DONE]\n\n');
+  const heldApproval=await waitEvent('held-context','approval.request');
+  assert.equal(heldApproval.execution_root,executionProject);
+  await request('resolveApproval',{approvalId:heldApproval.approval_id,runId:'held-context',decision:'once'},'approval.resolved');
   result = await running;
   assert.equal(result.result.success,true);assert(result.result.output_text.includes('unique_execution_project_evidence'));
   assert(!result.result.output_text.includes('unique_second_project_evidence'));assert(!result.result.output_text.includes('unique_first_project_evidence'));

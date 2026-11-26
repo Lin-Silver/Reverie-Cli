@@ -1,12 +1,12 @@
 use crate::{
-    Kernel, Result, models,
+    Kernel, Result, models, modes,
     provider::{ProviderClient, ToolCall},
 };
 use reverie_platform::ToolResult;
 use reverie_protocol::{PromptResult, Reply, Request};
 use serde_json::{Map, Value, json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
     time::Instant,
@@ -15,8 +15,19 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+mod extensions;
+pub use extensions::PendingExtension;
+mod catalog;
+pub use catalog::{tool_catalog, tool_catalog_for};
+mod aio;
+pub use aio::PendingAioDecision;
+mod approval;
+mod context;
+mod pending;
+pub use context::PendingCompaction;
+pub(crate) use context::usage as describe_context_usage;
+
 pub type EventSink = Arc<dyn Fn(Value) + Send + Sync>;
-type SessionGrants = Arc<Mutex<HashSet<String>>>;
 
 fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
     value
@@ -30,11 +41,21 @@ struct Waiter {
 
 pub struct RunControl {
     pub cancel: CancellationToken,
+    commit_gate: Mutex<()>,
     pub session_id: String,
     pub project_root: PathBuf,
+    assistant: bool,
     approvals: Mutex<HashMap<String, Waiter>>,
+    approval_ready: tokio::sync::Notify,
     questions: Mutex<HashMap<String, Waiter>>,
-    approved: SessionGrants,
+}
+
+impl RunControl {
+    fn request_cancel(&self) -> Result<()> {
+        let _commit = lock(&self.commit_gate)?;
+        self.cancel.cancel();
+        Ok(())
+    }
 }
 
 struct Run {
@@ -44,6 +65,8 @@ struct Run {
     root: PathBuf,
     execution_root: PathBuf,
     data: PathBuf,
+    grants: Mutex<Option<crate::permissions::Grants>>,
+    app: PathBuf,
     model: Value,
     config: Value,
     messages: Vec<Value>,
@@ -51,16 +74,35 @@ struct Run {
     no_index: bool,
     history_count: usize,
     rules: String,
-    store: Mutex<crate::session::SessionStore>,
+    store: Arc<Mutex<crate::session::SessionStore>>,
     context: Option<Arc<Mutex<reverie_context::ContextEngine>>>,
     context_key: PathBuf,
     monitor_configuration: PathBuf,
     skills: Mutex<Arc<crate::skills::SkillCatalog>>,
     pinned_skills: Vec<String>,
+    writer_project: Mutex<Option<Value>>,
+    wstyle_snapshot: Mutex<Value>,
+    assistant: bool,
+    plugins: Vec<Arc<crate::plugins::PluginLease>>,
+    mcp_servers: Vec<crate::mcp::ServerConfig>,
+    mcp_diagnostics: Vec<Value>,
+    mcp: Mutex<Option<Arc<crate::mcp::McpSnapshot>>>,
     semantic: Option<Arc<crate::semantic_resources::ModelVersion>>,
     semantic_error: Option<String>,
     reasoning: String,
     activities: Vec<Value>,
+}
+
+impl Run {
+    fn command_cwd(&self, args: &Value) -> PathBuf {
+        let cwd = std::path::Path::new(args["cwd"].as_str().unwrap_or("."));
+        let relative = if self.root != self.execution_root {
+            cwd.strip_prefix(&self.root).unwrap_or(cwd)
+        } else {
+            cwd
+        };
+        self.execution_root.join(relative)
+    }
 }
 
 pub struct PendingRun {
@@ -72,8 +114,12 @@ pub struct KernelHost {
     pub(crate) kernel: Mutex<Kernel>,
     active: Mutex<HashMap<String, Arc<RunControl>>>,
     clients: Mutex<HashMap<String, Arc<ProviderClient>>>,
-    grants: Mutex<HashMap<(PathBuf, String), SessionGrants>>,
     market_jobs: Mutex<HashMap<String, CancellationToken>>,
+    plugin_jobs: Mutex<HashMap<String, CancellationToken>>,
+    mcp: Arc<crate::mcp::McpRuntime>,
+    connectors: Mutex<Option<Arc<crate::connectors::ConnectorManager>>>,
+    aio: Mutex<Option<modes::aio::AioStore>>,
+    aio_last_decision: Mutex<Option<Instant>>,
     pub(crate) context_jobs: Mutex<HashMap<String, Arc<crate::context_jobs::ContextControl>>>,
     pub(crate) context_cancel: CancellationToken,
 }
@@ -84,8 +130,12 @@ impl KernelHost {
             kernel: Mutex::new(kernel),
             active: Mutex::new(HashMap::new()),
             clients: Mutex::new(HashMap::new()),
-            grants: Mutex::new(HashMap::new()),
             market_jobs: Mutex::new(HashMap::new()),
+            plugin_jobs: Mutex::new(HashMap::new()),
+            mcp: Arc::new(crate::mcp::McpRuntime::new()),
+            connectors: Mutex::new(None),
+            aio: Mutex::new(None),
+            aio_last_decision: Mutex::new(None),
             context_jobs: Mutex::new(HashMap::new()),
             context_cancel: CancellationToken::new(),
         }
@@ -93,9 +143,15 @@ impl KernelHost {
 
     pub fn cancel_all(&self) {
         self.context_cancel.cancel();
+        self.mcp.cancel_all();
+        if let Ok(connectors) = self.connectors.lock()
+            && let Some(connectors) = connectors.as_ref()
+        {
+            connectors.cancel_all();
+        }
         if let Ok(active) = self.active.lock() {
             for control in active.values() {
-                control.cancel.cancel();
+                let _ = control.request_cancel();
             }
         }
         if let Ok(jobs) = self.context_jobs.lock() {
@@ -110,9 +166,17 @@ impl KernelHost {
     }
 
     pub async fn dispatch(&self, request: Request, sink: EventSink) -> Reply {
+        if Self::is_extension_async_action(&request.action) {
+            return match self.begin_plugin_operation(&request.action, &request.payload) {
+                Ok(pending) => {
+                    Box::pin(self.complete_plugin_operation(request.id, pending, sink)).await
+                }
+                Err(error) => Reply::error(request.id, error),
+            };
+        }
         if Self::is_context_action(&request.action) {
             return match self.begin_context_job(&request.action, &request.payload) {
-                Ok(job) => self.complete_context_job(request.id, job, sink).await,
+                Ok(job) => Box::pin(self.complete_context_job(request.id, job, sink)).await,
                 Err(error) => Reply::error(request.id, error),
             };
         }
@@ -133,10 +197,35 @@ impl KernelHost {
                 job.cancel();
                 Ok(("market.control", json!({"market_id":name,"cancelled":true})))
             })(),
+            "stopPluginOperation" => self.stop_plugin_operation(&request.payload),
+            "cancelConnectorAuthorization" => (|| -> Result<_> {
+                let id = request.payload["authorization_id"]
+                    .as_str()
+                    .ok_or("authorization_id is required.")?;
+                self.connector_manager()?.cancel_authorization(id)?;
+                Ok((
+                    "connector.control",
+                    json!({"authorization_id":id,"cancelled":true}),
+                ))
+            })(),
+            "shutdown" => {
+                self.close_extensions().await;
+                return lock(&self.kernel)
+                    .map(|mut kernel| kernel.dispatch(request))
+                    .unwrap_or_else(|error| Reply::error(id, error));
+            }
             "getSemanticResources" => self.semantic_inventory(),
             "stopContextOperation" => self.stop_context_job(&request.payload),
             "runPrompt" => match self.begin_prompt(&request.payload) {
-                Ok(pending) => return self.complete_prompt(id, pending, sink).await,
+                Ok(pending) => return Box::pin(self.complete_prompt(id, pending, sink)).await,
+                Err(error) => return Reply::error(id, error),
+            },
+            "resumePrompt" => match self.begin_resume(&request.payload) {
+                Ok(pending) => return Box::pin(self.complete_prompt(id, pending, sink)).await,
+                Err(error) => return Reply::error(id, error),
+            },
+            "compactContext" => match self.begin_compaction(&request.payload) {
+                Ok(pending) => return Box::pin(self.complete_compaction(id, pending, sink)).await,
                 Err(error) => return Reply::error(id, error),
             },
             "stopPrompt" => self.stop(&request.payload),
@@ -161,10 +250,20 @@ impl KernelHost {
                 })();
                 recovered.map(|value| ("conversation.runs", value))
             }
-            "listTools" => Ok((
-                "tools",
-                json!({"mode":"reverie","tools":tool_catalog().into_iter().map(|tool|json!({"name":tool["function"]["name"],"description":tool["function"]["description"],"parameters":tool["function"]["parameters"],"kind":"built-in","category":if tool["function"]["name"]=="userInput"{"interaction"}else{"files"},"aliases":[],"tags":[],"traits":[],"supported_modes":["reverie"],"required":tool["function"]["parameters"]["required"],"properties":tool["function"]["parameters"]["properties"].as_object().map(|properties|properties.keys().collect::<Vec<_>>()).unwrap_or_default()})).collect::<Vec<_>>()}),
-            )),
+            "wstyleCommand" => match Box::pin(self.wstyle_command(&request.payload, sink)).await {
+                Ok(result) => Ok(("wstyle.result", result)),
+                Err(error) => Ok((
+                    "wstyle.result",
+                    json!({"success":false,"output":"","error":error.to_string(),"data":{},"session_id":request.payload["sessionId"].as_str().unwrap_or("")}),
+                )),
+            },
+            "aioDecision" => match self.begin_aio_decision(&request.payload) {
+                Ok(pending) => {
+                    return Box::pin(self.complete_aio_decision(request.id, pending, sink)).await;
+                }
+                Err(error) => return Reply::error(request.id, error),
+            },
+            action if Self::is_aio_action(action) => self.aio_action(action, &request.payload),
             _ => match lock(&self.kernel) {
                 Ok(mut kernel) => {
                     let action = request.action.clone();
@@ -281,7 +380,7 @@ impl KernelHost {
                     .as_ref()
                     .is_none_or(|project| project == &control.project_root)
             {
-                control.cancel.cancel();
+                control.request_cancel()?;
                 return Ok((
                     "run.control",
                     json!({"state":"stopping","run_id":id,"session_id":control.session_id,"project_root":control.project_root}),
@@ -305,10 +404,9 @@ impl KernelHost {
                 return Err("Explicit user answer is required.".into());
             }
         } else {
-            if !payload["decision"]
-                .as_str()
-                .is_some_and(|decision| ["once", "session", "deny", "message"].contains(&decision))
-            {
+            if !payload["decision"].as_str().is_some_and(|decision| {
+                ["once", "session", "project", "global", "deny", "message"].contains(&decision)
+            }) {
                 return Err("Invalid approval decision.".into());
             }
             if payload["decision"] == "message"
@@ -348,6 +446,9 @@ impl KernelHost {
                     .sender
                     .send(payload.clone())
                     .map_err(|_| "Decision request is no longer active.")?;
+                if !question {
+                    control.approval_ready.notify_one();
+                }
                 return Ok((
                     if question {
                         "user.resolved"
@@ -361,7 +462,214 @@ impl KernelHost {
         Err("Decision identity is unknown or no longer pending.".into())
     }
 
-    fn prepare(&self, payload: &Value, id: String) -> Result<Run> {
+    pub fn is_mode_async_action(action: &str) -> bool {
+        matches!(action, "wstyleCommand" | "aioDecision")
+    }
+
+    async fn text_model(
+        &self,
+        model: &Value,
+        configuration: &Value,
+        messages: &[Value],
+        cancel: &CancellationToken,
+        emit: &impl Fn(Value),
+    ) -> Result<String> {
+        let proxy = configuration["api_proxy"].as_str().unwrap_or("").to_owned();
+        let client = {
+            let mut clients = lock(&self.clients)?;
+            if !clients.contains_key(&proxy) {
+                clients.insert(proxy.clone(), Arc::new(ProviderClient::new(Some(&proxy))?));
+            }
+            clients[&proxy].clone()
+        };
+        let mut configuration = configuration.clone();
+        configuration["stream_responses"] = json!(false);
+        let result = client
+            .chat(model, &configuration, messages, &[], cancel, emit)
+            .await?;
+        if !result.tool_calls.is_empty() {
+            return Err(
+                "This model decision/review has no execution tools; no calls were dispatched."
+                    .into(),
+            );
+        }
+        Ok(result.content)
+    }
+
+    async fn wstyle_command(&self, payload: &Value, sink: EventSink) -> Result<Value> {
+        let (app, root, session, offline_configuration, defaults, snapshot, mut selected) = {
+            let active = lock(&self.active)?;
+            let mut kernel = lock(&self.kernel)?;
+            if let Some(root) = payload["projectRoot"].as_str() {
+                kernel.configure_project(root)?;
+            }
+            let session = payload["sessionId"]
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| kernel.view_session.clone())
+                .unwrap_or_default();
+            if active.values().any(|control| {
+                control.project_root == kernel.project_root
+                    && (session.is_empty() || control.session_id == session)
+            }) {
+                return Err(
+                    "Stop the active conversation run before executing a WStyle command.".into(),
+                );
+            }
+            let defaults = kernel.config.effective()?;
+            let page = if session.is_empty() {
+                None
+            } else {
+                Some(kernel.session_store()?.page(&session, None, 1)?)
+            };
+            let snapshot = page
+                .as_ref()
+                .and_then(|page| page.metadata.get("runtime_config"))
+                .cloned();
+            let mut configuration = defaults.clone();
+            if let Some(snapshot) = &snapshot {
+                for key in ["mode", "max_context_tokens"] {
+                    if let Some(value) = snapshot["settings"].get(key) {
+                        configuration[key] = value.clone();
+                    }
+                }
+            }
+            if modes::normalize(configuration["mode"].as_str().unwrap_or("reverie"))? != "writer" {
+                return Err("/wstyle is available only in Writer mode.".into());
+            }
+            let selected = page
+                .as_ref()
+                .and_then(|page| page.metadata.get("writer_project"))
+                .cloned()
+                .or(modes::infer_writer_binding(&kernel.project_root)?);
+            (
+                kernel.app_root.clone(),
+                kernel.project_root.clone(),
+                session,
+                configuration,
+                defaults,
+                snapshot,
+                selected,
+            )
+        };
+        let command = modes::wstyle::command(payload["args"].as_str().unwrap_or(""))?;
+        modes::wstyle::select_binding(&root, &mut selected, &command)?;
+        let result = if let Some(result) = modes::wstyle::offline(
+            &app,
+            &root,
+            &offline_configuration,
+            selected.as_ref(),
+            &command,
+        )? {
+            result
+        } else {
+            let configuration = if let Some(snapshot) = snapshot {
+                models::resolve(&defaults, &snapshot)?
+            } else {
+                defaults
+            };
+            let mut model = models::active(&configuration)
+                .cloned()
+                .ok_or("Select an available model before WStyle review/extraction.")?;
+            let request =
+                modes::wstyle::model_request(&app, &root, &configuration, &mut selected, &command)?;
+            let budget = model["max_output_tokens"]
+                .as_u64()
+                .or_else(|| model["max_tokens"].as_u64())
+                .unwrap_or(request.max_tokens)
+                .min(request.max_tokens);
+            model["max_output_tokens"] = json!(budget);
+            model["max_tokens"] = json!(budget);
+            let id = format!("wstyle-{}", Uuid::new_v4().simple());
+            let control = Arc::new(RunControl {
+                cancel: self.context_cancel.child_token(),
+                commit_gate: Mutex::new(()),
+                session_id: session.clone(),
+                project_root: root.clone(),
+                assistant: false,
+                approval_ready: Default::default(),
+                approvals: Mutex::new(HashMap::new()),
+                questions: Mutex::new(HashMap::new()),
+            });
+            {
+                let mut active = lock(&self.active)?;
+                if active.values().any(|control| {
+                    control.project_root == root
+                        && (session.is_empty() || control.session_id == session)
+                }) {
+                    return Err(
+                        "Stop the active conversation run before executing a WStyle command."
+                            .into(),
+                    );
+                }
+                active.insert(id.clone(), control.clone());
+            }
+            let emit = |mut event: Value| {
+                event["project_root"] = json!(root);
+                event["session_id"] = json!(session);
+                event["run_id"] = json!(id);
+                sink(event);
+            };
+            emit(
+                json!({"type":"wstyle.started","action":command.action,"diagnostics_path":request.folder}),
+            );
+            let messages = vec![
+                json!({"role":"system","content":request.system}),
+                json!({"role":"user","content":serde_json::to_string(&request.user)?}),
+            ];
+            let execution = self
+                .text_model(&model, &configuration, &messages, &control.cancel, &emit)
+                .await;
+            lock(&self.active)?.remove(&id);
+            let result = match execution {
+                Ok(raw) if !control.cancel.is_cancelled() => {
+                    modes::wstyle::model_result(&request, &raw, &model)
+                }
+                Ok(_) => Err(
+                    "WStyle operation was cancelled; source and diagnostics were preserved.".into(),
+                ),
+                Err(error) => Err(error),
+            };
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    modes::wstyle::failure(&request, &error.to_string())?;
+                    return Err(format!(
+                        "WStyle failed: {error}. Sources and diagnostics: {}",
+                        request.folder.display()
+                    )
+                    .into());
+                }
+            };
+            emit(json!({"type":"wstyle.finished","action":command.action,"success":true}));
+            result
+        };
+        if !session.is_empty()
+            && let Some(binding) = selected
+        {
+            let mut kernel = lock(&self.kernel)?;
+            kernel.configure_project(root.to_str().ok_or("Project root is not UTF-8.")?)?;
+            let store = kernel.session_store()?;
+            let page = store.page(&session, None, 1)?;
+            if page.metadata.get("writer_project") != Some(&binding) {
+                store.update_metadata(
+                    &session,
+                    Map::from_iter([("writer_project".into(), binding)]),
+                    page.revision,
+                )?;
+            }
+        }
+        Ok(
+            json!({"success":result["success"],"output":result["output"],"error":"","data":result["data"],"session_id":session}),
+        )
+    }
+
+    fn prepare(
+        &self,
+        payload: &Value,
+        id: String,
+        resumed: Option<&context::ResumedUser>,
+    ) -> Result<Run> {
         let prompt = payload["prompt"]
             .as_str()
             .or_else(|| payload["message"].as_str())
@@ -369,6 +677,7 @@ impl KernelHost {
             .ok_or("Prompt must contain text.")?
             .to_owned();
         let mut kernel = lock(&self.kernel)?;
+        kernel.configure_assistant(payload)?;
         if let Some(root) = payload["projectRoot"].as_str() {
             kernel.configure_project(root)?;
         }
@@ -399,7 +708,7 @@ impl KernelHost {
                 )?
                 .id
         };
-        let page = kernel.session_store()?.page(&session, None, 1)?;
+        let mut page = kernel.session_store()?.page(&session, None, 1)?;
         let snapshot = payload
             .get("configuration")
             .cloned()
@@ -412,9 +721,8 @@ impl KernelHost {
         if let Some(stream) = payload["stream"].as_bool() {
             config["stream_responses"] = json!(stream);
         }
-        if config["mode"].as_str().unwrap_or("reverie") != "reverie" {
-            return Err("This mode's full workflow has not yet been migrated.".into());
-        }
+        let mode = modes::normalize(config["mode"].as_str().unwrap_or("reverie"))?;
+        config["mode"] = json!(mode);
         let model = models::active(&config)
             .ok_or("Select a configured model before running a prompt.")?
             .clone();
@@ -423,6 +731,7 @@ impl KernelHost {
             Some(root) => crate::config::canonical_project(std::path::Path::new(root))?,
             None => root.clone(),
         };
+        let mode_guidance = modes::guidance(mode, &execution_root, &config)?;
         let pinned_skills = kernel.pinned_skills(Some(&session))?;
         if pinned_skills.len() > crate::skills::MAX_PINNED {
             return Err("A conversation can pin at most four skills.".into());
@@ -432,8 +741,41 @@ impl KernelHost {
             config["mode"].as_str().unwrap_or("reverie"),
             true,
         )?;
-        let data = kernel.project_data_dir.clone();
-        let mut store = crate::session::SessionStore::open(&data, &root)?;
+        let assistant = kernel.assistant_mode;
+        let data = if assistant {
+            modes::aio::data_directory(&kernel.app_root)
+        } else {
+            kernel.project_data_dir.clone()
+        };
+        let mut store = if assistant {
+            crate::session::SessionStore::open_assistant(&data)?
+        } else {
+            crate::session::SessionStore::open(&data, &root)?
+        };
+        let writer_project = if mode == "writer" {
+            page.metadata
+                .get("writer_project")
+                .cloned()
+                .or(modes::infer_writer_binding(&execution_root)?)
+        } else {
+            None
+        };
+        let mut resumed_source = resumed.map(|saved| saved.source.clone());
+        if mode == "writer"
+            && let Some(binding) = writer_project.as_ref()
+            && page.metadata.get("writer_project") != Some(binding)
+        {
+            if let Some(source) = resumed_source.as_ref() {
+                resumed_source = Some(store.bind_resumed_writer(source, binding)?.source);
+            } else {
+                store.update_metadata(
+                    &session,
+                    Map::from_iter([("writer_project".into(), binding.clone())]),
+                    page.revision,
+                )?;
+            }
+            page = store.page(&session, None, 1)?;
+        }
         let mut messages = store.history(&session)?;
         let history_count = messages.len();
         let no_index = payload["noIndex"].as_bool().unwrap_or(false);
@@ -447,16 +789,35 @@ impl KernelHost {
             Ok(version) => (version, None),
             Err(error) => (None, Some(error.to_string())),
         };
-        let user = json!({"role":"user","content":prompt});
-        store.begin_run(
-            &session,
-            &id,
-            &models::without_secrets(&snapshot),
-            page.revision,
-            &models::without_secrets(payload),
-            &user,
-        )?;
-        messages.push(user);
+        let user = resumed
+            .map(|saved| saved.message.clone())
+            .unwrap_or_else(|| json!({"role":"user","content":prompt}));
+        let mut saved_request = models::without_secrets(payload);
+        saved_request["executionRoot"] = json!(execution_root);
+        let plugins = skills.plugin_leases();
+        let mcp_configuration = extensions::mcp_configuration(&kernel.app_root, &config, &plugins)?;
+        if let Some(saved) = resumed {
+            store.begin_resumed_run(
+                resumed_source.as_ref().unwrap(),
+                saved.sequence,
+                &id,
+                &models::without_secrets(&snapshot),
+                &saved_request,
+                &user,
+            )?;
+        } else {
+            store.begin_run(
+                &session,
+                &id,
+                &models::without_secrets(&snapshot),
+                page.revision,
+                &saved_request,
+                &user,
+            )?;
+        }
+        if resumed.is_none() && payload["promptAlreadySaved"] != true {
+            messages.push(user);
+        }
         Ok(Run {
             session,
             session_name: page.name,
@@ -464,6 +825,8 @@ impl KernelHost {
             root,
             execution_root,
             data,
+            app: kernel.app_root.clone(),
+            grants: Mutex::new(None),
             model,
             config,
             messages,
@@ -473,17 +836,25 @@ impl KernelHost {
             rules: [
                 snapshot["rules"].as_str().unwrap_or_default(),
                 payload["goalContext"].as_str().unwrap_or_default(),
+                mode_guidance.as_str(),
             ]
             .into_iter()
             .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
             .join("\n\n"),
-            store: Mutex::new(store),
+            store: Arc::new(Mutex::new(store)),
             context,
             context_key,
             monitor_configuration: kernel.config.path.clone(),
             skills: Mutex::new(skills),
             pinned_skills,
+            writer_project: Mutex::new(writer_project),
+            wstyle_snapshot: Mutex::new(json!({"cards":[],"source":"base_writer"})),
+            assistant,
+            plugins,
+            mcp_servers: mcp_configuration.servers,
+            mcp_diagnostics: mcp_configuration.diagnostics,
+            mcp: Mutex::new(None),
             semantic,
             semantic_error,
             reasoning: String::new(),
@@ -492,6 +863,14 @@ impl KernelHost {
     }
 
     pub fn begin_prompt(&self, payload: &Value) -> Result<PendingRun> {
+        self.begin_prompt_kind(payload, false)
+    }
+
+    pub fn begin_resume(&self, payload: &Value) -> Result<PendingRun> {
+        self.begin_prompt_kind(payload, true)
+    }
+
+    fn begin_prompt_kind(&self, payload: &Value, resume: bool) -> Result<PendingRun> {
         let mut active = lock(&self.active)?;
         let id = payload["runId"]
             .as_str()
@@ -514,24 +893,33 @@ impl KernelHost {
             .transpose()?
             .unwrap_or(lock(&self.kernel)?.project_root.clone());
         if payload["sessionId"].as_str().is_some_and(|id| {
-            active
-                .values()
-                .any(|control| control.session_id == id && control.project_root == project)
+            active.values().any(|control| {
+                control.session_id == id
+                    && control.assistant == (payload["assistantId"] == "aio")
+                    && (control.assistant || control.project_root == project)
+            })
         }) {
             return Err("A run is already active for this conversation.".into());
         }
-        let run = self.prepare(payload, id)?;
-        let approved = lock(&self.grants)?
-            .entry((run.root.clone(), run.session.clone()))
-            .or_default()
-            .clone();
+        let resumed = if resume {
+            Some(self.resumed_user(payload)?)
+        } else {
+            None
+        };
+        let mut request = payload.clone();
+        if let Some(saved) = resumed.as_ref() {
+            request["prompt"] = saved.message["content"].clone();
+        }
+        let run = self.prepare(&request, id, resumed.as_ref())?;
         let control = Arc::new(RunControl {
             cancel: CancellationToken::new(),
+            commit_gate: Mutex::new(()),
             session_id: run.session.clone(),
             project_root: run.root.clone(),
+            assistant: run.assistant,
+            approval_ready: Default::default(),
             approvals: Mutex::new(HashMap::new()),
             questions: Mutex::new(HashMap::new()),
-            approved,
         });
         active.insert(run.id.clone(), control.clone());
         Ok(PendingRun { run, control })
@@ -560,7 +948,7 @@ impl KernelHost {
         emit(
             json!({"type":"run.started","prompt":run.prompt,"history_message_count":run.history_count}),
         );
-        let execution = self.execute(&mut run, &control, &sink).await;
+        let execution = Box::pin(self.execute(&mut run, &control, &sink)).await;
         let state = if execution.is_ok() {
             "completed"
         } else if control.cancel.is_cancelled() {
@@ -630,6 +1018,10 @@ impl KernelHost {
             clients[&proxy].clone()
         };
         let stream_error = Mutex::new(None::<String>);
+        let stream_store = run.store.clone();
+        let event_session = run.session.clone();
+        let event_run = run.id.clone();
+        let event_project = run.root.clone();
         let emit = |mut event: Value| {
             let kind = match event["type"].as_str() {
                 Some("assistant.delta") => Some("assistant"),
@@ -637,10 +1029,10 @@ impl KernelHost {
                 _ => None,
             };
             if let Some(kind) = kind {
-                let saved = lock(&run.store).and_then(|store| {
+                let saved = lock(&stream_store).and_then(|store| {
                     store.write_stream(
-                        &run.session,
-                        &run.id,
+                        &event_session,
+                        &event_run,
                         kind,
                         event["text"].as_str().unwrap_or_default(),
                     )
@@ -649,12 +1041,12 @@ impl KernelHost {
                     if let Ok(mut failure) = stream_error.lock() {
                         *failure = Some(error.to_string());
                     }
-                    control.cancel.cancel();
+                    let _ = control.request_cancel();
                 }
             }
-            event["project_root"] = json!(run.root);
-            event["session_id"] = json!(run.session);
-            event["run_id"] = json!(run.id);
+            event["project_root"] = json!(event_project);
+            event["session_id"] = json!(event_session);
+            event["run_id"] = json!(event_run);
             sink(event);
         };
         let (skill_guidance, loaded_skills) =
@@ -727,28 +1119,116 @@ impl KernelHost {
                 sink.clone(),
             )?;
         }
-        run.messages.insert(0,json!({"role":"system","content":format!("You are Reverie, an assistant working in {}. Execute workspace tools in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\n{}\nWorkspace evidence:{}",run.root.display(),run.execution_root.display(),run.rules,skill_guidance,context)}));
-        let catalog = tool_catalog();
-        for iteration in 0..64 {
+        let system = format!(
+            "You are Reverie, an assistant working in {}. Execute workspace tools in {}. Use the supplied workspace tools. Respect configured permissions, preserve files and report actual results. Ask a concise question with up to three options and a custom answer when required information is missing.\n{}\n{}\nWorkspace evidence:{}",
+            run.root.display(),
+            run.execution_root.display(),
+            run.rules,
+            skill_guidance,
+            context
+        );
+        run.messages
+            .insert(0, json!({"role":"system","content":system}));
+        let mut pending = VecDeque::new();
+        let outcome = async {
+        'iterations: for iteration in 0..64 {
             if control.cancel.is_cancelled() {
                 return Err("Run cancelled.".into());
             }
-            let turn = client
+            if run.config["mode"] == "writer" {
+                let selected = lock(&run.writer_project)?.clone();
+                let (style, snapshot) = modes::writer_style(
+                    &run.app,
+                    &run.execution_root,
+                    &run.config,
+                    selected.as_ref(),
+                )?;
+                *lock(&run.wstyle_snapshot)? = snapshot;
+                run.messages[0]["content"] = json!(format!("{system}\n{style}"));
+            }
+            if !pending.is_empty() {
+                let must_wait = iteration == 63 || crate::compaction::needs_compression(
+                    crate::compaction::count_messages(&run.messages).tokens, context::capacity(&run.config));
+                self.advance_approvals(run, control, &mut pending, must_wait, &emit).await?;
+            }
+            self.adjust_run_context(run, control, sink).await?;
+            let mut catalog = tool_catalog_for(run.config["mode"].as_str().unwrap_or("reverie"));
+            let auth = self
+                .mcp_authorization(&run.mcp_servers, &control.cancel)
+                .await?;
+            self.mcp
+                .retain_configurations(&run.execution_root, &run.mcp_servers)?;
+            let snapshot = Arc::new(
+                self.mcp
+                    .discover(
+                        &auth.servers,
+                        &run.execution_root,
+                        &auth.headers,
+                        Self::mcp_notify(&run.root, sink.clone()),
+                        &control.cancel,
+                    )
+                    .await?,
+            );
+            catalog.extend(
+                snapshot
+                    .tools
+                    .iter()
+                    .filter(|tool| {
+                        run.config["mode"] != "writer"
+                            || tool.metadata["annotations"]["readOnlyHint"] == true
+                    })
+                    .map(|tool| tool.definition.clone()),
+            );
+            if (iteration == 0 && (!snapshot.servers.is_empty() || !run.mcp_diagnostics.is_empty()))
+                || !auth.diagnostics.is_empty()
+            {
+                emit(
+                    json!({"type":"mcp.status","servers":snapshot.servers,"diagnostics":run.mcp_diagnostics,"authorization_diagnostics":auth.diagnostics}),
+                );
+            }
+            *lock(&run.mcp)? = Some(snapshot);
+            let awaiting = !pending.is_empty();
+            let model_event = |event: Value| {
+                if !awaiting || !matches!(event["type"].as_str(), Some("assistant.delta" | "reasoning.delta")) { emit(event); }
+            };
+            let turn = if awaiting {
+                let (model, config, messages)=(run.model.clone(),run.config.clone(),run.messages.clone());
+                let request=client.chat(&model,&config,&messages,&catalog,&control.cancel,&model_event);
+                tokio::pin!(request);
+                loop {tokio::select! {biased;
+                    _=control.approval_ready.notified(), if !pending.is_empty()=> {
+                        let before=pending.len();
+                        self.advance_approvals(run,control,&mut pending,false,&emit).await?;
+                        if before != pending.len() { continue 'iterations; }
+                    },
+                    response=&mut request=>break response,
+                }}
+            } else { client
                 .chat(
                     &run.model,
                     &run.config,
                     &run.messages,
                     &catalog,
                     &control.cancel,
-                    &emit,
+                    &model_event,
                 )
-                .await;
+                .await };
             if let Some(error) = lock(&stream_error)?.take() {
                 return Err(format!("Could not preserve streamed output: {error}").into());
             }
             let turn = turn?;
             if control.cancel.is_cancelled() {
                 return Err("Run cancelled.".into());
+            }
+            if awaiting && turn.tool_calls.is_empty() {
+                // The model has finished its independent work. Collect the actual tool
+                // results before asking for its final answer.
+                self.advance_approvals(run, control, &mut pending, true, &emit).await?;
+                continue;
+            }
+            let mut ids=std::collections::HashSet::new();
+            if turn.tool_calls.values().any(|c|c.id.is_empty() || !ids.insert(&c.id)) {
+                return Err("The model returned missing or duplicate tool call IDs.".into());
             }
             run.reasoning.push_str(&turn.reasoning);
             let calls=turn.tool_calls.values().map(|call|json!({"id":call.id,"type":"function","function":{"name":call.name,"arguments":call.arguments}})).collect::<Vec<_>>();
@@ -775,52 +1255,66 @@ impl KernelHost {
             if turn.tool_calls.is_empty() {
                 return Ok(turn.content);
             }
-            for (index, call) in turn.tool_calls {
-                let mut result = if control.cancel.is_cancelled() {
-                    ToolResult::not_started("Run cancelled before this tool started.")
-                } else {
-                    match serde_json::from_str::<Value>(&call.arguments) {
-                        Ok(arguments) => {
-                            emit(
-                                json!({"type":"ui.event","event":{"event":"tool_start","type":"tool_start","tool_name":call.name,"tool_call_id":call.id,"arguments":arguments}}),
-                            );
-                            match self.tool(run, control, &call, &arguments, &emit).await {
-                                Ok(result) => result,
-                                Err(error) if control.cancel.is_cancelled() => {
-                                    ToolResult::not_started(error)
-                                }
-                                Err(error) => ToolResult::fail(error),
-                            }
-                        }
-                        Err(_) => ToolResult::fail("Tool arguments must be valid JSON."),
-                    }
-                };
-                if reverie_platform::command::is_command(&call.name)
-                    && result.data["delivery"].is_null()
-                {
-                    result.data["delivery"] = json!("not_started");
-                    let arguments =
-                        serde_json::from_str::<Value>(&call.arguments).unwrap_or(Value::Null);
-                    if let Err(error) = reverie_platform::command::audit(
-                        &run.data,
-                        json!({"event":"command_blocked","allowed":false,"command":arguments["command"],"cwd":arguments["cwd"],"run_id":run.id,"session_id":run.session,"reason":result.error,"delivery":"not_started"}),
-                    ) {
-                        result.data["audit_error"] = json!(error.to_string());
-                    }
-                }
-                let activity = json!({"event":"tool_result","type":"tool_result","tool_name":call.name,"tool_call_id":call.id,"success":result.success,"output":result.output,"error":result.error,"status":result.status,"data":result.data});
+            let review = self
+                .review_tools(run, control, &turn.tool_calls, &client)
+                .await?;
+            if let Some(outcome) = review.as_ref() {
+                let activity = json!({"event":"permission_review","type":"permission_review","review":outcome});
                 emit(json!({"type":"ui.event","event":activity}));
                 run.activities.push(activity);
-                let tool = json!({"role":"tool","tool_call_id":call.id,"name":call.name,"content":serde_json::to_string(&result)?});
+            }
+            for (index, call) in turn.tool_calls {
+                let ready = if call.name == "userInput" && !pending.is_empty() {
+                    self.advance_approvals(run,control,&mut pending,true,&emit).await
+                } else { Ok(()) };
+                let event_id = format!("{}:tool:{iteration}:{index}", run.id);
+                let result = match ready.and_then(|()| serde_json::from_str::<Value>(&call.arguments).map_err(|_|"Tool arguments must be valid JSON.".into())) {
+                    Ok(args) => {
+                        emit(json!({"type":"ui.event","event":{"event":"tool_start","type":"tool_start","tool_name":call.name,"tool_call_id":call.id,"arguments":args}}));
+                        self.start_tool(run,control,&call,&args,review.as_ref(),&mut pending,&emit).await
+                    }
+                    Err(error) => Err(error),
+                };
+                let mut result=result;
+                if let Ok(provisional)=&mut result && provisional.status=="pending_approval" {
+                    provisional.data["approval_event"]=json!(event_id);
+                }
+                let (tool, activity) = Self::tool_message(run, control, &call, result)?;
+                if let Some(last) = pending.back_mut().filter(|p| p.event_id.is_empty()) {
+                    last.event_id = event_id.clone();
+                    last.message = tool.clone();
+                }
                 lock(&run.store)?.append(
                     &run.session,
-                    &format!("{}:tool:{iteration}:{index}", run.id),
+                    &event_id,
                     std::slice::from_ref(&tool),
                 )?;
                 run.messages.push(tool);
+                run.tool_activity(activity,&emit);
             }
         }
         Err("Run reached the supported tool-iteration limit without a final response.".into())
+        }.await;
+        if outcome.is_err() {
+            for waiting in pending {
+                lock(&control.approvals)?.remove(&waiting.approval_id());
+                if !waiting.message.is_null() {
+                    let result = ToolResult::not_started(
+                        "Run ended before the pending approval could be executed.",
+                    );
+                    let (message, activity) =
+                        Self::tool_message(run, control, waiting.call(), Ok(result))?;
+                    lock(&run.store)?.resolve_pending_tool(
+                        &run.session,
+                        &waiting.event_id,
+                        &waiting.message,
+                        &message,
+                    )?;
+                    run.tool_activity(activity, &emit);
+                }
+            }
+        }
+        outcome
     }
 
     async fn tool(
@@ -831,6 +1325,9 @@ impl KernelHost {
         args: &Value,
         emit: &impl Fn(Value),
     ) -> Result<ToolResult> {
+        if control.cancel.is_cancelled() {
+            return Err("Run cancelled before tool execution.".into());
+        }
         if !args.is_object() {
             return Err("Tool arguments must be an object.".into());
         }
@@ -881,68 +1378,130 @@ impl KernelHost {
                 .to_owned();
             return Ok(ToolResult::ok(response, answer));
         }
-        let read_only = reverie_platform::is_read_only(&call.name, args);
-        let level = run.config["security"]["permission_level"]
-            .as_str()
-            .unwrap_or("full_control");
-        if level == "read_only" && !read_only {
-            return Err("Configured permission level does not allow this write tool.".into());
-        }
-        if !["read_only", "workspace_write", "developer", "full_control"].contains(&level) {
-            return Err("Invalid configured permission level.".into());
-        }
-        let mode = run.config["security"]["permission_mode"]
-            .as_str()
-            .unwrap_or("default");
-        if mode == "auto_check" {
-            return Err("Automatic model approval review has not yet been migrated.".into());
-        }
-        if mode == "strict"
-            && !(read_only && run.config["security"]["strict_allow_read_only"] == true)
-            && !lock(&control.approved)?.contains(&call.name)
-        {
-            let id = Uuid::new_v4().simple().to_string();
-            let (sender, receiver) = oneshot::channel();
-            lock(&control.approvals)?.insert(id.clone(), Waiter { sender });
-            lock(&run.store)?.set_running_state(&run.session, &run.id, "waiting_user")?;
-            emit(
-                json!({"type":"approval.request","approval_id":id,"tool":call.name,"arguments":args,"read_only":read_only,"permission_mode":mode,"scopes":["once","session"],"paths":[args["path"]]}),
-            );
-            let answer = tokio::select! {_=control.cancel.cancelled()=>Err("Run cancelled while waiting for approval."),answer=receiver=>answer.map_err(|_|"Approval is no longer active.")};
-            lock(&control.approvals)?.remove(&id);
-            let answer = answer?;
-            lock(&run.store)?.set_running_state(&run.session, &run.id, "running")?;
-            emit(json!({"type":"run.control","state":"running"}));
-            match answer["decision"].as_str() {
-                Some("once") => {}
-                Some("session") => {
-                    lock(&control.approved)?.insert(call.name.clone());
-                }
-                Some("message") => {
-                    return Err(format!(
-                        "The user declined this {} call and replied: {}",
-                        call.name,
-                        answer["message"].as_str().unwrap_or_default()
-                    )
-                    .into());
-                }
-                _ => return Err("User denied the tool request.".into()),
-            }
-        } else if mode != "default" && mode != "strict" {
-            return Err("Invalid configured permission mode.".into());
-        }
+        let mcp_snapshot = { lock(&run.mcp)?.clone() };
+        let mcp_tool = mcp_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.prepare_tool(&call.name).ok());
+        let mcp_read = matches!(
+            call.name.as_str(),
+            "mcp-catalog" | "mcp-resources-read" | "mcp-prompts-get"
+        );
+        let mode_tool = modes::is_read_only(&call.name, args);
+        let mode_name = run.config["mode"].as_str().unwrap_or("reverie");
         if control.cancel.is_cancelled() {
             return Err("Run cancelled before tool execution.".into());
+        }
+        if let Some(lease) = mcp_tool {
+            let headers = self
+                .connector_manager()?
+                .headers(lease.configuration(), &control.cancel)
+                .await?;
+            return Ok(lease
+                .call_approved(args.clone(), &headers, &control.cancel)
+                .await);
+        }
+        if mcp_read {
+            let snapshot = mcp_snapshot.ok_or("MCP discovery is not available in this task.")?;
+            if call.name == "mcp-catalog" {
+                let result = catalog::mcp_catalog(&snapshot, args)?;
+                return Ok(ToolResult::ok(
+                    serde_json::to_string_pretty(&result)?,
+                    result,
+                ));
+            }
+            let server = args["server_id"]
+                .as_str()
+                .ok_or("MCP server_id is required.")?;
+            let target = if call.name == "mcp-resources-read" {
+                args["uri"]
+                    .as_str()
+                    .ok_or("MCP resource URI is required.")?
+            } else {
+                args["name"]
+                    .as_str()
+                    .ok_or("MCP prompt name is required.")?
+            };
+            let prompt_arguments = if call.name == "mcp-prompts-get" {
+                match args.get("arguments") {
+                    None | Some(Value::Null) => json!({}),
+                    Some(value) if value.is_object() => value.clone(),
+                    _ => return Err("MCP prompt arguments must be an object.".into()),
+                }
+            } else {
+                json!({})
+            };
+            let configuration = snapshot
+                .server_configuration(server)
+                .ok_or("MCP server was not discovered for this task.")?;
+            let headers = self
+                .connector_manager()?
+                .headers(configuration, &control.cancel)
+                .await?;
+            let result = if call.name == "mcp-resources-read" {
+                snapshot
+                    .read_resource(server, target, &headers, &control.cancel)
+                    .await
+            } else {
+                snapshot
+                    .get_prompt(server, target, prompt_arguments, &headers, &control.cancel)
+                    .await
+            };
+            return match result {
+                Ok(value) => Ok(ToolResult::ok(serde_json::to_string_pretty(&value)?, value)),
+                Err(error) => match error.downcast::<crate::mcp::Failure>() {
+                    Ok(failure) => {
+                        let mut result = ToolResult::fail(failure.message.clone());
+                        result.data =
+                            json!({"server_id":server,"delivery":failure.delivery.name()});
+                        Ok(result)
+                    }
+                    Err(error) => Err(error),
+                },
+            };
+        }
+        if mode_tool.is_some() {
+            let name = call.name.clone();
+            let arguments = args.clone();
+            let root = run.execution_root.clone();
+            let cancel = control.cancel.clone();
+            let style = lock(&run.wstyle_snapshot)?.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                if cancel.is_cancelled() {
+                    return Err("Run cancelled before mode tool execution.".into());
+                }
+                modes::execute(&name, &arguments, &root, &style)
+            })
+            .await??
+            .ok_or("Mode tool did not return a result.")?;
+            if mode_name == "writer"
+                && let Some(binding) = modes::writer_binding(&run.execution_root, &result["data"])?
+            {
+                let mut store = lock(&run.store)?;
+                let page = store.page(&run.session, None, 1)?;
+                if page.metadata.get("writer_project") != Some(&binding) {
+                    store.update_metadata(
+                        &run.session,
+                        Map::from_iter([("writer_project".into(), binding.clone())]),
+                        page.revision,
+                    )?;
+                }
+                *lock(&run.writer_project)? = Some(binding);
+            }
+            return Ok(ToolResult::ok(
+                result["output"].as_str().unwrap_or_default().to_owned(),
+                result["data"].clone(),
+            ));
         }
         if ["skill_lookup", "skill_search", "skills_help"].contains(&call.name.as_str()) {
             let request: reverie_protocol::SkillLookupRequest =
                 serde_json::from_value(args.clone())?;
             if request.force_refresh == Some(true) {
-                *lock(&run.skills)? = lock(&self.kernel)?.skill_catalog_at(
+                *lock(&run.skills)? = Arc::new(crate::skills::SkillCatalog::discover_with_plugins(
                     &run.execution_root,
+                    &run.app,
                     run.config["mode"].as_str().unwrap_or("reverie"),
-                    true,
-                )?;
+                    run.plugins.clone(),
+                )?);
             }
             let catalog = lock(&run.skills)?.clone();
             let details = catalog.model_lookup(&request, &run.pinned_skills, &run.prompt)?;
@@ -1006,13 +1565,7 @@ impl KernelHost {
             arguments["path"] = json!(run.execution_root.join(path));
         }
         if reverie_platform::command::is_command(&call.name) {
-            if run.root != run.execution_root
-                && let Some(path) = args["cwd"]
-                    .as_str()
-                    .and_then(|path| std::path::Path::new(path).strip_prefix(&run.root).ok())
-            {
-                arguments["cwd"] = json!(run.execution_root.join(path));
-            }
+            arguments["cwd"] = json!(run.command_cwd(args));
             return Ok(reverie_platform::command::execute(
                 &arguments,
                 &run.execution_root,
@@ -1028,12 +1581,4 @@ impl KernelHost {
             &run.data.join("tools/file-backups").join(&run.id),
         ))
     }
-}
-
-pub fn tool_catalog() -> Vec<Value> {
-    let mut tools = reverie_platform::tools();
-    tools.push(crate::skills::tool_definition());
-    tools.push(json!({"type":"function","function":{"name":"codebase-retrieval","description":"Inspect the active workspace before repository-dependent answers or edits. Use task for a broad bounded evidence workset, then symbol, file, search, outline or dependencies. Evidence includes content hashes and at most 72 source lines. Dependency targets distinguish lexical matches, inference, ambiguity and unresolved names. Memory and LSP queries are still being migrated.","parameters":{"type":"object","properties":{"query_type":{"type":"string","enum":["symbol","file","search","dependencies","outline","explore","task"]},"query":{"type":"string"},"include_source":{"type":"boolean","default":true},"include_dependencies":{"type":"boolean","default":true},"max_depth":{"type":"integer","minimum":0,"default":2},"filter_kind":{"type":"string","default":"all"},"direction":{"type":"string","enum":["incoming","outgoing","both"]},"limit":{"type":"integer","default":20},"max_files":{"type":"integer","default":6},"max_symbols":{"type":"integer","default":12},"max_tokens":{"type":"integer","default":12000},"include_history":{"type":"boolean"},"include_memory":{"type":"boolean"},"active_files":{"type":"array","items":{"type":"string"}},"changed_files":{"type":"array","items":{"type":"string"}}},"required":["query_type","query"]}}}));
-    tools.push(json!({"type":"function","function":{"name":"userInput","description":"Ask a concise clarification with up to three options and a custom answer. Wait for the user's explicit response; this does not approve workspace tools.","parameters":{"type":"object","properties":{"question":{"type":"string"},"reason":{"type":"string"},"options":{"type":"array","items":{"type":"string"},"maxItems":3},"multiple":{"type":"boolean"}},"required":["question","reason"]}}}));
-    tools
 }

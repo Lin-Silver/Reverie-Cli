@@ -1,5 +1,6 @@
 import { normalizeViewDisplayPreferences, type ViewDisplayPreference } from "./view-display-preferences";
 import { normalizeThemePreference, type ThemePreference } from "./appearance";
+import { DEFAULT_PINNED_PAGES, NAVIGATION_PAGES, normalizePageOrder, normalizePinnedPages, type NavigationPage } from "./navigation-preferences";
 export type UiVariant = "classic" | "liquid-glass";
 export type UiLanguage = "zh-CN" | "en-US";
 export type StartupModePreference = "gui" | "tui";
@@ -68,6 +69,8 @@ export interface StoredUiPreferences {
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
   viewPresentations: Record<string, ViewDisplayPreference>;
+  navigationPinned: NavigationPage[];
+  navigationOrder: NavigationPage[];
 }
 
 /**
@@ -112,6 +115,8 @@ export const DEFAULT_UI_PREFERENCES: StoredUiPreferences = {
   recentProjects: [],
   archivedSessions: {},
   viewPresentations: {},
+  navigationPinned: [...DEFAULT_PINNED_PAGES],
+  navigationOrder: [...NAVIGATION_PAGES],
 };
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
@@ -178,6 +183,8 @@ export function normalizeUiPreferences(value: unknown): StoredUiPreferences {
     recentProjects: stringList(source.recentProjects).slice(0, 12),
     archivedSessions: archivedSessions(source.archivedSessions),
     viewPresentations: normalizeViewDisplayPreferences(source.viewPresentations),
+    navigationPinned: normalizePinnedPages(source.navigationPinned),
+    navigationOrder: normalizePageOrder(source.navigationOrder),
   };
 }
 

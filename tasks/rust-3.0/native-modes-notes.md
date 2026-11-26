@@ -1,0 +1,30 @@
+# Native mode implementation notes
+
+This work implements Atlas, Writer/WStyle and AiO in the first-party Rust core. It does not implement the remaining product roadmap. The mode work does not change Python sources, branches, tags or releases.
+
+1. Atlas: all 11 delivery actions, the confirmed contract, implementation slices, verification records with evidence hashes, blockers, document snapshots, checkpoints, handoff and final reports. Criterion coverage follows the Python text heuristic; it is not an independent verification run. A research/documentation mode still respects the explicit user_requested_implementation flag.
+2. Writer: all nine serial_novel actions and existing aliases, five bibles, chapter control cards, original prose, length and deterministic text checks, append-only or full-rewrite recovery, three failed-repair limits, original revisions, continuity/timeline/foreshadowing records, reader exports and disk completion audits. A validated redo journal retains a complete pending commit when export fails and resumes it on the next authorized write.
+3. WStyle: the six original first-party cards are embedded byte for byte; their Git blobs and licensing are in resources/wstyle_cards/SOURCES.md. Bounded strict YAML, NFC identity, Unicode casefold, composition, global defaults, novel override/inheritance, request-time snapshots, offline commands, no-tool model review/extraction, exact quoted evidence, copied-passage rejection and preserved diagnostics are implemented. Card installation is independent of the Python package.
+4. AiO: one application-level store at .reverie/aio, persistent mainline/task branches, transactional events/tasks/outbox/signals, revision checks, deduplication, interruption and delivery-uncertainty states, bounded decision context, complete persisted messages, durable memory corrections/deletion tombstones and restart-safe memory jobs. The Host passes observation/workspaces/context and actual capabilities to a no-tool model judgment. Unsupported desktop/game execution proposals are refused before entering the executable queue.
+5. Mode state uses bounded reads, workspace path/link checks, original-byte backups, atomic file replacement and file locks that report busy without indefinite waiting. Writer length arithmetic and explicit WStyle input types are checked rather than silently wrapped or treated as defaults.
+6. Assistant tasks share the same .reverie/aio directory across Host, Kernel and Store. Session begin_run accepts an explicit executionRoot without requiring a workspace-scoped session. promptAlreadySaved=true is restricted to an AiO task branch and requires an exact match with its last saved user message; it creates the run/revision without duplicating that message. Workspace scope and missing/mismatched evidence reject the flag.
+
+Basic verification completed during implementation:
+
+- cargo test --manifest-path ReverieCli-rs/Cargo.toml -p reverie-core modes:: --locked: 19 passed, zero failed. Includes failed-export recovery, unchanged original bytes, strict WStyle evidence/types, future memory-schema rejection before modification, bounded mainline/reply context, busy locks and Atlas criterion coverage.
+- cargo test --manifest-path ReverieCli-rs/Cargo.toml -p reverie-core session:: --locked: five passed, zero failed. Includes application-level task execution-root binding, exact saved-prompt reuse, rejected workspace/mismatched flags, restart roles, message persistence and revision conflicts.
+- node --check scripts/verification/rust-modes-smoke.mjs: passed.
+- node scripts/verification/rust-modes-smoke.mjs ReverieCli-rs/target/debug/reverie.exe: passed, 13 groups and 51 loopback model calls. Current debug report: .runtime/rust-3.0/modes-smoke/case-EtxnH1/report.json; executable SHA-256: 5cbf915e7f6b311cffcdb633226803dc27ca4213779d7dad0bf8d18bee5e4241. Covers actual Rust SDK/tool dispatch, unchanged source bytes, WStyle review/extract/rejections/cancellation, and AiO scope, stale/cancelled decisions, worker execution, revisions, messages, memory and restart.
+- node scripts/verification/rust-modes-smoke.mjs ReverieCli-rs/target/release/reverie.exe: passed, the same 13 groups and 51 loopback model calls. Current release-build report: .runtime/rust-3.0/modes-smoke/case-ZikQR6/report.json; executable SHA-256: b7d8d9af7e66092d7094ef6862300fd0cc4b42fd75053d64a0070c21d3b13f44. This is the integrated Windows x64 3.0.0-dev release build, not a formal 3.0.0 product release.
+- Historical implementation-stage SDK reports case-YTXvex and case-MJ7OYk cover Atlas release execution and Atlas/Writer debug execution respectively. They predate the final WStyle/AiO integration and cannot certify the current executable.
+
+Unverified work, one item per line:
+
+1. Real Provider/model writing, review, extraction and autonomous judgment quality; loopback fixtures verify protocol and persistence only.
+2. Native desktop observation, window/screenshot input, Computer Use actions and actor=main/mode=aio execution; ordinary runPrompt(mode=aio) also remains explicitly unavailable. The tested AiO workflow is application-level judgment and supported worker execution.
+3. Four real desktop execution slots, real model task scheduling, prolonged AiO endurance and real foreground/background behavior.
+4. Complete literary/commercial quality assessment and representative full novel production; deterministic text gates do not establish literary quality or originality.
+5. Full existing Python SQLite/JSON migration matrix, large old user stores, disk exhaustion/crash fault injection and restoration across all target platforms.
+6. Complete Unicode equivalence across Python, Unicode 18 normalization and Unicode 16 casefold tables; current fixtures cover representative inputs only.
+7. Cross-platform native SDK/TUI/GUI mode runtime, real DPI and physical multi-display behavior for the final release package.
+8. Complex Atlas document plans and every historic edge rule under real model workflows; criterion coverage and recorded verification remain explicitly heuristic/reported evidence.

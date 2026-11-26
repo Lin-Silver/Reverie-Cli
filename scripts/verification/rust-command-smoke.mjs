@@ -49,7 +49,7 @@ const server = http.createServer(async (request, response) => {
   } catch (error) {serverFailure = error; response.destroy(error);}
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mode: 'reverie', models: [{model: 'command-fixture', profile_id: 'command-profile', provider: 'openai-chat', base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'COMMAND_FIXTURE'}], active_model_source: 'standard', active_model_index: 0, stream_responses: false, auto_index: false, security: {permission_mode: 'default', permission_level: 'full_control'}}));
+fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mode: 'reverie', models: [{model: 'command-fixture', profile_id: 'command-profile', provider: 'openai-chat', base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'COMMAND_FIXTURE'}], active_model_source: 'standard', active_model_index: 0, stream_responses: false, auto_index: false, security: {permission_mode: 'full_access', permission_level: 'full_control'}}));
 const quote = value => `"${value.replaceAll('"', '\\"')}"`;
 const node = quote(process.execPath);
 const eventsFor = run => bridge.events.filter(reply => reply.type === 'prompt.event' && reply.event.run_id === run).map(reply => reply.event);
@@ -58,9 +58,9 @@ async function wait(condition, label) {
   while (Date.now() < deadline) {if (condition()) return; await delay(10);}
   throw new Error(`Timed out: ${label}`);
 }
-function running(session, args, name = 'command_exec') {
+function running(session, args, name = 'command_exec', ownership = {}) {
   const runId = `command-run-${++sequence}`;
-  const pending = bridge.request('runPrompt', {projectRoot: project, sessionId: session, runId, prompt: JSON.stringify({name, args}), noIndex: true}, 20000);
+  const pending = bridge.request('runPrompt', {projectRoot: project, sessionId: session, ...ownership, runId, prompt: JSON.stringify({name, args}), noIndex: true}, 20000);
   return {runId, pending};
 }
 async function call(session, args, name) {
@@ -70,12 +70,12 @@ async function call(session, args, name) {
   assert.equal(reply.result.success, true, JSON.stringify(reply.result));
   return {result: JSON.parse(reply.result.output_text), runId, reply};
 }
-async function session(name, security) {
-  const created = await bridge.request('createSession', {projectRoot: project, name});
+async function session(name, security, projectRoot = project) {
+  const created = await bridge.request('createSession', {projectRoot, name});
   const id = created.session.id;
   if (security) {
-    const configuration = await bridge.request('getConversationConfig', {sessionId: id});
-    await bridge.request('getConversationConfig', {sessionId: id, revision: configuration.revision, configuration: {...configuration.configuration, settings: {...configuration.configuration.settings, security}}});
+    const configuration = await bridge.request('getConversationConfig', {projectRoot, sessionId: id});
+    await bridge.request('getConversationConfig', {projectRoot, sessionId: id, revision: configuration.revision, configuration: {...configuration.configuration, settings: {...configuration.configuration.settings, security}}});
   }
   return id;
 }
@@ -103,7 +103,11 @@ try {
   assert(progress.every(event => event.session_id === ordinary && event.event.tool_call_id));
   assert.equal(eventsFor(utf8.runId).find(event => event.event?.type === 'tool_result')?.event.event, 'tool_result');
   checks.push('Incremental split UTF-8 stdout and stderr with run and tool ownership');
-  ({result} = await call(ordinary, {command: `${node} large.mjs`, timeout: 10}));
+  const largeOutput = await session('Both command output pipes');
+  // This fixture echoes both complete pipes, including duplicate output/data fields.
+  // Give that one conversation room for the tool response and the fixture echo.
+  assert.equal((await bridge.request('setSetting',{sessionId:largeOutput,key:'max_context_tokens',value:1048576})).type,'setting.updated');
+  ({result} = await call(largeOutput, {command: `${node} large.mjs`, timeout: 10}));
   assert.equal(result.status, 'partial');
   assert.equal(result.success, false);
   assert.equal(result.data.exit_code, 7);
@@ -170,6 +174,34 @@ try {
     assert.equal(result.data.delivery, 'executed');
     checks.push('Actual audited PowerShell cmdlet pipeline');
   }
+  const normal = await session('Normal scoped grants',{permission_mode:'normal',permission_level:'workspace_write'});
+  const normalRead=await call(normal,{operation:'read',path:'keep.txt'},'file_ops');
+  assert(normalRead.result.success && !eventsFor(normalRead.runId).some(e=>e.type==='approval.request'));
+  async function grant(task,decision) {
+    await wait(()=>eventsFor(task.runId).some(e=>e.type==='approval.request'),decision+' approval');
+    const event=eventsFor(task.runId).find(e=>e.type==='approval.request');
+    assert.deepEqual(event.scopes,['once','session','project','global']);
+    assert.equal((await bridge.request('resolveApproval',{approvalId:event.approval_id,runId:task.runId,decision})).type,'approval.resolved');
+    return JSON.parse((await task.pending).result.output_text);
+  }
+  const projectArgs={command:node+' args.mjs project',timeout:5};
+  assert((await grant(running(normal,projectArgs),'project')).success);
+  const sibling=await session('Sibling strict grants',{permission_mode:'strict',permission_level:'workspace_write'});
+  assert((await call(sibling,projectArgs)).result.success);
+  fs.copyFileSync(path.join(project,'args.mjs'),path.join(outside,'args.mjs'));
+  assert(!(await grant(running(sibling,projectArgs,'command_exec',{executionRoot:outside}),'deny')).success);
+  const another=await session('Different project',{permission_mode:'strict',permission_level:'workspace_write'},outside);
+  assert(!(await grant(running(another,projectArgs,'command_exec',{projectRoot:outside}),'deny')).success);
+  const globalArgs={command:node+' args.mjs global',timeout:5};
+  assert((await grant(running(sibling,globalArgs),'global')).success);
+  await bridge.request('shutdown');
+  assert.equal((await bridge.closed).code,0);
+  bridge=startBridge(executable,project,appRoot); await bridge.ready;
+  const restarted=await running(another,globalArgs,'command_exec',{projectRoot:outside}).pending;
+  assert(JSON.parse(restarted.result.output_text).success);
+  assert((await call(normal,projectArgs)).result.success);
+  assert(!(await grant(running(normal,{...projectArgs,timeout:6}),'deny')).success);
+  checks.push('Normal allows native reads, project command grants match sibling conversations, a changed execution root is isolated, global authorization survives restart, and a changed option prompts again');
   await bridge.request('shutdown');
   assert.equal((await bridge.closed).code, 0);
   const audit = fs.readFileSync(path.join(state.workspace.project_data_dir, 'security/command_audit.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));

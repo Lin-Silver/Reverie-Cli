@@ -1,0 +1,111 @@
+import {useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
+import {ExternalLink, KeyRound, Plug, RefreshCw, Search, ShieldCheck, Square, Trash2, X} from 'lucide-react';
+import {useI18n} from './i18n';
+import {useDialogFocus} from './dialog-focus';
+import {connectorObject, type ConnectorsController} from './connector-state';
+import type {McpServerRecord} from './generated/core-types';
+import './connectors.css';
+
+const statusLabels:Record<string,string>={not_authorized:'尚未授权',authorized:'已授权',authorization_required:'需要授权',reauthorization_required:'需要重新授权',refresh_uncertain:'刷新结果不确定',target_changed:'连接目标已变化',configuration_missing:'配置已移除',configuration_unverified:'配置尚未核对',untrusted:'等待信任',trust_required:'等待信任',disabled:'已禁用',ready:'连接正常',partial:'部分能力可用',error:'连接失败',awaiting_authorization:'等待浏览器授权',callback_received:'已收到授权回调',exchanging_code:'正在交换授权',denied:'授权被拒绝',cancelled:'已取消'};
+const reviewLabels={trust:'信任此 MCP 配置',remove:'移除此 MCP 配置',revoke:'撤销 Connector 授权',clear:'仅清理本地凭据'};
+const transportLabels:Record<string,string>={stdio:'本地进程',streamable_http:'HTTP',http:'HTTP',sse:'SSE'};
+const emptyConfiguration='{\n  "type": "stdio",\n  "command": "node",\n  "args": ["/path/to/server.mjs"],\n  "enabled": false\n}';
+const date=(value:number)=>new Date(value*1000).toLocaleString();
+
+function ServerIdentity({server}:{server:McpServerRecord}) {
+  const {t}=useI18n();
+  return <dl className="connector-identity"><div><dt>{t('来源')}</dt><dd>{server.origin}</dd></div><div><dt>{t('传输方式')}</dt><dd>{t(transportLabels[server.type]||server.type)}</dd></div>
+    {server.url&&<div><dt>{t('连接目标')}</dt><dd><code>{server.url}</code></dd></div>}{server.command&&<div><dt>{t('程序入口')}</dt><dd><code>{server.command}</code> · {server.args_count} {t('参数')}</dd></div>}
+    {server.cwd&&<div><dt>{t('工作目录')}</dt><dd><code>{server.cwd}</code></dd></div>}<div><dt>{t('配置指纹')}</dt><dd><code>{server.fingerprint}</code></dd></div>
+    <div><dt>{t('环境变量名称')}</dt><dd>{server.env_keys.join(', ')||'—'}</dd></div><div><dt>{t('请求头名称')}</dt><dd>{server.header_keys.join(', ')||'—'}</dd></div>
+    <div><dt>{t('工具与模式过滤')}</dt><dd><pre>{JSON.stringify({includeTools:server.includeTools,excludeTools:server.excludeTools,includeModes:server.includeModes,excludeModes:server.excludeModes},null,2)}</pre></dd></div>
+  </dl>;
+}
+function ReviewDialog({controller:c}:{controller:ConnectorsController}) {
+  const {t}=useI18n(),dialog=useRef<HTMLFormElement>(null);useDialogFocus(dialog,c.closeReview);
+  const review=c.review!;
+  return createPortal(<div className="modal-backdrop" onMouseDown={c.closeReview}><form ref={dialog} className="connector-dialog" role="alertdialog" aria-modal="true" aria-labelledby="connector-review-title" tabIndex={-1} onMouseDown={event=>event.stopPropagation()} onSubmit={event=>{event.preventDefault();if(review.acknowledged)void c.confirmReview();}}>
+    <header><h2 id="connector-review-title">{t(reviewLabels[review.kind])}</h2><button type="button" className="icon-button" aria-label={t('关闭')} onClick={c.closeReview}><X size={18}/></button></header><strong>{review.name}</strong>
+    {review.server&&<ServerIdentity server={review.server}/>}{review.credential&&<pre>{JSON.stringify(review.credential,null,2)}</pre>}
+    {review.kind==='trust'&&<p>{t('信任只批准上述配置指纹；启动与启用分别管理。')}</p>}{review.kind==='remove'&&<p>{t('移除配置不会自动删除已保存的 Connector 凭据。')}</p>}
+    {review.kind==='revoke'&&<p>{t('撤销将尝试通知授权服务器，并清理本地授权；结果会单独报告。')}</p>}{review.kind==='clear'&&<p>{t('仅清理本地保存的凭据，不向远端撤销授权；连接目标变化或配置缺失时仍可使用。')}</p>}
+    <label className="connector-check"><input type="checkbox" checked={review.acknowledged} onChange={event=>c.patchReview({acknowledged:event.target.checked})}/>{t('我已审阅并确认本次操作')}</label>
+    <footer><button type="button" className="secondary-button" onClick={c.closeReview}>{t('取消')}</button><button type="submit" className="primary-button" disabled={!review.acknowledged||Boolean(c.pending)}>{t('确认操作')}</button></footer>
+  </form></div>,document.body);
+}
+function OAuthDialog({controller:c}:{controller:ConnectorsController}) {
+  const {t}=useI18n(),dialog=useRef<HTMLFormElement>(null),clientSecret=useRef<HTMLInputElement>(null),registrationToken=useRef<HTMLInputElement>(null);
+  const [hasSecret,setHasSecret]=useState(false);useDialogFocus(dialog,c.closeOAuth);const o=c.oauth!;
+  const issuer=o.discovery.authorization_servers.find(value=>value.issuer===o.issuer)!;
+  useEffect(()=>{if(clientSecret.current)clientSecret.current.value='';if(registrationToken.current)registrationToken.current.value='';setHasSecret(false);},[o.issuer,o.registration,o.clientAuthMethod]);
+  const methods=issuer.token_endpoint_auth_methods_supported.filter(value=>['none','client_secret_basic','client_secret_post'].includes(value));
+  const scopes=[...new Set([...o.discovery.required_scopes,...o.discovery.supported_scopes])];
+  const valid=!c.pending&&o.acknowledged&&o.discovery.expires_at>Date.now()/1000&&Boolean(o.clientAuthMethod)&&(o.registration==='dynamic'?Boolean(issuer.registration_endpoint):Boolean(o.clientId.trim())&&(o.clientAuthMethod==='none'||hasSecret));
+  return createPortal(<div className="modal-backdrop" onMouseDown={c.closeOAuth}><form ref={dialog} className="connector-dialog" role="alertdialog" aria-modal="true" aria-labelledby="connector-oauth-title" tabIndex={-1} onMouseDown={event=>event.stopPropagation()} onSubmit={event=>{
+    event.preventDefault();if(!valid)return;const secrets={clientSecret:clientSecret.current?.value||'',registrationToken:registrationToken.current?.value||''};if(clientSecret.current)clientSecret.current.value='';if(registrationToken.current)registrationToken.current.value='';setHasSecret(false);void c.authorize(secrets);
+  }}><header><h2 id="connector-oauth-title">{t('审阅 Connector 授权')}</h2><button type="button" className="icon-button" aria-label={t('关闭')} onClick={c.closeOAuth}><X size={18}/></button></header>
+    <dl className="connector-identity"><div><dt>{t('服务身份')}</dt><dd><code>{o.discovery.server_id}</code></dd></div><div><dt>{t('授权资源')}</dt><dd><code>{o.discovery.resource}</code></dd></div><div><dt>{t('发现有效期')}</dt><dd>{date(o.discovery.expires_at)}</dd></div></dl>
+    <label>{t('授权服务器')}<select value={o.issuer} onChange={event=>{const chosen=o.discovery.authorization_servers.find(value=>value.issuer===event.target.value)!;c.patchOAuth({issuer:chosen.issuer,registration:chosen.registration_endpoint?'dynamic':'existing',clientId:'',clientAuthMethod:chosen.token_endpoint_auth_methods_supported.includes('none')?'none':chosen.token_endpoint_auth_methods_supported.find(method=>['client_secret_basic','client_secret_post'].includes(method))||''});}}>{o.discovery.authorization_servers.map(value=><option key={value.issuer} value={value.issuer}>{value.issuer}</option>)}</select></label>
+    <dl className="connector-identity"><div><dt>{t('浏览器授权入口')}</dt><dd><code>{issuer.authorization_endpoint}</code></dd></div><div><dt>{t('令牌交换入口')}</dt><dd><code>{issuer.token_endpoint}</code></dd></div><div><dt>PKCE</dt><dd>{issuer.pkce}</dd></div></dl>
+    <fieldset><legend>{t('授权范围')}</legend>{scopes.length?scopes.map(scope=>{const required=o.discovery.required_scopes.includes(scope);return <label className="connector-check" key={scope}><input type="checkbox" checked={o.scopes.includes(scope)} disabled={required} onChange={event=>c.patchOAuth({scopes:event.target.checked?[...o.scopes,scope]:o.scopes.filter(value=>value!==scope)})}/><code>{scope}</code>{required&&<small>{t('必需')}</small>}</label>;}):<p>{t('服务未声明额外 scopes。')}</p>}</fieldset>
+    <label>{t('客户端注册方式')}<select value={o.registration} onChange={event=>c.patchOAuth({registration:event.target.value as 'dynamic'|'existing'})}>{issuer.registration_endpoint&&<option value="dynamic">{t('动态注册客户端')}</option>}<option value="existing">{t('使用已注册客户端')}</option></select></label>
+    {o.registration==='dynamic'?<><p>{t('确认后会向此入口注册 OAuth 客户端。')}</p><code>{issuer.registration_endpoint}</code><label>{t('注册令牌（可选）')}<input ref={registrationToken} type="password" autoComplete="off" spellCheck={false}/></label></>:<><label>Client ID<input value={o.clientId} onChange={event=>c.patchOAuth({clientId:event.target.value})} autoComplete="off"/></label>{o.clientAuthMethod!=='none'&&<label>Client secret<input ref={clientSecret} type="password" autoComplete="off" spellCheck={false} onInput={event=>setHasSecret(Boolean(event.currentTarget.value))}/></label>}</>}
+    <label>{t('客户端认证方式')}<select value={o.clientAuthMethod} onChange={event=>c.patchOAuth({clientAuthMethod:event.target.value})}>{methods.map(method=><option key={method} value={method}>{method}</option>)}</select></label>
+    <label>{t('本地回调 URI（可选）')}<input value={o.redirectUri} placeholder="http://127.0.0.1:0/callback" onChange={event=>c.patchOAuth({redirectUri:event.target.value})}/></label>
+    <p>{t('秘密字段仅用于本次提交；切页、关闭或发送后清空。')}</p><label className="connector-check"><input type="checkbox" checked={o.acknowledged} onChange={event=>c.patchOAuth({acknowledged:event.target.checked})}/>{t('我确认此资源、授权服务器、范围和注册方式')}</label>
+    <footer><button type="button" className="secondary-button" onClick={c.closeOAuth}>{t('取消')}</button><button type="submit" className="primary-button" disabled={!valid}><ExternalLink size={14}/>{t('开始浏览器登录')}</button></footer>
+  </form></div>,document.body);
+}
+function ApiKeyDialog({server,controller:c,close}:{server:McpServerRecord;controller:ConnectorsController;close:()=>void}) {
+  const {t}=useI18n(),dialog=useRef<HTMLFormElement>(null),secret=useRef<HTMLInputElement>(null);useDialogFocus(dialog,close);
+  const [header,setHeader]=useState('Authorization'),[hasSecret,setHasSecret]=useState(false),[confirmed,setConfirmed]=useState(false);
+  const unchanged=c.state?.management?.servers.some(current=>current.id===server.id&&current.fingerprint===server.fingerprint&&current.enabled&&current.trust);
+  const valid=!c.pending&&unchanged&&confirmed&&hasSecret&&Boolean(header.trim());
+  return createPortal(<div className="modal-backdrop" onMouseDown={close}><form ref={dialog} className="connector-dialog" role="alertdialog" aria-modal="true" aria-labelledby="connector-key-title" tabIndex={-1} onMouseDown={event=>event.stopPropagation()} onSubmit={event=>{
+    event.preventDefault();if(!valid)return;const value=secret.current?.value||'';if(secret.current)secret.current.value='';setHasSecret(false);close();void c.setApiKey(server,header.trim(),value);
+  }}><header><h2 id="connector-key-title">{t('保存 Connector API Key')}</h2><button type="button" className="icon-button" aria-label={t('关闭')} onClick={close}><X size={18}/></button></header><strong>{server.name}</strong><ServerIdentity server={server}/>
+    <label>{t('请求头名称')}<input value={header} onChange={event=>{setHeader(event.target.value);setConfirmed(false);}} autoComplete="off"/></label><label>{t('完整请求头值')}<input ref={secret} type="password" autoComplete="off" spellCheck={false} onInput={event=>setHasSecret(Boolean(event.currentTarget.value))}/></label>
+    <p>{t('Authorization 的值须包含适用方案，例如 Bearer；发送后输入立即清空。')}</p>{!unchanged&&<p role="alert">{t('配置已变化，请重新审阅连接目标。')}</p>}
+    <label className="connector-check"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>{t('我确认向上述连接目标使用此请求头凭据')}</label>
+    <footer><button type="button" className="secondary-button" onClick={close}>{t('取消')}</button><button type="submit" className="primary-button" disabled={!valid}>{t('保存凭据')}</button></footer>
+  </form></div>,document.body);
+}
+
+export function ConnectorsView({controller:c,onOpenPlugin}:{controller:ConnectorsController;onOpenPlugin?:(pluginId:string)=>void}) {
+  const {t}=useI18n(),configuration=useRef<HTMLTextAreaElement>(null),promptArguments=useRef<HTMLTextAreaElement>(null);
+  const [configurationConfirmed,setConfigurationConfirmed]=useState(false),[apiServer,setApiServer]=useState<McpServerRecord|null>(null),[resourceUri,setResourceUri]=useState(''),[promptName,setPromptName]=useState('');
+  const root=c.state?.root||'',selected=c.selected,busy=Boolean(c.pending),servers=c.state?.management?.servers||[],credentials=c.state?.connectors?.connectors||[];
+  useEffect(()=>{setApiServer(null);setConfigurationConfirmed(false);if(configuration.current)configuration.current.value='';},[root]);
+  useEffect(()=>{setResourceUri('');setPromptName('');if(promptArguments.current)promptArguments.current.value='';},[root,c.draft.serverId]);
+  const credential=credentials.find(value=>value.server_id===c.draft.serverId),orphans=credentials.filter(value=>!servers.some(server=>server.id===value.server_id));
+  const query=c.draft.query.toLocaleLowerCase(),visibleServers=servers.filter(server=>`${server.name} ${server.id} ${server.url}`.toLocaleLowerCase().includes(query));
+  const health=c.state?.health?.servers.map(connectorObject).find(value=>value&&(value.id===selected?.id||value.server_id===selected?.id))||c.state?.diagnostics.find(value=>value.server_id===selected?.id);
+  const capabilities=(kind:'tools'|'resources'|'resource_templates'|'prompts')=>c.state?.health?.[kind].map(connectorObject).filter((value):value is Record<string,unknown>=>Boolean(value)&&(value?.server_id===selected?.id||value?.server===selected?.id))||[];
+  return <div className="connectors-page"><header className="page-heading"><div><h1>{t('Connectors 与 MCP')}</h1><p>{t('配置、信任、连接健康与授权分别管理。')}</p></div><div className="connector-actions"><button className="secondary-button" type="button" disabled={c.loading} onClick={()=>void c.reload()}><RefreshCw size={14}/>{t('刷新状态')}</button><button className="primary-button" type="button" disabled={busy} onClick={()=>void c.refresh()}><Plug size={14}/>{t('连接并刷新能力')}</button></div></header>
+    <p className="connector-help">{t('刷新能力会连接当前生效的全部服务；未信任项不会启动。')}</p>
+    {c.pending&&<div className="connector-operation" role="status"><span>{c.pending.action} · {c.pending.serverId||c.pending.root}</span><button type="button" className="secondary-button" onClick={()=>void c.cancel()}><Square size={14}/>{t('停止')}</button></div>}{c.error&&<pre role="alert" className="connector-error">{c.error}</pre>}{c.notice&&<p role="status">{t(c.notice)}</p>}
+    <details className="connector-configuration"><summary>{t('添加或完整替换手动 MCP 配置')}</summary><form onSubmit={event=>{event.preventDefault();if(!configurationConfirmed||busy)return;const raw=configuration.current?.value||'';if(configuration.current)configuration.current.value='';setConfigurationConfirmed(false);void c.configure(raw,true);}}><fieldset disabled={busy}>
+      <label>{t('手动 MCP 名称')}<input value={c.draft.name} onChange={event=>{c.patch({name:event.target.value});setConfigurationConfirmed(false);}} required/></label>
+      <label>{t('完整 MCP 配置 JSON')}<textarea ref={configuration} defaultValue={emptyConfiguration} rows={7} spellCheck={false} onChange={()=>setConfigurationConfirmed(false)} required/></label>
+      <p>{t('填写完整配置；同名手动项将完整替换。此输入可能含凭据，发送或切页后清空。')}</p><label className="connector-check"><input type="checkbox" checked={configurationConfirmed} onChange={event=>setConfigurationConfirmed(event.target.checked)}/>{t('我确认新增或完整替换此手动配置')}</label><button type="submit" className="primary-button" disabled={!configurationConfirmed||!c.draft.name.trim()}>{t('保存完整配置')}</button>
+    </fieldset></form></details>
+    {c.state?.management?.mcp.diagnostics.length||c.state?.diagnostics.length||c.state?.configurationDiagnostics.length?<details className="connector-diagnostics" open><summary>{t('配置与连接诊断')}</summary><pre>{JSON.stringify({configuration:c.state?.management?.mcp.diagnostics,mcp:c.state?.configurationDiagnostics,connection:c.state?.diagnostics},null,2)}</pre></details>:null}
+    <div className="connectors-layout"><section className="connector-selection" aria-label={t('MCP 服务列表')}><label className="connector-search"><Search size={15}/><input aria-label={t('筛选 MCP 服务')} value={c.draft.query} onChange={event=>c.patch({query:event.target.value})}/></label>
+      {visibleServers.map(server=><button type="button" className={`connector-selector${c.draft.serverId===server.id?' selected':''}`} key={server.id} onClick={()=>c.patch({serverId:server.id})}><strong>{server.name}</strong><small>{server.origin} · {t(server.enabled?'已启用':'已禁用')} · {t(server.trust?'已信任':'等待信任')}</small><code>{server.id}</code>{!c.state?.management?.effective_server_ids.includes(server.id)&&<small>{t('不在当前执行集合')}</small>}</button>)}
+      {orphans.filter(value=>value.server_id.toLocaleLowerCase().includes(query)).map(value=><button type="button" className={`connector-selector${c.draft.serverId===value.server_id?' selected':''}`} key={value.server_id} onClick={()=>c.patch({serverId:value.server_id})}><strong>{value.server_id}</strong><small>{t('配置已移除')} · {t('仍有本地凭据')}</small></button>)}{!visibleServers.length&&!orphans.length&&<p>{t('尚无匹配的 MCP 服务。')}</p>}
+    </section><section className="connector-detail">{selected?<><header><div><h2>{selected.name}</h2><code>{selected.id}</code></div><span>{t(health?statusLabels[String(health.status)]||String(health.status):'尚未连接')}</span></header><ServerIdentity server={selected}/>
+      {selected.origin==='manual'?<div className="connector-controls"><label>{t('信任此执行配置')}<input type="checkbox" checked={selected.trust} disabled={busy} onChange={event=>event.target.checked?void c.requestReview('trust',selected.id):void c.control(selected,'setMcpTrust',false)}/></label><label>{t('启用此 MCP 服务')}<input type="checkbox" checked={selected.enabled} disabled={busy} onChange={event=>void c.control(selected,'setMcpEnabled',event.target.checked)}/></label><button type="button" className="secondary-button" disabled={busy} onClick={()=>void c.requestReview('remove',selected.id)}><Trash2 size={14}/>{t('移除配置')}</button></div>:<div><p>{t('此 MCP 由插件提供；信任和启用请在所属插件中管理。')}</p>{onOpenPlugin&&<button type="button" className="secondary-button" onClick={()=>onOpenPlugin(selected.origin.replace(/^plugin:/,''))}>{t('打开所属插件')}</button>}</div>}
+      {selected.type!=='stdio'&&<section className="connector-authorization"><h3>{t('Connector 授权')}</h3><p>{t(statusLabels[credential?.status||'not_authorized']||credential?.status||'尚未授权')}</p>{credential&&<dl className="connector-identity"><div><dt>{t('授权资源')}</dt><dd><code>{credential.resource||'—'}</code></dd></div><div><dt>{t('授权服务器')}</dt><dd><code>{credential.issuer||'—'}</code></dd></div><div><dt>{t('授权范围')}</dt><dd>{credential.scopes?.join(', ')||'—'}</dd></div><div><dt>{t('凭据存储')}</dt><dd>{credential.credential_storage||'—'}</dd></div></dl>}
+        <div className="connector-actions"><button type="button" className="primary-button" disabled={busy||!selected.enabled||!selected.trust} onClick={()=>void c.discover(selected)}><ShieldCheck size={14}/>{t('发现并审阅 OAuth')}</button><button type="button" className="secondary-button" disabled={busy||!selected.enabled||!selected.trust} onClick={()=>setApiServer(selected)}><KeyRound size={14}/>{t('设置 API Key')}</button>{credential?.credential_configured&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>void c.requestReview('revoke',selected.id)}>{t('撤销授权')}</button>}</div>
+      </section>}
+      {(['tools','resources','resource_templates','prompts'] as const).map(kind=><details className="connector-capabilities" key={kind}><summary>{t({tools:'工具',resources:'资源',resource_templates:'资源模板',prompts:'提示词'}[kind])} · {capabilities(kind).length}</summary><pre>{JSON.stringify(capabilities(kind),null,2)}</pre></details>)}
+      {selected.trust&&selected.enabled&&<div className="connector-capability-forms"><form onSubmit={event=>{event.preventDefault();if(resourceUri.trim()&&!busy)void c.readResource(selected.id,resourceUri.trim());}}><label>{t('资源 URI')}<input value={resourceUri} onChange={event=>setResourceUri(event.target.value)} required/></label><button type="submit" className="secondary-button" disabled={busy||!resourceUri.trim()}>{t('读取资源')}</button></form><form onSubmit={event=>{event.preventDefault();if(!promptName.trim()||busy)return;const args=promptArguments.current?.value||'{}';if(promptArguments.current)promptArguments.current.value='';void c.getPrompt(selected.id,promptName.trim(),args);}}><label>{t('提示词名称')}<input value={promptName} onChange={event=>setPromptName(event.target.value)} required/></label><label>{t('提示词参数 JSON')}<textarea ref={promptArguments} defaultValue="{}" rows={3} spellCheck={false}/></label><button type="submit" className="secondary-button" disabled={busy||!promptName.trim()}>{t('读取提示词')}</button></form></div>}
+    </>:credential?<><h2>{credential.server_id}</h2><pre>{JSON.stringify(credential,null,2)}</pre></>:<div className="empty-panel"><Plug size={26}/><strong>{t('选择 MCP 服务查看配置与授权。')}</strong></div>}
+    {credential?.credential_configured&&<button type="button" className="secondary-button" disabled={busy} onClick={()=>void c.requestReview('clear',credential.server_id)}><Trash2 size={14}/>{t('仅清理本地凭据')}</button>}
+    </section></div>
+    {Boolean(c.state?.connectors?.pending.length)&&<section className="connector-pending"><h2>{t('进行中的 Connector 授权')}</h2>{c.state!.connectors!.pending.map(authorization=><article key={authorization.authorization_id}><strong>{authorization.server_id}</strong><p>{t(statusLabels[authorization.status]||authorization.status)} · {date(authorization.expires_at)}</p><code>{authorization.authorization_id}</code><div className="connector-actions"><button type="button" className="primary-button" disabled={busy||authorization.configuration_current===false||authorization.expires_at<=Date.now()/1000||['denied','cancelled','exchanging_code'].includes(authorization.status)} onClick={()=>void c.complete(authorization)}>{t('等待并完成授权')}</button><button type="button" className="secondary-button" onClick={()=>void c.cancelAuthorization(authorization.authorization_id)}>{t('取消授权')}</button></div></article>)}</section>}
+    {c.result!==null&&<section className="connector-result"><h2>{t('最近一次操作结果')}</h2><pre>{JSON.stringify(c.result,null,2)}</pre></section>}
+    {c.review&&<ReviewDialog controller={c}/>} {c.oauth&&<OAuthDialog controller={c}/>} {apiServer&&<ApiKeyDialog server={apiServer} controller={c} close={()=>setApiServer(null)}/>}
+  </div>;
+}

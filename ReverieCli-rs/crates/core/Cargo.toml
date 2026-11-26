@@ -11,6 +11,7 @@ reverie-context.workspace = true
 reverie-platform.workspace = true
 serde_json.workspace = true
 serde.workspace = true
+ts-rs.workspace = true
 rusqlite.workspace = true
 uuid.workspace = true
 sha2.workspace = true
@@ -23,3 +24,15 @@ reqwest.workspace = true
 notify = "=9.0.0"
 serde-saphyr = { version = "=2.2.0", default-features = false, features = ["deserialize"] }
 walkdir = "=2.5.0"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+ed25519-dalek = "=3.0.0"
+base64 = "=0.23.1"
+keyring = "=4.2.0"
+unicode-normalization = "=0.1.26"
+caseless = "=0.2.2"
+regex = "=1.13.2"
+shlex.workspace = true
+toml = { version = "=0.9.8", default-features = false, features = ["std", "parse", "serde"] }
+semver = "=1.0.28"
+jsonschema = { version = "=0.63.1", default-features = false }
+tiktoken-rs = { version = "=0.12.1", default-features = false }

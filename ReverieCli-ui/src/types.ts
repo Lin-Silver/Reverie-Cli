@@ -1,7 +1,7 @@
-import type {ContextWatchState,SemanticResourcesState,SkillRecord,SkillsState} from './generated/core-types';
+import type {ContextWatchState,SemanticResourcesState,SkillRecord,SkillsState,PluginRecord as NativePluginRecord} from './generated/core-types';
 export type {SkillRecord,PinnedSkillsState,SkillsState} from './generated/core-types';
 
-export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings" | "context";
+export type ViewId = "chat" | "tools" | "rats" | "tasks" | "subagents" | "skills" | "plugins" | "recovery" | "settings" | "context" | "markets" | "connectors";
 
 export interface SubagentSpecRecord {
   id: string;
@@ -504,7 +504,7 @@ export interface SettingsState {
   workspace_mode: boolean;
 }
 
-export interface PluginRecord {
+export interface PluginRecord extends Partial<Pick<NativePluginRecord,'active_sha256'|'approval_profile_sha256'|'hooks_enabled'|'auto_update'|'previous_sha256'|'source'|'candidates'>> {
   id: string;
   name: string;
   family: string;
@@ -523,6 +523,7 @@ export interface PluginRecord {
 }
 
 export interface PluginsState {
+  revision?: number;
   summary: Record<string, unknown>;
   records: PluginRecord[];
 }

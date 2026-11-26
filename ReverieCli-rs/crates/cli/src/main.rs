@@ -73,7 +73,11 @@ fn run() -> reverie_core::Result<()> {
     }
     match args.first().map(String::as_str) {
         Some("--kernel-info") => println!("{}", serde_json::to_string(&kernel_info())?),
-        Some("--protocol-types") => print!("{}", reverie_protocol::typescript_types()),
+        Some("--protocol-types") => print!(
+            "{}{}",
+            reverie_protocol::typescript_types(),
+            reverie_core::browser::typescript_types()
+        ),
         Some("--sdk-bridge") => sdk::run()?,
         Some("--version" | "-V") => println!(
             "Reverie Cli v{VERSION}\nRelease status: development\nCore Interface v1.0\nKernel: rust"

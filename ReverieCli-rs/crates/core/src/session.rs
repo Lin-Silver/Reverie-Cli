@@ -11,10 +11,12 @@ use std::{
 };
 use uuid::Uuid;
 
+pub mod context;
+mod pending;
 mod runs;
 
 pub struct SessionStore {
-    db: Connection,
+    pub(crate) db: Connection,
     pub database_path: PathBuf,
     base: PathBuf,
     scope: Value,
@@ -63,7 +65,21 @@ fn validate_id(id: &str) -> Result<()> {
 
 impl SessionStore {
     pub fn open(base: &Path, project: &Path) -> Result<Self> {
+        Self::open_with_scope(base, config::workspace_metadata(project))
+    }
+
+    pub fn open_assistant(base: &Path) -> Result<Self> {
+        Self::open_with_scope(base, json!({"assistant_id":"aio"}))
+    }
+
+    fn open_with_scope(base: &Path, scope: Value) -> Result<Self> {
         fs::create_dir_all(base)?;
+        // SQLite and tempfile both need a verbatim Windows path, including the
+        // temporary backup and its final no-clobber rename.
+        #[cfg(windows)]
+        let base = base.canonicalize()?;
+        #[cfg(not(windows))]
+        let base = base.to_owned();
         let lock = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -112,8 +128,8 @@ impl SessionStore {
         let mut store = Self {
             db,
             database_path,
-            base: base.into(),
-            scope: config::workspace_metadata(project),
+            base,
+            scope,
         };
         store.migrate_legacy()?;
         Ok(store)
@@ -157,19 +173,21 @@ impl SessionStore {
                 return Err("Legacy conversation identity does not match its filename.".into());
             }
             let mut meta = data["metadata"].as_object().cloned().unwrap_or_default();
-            if meta
-                .get("workspace_id")
-                .and_then(Value::as_str)
-                .is_some_and(|value| {
-                    !value.is_empty() && value != self.scope["workspace_id"].as_str().unwrap()
-                })
+            if self.scope.get("workspace_id").is_some()
+                && meta
+                    .get("workspace_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| {
+                        !value.is_empty() && value != self.scope["workspace_id"].as_str().unwrap()
+                    })
             {
                 continue;
             }
-            if let Some(owner) = meta
-                .get("workspace_path")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
+            if self.scope.get("workspace_id").is_some()
+                && let Some(owner) = meta
+                    .get("workspace_path")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
                 && config::workspace_metadata(Path::new(owner))["workspace_id"]
                     != self.scope["workspace_id"]
             {
@@ -263,9 +281,8 @@ impl SessionStore {
         })
     }
 
-    pub fn list(&self) -> Result<Value> {
-        let items: Vec<SessionInfo> = self.db.prepare("SELECT id,name,created_at,updated_at,message_count FROM conversations WHERE deleted=0 ORDER BY updated_at DESC,id")?.query_map([], |row| Ok(SessionInfo { id:row.get(0)?, name:row.get(1)?, created_at:row.get(2)?, updated_at:row.get(3)?,message_count:row.get(4)? }))?.collect::<rusqlite::Result<_>>()?;
-        let selected: Option<String> = self
+    pub fn selected(&self) -> Result<Option<String>> {
+        Ok(self
             .db
             .query_row(
                 "SELECT value FROM navigation WHERE key='selected'",
@@ -273,7 +290,12 @@ impl SessionStore {
                 |row| row.get(0),
             )
             .optional()?
-            .flatten();
+            .flatten())
+    }
+
+    pub fn list(&self) -> Result<Value> {
+        let items: Vec<SessionInfo> = self.db.prepare("SELECT id,name,created_at,updated_at,message_count FROM conversations WHERE deleted=0 ORDER BY updated_at DESC,id")?.query_map([], |row| Ok(SessionInfo { id:row.get(0)?, name:row.get(1)?, created_at:row.get(2)?, updated_at:row.get(3)?,message_count:row.get(4)? }))?.collect::<rusqlite::Result<_>>()?;
+        let selected = self.selected()?;
         let mut archive = Map::new();
         let mut owners = Map::new();
         for item in &items {
@@ -445,31 +467,7 @@ impl SessionStore {
     }
 
     pub fn history(&self, id: &str) -> Result<Vec<Value>> {
-        let metadata: String = self
-            .db
-            .query_row(
-                "SELECT metadata FROM conversations WHERE id=? AND deleted=0",
-                [id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or("Conversation not found.")?;
-        let metadata: Value = serde_json::from_str(&metadata)?;
-        let start = metadata["active_context_start"]
-            .as_i64()
-            .unwrap_or(0)
-            .max(0);
-        let payloads: Vec<String> = self
-            .db
-            .prepare(
-                "SELECT payload FROM messages WHERE session_id=? AND sequence>=? ORDER BY sequence",
-            )?
-            .query_map(params![id, start], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        Ok(payloads
-            .into_iter()
-            .map(|payload| serde_json::from_str::<Value>(&payload).map(wire))
-            .collect::<serde_json::Result<_>>()?)
+        context::history(self, id)
     }
 
     pub fn begin_run(
@@ -485,14 +483,47 @@ impl SessionStore {
         let tx = self
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let count: i64 = tx
+        let (count, metadata): (i64, String) = tx
             .query_row(
-                "SELECT message_count FROM conversations WHERE id=? AND deleted=0",
+                "SELECT message_count,metadata FROM conversations WHERE id=? AND deleted=0",
                 [id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or("Conversation not found.")?;
+        let already_saved = match request.get("promptAlreadySaved") {
+            None => false,
+            Some(value) => value
+                .as_bool()
+                .ok_or("promptAlreadySaved must be a boolean.")?,
+        };
+        if already_saved {
+            let metadata: Value = serde_json::from_str(&metadata)?;
+            if self.scope["assistant_id"] != "aio"
+                || metadata["task_id"].as_str().is_none_or(str::is_empty)
+                || metadata["parent"] != "aio-mainline"
+                || !user["content"].is_string()
+            {
+                return Err(
+                    "A saved prompt can only be reused by an application-level AiO task branch."
+                        .into(),
+                );
+            }
+            let original: Option<String> = tx.query_row(
+                "SELECT payload FROM messages WHERE session_id=? AND json_extract(payload,'$.role')='user' ORDER BY sequence DESC LIMIT 1",
+                [id], |row| row.get(0),
+            ).optional()?;
+            if original
+                .map(|body| serde_json::from_str::<Value>(&body))
+                .transpose()?
+                .is_none_or(|original| original["content"] != user["content"])
+            {
+                return Err(
+                    "The saved AiO task prompt does not match the complete requested user text."
+                        .into(),
+                );
+            }
+        }
         let existing: Option<(String, String, String, String)> = tx
             .query_row(
                 "SELECT session_id,configuration,state,request FROM task_runs WHERE id=?",
@@ -517,10 +548,16 @@ impl SessionStore {
                 params![serde_json::to_string(&request)?, time, run_id],
             )?;
         } else {
-            tx.execute("INSERT INTO task_runs(id,session_id,configuration_revision,configuration,execution_root,state,revision,result,created_at,updated_at,request) VALUES (?,?,?,?,?,'running',1,'{}',?,?,?)",params![run_id,id,configuration_revision,serde_json::to_string(configuration)?,request["executionRoot"].as_str().unwrap_or(self.scope["workspace_path"].as_str().ok_or("Workspace identity is missing.")?),time,time,serde_json::to_string(&request)?])?;
+            let execution_root = request["executionRoot"]
+                .as_str()
+                .or_else(|| self.scope["workspace_path"].as_str())
+                .ok_or("An application-level task requires an explicit executionRoot.")?;
+            tx.execute("INSERT INTO task_runs(id,session_id,configuration_revision,configuration,execution_root,state,revision,result,created_at,updated_at,request) VALUES (?,?,?,?,?,'running',1,'{}',?,?,?)",params![run_id,id,configuration_revision,serde_json::to_string(configuration)?,execution_root,time,time,serde_json::to_string(&request)?])?;
         }
-        insert_messages(&tx, id, count, std::slice::from_ref(user))?;
-        tx.execute("UPDATE conversations SET message_count=message_count+1,revision=revision+1,updated_at=? WHERE id=?",params![time,id])?;
+        if !already_saved {
+            insert_messages(&tx, id, count, std::slice::from_ref(user))?;
+        }
+        tx.execute("UPDATE conversations SET message_count=message_count+?,revision=revision+1,updated_at=? WHERE id=?",params![i64::from(!already_saved),time,id])?;
         tx.commit()?;
         Ok(())
     }
@@ -549,6 +586,9 @@ impl SessionStore {
         };
         if tx.execute("UPDATE task_runs SET state=?,result=?,revision=revision+1,updated_at=? WHERE id=? AND session_id=? AND state NOT IN ('completed','cancelled','failed')",params![task_state,serde_json::to_string(result)?,now(),run_id,id])? == 0 {return Err("Task is missing or already finalized.".into());}
         tx.execute("INSERT INTO conversation_read_states VALUES (?,1) ON CONFLICT(session_id) DO UPDATE SET unread=1",[id])?;
+        if matches!(state, "cancelled" | "failed") {
+            pending::interrupt(&tx, run_id)?;
+        }
         if state == "completed" {
             tx.execute(
                 "DELETE FROM stream_chunks WHERE session_id=? AND run_id=?",
@@ -616,6 +656,144 @@ fn verify_backup(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn database_and_migration_backup_reopen_under_a_long_windows_path() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let base = temp
+            .path()
+            .join("nested-projects".repeat(9))
+            .join("workspace-data".repeat(9));
+        assert!(base.join("conversations.sqlite3").as_os_str().len() > 260);
+        drop(SessionStore::open(&base, temp.path())?);
+        drop(SessionStore::open(&base, temp.path())?);
+        assert!(
+            base.join("backups/conversations.before-rust-3.0.sqlite3")
+                .is_file()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn assistant_task_reuses_exact_saved_prompt_and_binds_its_explicit_execution_root() {
+        let app = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().to_str().unwrap().to_owned();
+        let mut aio = crate::modes::aio::AioStore::open(app.path()).unwrap();
+        let snapshot = json!({"settings":{"mode":"aio"}});
+        aio.enable(&snapshot).unwrap();
+        let revision = aio.state().unwrap()["native_revision"].as_u64().unwrap();
+        let original = "完整任务原文\r\n第二行😀";
+        let accepted = aio.accept_decision(&json!({"speech":"","tasks":[{"workspace":root,"mode":"reverie","actor":"worker","prompt":original,"acceptance":"Preserve complete original bytes"}],"memories":[]}), &json!({"event_id":"saved-task"}), std::slice::from_ref(&root), &snapshot, revision, true).unwrap();
+        let task = &accepted["tasks"][0];
+        let branch = task["branch"].as_str().unwrap();
+        let page = aio.sessions.page(branch, None, 10).unwrap();
+        let request = json!({"prompt":original,"executionRoot":root,"promptAlreadySaved":true});
+        let user = json!({"role":"user","content":original});
+        aio.sessions
+            .begin_run(
+                branch,
+                "native-run",
+                &task["configuration"],
+                page.revision,
+                &request,
+                &user,
+            )
+            .unwrap();
+        let after = aio.sessions.page(branch, None, 10).unwrap();
+        assert_eq!(after.total, 1);
+        assert_eq!(after.messages[0]["content"], original);
+        assert_eq!(after.revision, page.revision + 1);
+        assert_eq!(
+            aio.sessions
+                .db
+                .query_row(
+                    "SELECT execution_root FROM task_runs WHERE id='native-run'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            root
+        );
+        assert!(
+            aio.sessions
+                .begin_run(
+                    branch,
+                    "different-prompt",
+                    &task["configuration"],
+                    after.revision,
+                    &request,
+                    &json!({"role":"user","content":"替换任务原文"})
+                )
+                .is_err()
+        );
+        let missing = aio
+            .sessions
+            .create(
+                None,
+                Map::from_iter([
+                    ("task_id".into(), json!("missing-task")),
+                    ("parent".into(), json!("aio-mainline")),
+                ]),
+            )
+            .unwrap();
+        assert!(
+            aio.sessions
+                .begin_run(
+                    &missing.id,
+                    "missing-evidence",
+                    &snapshot,
+                    missing.revision,
+                    &request,
+                    &user
+                )
+                .is_err()
+        );
+        assert!(
+            aio.sessions
+                .begin_run(
+                    &missing.id,
+                    "missing-root",
+                    &snapshot,
+                    missing.revision,
+                    &json!({}),
+                    &user
+                )
+                .is_err()
+        );
+        assert_eq!(aio.sessions.page(&missing.id, None, 10).unwrap().total, 0);
+        aio.sessions
+            .begin_run(
+                &missing.id,
+                "ordinary-assistant",
+                &snapshot,
+                missing.revision,
+                &json!({"executionRoot":root}),
+                &user,
+            )
+            .unwrap();
+        assert_eq!(
+            aio.sessions.page(&missing.id, None, 10).unwrap().messages[0]["content"],
+            original
+        );
+        let mut store =
+            SessionStore::open(&workspace.path().join("workspace-data"), workspace.path()).unwrap();
+        let page = store.create(None, Map::new()).unwrap();
+        assert!(
+            store
+                .begin_run(
+                    &page.id,
+                    "invalid-workspace-flag",
+                    &snapshot,
+                    page.revision,
+                    &request,
+                    &user
+                )
+                .is_err()
+        );
+        assert_eq!(store.page(&page.id, None, 10).unwrap().total, 0);
+    }
 
     #[test]
     fn restart_paging_roles_events_and_deleted_sessions_keep_transcript_integrity() {

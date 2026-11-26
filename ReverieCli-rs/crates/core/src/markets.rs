@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
     process::Stdio,
@@ -108,6 +108,28 @@ fn load(app: &Path) -> Result<Store> {
                     "Invalid marketplace source identity; original catalog was preserved.".into(),
                 );
             }
+            let official = defaults();
+            let mut seen = BTreeSet::new();
+            for source in &store.sources {
+                if !seen.insert(&source.id) {
+                    return Err(
+                        "Duplicate marketplace identities; original catalog was preserved.".into(),
+                    );
+                }
+                let expected = official.sources.iter().find(|item| item.id == source.id);
+                if source.builtin != expected.is_some()
+                    || expected.is_some_and(|item| {
+                        item.kind != source.kind
+                            || item.location != source.location
+                            || item.manifest_path != source.manifest_path
+                    })
+                {
+                    return Err(
+                        "Official marketplace identity changed; original catalog was preserved."
+                            .into(),
+                    );
+                }
+            }
             Ok(store)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(defaults()),
@@ -151,6 +173,68 @@ pub fn state(app: &Path) -> Result<MarketsState> {
     })
 }
 
+fn retain_catalog(app: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let directory =
+        crate::plugins::package::managed_directory(app, ".reverie/extensions/markets/catalogs")?;
+    let path = directory.join(format!("{}.json", digest(bytes)));
+    if path.exists() {
+        let original = crate::plugins::package::bounded_text(&path, MAX_MANIFEST_BYTES)?;
+        if original != bytes {
+            return Err("Stored catalog content changed; original evidence was preserved.".into());
+        }
+        return Ok(());
+    }
+    let mut file = tempfile::NamedTempFile::new_in(directory)?;
+    file.write_all(bytes)?;
+    file.as_file().sync_all()?;
+    match file.persist_noclobber(&path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if crate::plugins::package::bounded_text(&path, MAX_MANIFEST_BYTES)? != bytes {
+                return Err(
+                    "Stored catalog content changed; original evidence was preserved.".into(),
+                );
+            }
+            Ok(())
+        }
+        Err(error) => Err(error.error.into()),
+    }
+}
+
+pub(crate) fn recorded_entry(app: &Path, entry_id: &str) -> Result<(MarketSource, MarketEntry)> {
+    let store = load(app)?;
+    let cached = store
+        .entries
+        .values()
+        .flatten()
+        .find(|entry| entry.id == entry_id)
+        .ok_or("Marketplace package was not found; refresh its catalog first.")?;
+    let source = store
+        .sources
+        .iter()
+        .find(|source| source.id == cached.market_id && source.enabled)
+        .ok_or("An enabled marketplace source is required.")?;
+    if !crate::plugins::package::valid_digest(&cached.catalog_sha256) {
+        return Err("Marketplace package has no valid catalog identity.".into());
+    }
+    let path = root(app)
+        .join("catalogs")
+        .join(format!("{}.json", cached.catalog_sha256));
+    let bytes = crate::plugins::package::bounded_text(&path, MAX_MANIFEST_BYTES).map_err(
+        |_| "Original catalog evidence is unavailable; refresh this marketplace before installing.",
+    )?;
+    if digest(&bytes) != cached.catalog_sha256 {
+        return Err("Marketplace catalog content was altered; installation was refused.".into());
+    }
+    let (entries, _) = parse(source, &bytes)?;
+    let entry = entries
+        .into_iter()
+        .find(|entry| entry.id == cached.id)
+        .ok_or("Cached package is not present in its original catalog.")?;
+    Ok((source.clone(), entry))
+}
+
 fn relative(path: &str) -> Result<&Path> {
     let path = Path::new(path);
     if path.as_os_str().is_empty()
@@ -162,7 +246,7 @@ fn relative(path: &str) -> Result<&Path> {
     }
     Ok(path)
 }
-fn validate_location(kind: MarketKind, location: &str) -> Result<String> {
+pub(crate) fn validate_location(kind: MarketKind, location: &str) -> Result<String> {
     if location.is_empty() || location.contains(['\n', '\r', '\0']) || location.starts_with('-') {
         return Err("Supply a valid marketplace source.".into());
     }
@@ -353,10 +437,17 @@ fn parse(source: &MarketSource, bytes: &[u8]) -> Result<(Vec<MarketEntry>, Strin
     ))
 }
 
-async fn git(arguments: &[String], cancel: &CancellationToken) -> Result<Vec<u8>> {
+pub(crate) async fn git(arguments: &[String], cancel: &CancellationToken) -> Result<Vec<u8>> {
     let mut command = Command::new("git");
     command
-        .args(["-c", "protocol.ext.allow=never", "-c", "core.hooksPath="])
+        .args([
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "core.hooksPath=",
+            "-c",
+            "core.longpaths=true",
+        ])
         .args(arguments)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
@@ -578,6 +669,7 @@ pub async fn refresh(
     let refreshed = async {
         let (bytes, commit) = read_source(app, &source, &request, cancel).await?;
         let (entries, cursor) = parse(&source, &bytes)?;
+        retain_catalog(app, &bytes)?;
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>((entries, cursor, digest(&bytes), commit))
     }
     .await;

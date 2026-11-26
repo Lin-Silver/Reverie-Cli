@@ -9,7 +9,12 @@ describe("desktop core request timeouts", () => {
   it("keeps prompt and indexing requests streaming without a transport deadline", () => {
     expect(coreRequestTimeoutMs("runPrompt")).toBe(0);
     expect(coreRequestTimeoutMs("resumePrompt")).toBe(0);
+    expect(coreRequestTimeoutMs("compactContext")).toBe(0);
     expect(coreRequestTimeoutMs("indexWorkspace")).toBe(0);
+    expect(coreRequestTimeoutMs("refreshMarket")).toBe(0);
+    expect(coreRequestTimeoutMs("preparePlugin")).toBe(0);
+    expect(coreRequestTimeoutMs("updatePlugin")).toBe(0);
+    expect(coreRequestTimeoutMs("completeConnectorAuthorization")).toBe(0);
   });
 
   it("lets a view tool call wait out its approval gate without a transport deadline", () => {

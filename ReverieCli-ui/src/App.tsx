@@ -4,6 +4,15 @@ import { AiOPanel } from './AiOPanel';
 import { VirtualSessionList } from './VirtualSessionList';
 import { ApiKeyEnvironmentField } from "./ApiKeyEnvironmentField";
 import {ContextEngineView,DEFAULT_CONTEXT_DRAFT,type ContextResourceDraft} from './ContextEngineView';
+import {PageNavigation} from './PageNavigation';
+import {MarketsView} from './MarketsView';
+import {useMarkets} from './market-state';
+import {ConnectorsView} from './ConnectorsView';
+import {useConnectors} from './connector-state';
+import {PluginsView} from './PluginsView';
+import {usePlugins} from './plugin-state';
+import {useDialogFocus} from './dialog-focus';
+import type { CoreContextUsage as ContextUsage } from './core-protocol';
 import { parseComputerResult } from "./computer-result";
 import { AvatarEditor, UserAvatar } from "./AvatarEditor";
 import { StarterActions, WelcomeHeader } from "./StartPage";
@@ -107,7 +116,6 @@ import { ViewPresentationProvider } from "./ViewPresentation";
 import type {
   CommandRecord,
   ConfigField,
-  ContextUsage,
   CustomProviderFormat,
   CustomProviderModel,
   CustomProviderRecord,
@@ -118,7 +126,8 @@ import type {
   LiveTurn,
   ModelRecord,
   ModelSource,
-  PluginRecord,
+  PluginsState,
+  SettingsState,
   ProviderProbe,
   RatsCustomProviderDefinition,
   RatsPermission,
@@ -217,6 +226,7 @@ import type { ApprovalDecision } from "./core-protocol";
 import type { GitWorkspaceStatus } from "../electron/git-workspace";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
+type ConversationRuntime = { live: LiveTurn | null; running: boolean; approval: Record<string, unknown> | null; question?: UserInputRequest | null; hostOwned?: boolean; runId?: string; operation?: "prompt" | "compaction"; controlStatus?: string; usage?: ContextUsage | null };
 
 
 const REVERIE_MARK_URL = new URL("reverie-mark.png", document.baseURI).href;
@@ -581,6 +591,7 @@ function Sidebar({
   switchWorkspace,
   openSearch,
   preferences,
+  updatePreferences,
   toggleSidebar,
   collapsed,
   renameSession,
@@ -601,6 +612,7 @@ function Sidebar({
   switchWorkspace: (projectRoot: string) => void;
   openSearch: () => void;
   preferences: UiPreferences;
+  updatePreferences: (patch: Partial<UiPreferences>) => void;
   toggleSidebar: () => void;
   collapsed: boolean;
   renameSession: (session: SessionInfo) => void;
@@ -716,42 +728,7 @@ function Sidebar({
         </button>
       </div>
 
-      <nav className="main-nav" aria-label={t("主导航")}>
-        {preferences.uiVariant === "liquid-glass" && <span className="glass-nav-label">{t("工作空间")}</span>}
-        <div className="nav-primary">
-        <button type="button" className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
-          <MessageSquare size={16} /> {t("对话")}
-        </button>
-        <button type="button" className={view === "tools" ? "active" : ""} onClick={() => setView("tools")}>
-          <Wrench size={16} /> {t("工具")}
-        </button>
-        <button type="button" className={view === "subagents" ? "active" : ""} onClick={() => setView("subagents")}>
-          <Bot size={16} /> {t("SubAgents")}
-        </button>
-        </div>
-        <div className="nav-automation">
-        {preferences.uiVariant === "liquid-glass" && <span className="glass-nav-label">{t("连接与任务")}</span>}
-        <button type="button" className={view === "rats" ? "active" : ""} onClick={() => setView("rats")}>
-          <Database size={16} /> RATS
-        </button>
-        <button type="button" className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}>
-          <Clock3 size={16} /> {t("RTP 任务")}
-        </button>
-        </div>
-        <div className="nav-utilities">
-        {preferences.uiVariant === "liquid-glass" && <span className="glass-nav-label">{t("资源库")}</span>}
-        <button type="button" className={view === "skills" ? "active" : ""} onClick={() => setView("skills")}>
-          <Sparkles size={16} /> {t("技能")}
-        </button>
-        <button type="button" className={view === "plugins" ? "active" : ""} onClick={() => setView("plugins")}>
-          <Plug size={16} /> {t("插件")}
-        </button>
-        <button type="button" className={view === "context" ? "active" : ""} onClick={() => setView("context")}><Database size={16}/>{t('上下文引擎')}</button>
-        <button type="button" className={view === "recovery" ? "active" : ""} onClick={() => setView("recovery")}>
-          <ArchiveRestore size={16} /> {t("恢复")}
-        </button>
-        </div>
-      </nav>
+      <PageNavigation view={view} setView={setView} preferences={preferences} updatePreferences={updatePreferences}/>
 
       <div className="project-heading">
         <span>{t("项目与会话")}</span>
@@ -1035,7 +1012,7 @@ function ModelPicker({
   );
 }
 
-const COMMAND_VIEWS: Record<string, ViewId> = { "/mode": "settings", "/permission": "settings", "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/skill": "skills", "/skills": "skills", "/plugins": "plugins", "/checkpoints": "recovery", "/rollback": "recovery" };
+const COMMAND_VIEWS: Record<string, ViewId> = { "/mode": "settings", "/permission": "settings", "/model": "settings", "/settings": "settings", "/setting": "settings", "/tools": "tools", "/rats": "rats", "/tasks": "tasks", "/operations": "tasks", "/skill": "skills", "/skills": "skills", "/plugins": "plugins", "/market": "markets", "/markets": "markets", "/connectors": "connectors", "/mcp": "connectors", "/checkpoints": "recovery", "/rollback": "recovery" };
 
 function Topbar({
   state,
@@ -1073,7 +1050,7 @@ function Topbar({
   const reasoning = activeSource?.selected_reasoning;
   const reasoningOptions = reasoning?.options ?? [];
   const selectedReasoning = reasoningOptions.find((item) => item.id === reasoning?.value);
-  const viewLabels: Record<ViewId, string> = { chat: "对话", tools: "工具", subagents: "SubAgents", rats: "RATS", tasks: "RTP 任务", skills: "技能", plugins: "插件", recovery: "恢复", settings: "设置",context:'上下文引擎' };
+  const viewLabels: Record<ViewId, string> = { chat: "对话", tools: "工具", subagents: "SubAgents", rats: "RATS", tasks: "RTP 任务", skills: "技能", plugins: "插件", recovery: "恢复", settings: "设置",context:'上下文引擎',markets:'扩展市场',connectors:'Connectors 与 MCP' };
   useEffect(() => {
     const closeMenus = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -1536,7 +1513,7 @@ const CONTEXT_SEGMENT_COLORS: Record<string, string> = {
 
 // A small ring in the composer showing how full the context window is, split by
 // category. The filled sweep is total/max; each coloured arc is one segment's
-// share of the window. Hover reveals the exact token split.
+// share of the window. Hover reveals the reported token split and its source.
 function ContextRing({ usage }: { usage: ContextUsage | null }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -1585,6 +1562,7 @@ function ContextRing({ usage }: { usage: ContextUsage | null }) {
   }, [open]);
 
   if (!usage || !usage.max_tokens) return null;
+  const nativeEstimate = usage.basis === "saved_native_context_estimate" || usage.basis === "native_next_request_estimate";
 
   const size = 26;
   const stroke = 3.5;
@@ -1674,7 +1652,7 @@ function ContextRing({ usage }: { usage: ContextUsage | null }) {
           </ul>
           <div className="context-ring-foot">
             <span>{t("context.usage.remaining", { tokens: formatTokens(usage.remaining_tokens) })}</span>
-            <span className="context-ring-approx">{t(usage.usage_source === "api" ? "context.usage.api" : usage.usage_source === "mixed" ? "context.usage.mixed" : usage.tokenizer.exact ? "context.usage.local" : "context.usage.approx")}</span>
+            <span className="context-ring-approx" title={nativeEstimate ? t("context.usage.native_detail") : usage.tokenizer.detail}>{t(nativeEstimate ? usage.basis === "native_next_request_estimate" ? "context.usage.next_request" : "context.usage.native" : usage.usage_source === "api" ? "context.usage.api" : usage.usage_source === "mixed" ? "context.usage.mixed" : usage.tokenizer.exact ? "context.usage.local" : "context.usage.approx")}</span>
           </div>
         </div>,
         document.body,
@@ -2407,40 +2385,6 @@ function Toggle({ checked, onChange, disabled = false, label }: { checked: boole
   return <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)} disabled={disabled}><span /></button>;
 }
 
-function PluginsView({
-  plugins,
-  updatePlugin,
-  refresh,
-}: {
-  plugins: PluginRecord[];
-  updatePlugin: (action: "setPluginEnabled" | "setPluginTrust", plugin: PluginRecord, value: boolean) => void;
-  refresh: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="page-scroll">
-      <PageHeader icon={<Plug size={20} />} title={t("插件")} description={t("管理运行时插件的启用状态与可执行信任。插件能力由同一个 Reverie 内核加载。")} action={<button type="button" className="secondary-button" onClick={refresh}><RefreshCw size={14} />{t("重新扫描")}</button>} />
-      <div className="plugin-list">
-        {plugins.map((plugin) => (
-          <div className="plugin-card" key={plugin.id}>
-            <div className="plugin-icon"><Plug size={18} /></div>
-            <div className="plugin-main">
-              <div className="plugin-title"><strong>{plugin.name}</strong><span className={`status-pill ${plugin.status}`}>{t(plugin.status_label || plugin.status)}</span></div>
-              <p>{plugin.family} · v{plugin.version || "—"}</p>
-              <div className="plugin-stats"><span>{plugin.tool_count} {t("工具")}</span><span>{plugin.command_count} {t("命令")}</span><span>{plugin.skill_count} {t("技能")}</span></div>
-            </div>
-            <div className="plugin-toggles">
-              <label><span>{t("信任执行")}</span><Toggle checked={plugin.trusted} onChange={(value) => updatePlugin("setPluginTrust", plugin, value)} /></label>
-              <label><span>{t("启用")}</span><Toggle checked={plugin.enabled} onChange={(value) => updatePlugin("setPluginEnabled", plugin, value)} /></label>
-            </div>
-          </div>
-        ))}
-        {plugins.length === 0 && <div className="empty-panel"><Plug size={26} /><strong>{t("没有发现运行时插件")}</strong><span>{t("将插件放入 Reverie 插件目录后重新扫描。")}</span></div>}
-      </div>
-    </div>
-  );
-}
-
 function SkillsView({
   skills,
   pinSkill,
@@ -2613,7 +2557,7 @@ function SettingControl({ item, update }: { item: SettingItem; update: (key: str
   if (item.kind === "choice") {
     const labels = item.labels ?? {};
     return (
-      <select value={String(item.value ?? "")} onChange={(event) => update(item.key, event.target.value)}>
+      <select aria-label={t(item.name)} value={String(item.value ?? "")} onChange={(event) => update(item.key, event.target.value)}>
         {(item.choices ?? []).map((choice) => {
           const raw = String(choice);
           return <option key={raw} value={raw}>{t(labels[raw] ?? raw)}</option>;
@@ -5031,7 +4975,7 @@ function ApprovalPanel({ approval, resolve }: { approval: Record<string, unknown
         <div className="confirm-icon"><ShieldCheck size={18} /></div>
         <div>
           <h2 id="approval-title">{t("工具请求更高权限")}</h2>
-          <p>{t(String(approval.permission_mode === "strict" ? "Strict 模式：每次工具调用都需要你的批准。" : "Reverie 内核暂停执行，等待你的决定。"))}</p>
+          <p>{t(String(approval.background ? "此调用等待审批，模型可继续处理独立任务。" : approval.permission_mode === "strict" ? "Strict 模式：每次工具调用都需要你的批准。" : "Reverie 内核暂停执行，等待你的决定。"))}</p>
         </div>
       </div>
       <div className="approval-tool"><Wrench size={15} /><strong>{String(approval.tool ?? "tool")}</strong>{riskLabel && <span className={riskClass}>{riskLabel}</span>}</div>
@@ -5061,6 +5005,8 @@ function ApprovalPanel({ approval, resolve }: { approval: Record<string, unknown
           <div className="approval-allow">
             <button type="button" className="primary-button" disabled={submitting} onClick={() => submit("once")}>{t("同意")}</button>
             {(!Array.isArray(approval.scopes) || approval.scopes.includes("session")) && <button type="button" className="approval-allow-session" disabled={submitting} onClick={() => submit("session")}>{t("本会话允许")}</button>}
+            {Array.isArray(approval.scopes) && approval.scopes.includes("project") && <button type="button" className="approval-allow-session" disabled={submitting} onClick={() => submit("project")}>{t("本项目允许")}</button>}
+            {Array.isArray(approval.scopes) && approval.scopes.includes("global") && <button type="button" className="approval-allow-session" disabled={submitting} onClick={() => submit("global")}>{t("全局允许")}</button>}
           </div>
         </div>
       )}
@@ -5078,6 +5024,7 @@ export default function App() {
   const [desktopPaths, setDesktopPaths] = useState<DesktopPaths | null>(null);
   const [bootError, setBootError] = useState("");
   const [view, setView] = useState<ViewId>("chat");
+  const markets=useMarkets(view==='markets');
   const [contextDrafts,setContextDrafts]=useState<Record<string,ContextResourceDraft>>({});
   const [settingsTarget,setSettingsTarget]=useState<'conversation'|'workspace'>('conversation');
   const [session, setSession] = useState<SessionState | null>(null);
@@ -5086,7 +5033,7 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [liveTurn, setLiveTurn] = useState<LiveTurn | null>(null);
-  const runtimeViews = useRef(new Map<string, { live: LiveTurn | null; running: boolean; approval: Record<string, unknown> | null; question?: UserInputRequest | null; hostOwned?:boolean }>());
+  const runtimeViews = useRef(new Map<string, ConversationRuntime>());
   const pendingLiveBatch = useRef<LiveTurnBatch>(emptyLiveTurnBatch());
   const liveBatchTimer = useRef<number | null>(null);
   const acceptLiveEvents = useRef(false);
@@ -5142,7 +5089,6 @@ export default function App() {
   const [question, setQuestion] = useState<UserInputRequest | null>(null);
   const questionDrafts = useRef(new Map<string,UserQuestionDraft>());
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
-  const contextBaselines = useRef(new Map<string, NonNullable<ContextUsage["api_baseline"]>>());
   const contextDirty = useRef(true);
   const contextRevision = useRef(0);
   const [mentionItems, setMentionItems] = useState<Array<Record<string, unknown>>>([]);
@@ -5207,6 +5153,13 @@ export default function App() {
   const projectRoot = state?.workspace.project_root ?? "";
   const configurationSessionId=view==='settings' && settingsTarget==='workspace'?undefined:session?.id;
   const assistantId:'aio'|undefined = session?.metadata.assistant_id==='aio'?'aio':undefined;
+  const acceptPlugins=useCallback((plugins:PluginsState,settings:SettingsState|undefined,root:string)=>{
+    if(draftOwner.current.root!==root)return;
+    if(settings)conversationViews.current.delete(ownerKey(root,draftOwner.current.id,draftOwner.current.assistantId));
+    setState(current=>current&&current.workspace.project_root===root?{...current,plugins,...(settings?{settings}:{})}:current);
+  },[]);
+  const connectors=useConnectors(view==='connectors',projectRoot);
+  const pluginManager=usePlugins(view==='plugins',projectRoot,acceptPlugins);
   const editingWstyle=/^\/wstyle(?:\s|$)/i.test(prompt);
   useEffect(()=>{
     if (!projectRoot || state?.workspace.mode!=='writer' || !editingWstyle || wstyleBusy) return;
@@ -5571,10 +5524,18 @@ export default function App() {
       const currentOwner = ownerKey(draftOwner.current.root, draftOwner.current.id,draftOwner.current.assistantId);
       let runtime = runtimeViews.current.get(eventOwner);
       if(type==='run.started' && !runtime){
-        runtime={running:true,approval:null,hostOwned:true,live:{userText:String(event.prompt || ''),assistantText:'',reasoningText:'',events:[],segments:[],error:'',startedAt:Date.now()}};
+        runtime={running:true,approval:null,hostOwned:true,runId:String(event.run_id || ''),live:{userText:String(event.prompt || ''),assistantText:'',reasoningText:'',events:[],segments:[],error:'',startedAt:Date.now()}};
         runtimeViews.current.set(eventOwner,runtime);
         setSessionStates(current=>({...current,[eventOwner]:'running'}));
         if(eventOwner===currentOwner){setRunning(true);setLiveTurn(runtime.live);acceptLiveEvents.current=true;}
+      }
+      if (type === "run.started" && runtime && !runtime.runId && typeof event.run_id === "string") runtime.runId = event.run_id;
+      if ((type === "context.usage" || type === "context.compaction.started" || type === "context.compaction.finished") && event.run_id && (!runtime?.running || runtime.runId !== event.run_id)) return;
+      if (type === "context.compaction.started" || type === "context.compaction.finished") {
+        if (!runtime?.running) return;
+        runtime.controlStatus = t(type === "context.compaction.started" ? "正在压缩上下文" : runtime.operation === "compaction" ? "上下文压缩完成" : "上下文压缩完成，继续任务");
+        if (eventOwner === currentOwner) setControlStatus(runtime.controlStatus);
+        return;
       }
       if(type==='conversation.saved'){
         if(runtime?.hostOwned){
@@ -5611,12 +5572,19 @@ export default function App() {
       }
       if (type === "context.usage") {
         const usage = event.usage as ContextUsage;
-        if (usage.api_baseline) contextBaselines.current.set(eventOwner, usage.api_baseline);
+        if (!usage || !runtime?.running) return;
+        runtime.usage = usage;
         if (eventOwner === currentOwner) {
           contextRevision.current += 1;
-          contextDirty.current = true;
+          contextDirty.current = false;
           setContextUsage(usage);
         }
+        return;
+      }
+      if (type === "run.control" && runtime?.operation === "compaction") {
+        if (event.run_id && event.run_id !== runtime.runId) return;
+        runtime.controlStatus = t("正在停止，等待当前操作结束");
+        if (eventOwner === currentOwner) setControlStatus(runtime.controlStatus);
         return;
       }
       if (runtime?.live) {
@@ -5758,7 +5726,6 @@ export default function App() {
     return JSON.stringify([sources?.active_source, sources?.active_model, provider?.id, selected?.context_length, source?.selected_reasoning.value]);
   }, [state?.models]);
   useEffect(() => {
-    contextBaselines.current.clear();
     contextRevision.current += 1;
     contextDirty.current = true;
   }, [contextModel]);
@@ -5766,10 +5733,6 @@ export default function App() {
     projectRoot,
     ...(session?.id ? { sessionId: session.id } : {}),
     ...(assistantId === "aio" ? { assistantId } : {}),
-    draftText: prompt,
-    attachments: attachments.filter(item => !item.status || item.status === "ready"),
-    liveAssistantText: running ? liveTurn?.assistantText || "" : "",
-    apiBaseline: contextBaselines.current.get(contextOwner),
   };
   useEffect(() => {
     setContextUsage(null);
@@ -5778,25 +5741,27 @@ export default function App() {
   }, [contextOwner, contextModel]);
   useEffect(() => {
     contextDirty.current = true;
-  }, [session?.messages, prompt, attachments, liveTurn?.assistantText, liveTurn?.events, running]);
+  }, [session?.messages, running]);
   useEffect(() => {
     if (modelPickerOpen) {
       contextDirty.current = true;
       return;
     }
-    if (!workspaceReady || sessionBusy || !state?.workspace.active_model || state.capabilities && !state.capabilities.actions.includes("getContextUsage")) return;
+    if (!workspaceReady || !session?.id || sessionBusy || running || !state?.workspace.active_model || state.capabilities && !state.capabilities.actions.includes("getContextUsage")) return;
     let cancelled = false;
     let retryEmpty = true;
     contextDirty.current = true;
-    // Throttle rather than debounce: continuous typing/streaming must keep updating.
+    // Saved history is read when idle; active runs publish their own usage events.
     const timer = window.setInterval(async () => {
       if (!contextDirty.current || contextInFlight.current) return;
       contextDirty.current = false;
       contextInFlight.current = true;
       const revision = contextRevision.current;
       try {
-        const response = await window.reverie.request("getContextUsage", contextSnapshot.current);
+        const snapshot = contextSnapshot.current;
+        const response = await window.reverie.request("getContextUsage", snapshot);
         if (!cancelled && revision === contextRevision.current) {
+          if (response.usage?.session_id && response.usage.session_id !== snapshot.sessionId) return;
           setContextUsage(response.usage ?? null);
           if (!response.usage && retryEmpty) {
             retryEmpty = false;
@@ -5810,7 +5775,7 @@ export default function App() {
       }
     }, 250);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [workspaceReady, contextOwner, sessionBusy, contextModel, modelPickerOpen, state?.capabilities]);
+  }, [workspaceReady, contextOwner, sessionBusy, running, contextModel, modelPickerOpen, state?.capabilities]);
 
   const openSession = useCallback(async (id: string,ownerAssistantId?:'aio') => {
     // Re-selecting the conversation already in view is just a jump back to its
@@ -5928,46 +5893,84 @@ export default function App() {
     setApproval(runtime?.approval ?? null);
     setQuestion(runtime?.question ?? null);
     acceptLiveEvents.current = runtime?.running ?? false;
-    setControlStatus("");
+    setControlStatus(runtime?.controlStatus ?? "");
+    if (runtime?.usage) setContextUsage(runtime.usage);
     setComposerError("");
     if (session) setSessionStates(current => ({ ...current, [ownerKey(projectRoot, session.id,assistantId)]: runtime?.running ? current[ownerKey(projectRoot,session.id,assistantId)] || "running" : "" }));
   }, [projectRoot, session?.id]);
 
   const compactContext = useCallback(async (focus = "") => {
     if (running || sessionBusy || !state) return;
+    const root = projectRoot;
     const requestSequence = ++sessionRequestSequence.current;
-    setSessionBusy(true);
+    let runtimeKey = ownerKey(root, session?.id ?? NEW_SESSION_DRAFT_ID, assistantId);
+    let runtime: ConversationRuntime | undefined;
+    let previous: ConversationRuntime | undefined;
+    const ownsView = () => ownerKey(draftOwner.current.root, draftOwner.current.id, draftOwner.current.assistantId) === runtimeKey && runtimeViews.current.get(runtimeKey) === runtime;
     try {
       let activeSession = session;
       if (!activeSession) {
-        const created = await window.reverie.request("createSession", {});
+        setSessionBusy(true);
+        const created = await window.reverie.request("createSession", { projectRoot: root });
         if (requestSequence !== sessionRequestSequence.current) return;
         activeSession = created.session;
         setSession(activeSession);
         setState((current) => current ? { ...current, sessions: created.sessions, skills: created.skills ?? current.skills } : current);
+        setSessionBusy(false);
       }
+      runtimeKey = ownerKey(root, activeSession.id, activeSession.metadata.assistant_id === "aio" ? "aio" : undefined);
+      previous = runtimeViews.current.get(runtimeKey);
+      if (previous?.running) return;
+      const runId = `compact-${crypto.randomUUID()}`;
+      runtime = { running: true, live: previous?.live ?? null, approval: null, runId, operation: "compaction", controlStatus: t("正在压缩上下文") };
+      runtimeViews.current.set(runtimeKey, runtime);
+      setSessionStates(current => ({ ...current, [runtimeKey]: "running" }));
+      setRunning(true);
+      setControlStatus(runtime.controlStatus!);
+      setComposerError("");
+      contextRevision.current += 1;
+      contextDirty.current = false;
       const response = await window.reverie.request("compactContext", {
         sessionId: activeSession.id,...(activeSession.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}),
         focus: focus || undefined,
-        projectRoot: state.workspace.project_root,
+        projectRoot: root,
+        runId,
       });
-      if (requestSequence !== sessionRequestSequence.current) return;
-      setSession(response.session);
+      if (response.session.id !== activeSession.id || response.session_id && response.session_id !== activeSession.id || response.run_id && response.run_id !== runId || response.project_root && ownerKey(response.project_root, activeSession.id, assistantId) !== runtimeKey) throw new Error(t("压缩结果与当前任务不一致"));
+      const refreshed = await refreshSessionWindow(sessionCache.current.get(activeSession.id, root, assistantId), response.session, async before => (await window.reverie.request("getSession", { projectRoot: root, sessionId: activeSession!.id, before, select: false, ...(assistantId === "aio" ? { assistantId } : {}) })).session);
+      if (runtimeViews.current.get(runtimeKey) !== runtime) return;
+      sessionCache.current.set(refreshed, root);
+      if (previous && response.usage) previous.usage = response.usage;
+      if (!ownsView() || pendingSessionId.current && pendingSessionId.current !== activeSession.id) return;
+      sessionRequestSequence.current += 1;
+      pendingSessionId.current = "";
+      setSessionBusy(false);
+      setSession(refreshed);
       setState((current) => current ? {
         ...current,
         sessions: response.sessions,
         recovery: response.recovery,
-        workspace: { ...current.workspace, context_engine: response.context_engine },
+        workspace: { ...current.workspace, context_engine: { ...current.workspace.context_engine, ...response.context_engine } },
       } : current);
+      setContextUsage(response.usage ?? null);
       setMentionItems([]);
       setMentionOpen(false);
-      toast(response.message, "success");
+      toast(response.message, response.success ? "success" : "info");
     } catch (error) {
-      if (requestSequence === sessionRequestSequence.current) toast(error instanceof Error ? error.message : String(error), "error");
+      const message = error instanceof Error ? error.message : String(error);
+      const cancelled = /^Context reduction was cancelled\b/i.test(message);
+      if (ownsView() || !runtime && requestSequence === sessionRequestSequence.current) toast(cancelled ? t("上下文压缩已停止") : message, cancelled ? "info" : "error");
     } finally {
+      if (runtime && runtimeViews.current.get(runtimeKey) === runtime) {
+        const owned = ownsView();
+        if (previous?.live) runtimeViews.current.set(runtimeKey, previous);
+        else runtimeViews.current.delete(runtimeKey);
+        setSessionStates(current => ({ ...current, [runtimeKey]: "" }));
+        if (owned) { setRunning(false); setControlStatus(""); contextDirty.current = true; }
+      }
       if (requestSequence === sessionRequestSequence.current) setSessionBusy(false);
     }
-  }, [running, session, sessionBusy, state, toast]);
+  }, [running, session, sessionBusy, state, projectRoot, assistantId, t, toast]);
 
   const skillsState = state?.skills;
   const pinnedSkills = useMemo(() => skillsState?.pinned.names ?? [], [skillsState]);
@@ -6069,7 +6072,7 @@ export default function App() {
     if (startsInView) setRunning(true);
     setSessionStates(current => ({ ...current, [ownerKey(runRoot, runSessionId,runAssistantId)]: "running" }));
     if (startsInView) { setComposerError(""); setControlStatus(""); resetLiveBatch(); acceptLiveEvents.current = true; }
-    const runtime = { live: { userText: resume ? "" : text, historyMessageCount: startsInView ? session?.messages.length ?? 0 : undefined, attachments: resume ? [] : inputAttachments.map(item => ({ ...item })), resumed: resume, assistantText: "", reasoningText: "", events: [], segments: [], error: "", startedAt: Date.now() } as LiveTurn | null, running: true, approval: null as Record<string, unknown> | null, question: null as UserInputRequest | null };
+    const runtime: ConversationRuntime = { live: { userText: resume ? "" : text, historyMessageCount: startsInView ? session?.messages.length ?? 0 : undefined, attachments: resume ? [] : inputAttachments.map(item => ({ ...item })), resumed: resume, assistantText: "", reasoningText: "", events: [], segments: [], error: "", startedAt: Date.now() }, running: true, approval: null, question: null, operation: "prompt" };
     let runtimeKey = ownerKey(runRoot, runSessionId,runAssistantId);
     runtimeViews.current.set(runtimeKey, runtime);
     if (startsInView) setLiveTurn(runtime.live);
@@ -6191,6 +6194,7 @@ export default function App() {
   const sendPrompt = useCallback(async (behaviorOverride?: "queue" | "steer") => {
     const text = prompt.trim();
     if ((!text && !attachments.length) || sessionBusy || wstyleBusy || streamSettingPending.current || !state) return;
+    if (runtimeViews.current.get(ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID, assistantId))?.operation === "compaction") { setComposerError(t("请等待上下文压缩完成后发送；草稿会保留。")); return; }
     const targetView = COMMAND_VIEWS[text.toLowerCase()];
     if (targetView && !/^\/skills?$/i.test(text)) { setView(targetView); setPrompt(""); return; }
     const command = desktopCommand(text);
@@ -6310,14 +6314,16 @@ export default function App() {
 
   const cancelPrompt = useCallback(async () => {
     if (!session || !running) return;
-    authorizedQueues.current.delete(ownerKey(projectRoot,session.id,assistantId));
+    const runtimeKey = ownerKey(projectRoot, session.id, assistantId);
+    const runtime = runtimeViews.current.get(runtimeKey);
+    authorizedQueues.current.delete(runtimeKey);
     setQueuePaused(true);
     setControlStatus(t("正在停止，等待当前操作结束"));
     setApproval(null);
     try {
-      await window.reverie.request("stopPrompt", { projectRoot, sessionId: session.id,...(assistantId==='aio'?{assistantId:'aio' as const}:{}) });
+      await window.reverie.request("stopPrompt", { projectRoot, sessionId: session.id, ...(runtime?.runId ? { runId: runtime.runId } : {}), ...(assistantId==='aio'?{assistantId:'aio' as const}:{}) });
     } catch (error) {
-      setComposerError(error instanceof Error ? error.message : String(error));
+      if (ownerKey(draftOwner.current.root, draftOwner.current.id, draftOwner.current.assistantId) === runtimeKey && runtimeViews.current.get(runtimeKey) === runtime) setComposerError(error instanceof Error ? error.message : String(error));
     }
   }, [projectRoot, running, session, t]);
 
@@ -6507,7 +6513,9 @@ export default function App() {
         decision,
         ...(decision === "message" && message ? { message } : {}),
       });
-      setApproval(null);
+      const owner = runtimeViews.current.get(ownerKey(String(approval.project_root || projectRoot), String(approval.session_id || session?.id || ""), approval.assistant_id === "aio" ? "aio" : undefined));
+      if (owner?.approval?.approval_id === approval.approval_id && owner) owner.approval = null;
+      setApproval(current => current?.approval_id === approval.approval_id ? null : current);
       toast(
         t(decision === "deny" ? "已拒绝工具执行" : decision === "message" ? "已发送个性化回复给模型" : "权限已授予"),
         decision === "deny" ? "info" : "success"
@@ -6824,28 +6832,6 @@ export default function App() {
     selectModel: (provider, model) => void selectCustomProviderModel(provider, model),
     editContextLimit: (provider, model) => setContextLimitModal({ provider, model }),
   }), [providerProbes, providerProbing, deleteCustomProvider, patchCustomProvider, setCustomProviderThinking, refreshCustomProvider, probeProviders, selectCustomProviderModel]);
-
-  const updatePlugin = useCallback(async (action: "setPluginEnabled" | "setPluginTrust", plugin: PluginRecord, value: boolean) => {
-    const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
-    try {
-      const response = action === "setPluginEnabled"
-        ? await window.reverie.request("setPluginEnabled", { pluginId: plugin.id, enabled: value,projectRoot,sessionId:session?.id,...(session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) })
-        : await window.reverie.request("setPluginTrust", { pluginId: plugin.id, trusted: value });
-      conversationViews.current.delete(owner);
-      if(ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
-      const plugins = response.plugins;
-      setState((current) => current ? { ...current, plugins, settings: response.settings } : current);
-      toast(t("plugin.updated", { name: plugin.name }), "success");
-    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast,projectRoot,session?.id]);
-
-  const refreshPlugins = useCallback(async () => {
-    try {
-      const response = await window.reverie.request("refreshPlugins", {});
-      setState((current) => current ? { ...current, plugins: response.plugins } : current);
-      toast(t("插件目录已刷新"), "success");
-    } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
 
   const indexWorkspace = useCallback(async () => {
     toast(t("工作区索引已开始"), "info");
@@ -7174,15 +7160,17 @@ export default function App() {
     if (view === "tasks") return <RtpTasksView preferences={uiPreferences} updatePreferences={updateUiPreferences} />;
     if (view === "subagents") return <SubagentsView />;
     if(view==='context')return <ContextEngineView key={state.workspace.project_root} projectRoot={state.workspace.project_root} engine={state.workspace.context_engine} draft={contextDrafts[state.workspace.project_root]??DEFAULT_CONTEXT_DRAFT} updateDraft={draft=>setContextDrafts(current=>({...current,[state.workspace.project_root]:draft}))} updateEngine={engine=>setState(current=>current?.workspace.project_root===state.workspace.project_root?{...current,workspace:{...current.workspace,context_engine:engine,index_ready:engine.ready}}:current)}/>;
+    if(view==='connectors')return <ConnectorsView controller={connectors} onOpenPlugin={id=>{pluginManager.patch({pluginId:id});setView('plugins');}}/>;
+    if(view==='markets')return <MarketsView controller={markets} pluginBusy={Boolean(pluginManager.pending)||pluginManager.loading} preparePlugin={(entry,endpoint)=>{setView('plugins');void pluginManager.prepare({kind:'market',entry_id:entry.id,...(endpoint?{location:endpoint}:{})},entry.name);}}/>;
     const requiredAction = {skills:"listSkills",plugins:"listPlugins",recovery:"rollbackCheckpoint"}[view as "skills"|"plugins"|"recovery"];
     if (requiredAction && state.capabilities && !state.capabilities.actions.includes(requiredAction)) return <div className="empty-row" role="status">{t("这个功能正在迁移到 Rust 内核，完成后会在这里启用。")}</div>;
     if (view === "skills") return <SkillsView skills={state.skills} pinSkill={(name) => void pinSkill(name)} unpinSkill={(name) => void unpinSkill(name)} clearPinned={() => void clearPinnedSkills()} refresh={() => void refreshSkills()} />;
-    if (view === "plugins") return <PluginsView plugins={state.plugins.records} updatePlugin={updatePlugin} refresh={refreshPlugins} />;
+    if (view === "plugins") return <PluginsView controller={pluginManager} actions={state.capabilities?.actions}/>;
     if (view === "recovery") return <RecoveryView recovery={state.recovery} rollback={rollback} />;
     if (view === "settings") return <>{(!state.capabilities || state.capabilities.actions.includes("aioState")) && <AiOPanel open={(id,root)=>void (root?navigateToSession(root,id,'aio'):openSession(id,'aio'))}/>}<label className="settings-card">配置范围 <select aria-label="配置范围" value={settingsTarget} onChange={event=>setSettingsTarget(event.target.value as 'conversation'|'workspace')}><option value="conversation">当前对话配置</option><option value="workspace">工作区默认配置（用于新对话）</option></select></label><SettingsView state={state} updateSetting={updateSetting} selectModel={selectModel} saveProvider={saveProvider} revealSecret={revealSecret} addStandard={() => setStandardModelForm({ target: null })} editStandard={(index, model) => setStandardModelForm({ target: { index, model } })} deleteStandard={deleteStandard} customProviders={customProviderControls} paths={desktopPaths} selectCoreData={() => void selectCoreData()} theme={theme} setTheme={changeTheme} preferences={uiPreferences} updatePreferences={updateUiPreferences} selectBackground={() => void selectBackground()} clearBackground={() => void clearBackground()} imageModels={imageModels} refreshImageModels={() => void refreshImageModels()} selectImageModel={(source, model) => void selectImageModel(source, model)} /></>;
     return <ChatView controls={inputControls} session={session} liveTurn={liveTurn} running={running} prompt={prompt} setPrompt={setPrompt} send={() => void sendPrompt()} cancel={() => void cancelPrompt()} resume={() => void runPromptText("", true)} mentionItems={mentionItems} mentionOpen={mentionOpen} mentionLoading={mentionLoading} requestMentions={(query) => void requestMentions(query)} chooseMention={chooseStructuredMention} attachments={attachments} selectAttachment={() => void selectAttachment()} importDroppedFiles={(files) => void importDroppedFiles(files)} removeAttachment={removeAttachment} pinnedSkills={pinnedSkills} unresolvedSkills={unresolvedSkills} unpinSkill={(name) => void unpinSkill(name)} modelName={state.models.active_model?.display_name ?? "Reverie"} sessionBusy={sessionBusy} renameSession={() => { if (session) setRenameSessionTarget({ id: session.id, name: session.name, projectRoot, assistantId }); }} forkSession={() => void forkActiveSession()} rewindSession={rewindActiveSession} deleteSession={() => { if (session) deleteSession(session); }} preferences={uiPreferences}
         updatePreferences={updateUiPreferences} approval={approval} resolveApproval={resolveApproval} question={question} resolveQuestion={resolveQuestion} questionDrafts={questionDrafts.current} contextUsage={contextUsage} loadHistoryPage={loadHistoryPage} />;
-  }, [contextDrafts, inputControls, state, view, settingsTarget, updatePlugin, refreshPlugins, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, question, resolveQuestion, contextUsage, t]);
+  }, [connectors, markets, pluginManager, contextDrafts, inputControls, state, view, settingsTarget, rollback, updateSetting, selectModel, saveProvider, revealSecret, deleteStandard, customProviderControls, desktopPaths, selectCoreData, theme, changeTheme, uiPreferences, updateUiPreferences, selectBackground, clearBackground, imageModels, refreshImageModels, selectImageModel, session, liveTurn, running, prompt, mentionItems, mentionOpen, mentionLoading, attachments, selectAttachment, importDroppedFiles, removeAttachment, pinnedSkills, unresolvedSkills, pinSkill, unpinSkill, clearPinnedSkills, refreshSkills, sendPrompt, cancelPrompt, runPromptText, requestMentions, chooseStructuredMention, sessionBusy, forkActiveSession, rewindActiveSession, deleteSession, approval, resolveApproval, question, resolveQuestion, contextUsage, t]);
 
   if (bootError) return <I18nProvider language={uiPreferences.language}><ErrorScreen error={bootError} retry={() => void retryInitialization()} /></I18nProvider>;
   if (!state) return <I18nProvider language={uiPreferences.language}><LoadingScreen /></I18nProvider>;
@@ -7198,7 +7186,7 @@ export default function App() {
       style={{ "--sidebar-width": `${sidebarWidth}px`, "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
     >
       <InputContext.Provider value={inputControls}>
-      <Sidebar collapsed={sidebarCollapsed} state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openOwnedSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name, projectRoot:state.sessions.owners?.[target.id]?.workspace || projectRoot, assistantId:state.sessions.owners?.[target.id]?state.sessions.owners[target.id].assistant_id:assistantId })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
+      <Sidebar collapsed={sidebarCollapsed} state={state} view={view} setView={setView} activeSessionId={activeSessionId} openSession={(id) => void openOwnedSession(id)} newSession={() => void createSession()} newProjectSession={(projectRoot) => void createSessionForProject(projectRoot)} sessionBusy={sessionBusy} selectWorkspace={() => void selectWorkspace()} switchWorkspace={(projectRoot) => void switchWorkspace(projectRoot)} openSearch={() => setSessionSearchOpen(true)} preferences={uiPreferences} updatePreferences={updateUiPreferences} toggleSidebar={toggleSidebar} renameSession={(target) => setRenameSessionTarget({ id: target.id, name: target.name, projectRoot:state.sessions.owners?.[target.id]?.workspace || projectRoot, assistantId:state.sessions.owners?.[target.id]?state.sessions.owners[target.id].assistant_id:assistantId })} toggleArchive={toggleSessionArchive} deleteSession={deleteSession} deleteArchivedSessions={deleteArchivedSessions} deleteProject={deleteProject} />
       </InputContext.Provider>
       <main className={`main-area ${gitStatus ? "with-git-status" : ""}`}>
         <Topbar state={state} view={view} sidebarCollapsed={sidebarCollapsed} toggleSidebar={toggleSidebar} openModelPicker={openModelPicker} selectReasoning={(value) => void selectReasoning(value)} inspectorOpen={uiPreferences.inspectorOpen} toggleInspector={() => updateUiPreferences({ inspectorOpen: !uiPreferences.inspectorOpen })} openCommands={() => setCommandOpen(true)} theme={theme} setTheme={changeTheme} uiVariant={uiPreferences.uiVariant} setUiVariant={uiVariant => updateUiPreferences({ uiVariant })} />
@@ -7270,65 +7258,4 @@ export default function App() {
     </ViewPresentationProvider>
     </I18nProvider>
   );
-}
-
-const DIALOG_FOCUSABLE = [
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "[href]",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
-
-function useDialogFocus(
-  dialogRef: { current: HTMLElement | null },
-  close?: () => void,
-): void {
-  const closeRef = useRef(close);
-  closeRef.current = close;
-  const restoreFocus = useRef<HTMLElement | null>(
-    typeof document !== "undefined" && document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null,
-  );
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE))
-      .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
-    const initial = dialog.querySelector<HTMLElement>("[autofocus]") ?? focusable()[0] ?? dialog;
-    initial.focus();
-
-    const keyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && closeRef.current) {
-        event.preventDefault();
-        event.stopPropagation();
-        closeRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const elements = focusable();
-      if (!elements.length) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const first = elements[0];
-      const last = elements[elements.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    dialog.addEventListener("keydown", keyDown);
-    return () => {
-      dialog.removeEventListener("keydown", keyDown);
-      restoreFocus.current?.focus();
-    };
-  }, [dialogRef]);
 }

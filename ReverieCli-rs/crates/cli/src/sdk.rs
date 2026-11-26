@@ -95,8 +95,12 @@ pub fn run() -> io::Result<()> {
                 }
             }
         });
-        if request.action == "runPrompt" {
-            let pending = match host.begin_prompt(&request.payload) {
+        if matches!(request.action.as_str(), "runPrompt" | "resumePrompt") {
+            let pending = match if request.action == "resumePrompt" {
+                host.begin_resume(&request.payload)
+            } else {
+                host.begin_prompt(&request.payload)
+            } {
                 Ok(pending) => pending,
                 Err(error) => {
                     write(&output, &Reply::error(request.id, error))?;
@@ -108,6 +112,28 @@ pub fn run() -> io::Result<()> {
             let task_failure = failure.clone();
             tasks.push(runtime.spawn(async move {
                 let reply = task_host.complete_prompt(request.id, pending, sink).await;
+                if let Err(error) = write(&task_output, &reply) {
+                    if let Ok(mut failure) = task_failure.lock() {
+                        *failure = Some(error.to_string());
+                    }
+                    task_host.cancel_all();
+                }
+            }));
+        } else if request.action == "compactContext" {
+            let pending = match host.begin_compaction(&request.payload) {
+                Ok(pending) => pending,
+                Err(error) => {
+                    write(&output, &Reply::error(request.id, error))?;
+                    continue;
+                }
+            };
+            let task_host = host.clone();
+            let task_output = output.clone();
+            let task_failure = failure.clone();
+            tasks.push(runtime.spawn(async move {
+                let reply = task_host
+                    .complete_compaction(request.id, pending, sink)
+                    .await;
                 if let Err(error) = write(&task_output, &reply) {
                     if let Ok(mut failure) = task_failure.lock() {
                         *failure = Some(error.to_string());
@@ -128,6 +154,63 @@ pub fn run() -> io::Result<()> {
             let task_failure = failure.clone();
             tasks.push(runtime.spawn(async move {
                 let reply = task_host.complete_market_refresh(request.id, pending).await;
+                if let Err(error) = write(&task_output, &reply) {
+                    if let Ok(mut failure) = task_failure.lock() {
+                        *failure = Some(error.to_string());
+                    }
+                    task_host.cancel_all();
+                }
+            }));
+        } else if KernelHost::is_extension_async_action(&request.action) {
+            let pending = match host.begin_plugin_operation(&request.action, &request.payload) {
+                Ok(pending) => pending,
+                Err(error) => {
+                    write(&output, &Reply::error(request.id, error))?;
+                    continue;
+                }
+            };
+            let task_host = host.clone();
+            let task_output = output.clone();
+            let task_failure = failure.clone();
+            tasks.push(runtime.spawn(async move {
+                let reply = task_host
+                    .complete_plugin_operation(request.id, pending, sink)
+                    .await;
+                if let Err(error) = write(&task_output, &reply) {
+                    if let Ok(mut failure) = task_failure.lock() {
+                        *failure = Some(error.to_string());
+                    }
+                    task_host.cancel_all();
+                }
+            }));
+        } else if request.action == "aioDecision" {
+            let pending = match host.begin_aio_decision(&request.payload) {
+                Ok(pending) => pending,
+                Err(error) => {
+                    write(&output, &Reply::error(request.id, error))?;
+                    continue;
+                }
+            };
+            let task_host = host.clone();
+            let task_output = output.clone();
+            let task_failure = failure.clone();
+            tasks.push(runtime.spawn(async move {
+                let reply = task_host
+                    .complete_aio_decision(request.id, pending, sink)
+                    .await;
+                if let Err(error) = write(&task_output, &reply) {
+                    if let Ok(mut failure) = task_failure.lock() {
+                        *failure = Some(error.to_string());
+                    }
+                    task_host.cancel_all();
+                }
+            }));
+        } else if KernelHost::is_mode_async_action(&request.action) {
+            let task_host = host.clone();
+            let task_output = output.clone();
+            let task_failure = failure.clone();
+            tasks.push(runtime.spawn(async move {
+                let reply = task_host.dispatch(request, sink).await;
                 if let Err(error) = write(&task_output, &reply) {
                     if let Ok(mut failure) = task_failure.lock() {
                         *failure = Some(error.to_string());
@@ -180,6 +263,7 @@ pub fn run() -> io::Result<()> {
         for task in tasks {
             task.await.map_err(io::Error::other)?;
         }
+        host.close_extensions().await;
         Ok::<_, io::Error>(())
     })?;
     if let Some(error) = failure

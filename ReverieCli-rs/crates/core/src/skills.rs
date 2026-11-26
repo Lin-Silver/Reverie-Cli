@@ -62,6 +62,7 @@ pub(crate) struct SkillCatalog {
     records: Vec<Skill>,
     errors: Vec<SkillIssue>,
     shadowed: Vec<SkillShadow>,
+    plugins: Vec<std::sync::Arc<crate::plugins::PluginLease>>,
 }
 
 pub(crate) fn normalize(value: &str) -> String {
@@ -98,7 +99,7 @@ fn digest(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
-fn frontmatter(text: &str) -> Result<(Value, &str)> {
+pub(crate) fn frontmatter(text: &str) -> Result<(Value, &str)> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let Some(rest) = text
         .strip_prefix("---\r\n")
@@ -133,6 +134,44 @@ fn summary(text: &str) -> String {
 }
 
 impl SkillCatalog {
+    pub fn discover_with_plugins(
+        project: &Path,
+        app: &Path,
+        mode: &str,
+        plugins: Vec<std::sync::Arc<crate::plugins::PluginLease>>,
+    ) -> Result<Self> {
+        let mut catalog = Self::discover(project, app, mode)?;
+        for plugin in &plugins {
+            let root = Root {
+                path: plugin.root.clone(),
+                label: format!("{} ({})", plugin.metadata().display_name, plugin.id),
+                scope: "Plugin",
+            };
+            for component in plugin
+                .metadata()
+                .components
+                .iter()
+                .filter(|component| component.kind == "skill")
+            {
+                let file = crate::plugins::package::checked_path(&plugin.root, &component.path)?;
+                let mut skill = Self::load(&file, &plugin.root, &root)?;
+                skill.row.plugin_id = plugin.id.clone();
+                skill.row.name = format!(
+                    "{}-{}:{}",
+                    plugin.metadata().name,
+                    &plugin.id[..12],
+                    component.name
+                );
+                skill.row.key = normalize(&skill.row.name);
+                catalog.records.push(skill);
+            }
+        }
+        catalog.plugins = plugins;
+        Ok(catalog)
+    }
+    pub fn plugin_leases(&self) -> Vec<std::sync::Arc<crate::plugins::PluginLease>> {
+        self.plugins.clone()
+    }
     pub fn discover(project: &Path, app: &Path, mode: &str) -> Result<Self> {
         let mut roots = Vec::new();
         if let Some(parent) = std::env::current_exe()?.parent() {
@@ -176,6 +215,7 @@ impl SkillCatalog {
             records: Vec::new(),
             errors: Vec::new(),
             shadowed: Vec::new(),
+            plugins: Vec::new(),
         };
         let mut seen_roots = BTreeSet::new();
         let mut seen_files = BTreeSet::new();
@@ -498,6 +538,18 @@ impl SkillCatalog {
             return Err("Skill resources must be UTF-8 text of at most 2 MiB.".into());
         }
         let hash = digest(&bytes);
+        if !skill.row.plugin_id.is_empty() {
+            let plugin = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.id == skill.row.plugin_id)
+                .ok_or("Skill has no task-bound extension version.")?;
+            let relative = target
+                .strip_prefix(&plugin.root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            plugin.verify_content(&relative, &bytes)?;
+        }
         let text = String::from_utf8(bytes)?;
         Ok((
             text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned(),

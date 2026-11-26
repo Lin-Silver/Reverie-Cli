@@ -15,7 +15,14 @@ impl Kernel {
     ) -> Result<Arc<SkillCatalog>> {
         let key = (root.to_owned(), mode.to_owned());
         if refresh || !self.skill_catalogs.contains_key(&key) {
-            let catalog = Arc::new(SkillCatalog::discover(root, &self.app_root, mode)?);
+            let plugins =
+                crate::plugins::PluginStore::new(&self.app_root)?.leases(root, &|| false)?;
+            let catalog = Arc::new(SkillCatalog::discover_with_plugins(
+                root,
+                &self.app_root,
+                mode,
+                plugins,
+            )?);
             self.skill_catalogs.insert(key.clone(), catalog);
         }
         Ok(self.skill_catalogs[&key].clone())

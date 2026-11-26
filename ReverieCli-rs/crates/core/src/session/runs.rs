@@ -168,6 +168,7 @@ impl SessionStore {
         let executing: Vec<String> = tx.prepare("SELECT id FROM task_runs WHERE state IN ('running','stopping','waiting_pause','paused','waiting_user','verifying')")?
             .query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
         for id in executing.into_iter().filter(|id| !active.contains(id)) {
+            super::pending::interrupt(&tx, &id)?;
             tx.execute("UPDATE task_runs SET state='interrupted',revision=revision+1,updated_at=? WHERE id=?", params![now(),id])?;
         }
         let queued = tx.prepare("SELECT t.* FROM task_runs t JOIN conversations c ON c.id=t.session_id WHERE t.state='queued' AND c.deleted=0 ORDER BY t.created_at,t.id")?

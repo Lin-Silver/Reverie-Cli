@@ -1,6 +1,7 @@
 import type { CoreActionName } from "../electron/core-actions";
 import type { ComposerAttachment } from "../electron/attachments";
-import type {SemanticDevice,SemanticResourcesState,SkillLookupRequest,AddMarketRequest,SetMarketEnabledRequest,MarketRequest,MarketsState,MarketSource,MarketEntry} from './generated/core-types';
+import type {McpServerRecord,McpConfigurationState,McpSnapshotState,McpConfigurationRequest,McpControlRequest,McpResourceRequest,McpPromptRequest,ConnectorsState,ConnectorDiscovery,ConnectorRequest,AuthorizeConnectorRequest,CompleteConnectorAuthorizationRequest,CancelConnectorAuthorizationRequest,ConnectorApiKeyRequest,ClearConnectorCredentialsRequest,StartedConnectorAuthorization} from './generated/core-types';
+import type {SemanticDevice,SemanticResourcesState,SkillLookupRequest,AddMarketRequest,SetMarketEnabledRequest,MarketRequest,MarketsState,MarketSource,MarketEntry,PreparePluginRequest,ActivatePluginRequest,PluginControlRequest,PluginCandidate} from './generated/core-types';
 import type {
   ContextUsage,
   TokenFilters,
@@ -14,6 +15,7 @@ import type {
   ModelSourcesState,
   ModelSelectionUpdate,
   PluginsState,
+  PluginRecord,
   PromptResult,
   ProviderProbe,
   RecoveryState,
@@ -31,9 +33,25 @@ import type {
 } from "./types";
 
 type EmptyPayload = Record<never, never>;
+type ExtensionContext={projectRoot?:string;sessionId?:string;operation_id?:string;operationId?:string};
+type McpManagementFields={mcp:McpConfigurationState;servers:McpServerRecord[];effective_server_ids:string[];operation_id:string};
+type ConnectorUpdateEnvelope=Envelope<'connector.updated',{connector:Record<string,unknown>;connectors:ConnectorsState;operation_id:string}>;
 type ContextOperationPayload={operationId?:string;expectedRevision?:number;device?:SemanticDevice;threads?:number};
 type SemanticEnvelope=Envelope<'context.resources',{semantic:SemanticResourcesState;operation_id?:string;health?:Record<string,unknown>;pending_restart?:boolean}>;
+type PluginUpdateEnvelope=Envelope<'plugin.updated',{plugin_id:string;plugins:PluginsState;settings:SettingsState}>;
+type PluginPreparedEnvelope=Envelope<'plugin.prepared',{plugin_id:string;candidate:PluginCandidate;plugins:PluginsState}>;
+export interface PluginInspection {plugin_id:string;record:PluginRecord;active:PluginCandidate|null;revision:number}
 export interface AiOState {assistant_id:'aio';mainline_id:string;enabled:boolean;proactive:boolean;paused:boolean;tasks:Array<{id:string;branch:string;workspace:string;state:string;revision:number}>}
+/** Native context accounting is a local estimate, even with exact text tokenization. */
+export interface CoreContextUsage extends ContextUsage {
+  basis?: string;
+  text_exact?: boolean;
+  envelope_estimated?: boolean;
+  media_estimated?: boolean;
+  fallback_reason?: string | null;
+  session_id?: string;
+  revision?: number;
+}
 type Envelope<Type extends string, Body extends object> = { id?: string | number | null; type: Type } & Body;
 /** Every custom-provider mutation answers with the record it touched plus fresh state. */
 type CustomProviderEnvelope = Envelope<
@@ -50,7 +68,7 @@ type SkillPinEnvelope = Envelope<
 >;
 
 /** Decisions the approval prompt can return. `message` carries a free-form reply to the model. */
-export type ApprovalDecision = "once" | "session" | "deny" | "message";
+export type ApprovalDecision = "once" | "session" | "project" | "global" | "deny" | "message";
 
 export interface SessionSearchResult extends Record<string, unknown> {
   session_id: string;
@@ -69,6 +87,22 @@ export interface WorkspaceMention extends Record<string, unknown> {
 }
 
 interface CoreRequestMap {
+  listMcp:{payload:ExtensionContext;response:Envelope<'mcp',McpManagementFields>};
+  configureMcp:{payload:McpConfigurationRequest&ExtensionContext;response:Envelope<'mcp.updated',McpManagementFields>};
+  removeMcp:{payload:McpControlRequest&ExtensionContext;response:Envelope<'mcp.updated',McpManagementFields>};
+  setMcpTrust:{payload:McpControlRequest&ExtensionContext;response:Envelope<'mcp.updated',McpManagementFields>};
+  setMcpEnabled:{payload:McpControlRequest&ExtensionContext;response:Envelope<'mcp.updated',McpManagementFields>};
+  refreshMcp:{payload:ExtensionContext&{server_id?:string};response:Envelope<'mcp.result',{mcp:McpSnapshotState;operation_id:string;mcp_diagnostics:Record<string,unknown>[];authorization_diagnostics:Record<string,unknown>[]}>};
+  readMcpResource:{payload:McpResourceRequest&ExtensionContext;response:Envelope<'mcp.result',{mcp:Record<string,unknown>;operation_id:string}>};
+  getMcpPrompt:{payload:McpPromptRequest&ExtensionContext;response:Envelope<'mcp.result',{mcp:Record<string,unknown>;operation_id:string}>};
+  listConnectors:{payload:ExtensionContext;response:Envelope<'connectors',{connectors:ConnectorsState;mcp_diagnostics:Record<string,unknown>[];operation_id:string}>};
+  discoverConnector:{payload:ConnectorRequest&ExtensionContext;response:Envelope<'connector.updated',{connector:ConnectorDiscovery;connectors:ConnectorsState;operation_id:string}>};
+  authorizeConnector:{payload:AuthorizeConnectorRequest&ExtensionContext;response:Envelope<'connector.updated',{connector:StartedConnectorAuthorization;connectors:ConnectorsState;operation_id:string}>};
+  completeConnectorAuthorization:{payload:CompleteConnectorAuthorizationRequest&ExtensionContext;response:ConnectorUpdateEnvelope};
+  revokeConnector:{payload:ConnectorRequest&ExtensionContext;response:ConnectorUpdateEnvelope};
+  clearConnectorCredentials:{payload:ClearConnectorCredentialsRequest&ExtensionContext;response:ConnectorUpdateEnvelope};
+  setConnectorApiKey:{payload:ConnectorApiKeyRequest&ExtensionContext;response:ConnectorUpdateEnvelope};
+  cancelConnectorAuthorization:{payload:CancelConnectorAuthorizationRequest;response:Envelope<'connector.control',{authorization_id:string;cancelled:boolean}>};
   wstyleCommand: {payload:{args:string;projectRoot?:string;sessionId?:string};response:Envelope<'wstyle.result',{success:boolean;output:string;error:string;data:Record<string,unknown>;session_id:string}>};
   listCommands: {payload:EmptyPayload;response:Envelope<'commands',{commands:CommandsState}>};
   archiveSession: {payload:{projectRoot:string;assistantId?:'aio';sessionId:string;revision:number;archived:boolean};response:Envelope<'sessions',{sessions:SessionListState}>};
@@ -91,7 +125,7 @@ interface CoreRequestMap {
   aioTaskState: {payload:{assistantId:'aio';taskId:string;state:string;revision:number;result?:Record<string,unknown>};response:Envelope<'aio.task-state',{revision:number}>};
   aioMemory: {payload:{assistantId:'aio';memoryId?:string;content?:string};response:Envelope<'aio.memory',{memories:Record<string,unknown>[]}>};
   steerPrompt: { payload: { sessionId: string; projectRoot?: string; prompt: string; attachments?: ComposerAttachment[] }; response: Envelope<"run.control", { state: string; run_id: string; message_id?: string }> };
-  stopPrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
+  stopPrompt: { payload: { sessionId: string; projectRoot?: string; runId?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
   pausePrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
   continuePrompt: { payload: { sessionId: string; projectRoot?: string }; response: Envelope<"run.control", { state: string; run_id: string }> };
   listTools: { payload: { mode: string }; response: Envelope<"tools", { mode: string; tools: ToolRecord[] }> };
@@ -132,7 +166,7 @@ interface CoreRequestMap {
   indexSemanticWorkspace:{payload:ContextOperationPayload&{force?:boolean};response:Envelope<'context.semantic-indexed',{result:Record<string,unknown>;context_engine:NonNullable<WorkspaceState['context_engine']>;semantic:SemanticResourcesState;operation_id:string}>};
   stopContextOperation:{payload:{operationId:string};response:Envelope<'context.control',{operation_id:string;state:string}>};
   queryContext:{payload:ContextOperationPayload&{query:string;strategy?:'auto'|'basic'|'hybrid';limit?:number;estimatedTokens?:number};response:Envelope<'context.results',{results:Array<{file_path:string;start_line:number;end_line:number;content:string;content_hash:string;revision:number;sources:string[]}>;context_engine:NonNullable<WorkspaceState['context_engine']>;retrieval:Record<string,unknown>;operation_id:string}>};
-  getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: ContextUsage | null }> };
+  getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: CoreContextUsage | null }> };
   revealProviderSecret: { payload: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }; response: Envelope<"provider.secret", { value: string }> };
   listApiKeyEnvironmentVariables: { payload: Record<string, never>; response: Envelope<"provider.environment", { names: string[] }> };
   getSubagents: { payload: EmptyPayload; response: Envelope<"subagents", { subagents: SubagentsState }> };
@@ -143,12 +177,12 @@ interface CoreRequestMap {
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   resumePrompt: {
-    payload: { sessionId: string; mode?: string; configuration?: Record<string, unknown>; stream?: boolean };
+    payload: { sessionId: string; mode?: string; configuration?: Record<string, unknown>; stream?: boolean; runId?: string };
     response: Envelope<"prompt.result", { result: PromptResult; sessions: SessionListState; recovery: RecoveryState }>;
   };
   compactContext: {
-    payload: { sessionId: string; focus?: string; projectRoot?: string };
-    response: Envelope<"context.compacted", { success: boolean; message: string; session: SessionState; sessions: SessionListState; recovery: RecoveryState; context_engine: NonNullable<WorkspaceState["context_engine"]> }>;
+    payload: { sessionId: string; focus?: string; projectRoot?: string; runId?: string };
+    response: Envelope<"context.compacted", { success: boolean; message: string; session: SessionState; sessions: SessionListState; recovery: RecoveryState; context_engine: NonNullable<WorkspaceState["context_engine"]>; compaction?: Record<string, unknown>; usage?: CoreContextUsage; session_id?: string; run_id?: string; project_root?: string }>;
   };
   renameSession: { payload: { sessionId: string; name: string }; response: Envelope<"session.updated", { session: SessionState | null; updated_session?: SessionState | null; sessions: SessionListState }> };
   forkSession: { payload: { sessionId: string; messageCount: number; name?: string }; response: Envelope<"session.updated", { session: SessionState; sessions: SessionListState }> };
@@ -178,8 +212,17 @@ interface CoreRequestMap {
   refreshCustomProviderModels: { payload: { providerId: string }; response: CustomProviderEnvelope };
   selectCustomProviderModel: { payload: { providerId: string; modelId: string; contextLimit?: number; reasoning?: string; compact?: boolean }; response: Envelope<"custom-provider.updated", ModelSelectionResult> };
   probeProviders: { payload: { keys?: string[] }; response: Envelope<"providers.probed", { probes: ProviderProbe[] }> };
-  setPluginEnabled: { payload: { pluginId: string; enabled: boolean;sessionId?:string;projectRoot?:string;assistantId?:'aio' }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
-  setPluginTrust: { payload: { pluginId: string; trusted: boolean }; response: Envelope<"plugin.updated", { plugin_id: string; plugins: PluginsState; settings: SettingsState }> };
+  setPluginEnabled: { payload: PluginControlRequest; response: PluginUpdateEnvelope };
+  setPluginTrust: { payload: PluginControlRequest; response: PluginUpdateEnvelope };
+  inspectPlugin: {payload:{pluginId:string;projectRoot?:string};response:Envelope<'plugin.inspect',PluginInspection>};
+  preparePlugin: {payload:PreparePluginRequest;response:PluginPreparedEnvelope};
+  updatePlugin: {payload:{pluginId:string;operation_id?:string;expected_revision?:number};response:PluginPreparedEnvelope};
+  activatePlugin: {payload:ActivatePluginRequest;response:PluginUpdateEnvelope};
+  rollbackPlugin: {payload:PluginControlRequest;response:PluginUpdateEnvelope};
+  removePlugin: {payload:PluginControlRequest;response:PluginUpdateEnvelope};
+  setPluginHooks: {payload:PluginControlRequest;response:PluginUpdateEnvelope};
+  setPluginAutoUpdate: {payload:PluginControlRequest;response:PluginUpdateEnvelope};
+  stopPluginOperation: {payload:{operation_id:string};response:Envelope<'plugin.control',{operation_id:string;cancelled:boolean}>};
   refreshPlugins: { payload: EmptyPayload; response: Envelope<"plugins", { plugins: PluginsState }> };
   refreshSkills: { payload: EmptyPayload; response: Envelope<"skills", { skills: SkillsState }> };
   pinSkill: { payload: { skill: string; draft?:boolean }; response: SkillPinEnvelope };

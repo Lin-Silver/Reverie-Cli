@@ -110,6 +110,21 @@ jobs:
         run: node scripts/verification/rust-skills-smoke.mjs
       - name: Run native market source, cache, Git and cancellation checks
         run: node scripts/verification/rust-markets-smoke.mjs
+      - name: Run native modes, Writer source, WStyle and AiO persistence checks
+        run: node scripts/verification/rust-modes-smoke.mjs
+      - name: Run native MCP transport and protocol checks
+        run: node scripts/verification/rust-mcp-smoke.mjs
+      - name: Run actual MCP SDK, Agent approvals and cancellation checks
+        run: node scripts/verification/rust-mcp-sdk-smoke.mjs
+      - name: Run native Auto Check binding, permissions and cancellation checks
+        run: node scripts/verification/rust-approval-smoke.mjs
+      - name: Run native context compaction, checkpoints and same-conversation resume checks
+        run: node scripts/verification/rust-compaction-smoke.mjs
+      - name: Run native LSP stdio, source revisions and lifecycle checks
+        run: node scripts/verification/rust-lsp-smoke.mjs
+      - name: Run OAuth and actual Windows credential storage checks
+        if: runner.os == 'Windows'
+        run: node scripts/verification/rust-oauth-smoke.mjs
       - name: Run actual Context Engine checks
         run: node scripts/verification/rust-context-smoke.mjs
       - name: Run actual native parser checks
@@ -135,6 +150,8 @@ jobs:
         run: node scripts/verification/rust-desktop-bridge-smoke.mjs
       - name: Run actual scrolling terminal and single-prompt checks
         run: node scripts/verification/rust-tui-smoke.mjs
+      - name: Run actual plugin preparation, trust, activation and terminal cancellation checks
+        run: node scripts/verification/rust-plugins-tui-smoke.mjs
       - name: Preserve failed native verification evidence
         if: failure()
         uses: actions/upload-artifact@v4

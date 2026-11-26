@@ -6,7 +6,7 @@ use crate::{Result, ToolResult, workspace_path};
 use builtin::MOTION_ENTRY;
 pub use builtin::motion_entry;
 use policy::Invocation;
-use process_tree::ProcessTree;
+pub use process_tree::ProcessTree;
 use serde_json::{Value, json};
 use std::{
     fs,

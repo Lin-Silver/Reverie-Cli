@@ -1,0 +1,34 @@
+.plugins-page {display:grid;gap:20px;min-width:0;}
+.plugin-prepare,.plugin-detail,.plugin-selection {padding:20px;border:1px solid var(--border);border-radius:12px;background:var(--panel);min-width:0;}
+.plugin-prepare summary {display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-2);}
+.plugin-prepare fieldset {display:grid;gap:16px;margin:16px 0 0;padding:0;border:0;}
+.plugin-prepare fieldset>button {justify-self:start;}
+.plugin-source-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px;}
+.plugin-source-fields label,.plugin-candidate-choice {display:grid;gap:6px;color:var(--text-2);font-size:var(--font-small);}
+.plugin-source-fields :is(input:not([type=checkbox]),select),.plugin-search input,.plugin-candidate-choice select {width:100%;min-width:0;padding:9px 10px;border:1px solid var(--border-strong);border-radius:7px;background:var(--panel-2);color:var(--text);font:inherit;}
+.plugin-source-fields .plugin-checkbox {display:flex;align-items:center;gap:8px;}
+.plugins-layout {display:grid;grid-template-columns:minmax(200px,280px) minmax(0,1fr);gap:16px;min-width:0;}
+.plugin-selection {align-self:start;display:grid;gap:10px;}
+.plugin-search {display:flex;gap:8px;align-items:center;min-width:0;}
+.plugin-selector {display:grid;gap:6px;padding:12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);text-align:left;cursor:pointer;overflow-wrap:anywhere;}
+.plugin-selector small {color:var(--muted);font-size:var(--font-small);}.plugin-selector.selected {border-color:var(--accent);background:var(--accent-bg);}
+.plugin-detail {display:grid;align-content:start;gap:18px;}
+.plugin-detail>header,.plugin-review-dialog>header {display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}
+.plugin-detail :is(h2,h3),.plugin-review-dialog :is(h2,h3) {margin:0 0 10px;}
+.plugin-detail>header code,.plugin-candidate-details code {overflow-wrap:anywhere;}
+.plugin-control-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.plugin-control-grid label {display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:var(--font-small);}
+.plugin-version-actions {display:flex;flex-wrap:wrap;gap:10px;}
+.plugin-candidate-details {display:grid;gap:14px;min-width:0;}
+.plugin-candidate-details dl {display:grid;gap:10px;margin:0;font-size:var(--font-small);}
+.plugin-candidate-details dl>div {display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;}
+.plugin-candidate-details dt {color:var(--muted);}.plugin-candidate-details dd {margin:0;overflow-wrap:anywhere;}
+.plugin-candidate-details summary {cursor:pointer;color:var(--text-2);font-size:var(--font-small);}
+.plugin-candidate-details pre,.plugin-profile-change pre {margin:10px 0 0;padding:12px;background:var(--panel-2);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--font-small);}
+.plugin-components {display:grid;gap:10px;}.plugin-components article {padding:12px;border:1px solid var(--border);border-radius:8px;min-width:0;}.plugin-components strong {overflow-wrap:anywhere;}.plugin-components p {font-size:var(--font-small);color:var(--muted);}
+.plugin-review-dialog {width:min(900px,calc(100vw - 32px));max-height:90vh;overflow:auto;padding:24px;border:1px solid var(--border-strong);border-radius:14px;background:var(--panel);color:var(--text);box-shadow:var(--shadow);display:grid;gap:18px;}
+.plugin-review-dialog footer {display:flex;justify-content:flex-end;gap:10px;}
+.plugin-review-checks {display:grid;gap:12px;}.plugin-review-checks label {display:flex;align-items:flex-start;gap:10px;}
+.plugin-profile-change {display:grid;gap:12px;padding:14px;border:1px solid var(--border-strong);border-radius:10px;min-width:0;}
+@media(max-width:950px){.plugins-layout{grid-template-columns:minmax(0,1fr);}.plugin-selection{grid-template-columns:repeat(2,minmax(0,1fr));}.plugin-search{grid-column:1 / -1;}}
+@media(max-width:650px){.plugin-source-fields,.plugin-control-grid,.plugin-selection{grid-template-columns:minmax(0,1fr);}.plugin-candidate-details dl>div{grid-template-columns:minmax(0,1fr);gap:4px;}.plugin-review-dialog{padding:16px;}}

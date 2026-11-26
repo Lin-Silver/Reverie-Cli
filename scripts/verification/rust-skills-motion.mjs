@@ -98,7 +98,6 @@ export async function verifyMotion({bridge, project, assets, appState, motionCal
     while (!approvals(task.runId).length && Date.now()<deadline) await delay(20);
     const [approval] = approvals(task.runId);
     assert.equal(approval?.tool,'command_exec');
-    assert(!fs.existsSync(strictSpec));
     await bridge.request('resolveApproval',{runId:task.runId,approvalId:approval.approval_id,decision});
     return task.pending;
   }
@@ -108,15 +107,20 @@ export async function verifyMotion({bridge, project, assets, appState, motionCal
   const allowed = run(strict,strictDesign);
   result(await resolve(allowed,'session'));
   assert(fs.existsSync(strictSpec));
-  const reuse = run(strict,'export --project . --spec strict-pop --targets css');
+  const reuse = run(strict,strictDesign);
   result(await reuse.pending);
   assert.equal(approvals(reuse.runId).length,0);
-  assert(fs.statSync(path.join(project,'src/motion/strict-pop.motion.css')).size>0);
+  const css = path.join(project,'src/motion/strict-pop.motion.css');
+  const exportCommand = 'export --project . --spec strict-pop --targets css';
+  assert.equal((await resolve(run(strict,exportCommand),'deny')).success,false);
+  assert(!fs.existsSync(css));
+  result(await resolve(run(strict,exportCommand),'once'));
+  assert(fs.statSync(css).size>0);
   const readonly = await session('Read-only Motion',{permission_mode:'default',permission_level:'read_only'});
   const blocked = run(readonly,'design --project . --template spring-pop --id readonly-pop');
   assert.equal((await blocked.pending).data.delivery,'not_started');
   assert(!fs.existsSync(path.join(project,'.reverie-motion/specs/readonly-pop.json')));
-  checks.push('Strict refusal has no side effects, a session grant executes and covers a second command, and read_only denies before launch');
+  checks.push('Strict refusal has no side effects, an exact session grant can be reused and changed arguments require fresh approval, and read_only denies before launch');
   const auditPath = path.join(appState.workspace.project_data_dir,'security/command_audit.jsonl');
   const audit = fs.readFileSync(auditPath,'utf8').trim().split('\n').map(line=>JSON.parse(line));
   for (const task of [denied,blocked]) assert(audit.some(row=>row.event==='command_blocked'&&row.run_id===task.runId&&row.delivery==='not_started'));

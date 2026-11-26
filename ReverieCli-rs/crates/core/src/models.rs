@@ -169,8 +169,40 @@ pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
     Ok(config)
 }
 
+pub fn assign_setting(
+    settings: &mut Map<String, Value>,
+    key: &str,
+    value: &Value,
+) -> std::io::Result<()> {
+    let target = if matches!(key, "permission_mode" | "auto_review_fallback") {
+        settings
+            .entry("security")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or_else(|| std::io::Error::other("Invalid security settings."))?
+    } else {
+        settings
+    };
+    target.insert(key.to_owned(), value.clone());
+    Ok(())
+}
+
 pub fn validate_setting(key: &str, value: &Value) -> Result<()> {
     match key {
+        "permission_mode"
+            if value
+                .as_str()
+                .is_some_and(|v| crate::permissions::MODES.contains(&v)) =>
+        {
+            Ok(())
+        }
+        "auto_review_fallback"
+            if value
+                .as_str()
+                .is_some_and(|v| crate::permissions::FALLBACKS.contains(&v)) =>
+        {
+            Ok(())
+        }
         "mode"
             if value.as_str().is_some_and(|v| {
                 [
@@ -218,9 +250,14 @@ pub fn validate_setting(key: &str, value: &Value) -> Result<()> {
 }
 
 pub fn settings(config: &Value, path: &std::path::Path, workspace_mode: bool) -> Value {
-    let items: Vec<Value> = ["mode","stream_responses","auto_index","max_context_tokens","thinking_output_style","tool_output_style","api_timeout","api_max_retries","api_initial_backoff","api_proxy"].iter().map(|key| {
+    let mut items: Vec<Value> = ["mode","stream_responses","auto_index","max_context_tokens","thinking_output_style","tool_output_style","api_timeout","api_max_retries","api_initial_backoff","api_proxy"].iter().map(|key| {
         let value=config.get(*key).cloned().unwrap_or_else(||match *key {"api_timeout"=>json!(60),"api_max_retries"=>json!(5),"api_initial_backoff"=>json!(1.0),"api_proxy"=>json!(""),_=>Value::Null});
         json!({"name":key,"key":key,"kind":if *key=="api_proxy"{"text"}else if *key=="api_initial_backoff"{"float"}else if value.is_boolean(){"bool"}else if value.is_number(){"int"}else{"choice"},"description":"","value":value,"choices":match *key {"mode"=>json!(["reverie","atlas","writer","aio","gamer"]),"thinking_output_style"=>json!(["hidden","compact","full"]),"tool_output_style"=>json!(["minimal","compact","condensed","full"]),_=>Value::Null}})
     }).collect();
+    let security = &config["security"];
+    items.extend([
+        json!({"name":"Permission mode","key":"permission_mode","kind":"choice","value":crate::permissions::mode(security),"choices":crate::permissions::MODES,"labels":{"strict":"Strict","normal":"Normal","auto":"Auto","full_access":"Full Access"},"description":"Approval policy for model tool calls."}),
+        json!({"name":"Auto review fallback","key":"auto_review_fallback","kind":"choice","value":crate::permissions::fallback(security),"choices":crate::permissions::FALLBACKS,"labels":{"wait":"Wait for a human","deny":"Deny and continue"},"description":"Wait for human approval or deny the call while independent work continues."})
+    ]);
     json!({"items":items,"config_path":path,"workspace_mode":workspace_mode})
 }

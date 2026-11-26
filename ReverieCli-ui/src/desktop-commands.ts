@@ -10,8 +10,10 @@ export function desktopCommand(text: string): DesktopCommand | null {
   if (wstyle) return {kind:"wstyle",args:wstyle[1] || ""};
   const mode = /^\/mode\s+(\S+)\s*$/i.exec(text);
   if (mode) return {kind:"setting",key:"mode",value:mode[1]};
-  const permission = /^\/permission\s+mode\s+(default|auto_check|strict)\s*$/i.exec(text);
-  if (permission) return {kind:"setting",key:"permission_mode",value:permission[1].toLowerCase()};
+  const permission = /^\/permission\s+mode\s+(normal|strict|auto|full_access|default|auto_check)\s*$/i.exec(text);
+  if (permission) return {kind:"setting",key:"permission_mode",value:({default:"normal",auto_check:"auto"} as Record<string,string>)[permission[1].toLowerCase()] ?? permission[1].toLowerCase()};
+  const fallback = /^\/permission\s+fallback\s+(wait|deny)\s*$/i.exec(text);
+  if (fallback) return {kind:"setting",key:"auto_review_fallback",value:fallback[1].toLowerCase()};
   const provider = /^\/provider(?:\s+(list|status))?\s*$/i.exec(text);
   if (provider) return {kind:"provider",name:provider[1] || ""};
   const review = /^\/review(?:\s+([\s\S]+))?$/i.exec(text);
@@ -36,5 +38,5 @@ export function desktopCommand(text: string): DesktopCommand | null {
 }
 
 export function desktopCommandAvailable(command:string):boolean {
-  return /^\/wstyle(?:\s|$)/.test(command) || /^\/(?:mode|permission|provider|review|compact|skills?|model|settings?|tools|rats|tasks|operations|plugins|checkpoints|rollback)$/.test(command);
+  return /^\/wstyle(?:\s|$)/.test(command) || /^\/(?:mode|permission|provider|review|compact|skills?|markets?|model|settings?|tools|rats|tasks|operations|plugins|checkpoints|rollback)$/.test(command);
 }

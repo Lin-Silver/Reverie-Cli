@@ -6,6 +6,8 @@
 
 先读取仓库的适用指令和 `tasks/rust-3.0/plan.md`、`phase1.md`、`phase0B.md`、`UNVERIFIED.md`、`progress.md`。固定当前 `main` 的提交 SHA、Rust/Cargo 版本、系统、CPU、内存、缓存策略和输入摘要。实施状态以源码和实际运行结果为准；发现尚未实现的功能，列为未实现，不用占位响应验收，也不因缺实现而降低题集或门槛。
 
+当前新增实现包括模式与 Writer 原文、MCP／OAuth／LSP、通用插件管理、Auto Check 及普通会话压缩。优先在你实际构建的同一个程序上执行 `rust-modes-smoke.mjs`、`rust-mcp-sdk-smoke.mjs`、`rust-approval-smoke.mjs` 和 `rust-compaction-smoke.mjs`，命令形式为 `node scripts/verification/<脚本名> <实际Rust程序路径> <项目内证据目录>`。MCP／OAuth／LSP 的库夹具包装脚本只接受证据目录，按 [原生记录](native-mcp-notes.md) 的命令执行，不能将其当作 CLI 脚本传入二进制路径。真实服务、模型、浏览器及完整产品范围以逐行 [未验证清单](UNVERIFIED.md) 为准。
+
 按以下顺序工作：
 
 市场来源增加 `node scripts/verification/rust-markets-smoke.mjs`，检查四个按需来源、手动目录/固定 Git/HTTP/MCP Registry、不同清单共用仓库、分页与 cursor、清单 SHA-256、来源版本、损坏缓存保留、并发修改、取消及重启。来源中的 command 只作元数据，不得执行；不得把目录内容哈希当成发布者签名。Windows 隔离 Git/HTTP 检查不替代四个远端完整原生下载、包安装、许可、OAuth 和更新验收。`dcb99f4` 的六个 CI job 已回读通过，市场新增来源仍须按实际提交另验。

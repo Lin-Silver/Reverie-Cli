@@ -35,6 +35,11 @@ fs.writeFileSync(path.join(project, 'terminal-context.md'), '# terminal_context_
 fs.mkdirSync(path.join(project, '.agents/skills/tui-native-skill'), {recursive:true});
 fs.writeFileSync(path.join(project, '.agents/skills/tui-native-skill/SKILL.md'), '---\nname: tui-native-skill\ndescription: Native terminal fixture.\n---\nTUI_SKILL_BODY中文😀\n');
 fs.writeFileSync(path.join(project, '.agents/skills/tui-native-skill/reference.md'), 'TUI_REFERENCE中文😀\n');
+const marketSource = path.join(root, 'terminal market source😀');
+fs.mkdirSync(path.join(marketSource, '.claude-plugin'), {recursive:true});
+const marketManifest = {name:'terminal-native-fixture',plugins:Array.from({length:35},(_,index)=>({name:`tui-entry-${String(index).padStart(2,'0')}`,description:`Native terminal entry ${index}`,source:`./plugins/entry-${index}`}))};
+const marketManifestBytes = JSON.stringify(marketManifest);
+fs.writeFileSync(path.join(marketSource, '.claude-plugin/marketplace.json'), marketManifestBytes);
 const prompts = [];
 const requests = [];
 const checks = [];
@@ -47,6 +52,7 @@ const displayReplies = display.onData(bytes => {
 let output = '';
 let terminalExit;
 let held;
+const heldMarkets = new Set();
 let serverFailure;
 function frame(response, data) {response.write(`data: ${JSON.stringify(data)}\n\n`);}
 function finish(response, text) {
@@ -56,6 +62,11 @@ function finish(response, text) {
 }
 const server = http.createServer(async (request, response) => {
   try {
+    if (request.method==='GET'&&new URL(request.url,'http://127.0.0.1').pathname==='/market-hold') {
+      heldMarkets.add(response);
+      response.once('close',()=>heldMarkets.delete(response));
+      return;
+    }
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -132,6 +143,46 @@ try {
   terminal.write('/skills resource tui-native-skill reference.md\r');
   await wait(() => screenText().includes('TUI_REFERENCE中文😀'), 'native packaged skill resource');
   checks.push('Native /skills pin, complete instructions and packaged resources through the shared kernel');
+  const marketRequestsBefore=requests.length;
+  terminal.write('/markets list\r');
+  await wait(()=>screenText().includes('Markets: 4 sources')&&['Anthropic official plugins','Anthropic Skills','OpenAI Plugins','MCP Registry'].every(name=>screenText().includes(name)),'four native terminal markets');
+  const marketCatalogPath=path.join(appRoot,'.reverie/extensions/markets/catalog.json');
+  const marketCatalog=()=>fs.existsSync(marketCatalogPath)?JSON.parse(fs.readFileSync(marketCatalogPath,'utf8')):null;
+  terminal.write(`/markets add directory "Terminal native market😀" "${marketSource.replaceAll('\\','/')}"\r`);
+  await wait(()=>marketCatalog()?.sources.some(source=>source.name==='Terminal native market😀')&&screenText().includes('Market added:'),'explicit native terminal source add');
+  const localMarketId=marketCatalog().sources.find(source=>source.name==='Terminal native market😀').id;
+  terminal.write(`/markets refresh ${localMarketId}\r`);
+  await wait(()=>marketCatalog()?.sources.find(source=>source.id===localMarketId)?.entry_count===35&&screenText().includes('Native terminal entry 0'),'native terminal catalog refresh');
+  assert.equal(marketCatalog().sources.find(source=>source.id===localMarketId).content_sha256,crypto.createHash('sha256').update(marketManifestBytes).digest('hex'));
+  let marketOutputStart=output.length;
+  terminal.write(`/markets show ${localMarketId} 30\r`);
+  await wait(()=>stripVTControlCharacters(output.slice(marketOutputStart)).includes('Native terminal entry 34')&&screenText().includes('offset 30'),'native terminal cache pagination');
+  marketOutputStart=output.length;
+  terminal.write(`/market search ${localMarketId} tui-entry-34\r`);
+  await wait(()=>stripVTControlCharacters(output.slice(marketOutputStart)).includes('Native terminal entry 34'),'native terminal cached search alias');
+  assert(!stripVTControlCharacters(output.slice(marketOutputStart)).includes('Native terminal entry 0'));
+  checks.push('Four lazy markets, explicit directory add, native manifest SHA-256, cache pagination and /market search alias');
+  terminal.write(`/markets add manifest "Terminal pending market" "http://127.0.0.1:${server.address().port}/market-hold"\r`);
+  await wait(()=>marketCatalog()?.sources.some(source=>source.name==='Terminal pending market'),'native terminal pending source add');
+  const pendingMarketId=marketCatalog().sources.find(source=>source.name==='Terminal pending market').id;
+  for (const cancelInput of ['/markets stop\r','\x03']) {
+    terminal.write(`/markets refresh ${pendingMarketId}\r`);
+    await wait(()=>heldMarkets.size===1&&viewportText().includes('Refreshing market'),'actual pending terminal catalog request');
+    marketOutputStart=output.length;
+    terminal.write('/markets list\r');
+    await wait(()=>stripVTControlCharacters(output.slice(marketOutputStart)).includes('Markets: 6 sources'),'responsive terminal during market refresh');
+    assert.equal(heldMarkets.size,1,'A read-only market listing cancelled the active refresh');
+    terminal.write(cancelInput);
+    await wait(()=>heldMarkets.size===0&&!viewportText().includes('Refreshing market')&&viewportText().includes('tui-fixture'),'actual terminal market cancellation');
+  }
+  terminal.write(`/markets disable ${localMarketId}\r`);
+  await wait(()=>marketCatalog()?.sources.find(source=>source.id===localMarketId)?.enabled===false,'native terminal source disable');
+  terminal.write(`/markets enable ${localMarketId}\r`);
+  await wait(()=>marketCatalog()?.sources.find(source=>source.id===localMarketId)?.enabled===true,'native terminal source enable');
+  terminal.write(`/markets remove ${pendingMarketId}\r`);
+  await wait(()=>!marketCatalog()?.sources.some(source=>source.id===pendingMarketId),'native terminal source removal');
+  assert.equal(requests.length,marketRequestsBefore,'Terminal market management invoked a model');
+  checks.push('Actual pending HTTP catalog keeps terminal commands responsive, /markets stop and Ctrl+C release it, source enable/disable/remove and no model request');
   const pasted = 'PASTED_FIRST😀\nPASTED_SECOND';
   terminal.write(`\x1b[200~${pasted}\x1b[201~`);
   await delay(200);
@@ -165,6 +216,8 @@ try {
   assert.match(messageRows().filter(message => message.role === 'Reverie').at(-1).content, /CUSTOM_REPLY😀/);
   checks.push('Three options and a fourth custom answer through the shared kernel');
   terminal.write('COMMAND\r');
+  await wait(()=>screenText().includes('Approve command_exec?'),'Normal approval before starting the terminal command');
+  terminal.write('\r');
   await wait(() => screenText().includes('COMMAND_TERMINAL_PROGRESS😀'), 'actual command progress in terminal scrollback');
   assert.equal(completedCount(), 3, 'Command output was only shown after completion');
   await wait(() => completedCount() === 4, 'native terminal command completion');
@@ -234,6 +287,7 @@ try {
   database?.close();
   if (terminal && !terminalExit) terminal.kill();
   held?.destroy();
+  for(const response of heldMarkets)response.destroy();
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
 }

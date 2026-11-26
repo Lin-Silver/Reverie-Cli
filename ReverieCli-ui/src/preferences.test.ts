@@ -3,6 +3,17 @@ import { backgroundPresetUrl, DEFAULT_UI_PREFERENCES, effectiveBackgroundUrl, no
 import { normalizeUiPreferences as normalizeStored } from "../electron/preferences";
 
 describe("renderer UI preferences", () => {
+  it("preserves explicit page pins and order in both preference layers", () => {
+    for (const normalize of [normalizeUiPreferences, normalizeStored]) {
+      const value=normalize({navigationPinned:['markets','chat','markets','unknown'],navigationOrder:['markets','tools','markets','unknown']});
+      expect(value.navigationPinned).toEqual(['markets','chat']);
+      expect(value.navigationOrder.slice(0,2)).toEqual(['markets','tools']);
+      expect(value.navigationOrder).toHaveLength(12);
+      expect(value.navigationOrder).toContain('connectors');
+      expect(normalize({navigationPinned:[]}).navigationPinned).toEqual([]);
+      expect(normalize({}).navigationPinned).toContain('context');
+    }
+  });
   it("persists only a bounded raster avatar in both preference layers", () => {
     for (const normalize of [normalizeUiPreferences, normalizeStored]) {
       expect(normalize({ userAvatarUrl: "data:image/png;base64,YQ==" }).userAvatarUrl).toBe("data:image/png;base64,YQ==");

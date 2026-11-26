@@ -1,5 +1,6 @@
 import { normalizeUiLanguage, type UiLanguage } from "./i18n";
 import { normalizeViewDisplayPreferences, type ViewDisplayPreference } from "../electron/view-display-preferences";
+import { DEFAULT_PINNED_PAGES, NAVIGATION_PAGES, normalizePageOrder, normalizePinnedPages, type NavigationPage } from "../electron/navigation-preferences";
 import {
   INSPECTOR_DEFAULT_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
@@ -43,6 +44,8 @@ export interface UiPreferences {
   recentProjects: string[];
   archivedSessions: Record<string, string[]>;
   viewPresentations: Record<string, ViewDisplayPreference>;
+  navigationPinned: NavigationPage[];
+  navigationOrder: NavigationPage[];
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
@@ -76,6 +79,8 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   recentProjects: [],
   archivedSessions: {},
   viewPresentations: {},
+  navigationPinned: [...DEFAULT_PINNED_PAGES],
+  navigationOrder: [...NAVIGATION_PAGES],
 };
 
 function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
@@ -133,6 +138,8 @@ export function normalizeUiPreferences(value: unknown): UiPreferences {
       Object.entries(rawArchives).map(([project, sessions]) => [project, stringList(sessions)]),
     ),
     viewPresentations: normalizeViewDisplayPreferences(source.viewPresentations),
+    navigationPinned: normalizePinnedPages(source.navigationPinned),
+    navigationOrder: normalizePageOrder(source.navigationOrder),
   };
 }
 

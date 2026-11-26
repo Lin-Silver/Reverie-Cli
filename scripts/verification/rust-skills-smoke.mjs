@@ -83,7 +83,7 @@ const server=http.createServer(async(request,response)=>{
   }catch(error){serverFailure=error;response.destroy(error);}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const configuration={mode:'reverie',models:[{model:'skills-fixture',profile_id:'skills-fixture',provider:'openai-chat',base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'SKILL_FIXTURE_KEY'}],active_model_source:'standard',active_model_index:0,auto_index:false,stream_responses:false,security:{permission_level:'full_control',permission_mode:'default'}};
+const configuration={mode:'reverie',models:[{model:'skills-fixture',profile_id:'skills-fixture',provider:'openai-chat',base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'SKILL_FIXTURE_KEY'}],active_model_source:'standard',active_model_index:0,auto_index:false,stream_responses:false,security:{permission_level:'full_control',permission_mode:'full_access'}};
 fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify(configuration));
 const environment={USERPROFILE:user,HOME:user,NO_PROXY:'127.0.0.1,localhost'};
 async function request(action,payload={},type) {const reply=await bridge.request(action,payload,30000);if(type)assert.equal(reply.type,type,JSON.stringify(reply));return reply;}

@@ -2,15 +2,17 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 /** Native top-layer placement keeps menus above scroll containers and side panels. */
-export function FloatingMenu({ children, className, close, side = "bottom", label }: {
+export function FloatingMenu({ children, className, close, side = "bottom", label, autoFocus = true }: {
   children: ReactNode;
   className: string;
   close: () => void;
   side?: "top" | "bottom";
   label?: string;
+  autoFocus?: boolean;
 }) {
   const marker = useRef<HTMLSpanElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const reposition = useRef<(() => void) | null>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
   useLayoutEffect(() => {
@@ -30,7 +32,7 @@ export function FloatingMenu({ children, className, close, side = "bottom", labe
       element.style.transformOrigin = `${Math.max(0, Math.min(element.offsetWidth, rect.left + rect.width / 2 - parseFloat(element.style.left)))}px ${up ? "bottom" : "top"}`;
       element.style.top = `${up ? Math.max(margin, rect.top - element.offsetHeight - margin) : rect.bottom + margin}px`;
     };
-    position();
+    reposition.current = position;
     const dismiss = () => closeRef.current();
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !element.contains(event.target) && !anchor.contains(event.target)) dismiss(); };
     const focusOutside = (event: FocusEvent) => { if (event.target instanceof Node && !element.contains(event.target) && !anchor.contains(event.target)) dismiss(); };
@@ -40,7 +42,7 @@ export function FloatingMenu({ children, className, close, side = "bottom", labe
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(position);
     observer?.observe(element);
     observer?.observe(anchor);
-    element.querySelector<HTMLElement>("input,button:not(:disabled)")?.focus();
+    if (autoFocus) element.querySelector<HTMLElement>("input,button:not(:disabled)")?.focus();
     document.addEventListener("pointerdown", outside, true);
     document.addEventListener("focusin", focusOutside);
     document.addEventListener("keydown", key, true);
@@ -48,6 +50,7 @@ export function FloatingMenu({ children, className, close, side = "bottom", labe
     window.addEventListener("scroll", position, true);
     window.addEventListener("reverie:menu-open", dismiss);
     return () => {
+      reposition.current = null;
       observer?.disconnect();
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("focusin", focusOutside);
@@ -57,7 +60,8 @@ export function FloatingMenu({ children, className, close, side = "bottom", labe
       window.removeEventListener("reverie:menu-open", dismiss);
       element.hidePopover?.();
     };
-  }, [side]);
+  }, [side, autoFocus]);
+  useLayoutEffect(() => { reposition.current?.(); });
   return <><span ref={marker} hidden />{createPortal(<div ref={menu} role={label ? "dialog" : undefined} aria-label={label} popover={typeof HTMLElement.prototype.showPopover === "function" ? "manual" : undefined} className={`${className} floating-menu`} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;

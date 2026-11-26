@@ -32,6 +32,9 @@ copyFileSync(executable, staged);
 cpSync(path.join(metadata.target_directory, 'release/builtin_skills'), path.join(kernelDirectory, 'builtin_skills'), {recursive:true});
 if (process.platform !== 'win32') chmodSync(staged, 0o755);
 copyFileSync(path.join(repositoryRoot, 'LICENSE'), path.join(kernelDirectory, 'LICENSE.txt'));
+for (const component of ['core', 'context']) {
+  cpSync(path.join(repositoryRoot, `ReverieCli-rs/crates/${component}/licenses`), path.join(kernelDirectory, 'third-party-licenses', component), {recursive:true});
+}
 const sha256 = createHash('sha256').update(readFileSync(staged)).digest('hex');
 const sourceSha = command('git', ['rev-parse', 'HEAD']).trim();
 const sourceDirty = !!command('git', ['status', '--porcelain']).trim();

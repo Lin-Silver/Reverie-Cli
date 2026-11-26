@@ -1,5 +1,6 @@
 use super::{
-    Panel,
+    Panel, PanelKind,
+    connectors::{masked_input, private_command},
     cursor_backend::CursorBackend,
     input::{Input, display_text, wrapped},
 };
@@ -104,6 +105,11 @@ impl Screen {
         panel: Option<&Panel>,
     ) -> io::Result<()> {
         self.terminal.draw(|frame| {
+            let hidden = panel
+                .is_some_and(|panel| matches!(panel.kind, PanelKind::ConnectorSecret))
+                || panel.is_none() && private_command(&input.text);
+            let masked = hidden.then(|| masked_input(input));
+            let input = masked.as_ref().unwrap_or(input);
             let area = frame.area();
             let input_width = area.width.saturating_sub(2).max(1);
             let input_rows = wrapped(&display_text(&input.text), input_width)
@@ -183,7 +189,9 @@ impl Screen {
                 ));
             }
             frame.render_widget(
-                Paragraph::new(if panel.is_some() {
+                Paragraph::new(if hidden {
+                    "Input masked · Enter submit · Esc/Ctrl+C cancel"
+                } else if panel.is_some() {
                     "↑↓ select · Space multi-select · Enter submit · Esc cancel"
                 } else {
                     "Enter send · Shift+Enter/Ctrl+J newline · Ctrl+C stop · /help"

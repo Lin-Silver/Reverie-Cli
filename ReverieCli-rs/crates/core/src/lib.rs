@@ -7,12 +7,22 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, TryLockError},
 };
 
+pub mod approval_review;
+pub mod browser;
+pub mod compaction;
 pub mod config;
+pub mod connectors;
 mod context_jobs;
 mod context_watch;
+pub mod credentials;
 pub mod host;
+pub mod lsp;
 mod markets;
+pub mod mcp;
 pub mod models;
+mod modes;
+mod permissions;
+pub mod plugins;
 pub mod provider;
 pub mod semantic_resources;
 pub mod session;
@@ -33,6 +43,7 @@ pub struct Kernel {
     semantic: Arc<semantic_resources::SemanticResources>,
     view_session: Option<String>,
     workspace_mode: bool,
+    assistant_mode: bool,
 }
 
 pub const ACTIONS: &[&str] = &[
@@ -54,10 +65,56 @@ pub const ACTIONS: &[&str] = &[
     "indexSemanticWorkspace",
     "stopContextOperation",
     "runPrompt",
+    "resumePrompt",
+    "compactContext",
+    "getContextUsage",
     "stopPrompt",
     "resolveApproval",
     "resolveUserInput",
     "listTools",
+    "listPlugins",
+    "refreshPlugins",
+    "inspectPlugin",
+    "preparePlugin",
+    "updatePlugin",
+    "activatePlugin",
+    "setPluginEnabled",
+    "setPluginTrust",
+    "setPluginHooks",
+    "setPluginAutoUpdate",
+    "rollbackPlugin",
+    "removePlugin",
+    "stopPluginOperation",
+    "listMcp",
+    "refreshMcp",
+    "configureMcp",
+    "removeMcp",
+    "setMcpTrust",
+    "setMcpEnabled",
+    "readMcpResource",
+    "getMcpPrompt",
+    "listConnectors",
+    "discoverConnector",
+    "authorizeConnector",
+    "completeConnectorAuthorization",
+    "cancelConnectorAuthorization",
+    "revokeConnector",
+    "setConnectorApiKey",
+    "clearConnectorCredentials",
+    "wstyleCommand",
+    "aioState",
+    "aioControl",
+    "aioObserve",
+    "aioDecision",
+    "aioMessages",
+    "aioPendingSignals",
+    "aioAcknowledgeSignal",
+    "aioPendingTasks",
+    "aioRecoverHost",
+    "aioMessageState",
+    "aioReply",
+    "aioTaskState",
+    "aioMemory",
     "listSkills",
     "refreshSkills",
     "inspectSkill",
@@ -121,17 +178,36 @@ impl Kernel {
             semantic,
             view_session: None,
             workspace_mode: false,
+            assistant_mode: false,
         })
     }
 
     pub fn session_store(&mut self) -> Result<&mut session::SessionStore> {
         if self.sessions.is_none() {
-            self.sessions = Some(session::SessionStore::open(
-                &self.project_data_dir,
-                &self.project_root,
-            )?);
+            self.sessions = Some(if self.assistant_mode {
+                session::SessionStore::open_assistant(&modes::aio::data_directory(&self.app_root))?
+            } else {
+                session::SessionStore::open(&self.project_data_dir, &self.project_root)?
+            });
         }
         Ok(self.sessions.as_mut().unwrap())
+    }
+
+    fn configure_assistant(&mut self, payload: &Value) -> Result<()> {
+        if payload
+            .get("assistantId")
+            .is_some_and(|value| !value.is_null() && value != "aio")
+        {
+            return Err("Unknown assistant scope.".into());
+        }
+        let assistant = payload["assistantId"] == "aio";
+        if self.assistant_mode != assistant {
+            self.assistant_mode = assistant;
+            self.sessions = None;
+            self.view_session = None;
+        }
+        let root = self.project_root.to_string_lossy().into_owned();
+        self.configure_project(&root)
     }
 
     pub fn effective_config(&mut self, id: Option<&str>) -> Result<Value> {
@@ -283,7 +359,7 @@ impl Kernel {
         let skills = self.skills_state(self.view_session.clone().as_deref(), false)?;
         Ok(
             json!({"protocol_version":1,"core":{"version":VERSION,"interface_version":"1.0","implementation":"rust","release_status":"development"},"workspace":self.workspace(&config),"models":models::sources(&config),"settings":models::settings(&config,&self.config.path,self.workspace_mode),"sessions":sessions,"capabilities":{"actions":ACTIONS},
-                "plugins":{"summary":{"available":false,"status":"migration_pending"},"records":[]},
+                "plugins":plugins::PluginStore::new(&self.app_root)?.state(Some(&self.project_root))?,
                 "skills":skills,
                 "commands":{"available":false,"status":"migration_pending","sections":[],"items":[]},
                 "recovery":{"available":false,"status":"migration_pending","summary":{"available":false},"operations":[],"checkpoints":[]}}),
@@ -294,7 +370,9 @@ impl Kernel {
         let project = config::canonical_project(std::path::Path::new(root))?;
         if project != self.project_root {
             self.sessions = None;
-            self.view_session = None;
+            if !self.assistant_mode {
+                self.view_session = None;
+            }
             self.project_root = project;
             self.project_data_dir = self
                 .app_root
@@ -302,7 +380,7 @@ impl Kernel {
                 .join(config::project_name(&self.project_root));
         }
         let workspace_path = self.project_data_dir.join("config.json");
-        self.workspace_mode = if workspace_path.exists() {
+        self.workspace_mode = if !self.assistant_mode && workspace_path.exists() {
             config::ConfigStore::at(workspace_path.clone()).load()?["use_workspace_config"]
                 .as_bool()
                 .unwrap_or(false)
@@ -334,10 +412,24 @@ impl Kernel {
         if !ACTIONS.contains(&action) {
             return Err(format!("Unknown action: {action}").into());
         }
+        self.configure_assistant(payload)?;
         if let Some(root) = payload["projectRoot"].as_str() {
             self.configure_project(root)?;
         }
         match action {
+            "listPlugins" | "refreshPlugins" => Ok((
+                "plugins",
+                json!({"plugins":plugins::PluginStore::new(&self.app_root)?.state(Some(&self.project_root))?}),
+            )),
+            "inspectPlugin" => Ok((
+                "plugin.inspect",
+                plugins::PluginStore::new(&self.app_root)?.inspect(
+                    payload["pluginId"]
+                        .as_str()
+                        .ok_or("pluginId is required.")?,
+                    Some(&self.project_root),
+                )?,
+            )),
             "listMarkets" => Ok((
                 "markets",
                 json!({"markets":markets::state(&self.app_root)?}),
@@ -407,6 +499,32 @@ impl Kernel {
                 "sessions",
                 json!({"sessions":self.session_store()?.list()?}),
             )),
+            "getContextUsage" => {
+                let selected = payload["sessionId"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .or_else(|| self.view_session.clone());
+                let defaults = self.config.effective()?;
+                let store = self.session_store()?;
+                let id = selected.or(store.selected()?);
+                let usage = if let Some(id) = id {
+                    let page = store.page(&id, None, 1)?;
+                    let configuration = page
+                        .metadata
+                        .get("runtime_config")
+                        .cloned()
+                        .unwrap_or_else(|| models::capture(&defaults));
+                    let configuration = models::resolve(&defaults, &configuration)?;
+                    let mut usage =
+                        host::describe_context_usage(&store.history(&id)?, &configuration);
+                    usage["session_id"] = json!(id);
+                    usage["revision"] = json!(page.revision);
+                    usage
+                } else {
+                    Value::Null
+                };
+                Ok(("context.usage", json!({"usage":usage})))
+            }
             "queueConversationRun" => {
                 let configuration = models::without_secrets(
                     payload
@@ -755,7 +873,13 @@ impl Kernel {
                         .get("runtime_config")
                         .cloned()
                         .unwrap_or_else(|| models::capture(&defaults));
-                    snapshot["settings"][key] = value.clone();
+                    models::assign_setting(
+                        snapshot["settings"]
+                            .as_object_mut()
+                            .ok_or("Invalid conversation settings.")?,
+                        key,
+                        value,
+                    )?;
                     self.session_store()?.update_metadata(
                         id,
                         Map::from_iter([("runtime_config".into(), snapshot)]),
@@ -763,10 +887,8 @@ impl Kernel {
                     )?;
                     self.effective_config(Some(id))?
                 } else {
-                    self.config.update(|fields| {
-                        fields.insert(key.into(), value.clone());
-                        Ok(())
-                    })?;
+                    self.config
+                        .update(|fields| models::assign_setting(fields, key, value))?;
                     self.config.effective()?
                 };
                 Ok((

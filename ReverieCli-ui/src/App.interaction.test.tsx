@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { readFileSync } from "node:fs";
 import { DEFAULT_UI_PREFERENCES, normalizeUiPreferences, type UiPreferences } from "./preferences";
-import type { ContextUsage, CustomProviderRecord, DesktopState, ImageModelSourcesState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
+import type { CustomProviderRecord, DesktopState, ImageModelSourcesState, ModelRecord, ModelSource, ModelSourcesState, ProviderProbe, RatsCustomProviderDefinition, RatsPermission, RatsState, RatsTaskRecord, SessionState } from "./types";
+import type { CoreContextUsage as ContextUsage } from "./core-protocol";
 
 /** One stored manual ("Manual Model") entry, in the core's own config shape. */
 type StandardModelConfig = {
@@ -21,6 +22,20 @@ type StandardModelConfig = {
   supports_vision?: boolean;
   custom_headers?: Record<string, string>;
 };
+
+function nativeContextUsage(percentage = 5): ContextUsage {
+  const total = Math.round(percentage * 1000);
+  return {
+    basis: "saved_native_context_estimate",
+    tokenizer: { name: "cl100k_base", label: "cl100k", exact: true, detail: "Local tokenizer" },
+    text_exact: true, envelope_estimated: true, media_estimated: false,
+    total_tokens: total, max_tokens: 100_000, remaining_tokens: 100_000 - total, percentage,
+    overhead_tokens: 0, reasoning_tokens: 0,
+    segments: [{ key: "history", tokens: total, messages: 1, share: 100 }],
+    payload_message_count: 1, history_message_count: 1, history_limit: 1,
+    compaction_tokens: 70_000, rotation_tokens: 82_000,
+  };
+}
 
 function customProviderRecord(overrides: Partial<CustomProviderRecord> = {}): CustomProviderRecord {
   return {
@@ -773,10 +788,12 @@ function installDesktopApi(options: {
         type: "context.compacted",
         success: true,
         message: "Context compressed: 1,200 -> 500 tokens",
-        session: {
-          ...baseSession,
-          messages: [{ role: "system", content: "# Continuation Summary\n## Current objective\nKeep GUI parity." }],
-        },
+        session: options.initialSession ?? baseSession,
+        session_id: String(payload.sessionId),
+        project_root: String(payload.projectRoot),
+        run_id: String(payload.runId),
+        usage: nativeContextUsage(0.5),
+        compaction: { changed: true, message: "Context compressed: 1,200 -> 500 tokens" },
         sessions: desktopState.sessions,
         recovery: desktopState.recovery,
         context_engine: desktopState.workspace.context_engine,
@@ -1128,21 +1145,33 @@ describe("desktop GUI interactions", () => {
     await act(async () => releasePrompt());
   });
 
-  it("updates context during continuous draft edits and streaming before the turn ends", async () => {
+  it("shows scoped native context usage during streaming without treating drafts as saved input", async () => {
     const { request, emitCoreEvent, releasePrompt } = installDesktopApi({ gatePrompt: true });
     const user = userEvent.setup();
     render(<App />);
     const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
     await user.type(composer, "draft context");
-    await waitFor(() => expect(request).toHaveBeenCalledWith("getContextUsage", expect.objectContaining({ draftText: "draft context" })));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("getContextUsage", expect.objectContaining({ sessionId: baseSession.id })));
     await user.keyboard("{Enter}");
     await waitFor(() => expect(request).toHaveBeenCalledWith("runPrompt", expect.anything()));
+    const scope = { project_root: "C:/workspace", session_id: baseSession.id, run_id: "context-run-1" };
+    act(() => {
+      emitCoreEvent({ type: "run.started", ...scope });
+      emitCoreEvent({ type: "context.usage", usage: { ...nativeContextUsage(7), basis: "native_next_request_estimate" }, ...scope });
+    });
+    await screen.findByRole("button", { name: /上下文窗口已用 7%/ });
+    act(() => {
+      emitCoreEvent({ type: "context.usage", usage: nativeContextUsage(99), ...scope, run_id: "old-context-run" });
+      emitCoreEvent({ type: "context.usage", usage: nativeContextUsage(99), ...scope, session_id: searchSession.id });
+      emitCoreEvent({ type: "context.usage", usage: nativeContextUsage(99), ...scope, project_root: "C:/another-workspace" });
+    });
     for (let index = 0; index < 8; index += 1) {
       act(() => emitCoreEvent({ type: "assistant.delta", text: `stream ${index} ` }));
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
     }
-    expect(request.mock.calls.some(([action, payload]) => action === "getContextUsage" && String(payload.liveAssistantText || "").includes("stream 0"))).toBe(true);
-    expect(request.mock.calls.filter(([action]) => action === "getContextUsage").every(([, payload]) => !("history" in payload) && !("liveAttachments" in payload))).toBe(true);
+    expect(screen.queryByRole("button", { name: /上下文窗口已用 99%/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /上下文窗口已用 7%/ })).toBeTruthy();
+    expect(request.mock.calls.filter(([action]) => action === "getContextUsage").every(([, payload]) => !("draftText" in payload) && !("attachments" in payload) && !("liveAssistantText" in payload))).toBe(true);
     expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
     await act(async () => releasePrompt());
   });
@@ -1961,11 +1990,12 @@ describe("desktop GUI interactions", () => {
     expect(await screen.findByTitle("压缩上下文")).toBeTruthy();
     await user.type(composer, "/compact preserve provider failures{Enter}");
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", expect.objectContaining({
       sessionId: baseSession.id,
       focus: "preserve provider failures",
       projectRoot: "C:/workspace",
-    }));
+      runId: expect.stringMatching(/^compact-[A-Za-z0-9-]+$/),
+    })));
     expect(request).not.toHaveBeenCalledWith("runPrompt", expect.objectContaining({ prompt: expect.stringContaining("/compact") }));
     expect(await screen.findByText("Context compressed: 1,200 -> 500 tokens")).toBeTruthy();
   });
@@ -1981,12 +2011,126 @@ describe("desktop GUI interactions", () => {
     await user.click(screen.getByRole("button", { name: "上下文" }));
     await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
 
-    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", {
+    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", expect.objectContaining({
       sessionId: baseSession.id,
       focus: undefined,
       projectRoot: "C:/workspace",
-    }));
+      runId: expect.stringMatching(/^compact-[A-Za-z0-9-]+$/),
+    })));
     expect((composer as HTMLTextAreaElement).value).toBe("unfinished draft");
+  });
+
+  it("reports a compaction with no changes as information", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => {
+      const response = await original(action, payload);
+      return action === "compactContext" ? { ...response, success: false, message: "No context changes were needed." } as never : response;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
+    await user.click(screen.getByRole("button", { name: "上下文" }));
+    await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
+    const message = await screen.findByText("No context changes were needed.");
+    expect(message.closest(".toast")?.className).toContain("info");
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  });
+
+  it("cancels the selected compaction and preserves a draft typed while it runs", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    let rejectCompaction: (error: Error) => void = () => {};
+    const pending = new Promise<never>((_resolve, reject) => { rejectCompaction = reject; });
+    request.mockImplementation(async (action, payload) => {
+      if (action === "compactContext") return await pending;
+      if (action === "stopPrompt") {
+        rejectCompaction(new Error("Context reduction was cancelled before switching context."));
+        return { type: "run.control", state: "stopping", run_id: String(payload.runId) } as never;
+      }
+      return original(action, payload);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
+    await user.click(screen.getByRole("button", { name: "上下文" }));
+    await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
+    await screen.findByText("正在压缩上下文");
+    const payload = request.mock.calls.find(([action]) => action === "compactContext")![1];
+    await user.type(composer, "my next draft{Enter}");
+    expect(await screen.findByText("请等待上下文压缩完成后发送；草稿会保留。")).toBeTruthy();
+    expect(request.mock.calls.some(([action]) => action === "runPrompt" || action === "steerPrompt")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "停止" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("stopPrompt", { projectRoot: "C:/workspace", sessionId: baseSession.id, runId: payload.runId }));
+    expect((await screen.findByText("上下文压缩已停止")).closest(".toast")?.className).toContain("info");
+    expect(composer.value).toBe("my next draft");
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  });
+
+  it("keeps the viewed conversation and draft when a background compaction finishes", async () => {
+    const { request } = installDesktopApi();
+    const original = request.getMockImplementation()!;
+    let releaseCompaction = () => {};
+    const gate = new Promise<void>(resolve => { releaseCompaction = resolve; });
+    request.mockImplementation(async (action, payload) => {
+      if (action === "compactContext") await gate;
+      return original(action, payload);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
+    await user.click(screen.getByRole("button", { name: "上下文" }));
+    await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("compactContext", expect.anything()));
+    const row = [...document.querySelectorAll(".session-item")].find(item => item.getAttribute("title") === searchSession.name)!;
+    fireEvent.click(row);
+    await screen.findByText("Investigate cache invalidation");
+    const composer = screen.getByRole("textbox", { name: /向 Test Model 提问/ }) as HTMLTextAreaElement;
+    await user.type(composer, "draft in another conversation");
+    await act(async () => releaseCompaction());
+    expect(document.querySelector(".conversation-header")?.textContent).toContain(searchSession.name);
+    expect(composer.value).toBe("draft in another conversation");
+    expect(screen.queryByText("Context compressed: 1,200 -> 500 tokens")).toBeNull();
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+  });
+
+  it("retains loaded history when compaction returns only the latest page", async () => {
+    const messages = Array.from({ length: 130 }, (_, index) => ({ role: "user", content: `saved-line-${index}` }));
+    const stored = { ...baseSession, messages, total: 130, before: null, revision: 5 };
+    const { request } = installDesktopApi({ initialSession: stored });
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (action, payload) => {
+      const response = await original(action, payload);
+      return action === "compactContext" ? { ...response, session: { ...stored, revision: 6, before: 70, messages: messages.slice(70) } } as never : response;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("textbox", { name: /向 Test Model 提问/ });
+    await user.click(await screen.findByRole("button", { name: "加载更早的消息" }));
+    expect(await screen.findByText("saved-line-10")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "打开工作面板" }));
+    await user.click(screen.getByRole("button", { name: "上下文" }));
+    await user.click(await screen.findByRole("button", { name: "压缩上下文" }));
+    await screen.findByText("Context compressed: 1,200 -> 500 tokens");
+    expect(screen.getByText("saved-line-10")).toBeTruthy();
+    expect(request.mock.calls.some(([action]) => action === "runPrompt")).toBe(false);
+  });
+
+  it.each([
+    ["saved_native_context_estimate", "本地上下文估算"],
+    ["native_next_request_estimate", "下一次请求的本地上下文估算"],
+  ])("labels native context accounting %s as an estimate even with exact text tokenization", async (basis, label) => {
+    installDesktopApi({ contextUsage: { ...nativeContextUsage(), basis, usage_source: "api" } });
+    const user = userEvent.setup();
+    render(<App />);
+    const ring = await screen.findByRole("button", { name: /上下文窗口已用 5%/ });
+    await user.hover(ring);
+    const source = await screen.findByText(label);
+    expect(source.title).toContain("不能代替 API 实际返回用量");
+    expect(screen.queryByText("API 返回用量")).toBeNull();
   });
 
   it("asks for model reasoning before switching and hides retired sources", async () => {

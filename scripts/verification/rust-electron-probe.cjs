@@ -62,6 +62,17 @@ app.whenReady().then(async()=>{
     const paths = await evaluate('window.reverie.paths()');
     fs.writeFileSync(path.join(options.outputRoot,'desktop-paths.json'),JSON.stringify(paths,null,2));
     checks.push('Real Electron window, renderer, preload and Rust initialization');
+    await evaluate('document.querySelector(".footer-settings").click()');
+    await wait('!!document.querySelector("select[aria-label=权限模式]")','The native permission settings did not appear');
+    const modes=await evaluate('Array.from(document.querySelector("select[aria-label=权限模式]").options,o=>o.value)');
+    if(JSON.stringify(modes)!==JSON.stringify(['strict','normal','auto','full_access']))throw new Error('The desktop did not expose four approval modes');
+    for(const choice of ['deny','wait']){
+      await evaluate(`(()=>{const field=document.querySelector('select[aria-label="Auto 审查拒绝或失败时"]');field.value=${JSON.stringify(choice)};field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+      await wait(`document.querySelector('select[aria-label="Auto 审查拒绝或失败时"]').value===${JSON.stringify(choice)}`,'The selected Auto fallback did not reach the settings view');
+    }
+    await screenshot('permission-settings.png');
+    await evaluate('document.querySelector(".footer-settings").click()');
+    checks.push('All four native permission modes and the two selectable Auto fallback choices are present in the actual settings window');
     await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='技能').click()`);
     await wait('!!document.querySelector(".skills-page") && document.body.innerText.includes("desktop-native-skill") && document.body.innerText.includes("photo-to-3d")','The native skill catalog did not reach the actual Skills page');
     await type('.skills-page input','desktop-native-skill');
@@ -126,6 +137,8 @@ app.whenReady().then(async()=>{
       await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='对话').click()`);
     }
     await prompt('QUESTION');
+    await wait('document.querySelector(".approval-tool")?.textContent.includes("userInput")','Strict did not ask before using the question tool');
+    await evaluate(`Array.from(document.querySelectorAll('.approval-panel button')).find(button=>button.textContent.trim()==='同意').click()`);
     await wait('document.querySelectorAll(".user-question-panel input[type=radio]").length === 4','Four explicit answer choices did not appear');
     await wait('Array.from(document.querySelectorAll(".session-state")).some(item => item.textContent === "等待回答")','The user question was mislabeled as a permission approval');
     await screenshot('question.png');

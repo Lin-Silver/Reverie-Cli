@@ -11,7 +11,7 @@ const workspace = fs.realpathSync.native(process.cwd());
 const executionRoot = fs.realpathSync.native(process.env.REVERIE_BUILTIN_WORKSPACE);
 const packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), 'reverie-motion');
 const library = name => pathToFileURL(path.join(packageRoot, 'runtime/lib', name)).href;
-const {findBrowsers} = await import(library('cdp.mjs'));
+const {findBrowsers, Page} = await import(library('cdp.mjs'));
 const {parseArgs} = await import(library('cli.mjs'));
 const {TOOL_BY_CLI} = await import(library('tools.mjs'));
 const browsers = new Set(findBrowsers().map(file => fs.realpathSync.native(file)));
@@ -68,7 +68,12 @@ childProcess.spawn = (file, argv, options) => {
   // pre-existing workspace links within its profile.
   const fresh = fs.mkdtempSync(path.join(parent, 'run-'));
   const identity = fs.lstatSync(fresh, {bigint:true});
-  const child = spawn(browser, argv.map(arg => arg === profile ? '--user-data-dir=' + fresh : arg), options);
+  const browserArgs = argv.map(arg => arg === profile ? '--user-data-dir=' + fresh : arg);
+  if (process.platform === 'darwin') browserArgs.unshift('--use-mock-keychain');
+  const child = spawn(browser, browserArgs, options);
+  // A browser that exits before CDP is ready may reset a pipe before Node
+  // reports the process exit. Let the driver's exit handler reject pending calls.
+  for (const pipe of child.stdio) pipe?.on('error', () => child.kill());
   child.once('exit', () => {
     // Browser helpers can inherit these handles and keep the Node CLI alive
     // after Chromium exits. No more CDP messages can arrive from that browser.
@@ -85,6 +90,42 @@ childProcess.spawn = (file, argv, options) => {
   return child;
 };
 syncBuiltinESMExports();
+// The initial blank page can finish loading after the target has been created.
+// Bind readiness to the committed top-level loader, including its document URL.
+Page.prototype.goto = async function (url, {waitMs = 20000} = {}) {
+  let timer, lastState = 'sending Page.navigate';
+  let expired = false;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      expired = true;
+      reject(new Error(`Motion navigation timed out (${lastState}).`));
+    }, waitMs);
+  });
+  const navigate = async () => {
+    let navigation;
+    for (let attempt = 0; attempt < 3 && !expired; attempt++) {
+      navigation = await this.send('Page.navigate', {url});
+      if (!navigation.errorText) break;
+      if (navigation.errorText !== 'net::ERR_ABORTED' || attempt === 2) throw new Error(navigation.errorText);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    while (!expired) {
+      const {frameTree} = await this.send('Page.getFrameTree');
+      const frame = frameTree.frame;
+      if (frame.unreachableUrl) throw new Error('Motion preview document was unreachable.');
+      lastState = `frame ${frame.url}; loader ${frame.loaderId}`;
+      if (frame.id === navigation.frameId && (!navigation.loaderId || frame.loaderId === navigation.loaderId)
+          && frame.url !== 'about:blank') {
+        const state = await this.evaluate('document.readyState');
+        lastState += `; document ${state}`;
+        if (state === 'complete') return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  };
+  try { await Promise.race([navigate(), deadline]); }
+  finally { clearTimeout(timer); }
+};
 if (tool) {
   const input = parseArgs(tool, args);
   if (input.project !== undefined) checked(input.project, true);

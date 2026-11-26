@@ -87,11 +87,11 @@ jobs:
       - name: Run actual configuration and session checks
         run: node scripts/verification/rust-session-smoke.mjs
       - name: Install the Motion acceptance browser
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           case "$RUNNER_OS/$RUNNER_ARCH" in
             Windows/X64) platform=win64; executable=chrome.exe ;;
-            Linux/X64) platform=linux64; executable=chrome ;;
             macOS/ARM64) platform=mac-arm64; executable='Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' ;;
             macOS/X64) platform=mac-x64; executable='Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' ;;
             *) exit 1 ;;
@@ -103,6 +103,9 @@ jobs:
           test -f "$browser"
           if [ "$RUNNER_OS" = Windows ]; then browser="$(cygpath -w "$browser")"; fi
           echo "REVERIE_MOTION_BROWSER=$browser" >> "$GITHUB_ENV"
+      - name: Select Ubuntu's installed Chrome with its system sandbox
+        if: runner.os == 'Linux'
+        run: echo "REVERIE_MOTION_BROWSER=$(command -v google-chrome)" >> "$GITHUB_ENV"
       - name: Run standalone native skills and conversation policy checks
         run: node scripts/verification/rust-skills-smoke.mjs
       - name: Run native market source, cache, Git and cancellation checks

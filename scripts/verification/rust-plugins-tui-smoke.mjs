@@ -23,7 +23,12 @@ function viewportText(){return screenText().split('\n').slice(-12).join('\n');}
 const displayReplies=display.onData(bytes=>terminal?.write(bytes));
 async function wait(condition,label){const deadline=Date.now()+15_000;while(Date.now()<deadline){if(await condition())return;await delay(25);}throw new Error(`Timed out: ${label}; exit=${JSON.stringify(terminalExit)}`);}
 async function plugin(){return (await bridge.request('listPlugins',{projectRoot:fixture.projectRoot})).plugins.records.find(record=>record.name==='Native plugin fixture😀');}
-async function submit(command,label){const offset=output.length;terminal.write(command+'\r');if(label)await wait(()=>stripVTControlCharacters(output.slice(offset)).includes(label),label);}
+async function submit(command,label){
+  const offset=output.length;
+  terminal.write(command+'\r');
+  if(label==='Confirm inspected operation')await wait(()=>viewportText().includes(label),label);
+  else if(label)await wait(()=>stripVTControlCharacters(output.slice(offset)).includes(label),label);
+}
 async function confirm(command){await submit(command,'Confirm inspected operation');const offset=output.length;terminal.write('\x1b[B\r');await wait(()=>stripVTControlCharacters(output.slice(offset)).includes('Plugin state updated:'),'confirmed native operation completion');await wait(()=>!viewportText().includes('Confirm inspected operation'),'confirmed panel closure');}
 try {
   bridge=startBridge(executable,fixture.projectRoot,fixture.appRoot);await bridge.ready;await bridge.request('initialize',{projectRoot:fixture.projectRoot});

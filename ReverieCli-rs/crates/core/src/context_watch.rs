@@ -193,7 +193,18 @@ fn update(
         let mut engine = engine
             .lock()
             .map_err(|_| "Context Engine lock was poisoned.")?;
-        let structural = engine.index_with_cancel(false, &cancelled)?;
+        // A save can replace a file between its inventory and parse. The engine
+        // rolls back that transaction, so take a fresh inventory for this watch cycle.
+        let mut structural = engine.index_with_cancel(false, &cancelled);
+        if structural.as_ref().is_err_and(|error| {
+            error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::Interrupted)
+        }) && !cancelled()
+        {
+            structural = engine.index_with_cancel(false, &cancelled);
+        }
+        let structural = structural?;
         (
             structural["revision"]
                 .as_i64()

@@ -122,11 +122,14 @@ impl Parsers {
         source
             .take((MAX_BODY_BYTES + 1) as u64)
             .read_to_end(&mut bytes)?;
-        if bytes.len() as i64 != document.file.size {
-            return Err(format!("File changed while indexing: {}", path.display()).into());
-        }
-        if hash_bytes(&bytes) != document.file.content_hash {
-            return Err(format!("File changed while parsing: {}", path.display()).into());
+        if bytes.len() as i64 != document.file.size
+            || hash_bytes(&bytes) != document.file.content_hash
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                format!("File changed while indexing: {}", path.display()),
+            )
+            .into());
         }
         let Some(body) = source_text(bytes) else {
             return Ok(document);
@@ -530,4 +533,38 @@ fn headings(module: &str, body: &str) -> Vec<Chunk> {
         }
     }
     chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_and_content_changes_require_a_fresh_inventory_before_parsing() {
+        let dir = tempfile::tempdir().unwrap();
+        let before = FileEntry {
+            path: "note.md".into(),
+            size: 3,
+            modified_ns: 0,
+            content_hash: hash_bytes(b"old"),
+        };
+        let mut parsers = Parsers::default();
+        for after in ["new", "longer"] {
+            std::fs::write(dir.path().join(&before.path), after).unwrap();
+            let Err(error) = parsers.document(dir.path(), before.clone()) else {
+                panic!("Indexing accepted a changed file");
+            };
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::Interrupted
+            );
+            let rescanned = FileEntry {
+                size: after.len() as i64,
+                content_hash: hash_bytes(after.as_bytes()),
+                ..before.clone()
+            };
+            let parsed = parsers.document(dir.path(), rescanned).unwrap();
+            assert_eq!(parsed.body.as_deref(), Some(after));
+        }
+    }
 }

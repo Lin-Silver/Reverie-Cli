@@ -102,9 +102,7 @@ fn fixture(directory: &Path) -> String {
 
 #[test]
 fn offline_staging_verifies_actual_bytes_and_does_not_activate() {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&parent).unwrap();
-    let directory = tempfile::tempdir_in(parent).unwrap();
+    let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("source");
     fs::create_dir(&source).unwrap();
     let digest = fixture(&source);
@@ -126,9 +124,7 @@ fn offline_staging_verifies_actual_bytes_and_does_not_activate() {
 
 #[test]
 fn resources_reject_traversal_incompatible_contracts_and_cancelled_copy() {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&parent).unwrap();
-    let directory = tempfile::tempdir_in(parent).unwrap();
+    let directory = tempfile::tempdir().unwrap();
     let digest = fixture(directory.path());
     assert!(resources::verify(directory.path(), &digest, &|| true).is_err());
     for name in [

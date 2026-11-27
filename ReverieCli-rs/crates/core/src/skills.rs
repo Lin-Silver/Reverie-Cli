@@ -913,9 +913,7 @@ mod tests {
 
     #[test]
     fn package_discovery_precedence_yaml_and_bounded_resources_preserve_originals() {
-        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/skill-tests");
-        fs::create_dir_all(&parent).unwrap();
-        let temporary = tempfile::tempdir_in(parent).unwrap();
+        let temporary = tempfile::tempdir().unwrap();
         let app = temporary.path().join("app");
         let workspace = temporary.path().join("workspace");
         for path in [

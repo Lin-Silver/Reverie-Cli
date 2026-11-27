@@ -423,9 +423,7 @@ mod tests {
     use super::*;
     #[test]
     fn commands_preserve_literal_operators_and_reject_execution_bypasses() {
-        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/command-policy-tests");
-        fs::create_dir_all(&base).unwrap();
-        let directory = tempfile::tempdir_in(base).unwrap();
+        let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let invocation = prepare("node example.mjs \"literal && text\" \"&&\"", root, ".").unwrap();
         assert_eq!(&invocation.argv[2..], ["literal && text", "&&"]);

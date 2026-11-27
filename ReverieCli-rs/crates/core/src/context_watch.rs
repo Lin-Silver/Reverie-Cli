@@ -422,9 +422,7 @@ mod tests {
 
     #[test]
     fn native_watch_updates_nested_files_ignore_rules_and_releases_on_stop() {
-        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-watch-tests");
-        fs::create_dir_all(&parent).unwrap();
-        let temporary = tempfile::tempdir_in(parent).unwrap();
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("workspace");
         fs::create_dir(&root).unwrap();
         let root = crate::config::canonical_project(&root).unwrap();

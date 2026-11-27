@@ -467,9 +467,7 @@ mod tests {
 
     #[test]
     fn legacy_vectors_migrate_after_backup_and_cancelled_migration_preserves_schema() {
-        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-        fs::create_dir_all(&parent).unwrap();
-        let root = tempfile::tempdir_in(parent).unwrap();
+        let root = tempfile::tempdir().unwrap();
         let database = root.path().join("legacy.sqlite3");
         let db = Connection::open(&database).unwrap();
         db.execute_batch(SCHEMA).unwrap();
@@ -609,9 +607,7 @@ mod tests {
     }
     #[test]
     fn stored_vectors_and_top_k_keep_positive_negative_and_tied_neighbors() {
-        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-        fs::create_dir_all(&parent).unwrap();
-        let root = tempfile::tempdir_in(parent).unwrap();
+        let root = tempfile::tempdir().unwrap();
         let database = root.path().join("semantic.sqlite3");
         let store = Store::open(&database, root.path()).unwrap();
         store

@@ -1,14 +1,12 @@
 use reverie_context::ContextEngine;
 use rusqlite::{Connection, OpenFlags, params};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::fs;
 
 #[cfg(windows)]
 #[test]
 fn nested_execution_database_paths_beyond_max_path_open_and_resume() {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&parent).unwrap();
-    let dir = tempfile::tempdir_in(parent).unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("project");
     fs::create_dir_all(&project).unwrap();
     fs::write(project.join("logic.py"), "def marker(): return 1\n").unwrap();
@@ -30,9 +28,7 @@ fn nested_execution_database_paths_beyond_max_path_open_and_resume() {
 
 #[test]
 fn version_two_migration_backs_up_committed_wal_and_preserves_rebuild_recovery() {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&parent).unwrap();
-    let dir = tempfile::tempdir_in(parent).unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("project");
     fs::create_dir_all(&root).unwrap();
     let source = "def marker():\n    return 'original_marker'\n";

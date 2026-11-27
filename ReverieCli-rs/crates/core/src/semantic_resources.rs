@@ -608,9 +608,7 @@ mod tests {
     use super::*;
     #[test]
     fn corrupted_activation_is_preserved_and_empty_store_is_on_demand() {
-        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/core-tests");
-        fs::create_dir_all(&parent).unwrap();
-        let root = tempfile::tempdir_in(parent).unwrap();
+        let root = tempfile::tempdir().unwrap();
         let manager = SemanticResources::new(root.path().to_owned());
         assert_eq!(manager.status()["available"], false);
         assert!(manager.capture().unwrap().is_none());
@@ -623,9 +621,7 @@ mod tests {
     }
     #[test]
     fn deactivation_keeps_existing_task_leases_and_cancelled_changes_preserve_the_record() {
-        let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/core-tests");
-        fs::create_dir_all(&parent).unwrap();
-        let root = tempfile::tempdir_in(parent).unwrap();
+        let root = tempfile::tempdir().unwrap();
         let fixture = root.path().join("fixture");
         fs::create_dir(&fixture).unwrap();
         let mut files = serde_json::Map::new();

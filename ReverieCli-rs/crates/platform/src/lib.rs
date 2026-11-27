@@ -345,9 +345,7 @@ mod tests {
     use super::*;
     #[test]
     fn tools_confine_paths_and_preserve_exact_text_on_failed_edits() {
-        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/platform-tests");
-        fs::create_dir_all(&base).unwrap();
-        let dir = tempfile::tempdir_in(base).unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("project");
         fs::create_dir_all(&root).unwrap();
         let backups = dir.path().join("backups");

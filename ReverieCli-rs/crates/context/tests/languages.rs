@@ -1,12 +1,10 @@
 use reverie_context::ContextEngine;
 use serde_json::json;
-use std::{fs, path::Path};
+use std::fs;
 
 #[test]
 fn script_and_web_resource_grammars_preserve_names_and_real_source() {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&parent).unwrap();
-    let dir = tempfile::tempdir_in(parent).unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("project");
     fs::create_dir_all(&root).unwrap();
     let fixtures = [
@@ -102,9 +100,7 @@ fn script_and_web_resource_grammars_preserve_names_and_real_source() {
 
 #[test]
 fn native_grammars_return_real_definitions_bodies_and_scoped_references() {
-    let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&parent).unwrap();
-    let dir = tempfile::tempdir_in(parent).unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("project");
     fs::create_dir_all(&root).unwrap();
     let fixtures = [

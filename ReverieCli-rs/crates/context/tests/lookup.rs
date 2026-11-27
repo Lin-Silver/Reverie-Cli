@@ -1,11 +1,9 @@
 use reverie_context::ContextEngine;
 use serde_json::{Value, json};
-use std::{fs, path::Path};
+use std::fs;
 
 fn directory() -> tempfile::TempDir {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/context-tests");
-    fs::create_dir_all(&root).unwrap();
-    tempfile::tempdir_in(root).unwrap()
+    tempfile::tempdir().unwrap()
 }
 
 #[test]

@@ -127,7 +127,7 @@ function headless(args) {
     child.stdin.end();
   });
 }
-let database;
+let database, report;
 try {
   const bridge = startBridge(executable, project, appRoot);
   markPhase('SDK initialization');
@@ -282,28 +282,32 @@ try {
   assert.equal(JSON.parse(question.stdout).result.state, 'cancelled');
   checks.push('Native single-prompt JSON entry and no implicit headless authorization');
   if (serverFailure) throw serverFailure;
-  const report = {schema: 'reverie.rust-tui-smoke.v1', passed: true, verified_at: new Date().toISOString(), executable,
+  report = {schema: 'reverie.rust-tui-smoke.v1', passed: true, verified_at: new Date().toISOString(), executable,
     executable_sha256: crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'), root, platform: process.platform, checks,
     scope: 'Actual native executable and pseudoterminal input/output, shared Rust kernel, SQLite transcript and loopback model fixture; not physical keyboard/IME, GUI, DPI or full terminal acceptance.'};
-  fs.writeFileSync(path.join(root, 'report.json'), JSON.stringify(report, null, 2) + '\n');
-  console.log(JSON.stringify({passed: true, checks: checks.length, report: path.join(root, 'report.json')}));
 } catch (error) {
   console.error(JSON.stringify({error:String(error),terminalExit,prompts,terminal_tail:stripVTControlCharacters(output).slice(-3500)}));
   fs.writeFileSync(path.join(root, 'failure.json'), JSON.stringify({passed: false, checks, prompts, error: String(error), stack: error.stack, terminalExit}, null, 2) + '\n');
   fs.writeFileSync(path.join(root, 'fixture-requests.json'), JSON.stringify(requests, null, 2) + '\n');
   throw error;
 } finally {
+  markPhase('disposing terminal display');
   fs.writeFileSync(path.join(root, 'terminal.txt'), output);
   fs.writeFileSync(path.join(root, 'screen.txt'), screenText());
   displayReplies.dispose();
   display.dispose();
   database?.close();
   if (terminal && !terminalExit) terminal.kill();
+  markPhase('closing loopback server');
+  const closed = new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   held?.destroy();
   for(const response of heldMarkets)response.destroy();
   server.closeAllConnections();
-  await new Promise(resolve => server.close(resolve));
+  await closed;
 }
-// node-pty keeps its ConPTY reader worker alive after the verified child exit.
-// Terminate this driver after saving evidence and closing its server/database.
-process.exit(0);
+markPhase('terminal, database and server closed');
+fs.writeFileSync(path.join(root, 'report.json'), JSON.stringify(report, null, 2) + '\n');
+console.log(JSON.stringify({passed: true, checks: checks.length, report: path.join(root, 'report.json')}));
+// Unix node-pty releases its native wait thread through the Node event loop.
+// The Windows ConPTY reader worker can remain alive after the verified exit.
+if (process.platform === 'win32') process.exit(0);

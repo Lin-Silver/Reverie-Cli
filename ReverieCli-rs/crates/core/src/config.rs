@@ -91,8 +91,19 @@ pub fn atomic_json(path: &Path, value: &Value) -> io::Result<()> {
     serde_json::to_writer_pretty(&mut file, value)?;
     file.write_all(b"\n")?;
     file.as_file().sync_all()?;
-    file.persist(path).map_err(|error| error.error)?;
-    Ok(())
+    // A Windows reader that omitted FILE_SHARE_DELETE temporarily prevents replacement.
+    #[cfg(windows)]
+    for ms in [10, 20, 40, 80, 160] {
+        match file.persist(path) {
+            Ok(_) => return Ok(()),
+            Err(error) if matches!(error.error.raw_os_error(), Some(5 | 32 | 33)) => {
+                file = error.file;
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+            }
+            Err(error) => return Err(error.error),
+        }
+    }
+    file.persist(path).map(|_| ()).map_err(|error| error.error)
 }
 
 pub struct ConfigStore {
@@ -256,5 +267,30 @@ mod tests {
                 .is_err()
         );
         assert_eq!(fs::read(&store.path).unwrap(), before);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_replacement_survives_a_short_lived_windows_reader() {
+        use std::{os::windows::fs::OpenOptionsExt, thread, time::Duration};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        atomic_json(&path, &json!({"revision":1})).unwrap();
+        let reader = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        let finish = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(90));
+            drop(reader);
+        });
+        let result = atomic_json(&path, &json!({"revision":2}));
+        finish.join().unwrap();
+        result.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap(),
+            json!({"revision":2})
+        );
     }
 }

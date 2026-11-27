@@ -26,6 +26,10 @@
 8. Windows 已通过截图坐标点击和拖拽验收。自有窗口的事件日志记录了实际落点；过期引用、窗口移动、遮挡和 Strict 拒绝均没有增加输入计数。两个独立 SDK 内核已验证同一桌面的占用、取消与恢复。纯文本会话也已验证由夹具注入的系统 Escape 取消原生等待。[桌面控制说明](computer-use.md)
 9. 已接入 `computer_focus` 和 `computer_type_text`。Windows SDK 已在真实编辑框中聚焦、选区插入中文和 emoji，并独立核对了保存文件。下一项是有明确目标窗口的组合键，验收时检查实际按键效果、系统保留组合和取消时的按键释放。继续补齐 Provider、模式及独立组件，四档物理 DPI 和跨平台正式发行沿用第 4、5 节的验收要求。
 
+`7f17e62` 的 Windows release 与桌面解包 CLI 具有相同 SHA-256 `e3147a5056ff8adce388f6934317731beb23097c05a83909ed5bc913e71ad2a4`。两者均通过 17 项 Skills 检查。解包版发给回环模型的普通请求中，技能目录共 10,439 个字符，26 个有效技能各出现一次。Motion 在真实 Chrome 中生成 8 帧并导出 CSS、WAAPI 和类型声明。原包、仓库、release、桌面暂存和解包目录中的 30 个 Motion 文件逐一匹配。Windows Cargo 通过 163 项，另有 3 项由独立夹具执行。28 个既有 smoke 均正常退出。GitHub Test 六个作业全部通过，其中 Windows x64、Linux x64、macOS arm64 和 macOS x64 均通过 Skills 检查。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46005355224)
+
+Windows 独立浏览器仍有路径相关的发行限制。D 盘解包目录的首次 `open` 返回 `adapter_rejected`。将同一包的 CLI 和浏览器运行文件共 258 个逐一校验后置于 C 盘，同目录自动发现及 5 项浏览器检查通过。复制整包时 Defender 处置了另一个既有技能的一份资源。Motion 已在 D 盘原地复验，完整安装包与四档物理 DPI 继续按第 4.4、5.5 节验收。
+
 ### 此前执行决定（2026-11-23）
 
 - 结束 Python 2.5.5 收尾与继续本地扩展测评；正式标签、Release 和 `Reverie-Cli-py` 固定到 `070fa25`。

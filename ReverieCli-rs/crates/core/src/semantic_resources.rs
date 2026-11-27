@@ -72,11 +72,20 @@ fn read_registry(store: &Path) -> Result<Registry> {
     Ok(registry)
 }
 
+struct ResourceLease(fs::File);
+
+impl Drop for ResourceLease {
+    fn drop(&mut self) {
+        // Closing one descriptor need not release the OS lock if a duplicate is still open.
+        let _ = self.0.unlock();
+    }
+}
+
 pub struct ModelVersion {
     pub selection: Selection,
     directory: PathBuf,
-    _lease: fs::File,
     models: Mutex<Option<Arc<LocalModels>>>,
+    _lease: ResourceLease,
 }
 impl ModelVersion {
     fn new(store: &Path, selection: Selection) -> Result<Self> {
@@ -103,7 +112,7 @@ impl ModelVersion {
         Ok(Self {
             directory,
             selection,
-            _lease: lease,
+            _lease: ResourceLease(lease),
             models: Mutex::new(None),
         })
     }
@@ -670,6 +679,7 @@ mod tests {
         .unwrap();
         let manager = SemanticResources::new(root.path().to_owned());
         let task = manager.capture().unwrap().unwrap();
+        let other_owner = ModelVersion::new(root.path(), selection.clone()).unwrap();
         assert_eq!(task.selection, selection);
         assert!(manager.unload().is_err());
         manager.disable(0, &|| false).unwrap();
@@ -683,7 +693,12 @@ mod tests {
         let bytes = fs::read(root.path().join("active.json")).unwrap();
         assert!(manager.disable(1, &|| true).is_err());
         assert_eq!(fs::read(root.path().join("active.json")).unwrap(), bytes);
+        // A descriptor inherited by a just-forked child can remain open until exec.
+        let inherited = task._lease.0.try_clone().unwrap();
         drop(task);
+        assert!(exclusive.try_lock().is_err());
+        drop(other_owner);
         exclusive.try_lock().unwrap();
+        drop(inherited);
     }
 }

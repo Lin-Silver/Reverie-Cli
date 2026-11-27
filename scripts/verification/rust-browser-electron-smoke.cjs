@@ -33,7 +33,8 @@ async function* browserFlow() {
   const tab_id = open.data.result.tab.tab_id;
   await until(()=>evaluate("!!document.querySelector('.browser-page-slot')"),'rendered browser panel');
   const view=win.contentView.children.find(v=>v.webContents===guest());
-  await until(()=>view?.getVisible() && view.getBounds().width<win.getContentSize()[0],'native guest in sidebar');
+  await until(()=>view?.getVisible() && view.getBounds().width<win.getContentSize()[0] && view.getBounds().height>100,'native guest in sidebar');
+  await until(async()=>await guest().executeJavaScript("document.visibilityState")==='visible','visible Chromium document');
   assert.equal(await guest().executeJavaScript('typeof window.reverie + "/" + typeof window.require'),'undefined/undefined');
   checks.push('Production desktop sidebar displays the isolated native Chromium guest');
   function inspect(reply) {
@@ -115,13 +116,11 @@ app.whenReady().then(async()=>{
     await evaluate("document.querySelector('.composer textarea').focus()");
     await win.webContents.insertText('Use the browser to edit the local form.');
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
-    await until(()=>evaluate("document.body.innerText.includes('Browser interaction verified')"),'first browser turn');
+    await until(()=>evaluate("document.body.innerText.includes('Browser interaction verified') && window.browserEvents.includes('conversation.saved') && !document.querySelector('.send-behavior')"),'first browser turn saved');
     sessionId=(await rpc('getState',{})).state.sessions.current_session_id;
     assert(sessionId);
     for(const mode of ['persistent','ephemeral']) {
-      const saved=await rpc('getConversationConfig',{sessionId});
-      const config={...saved.configuration,settings:{...saved.configuration.settings,browser_profile:mode}};
-      await rpc('getConversationConfig',{sessionId,revision:saved.revision,configuration:config});
+      await rpc('setSetting',{sessionId,key:'browser_profile',value:mode});
       routine=profileFlow(mode);finalText='Verified '+mode;
       const response=await rpc('runPrompt',{sessionId,projectRoot:project,prompt:finalText,noIndex:true});
       if(modelFailure)throw modelFailure;

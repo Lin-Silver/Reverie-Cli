@@ -222,9 +222,12 @@ export class BrowserHost {
     this.check(context); this.configureSession(guestSession);
     if (this.tabs.size >= 1024 || Array.from(this.tabs.values()).filter(guest => guest.owner === context.owner).length >= 64) throw new Error("Browser tab limit reached.");
     context.started = true;
-    const view = new WebContentsView({ webPreferences: { session: guestSession, sandbox: true, contextIsolation: true, nodeIntegration: false,
+    // Electron 41 creates the underlying WebContents hidden unless explicitly shown.
+    // The native view still controls which tab is displayed in the sidebar.
+    const webPreferences = { show: true, session: guestSession, sandbox: true, contextIsolation: true, nodeIntegration: false,
       nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webviewTag: false, webSecurity: true,
-      allowRunningInsecureContent: false, navigateOnDragDrop: false, disableDialogs: true, safeDialogs: true, devTools: false, spellcheck: false } });
+      allowRunningInsecureContent: false, navigateOnDragDrop: false, disableDialogs: true, safeDialogs: true, devTools: false, spellcheck: false };
+    const view = new WebContentsView({ webPreferences });
     const guest: Guest = { id: `tab-${randomUUID()}`, owner: context.owner, scope: { ...context.request.scope }, profile: { ...context.request.profile },
       view, page: new BrowserPage(view.webContents, () => this.invalidate(guest)), revision: 1, announced: false, unavailable: false, closed: false, notifications: Promise.resolve(), notificationError: false };
     context.guest = guest; this.tabs.set(guest.id, guest);

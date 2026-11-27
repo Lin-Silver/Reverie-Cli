@@ -63,7 +63,7 @@ describe("Electron browser host lifecycle", () => {
     expect((await host.receive(request())).outcome).toEqual({ status: "completed", result: { type: "listed", tabs: [] } });
     const result = await host.receive(request({ action: "open", url: "https://example.invalid/?token=hidden#private" }));
     expect(result.outcome.status).toBe("completed");
-    expect(view().options.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webviewTag: false, webSecurity: true });
+    expect(view().options.webPreferences).toMatchObject({ show: true, sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webviewTag: false, webSecurity: true });
     expect(view().options.webPreferences).not.toHaveProperty("preload");
     expect(view().webContents.windowOpen()).toEqual({ action: "deny" });
     expect(guestSession.setPermissionCheckHandler.mock.calls[0][0]()).toBe(false);

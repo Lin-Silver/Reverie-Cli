@@ -9,6 +9,8 @@ import {setTimeout as delay} from 'node:timers/promises';
 import fileCases from './rust-browser-file-cases.cjs';
 
 const binary=path.resolve(process.argv[2]), directory=path.resolve(process.argv[3]||'.runtime/rust-3.0/browser-cli');
+const component = process.env.REVERIE_BROWSER_COMPONENT || path.join(path.dirname(binary),
+  process.platform === 'darwin' ? 'MacOS/ReverieUI' : process.platform === 'win32' ? 'ReverieUI.exe' : 'ReverieUI');
 fs.mkdirSync(directory,{recursive:true});
 const root=fs.mkdtempSync(path.join(directory,'case-')), project=path.join(root,'project'), app=path.join(root,'application');
 for(const folder of [project,path.join(app,'.reverie')])fs.mkdirSync(folder,{recursive:true});
@@ -91,8 +93,10 @@ try{
   checks.push('The packaged CLI transfers binary bytes in both directions using its own Chromium component');
   assert.deepEqual(fs.readdirSync(profileRoot),['persistent']);
   assert.equal(visits.length,4);assert(visits.every(ua=>/Chrome\/\d+/.test(ua)));
-  checks.push('Packaged CLI launches its Electron sibling and the real web form changes after a model click','Persistent storage survives a fresh CLI process; temporary storage and component exit are verified at return');
-  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({passed:true,checks,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),calls,visits,transfers:files.evidence()},null,2));
+  checks.push('Packaged CLI launches the selected Electron component and the real web form changes after a model click','Persistent storage survives a fresh CLI process; temporary storage and component exit are verified at return');
+  const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({passed:true,checks,binary,sha256:hash(binary),
+    component:{path:component,selection:process.env.REVERIE_BROWSER_COMPONENT?'explicit':'sibling',sha256:hash(component)},calls,visits,transfers:files.evidence()},null,2));
   console.log('CLI browser smoke passed: '+root);
 }catch(failure){fs.writeFileSync(path.join(root,'failure.json'),JSON.stringify({checks,calls,visits,error:String(failure.stack||failure)},null,2));console.error(root,failure);process.exitCode=1;}
 finally{server.closeAllConnections();server.close();}

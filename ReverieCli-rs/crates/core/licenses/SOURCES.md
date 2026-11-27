@@ -27,3 +27,7 @@ Sources: [tiktoken-rs LICENSE](https://github.com/zurawiki/tiktoken-rs/blob/72a5
 ## Browser file transfers
 
 The workspace file boundary uses cap-std and cap-fs-ext 4.0.3, from Bytecode Alliance revision `b7acf8e8807fe3fab991884d2208b7e03d35a409`. The lockfile pins each downloaded package. The notices for the eleven added packages retain the upstream copyright and selected license texts, including the LLVM exception for winx. Identical texts share one entry. [Bundled notices](browser-file-transfer-notices.txt)
+
+## Desktop window screenshots
+
+The native kernel uses image 0.25.10 with its PNG codec for window capture, cropping and resizing. The lockfile pins the packages. License texts were copied from those crate archives and grouped when identical. [Bundled notices](desktop-image-notices.txt)

@@ -31,6 +31,10 @@ pub(super) struct Native {
 }
 
 impl Native {
+    pub(super) fn scratch(&self) -> &std::path::Path {
+        self.directory.path()
+    }
+
     pub(super) fn open() -> Result<Self> {
         let manifest: Value = serde_json::from_str(MANIFEST)?;
         let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);

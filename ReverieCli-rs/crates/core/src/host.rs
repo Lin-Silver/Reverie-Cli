@@ -1214,8 +1214,9 @@ impl KernelHost {
             let model_event = |event: Value| {
                 if !awaiting || !matches!(event["type"].as_str(), Some("assistant.delta" | "reasoning.delta")) { emit(event); }
             };
+            let model_messages = run.desktop_messages().await?;
             let turn = if awaiting {
-                let (model, config, messages)=(run.model.clone(),run.config.clone(),run.messages.clone());
+                let (model, config, messages)=(run.model.clone(),run.config.clone(),model_messages.into_owned());
                 let request=client.chat(&model,&config,&messages,&catalog,&control.cancel,&model_event);
                 tokio::pin!(request);
                 loop {tokio::select! {biased;
@@ -1230,7 +1231,7 @@ impl KernelHost {
                 .chat(
                     &run.model,
                     &run.config,
-                    &run.messages,
+                    &model_messages,
                     &catalog,
                     &control.cancel,
                     &model_event,
@@ -1405,7 +1406,7 @@ impl KernelHost {
             return self.browser_tool(run, control, args).await;
         }
         if computer::read_only(&call.name).is_some() {
-            return run.computer_tool(&call.name, args, &control.cancel).await;
+            return run.computer_tool(&call.name, args, control).await;
         }
         let mcp_snapshot = { lock(&run.mcp)?.clone() };
         let mcp_tool = mcp_snapshot

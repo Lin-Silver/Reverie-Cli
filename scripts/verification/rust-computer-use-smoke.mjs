@@ -20,6 +20,7 @@ fs.mkdirSync(project);
 fs.mkdirSync(path.join(app, '.reverie'), {recursive: true});
 const checks = [];
 let fixture, bridge, scenario, expectedTools, serverError, sequence = 0;
+let imageBlocks=[];
 let previousRef, windowId;
 const source = 'Reverie 原生桌面 😀';
 const artifact = path.join(root, 'fixture-saved.txt');
@@ -100,6 +101,36 @@ function* foreign() {
   refusal(yield tool('click', {ref:previousRef}), 'STALE_REF');
   checks.push('new run rejected the previous run control ref');
 }
+function* screenshot(vision) {
+  yield* discover();
+  const shot=data(yield tool('screenshot',{window_id:windowId,max_dimension:640}));
+  assert.equal(shot.model_visible,vision);
+  assert.equal(shot.target.id,windowId);
+  const saved=fs.readFileSync(shot.path);
+  assert.equal(saved.readUInt32BE(16),shot.width);
+  assert.equal(saved.readUInt32BE(20),shot.height);
+  assert.equal(Math.max(shot.width,shot.height),640);
+  const pixels=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',
+    'Add-Type -AssemblyName System.Drawing; $bitmap=[Drawing.Bitmap]::FromFile($env:REVERIE_FIXTURE_PNG); try { $blue=0; for($x=0;$x -lt $bitmap.Width;$x+=5){ for($y=0;$y -lt $bitmap.Height;$y+=5){ $c=$bitmap.GetPixel($x,$y); if($c.R -eq 135 -and $c.G -eq 206 -and $c.B -eq 250){$blue++} } }; $blue } finally { $bitmap.Dispose() }'],
+    {encoding:'utf8',env:{...process.env,REVERIE_FIXTURE_PNG:shot.path},windowsHide:true});
+  assert(Number(pixels.trim())>100,'the native screenshot must contain the fixture canvas');
+  if (vision) {
+    assert.equal(imageBlocks.length,1);
+    assert(Buffer.from(imageBlocks[0].image_url.url.split(',')[1],'base64').equals(saved));
+    // A later model request must continue receiving the originally captured bytes.
+    fs.writeFileSync(shot.path,'fixture replaced this public preview');
+    data(yield tool('status'));
+    assert(Buffer.from(imageBlocks[0].image_url.url.split(',')[1],'base64').equals(saved));
+    fs.writeFileSync(shot.path,saved);
+  } else {assert.equal(imageBlocks.length,0);}
+  const region={x:10,y:10,width:180,height:120};
+  const cropped=data(yield tool('screenshot',{window_id:windowId,region}));
+  assert.deepEqual(cropped.region,region);
+  assert.equal(cropped.width,180);assert.equal(cropped.height,120);
+  refusal(yield tool('screenshot',{window_id:windowId,region:{x:shot.original_width,y:0,width:2,height:2}}),'CAPTURE_FAILED');
+  checks.push(vision ? 'vision request carried the exact captured PNG, preserved pixels after preview replacement and checked crop bounds' :
+    'text-only model received a local PNG with independently measured fixture pixels and no image payload');
+}
 function* restricted() {
   const r = yield tool('list_windows');
   assert.equal(r.success,false); assert.match(r.error,/full_control/);
@@ -126,7 +157,8 @@ const server = http.createServer(async (req,res) => {
     const names = request.tools.map(t => t.function.name);
     assert(names.includes('computer_status'));
     assert.equal(names.includes('computer_click'), expectedTools);
-    const last = request.messages.at(-1);
+    imageBlocks=request.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(b=>b.type==='image_url'):[]);
+    const last = request.messages.findLast(m=>m.role==='tool') ?? request.messages.at(-1);
     const next = scenario.next(last.role === 'tool' ? JSON.parse(last.content) : undefined);
     const message = next.done ? {role:'assistant',content:'Fixture checks complete.'} :
       {role:'assistant',content:null,tool_calls:[{id:'desktop-' + (++sequence),type:'function',
@@ -138,7 +170,7 @@ const server = http.createServer(async (req,res) => {
 await new Promise(r => server.listen(0,'127.0.0.1',r));
 const model = {model:'desktop-test', profile_id:'desktop-test', provider:'openai-chat',
   base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'local-fixture'};
-fs.writeFileSync(path.join(app,'.reverie/config.json'), JSON.stringify({mode:'reverie',models:[model],
+fs.writeFileSync(path.join(app,'.reverie/config.json'), JSON.stringify({mode:'reverie',models:[model,{...model,model:'desktop-vision',profile_id:'desktop-vision',supports_vision:true}],
   active_model_source:'standard',active_model_index:0,auto_index:false,stream_responses:false,
   security:{permission_level:'full_control',permission_mode:'normal'}}));
 async function request(action, payload) {
@@ -146,6 +178,10 @@ async function request(action, payload) {
 }
 async function run(id, actions, level='full_control', cancel=false, decisions=[]) {
   const {session} = await request('createSession',{name:id});
+  if(id==='desktop-vision') {
+    const selected=await request('selectModel',{sessionId:session.id,source:'standard',modelId:'desktop-vision'});
+    assert.equal(selected.type,'model.selected');
+  }
   const settings = await request('getConversationConfig',{sessionId:session.id});
   const saved = await request('getConversationConfig',{sessionId:session.id,revision:settings.revision,
     configuration:{...settings.configuration,settings:{...settings.configuration.settings,security:{permission_level:level,permission_mode:decisions.length ? 'strict' : 'normal'}}}});
@@ -198,7 +234,7 @@ try {
     const file = path.join(root,'ReverieRustFixture.exe');
     execFileSync(path.join(process.env.WINDIR,'Microsoft.NET/Framework64/v4.0.30319/csc.exe'),['/nologo','/target:winexe',
       '/reference:System.Drawing.dll','/reference:System.Windows.Forms.dll','/out:'+file,path.join(repo,'scripts/verification/fixtures/computer-use/Fixture.cs')],{windowsHide:true});
-    fixture=spawn(file,[artifact],{stdio:'ignore'});
+    fixture=spawn(file,[artifact],{stdio:'ignore',env:{...process.env,REVERIE_EXTENDED_FIXTURE:'1'}});
   }
   bridge = startBridge(executable,project,app,{NO_PROXY:'127.0.0.1,localhost'});
   await bridge.ready;
@@ -206,6 +242,8 @@ try {
   await run('desktop-controls',statusOnly ? status : interactive);
   if (!statusOnly) {
     await run('desktop-new-run',foreign);
+    await run('desktop-text-image',()=>screenshot(false));
+    await run('desktop-vision',()=>screenshot(true));
     await run('desktop-strict',strict,'full_control',false,['deny','session']);
     await run('desktop-cancel',waiting,'full_control',true);
   }

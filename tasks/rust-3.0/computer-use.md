@@ -7,6 +7,7 @@ Rust 内核通过 `computer_*` 工具调用随包提供的 agent-desktop 1.2.0�
 | `computer_status` | 读取引擎、协议与系统权限。可在只读权限下诊断。 |
 | `computer_list_apps`、`computer_list_displays`、`computer_list_windows` | 桌面信息需要 `full_control` 权限级别。窗口可按应用名称过滤。 |
 | `computer_snapshot`、`computer_find`、`computer_wait` | 仅观察本轮窗口清单中的指定窗口，核对操作系统返回的窗口与进程身份。 |
+| `computer_screenshot` | 捕获指定窗口，核对捕获前后的进程、窗口边界与显示器配置。支持按原图像素裁剪和等比例缩小。纯文本模型得到 PNG 路径，视觉模型额外收到捕获时的图片字节。 |
 | `computer_get`、`computer_is` | 从本轮最近一次观察中取得控件引用，实际读取控件属性或状态。 |
 | `computer_click`、`computer_set_value`、`computer_set_state`、`computer_select`、`computer_scroll`、`computer_scroll_to` | 使用原生无障碍接口。一次输入消耗当前观察，后续输入需要新引用。原生返回实际送达状态；结果不确定时应重新观察。 |
 
@@ -22,4 +23,4 @@ node scripts/prepare-computer-use.mjs ReverieCli-rs/target/release
 node scripts/verification/rust-computer-use-smoke.mjs --status-only
 ```
 
-在已登录的 Windows 桌面运行 `node scripts/verification/rust-computer-use-smoke.mjs` 可执行真实窗口检查。脚本接受 release 可执行文件和证据目录两个可选位置参数。它启动自有 WinForms 窗口和回环模型，用 `--sdk-bridge` 驱动工具，核对实际窗口状态、UTF-8 文件和被取消进程的退出。模型仅负责发出确定的调用。图像坐标、物理键鼠、真实模型选择与其他平台的桌面交互另行验收。
+在已登录的 Windows 桌面运行 `node scripts/verification/rust-computer-use-smoke.mjs` 可执行真实窗口检查。脚本接受 release 可执行文件和证据目录两个可选位置参数。它启动自有 WinForms 窗口和回环模型，用 `--sdk-bridge` 驱动工具，核对实际窗口状态、UTF-8 文件和被取消进程的退出。脚本独立解码 PNG、检查夹具画布颜色，将发往视觉模型的图片与文件逐字节比较，并在替换公开预览后再次核对原图。模型仅负责发出确定的调用。像素坐标输入、物理键鼠、真实模型选择与其他平台的桌面交互另行验收。

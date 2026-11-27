@@ -44,4 +44,5 @@ if (!Object.entries(platform.files).every(([name, digest]) => matches(name, dige
 }
 fs.writeFileSync(path.join(target, 'LICENSE'), license);
 fs.copyFileSync(path.join(resources, 'manifest.json'), path.join(target, 'manifest.json'));
+fs.copyFileSync(path.resolve(resources, '../../crates/core/licenses/desktop-image-notices.txt'), path.join(target, 'desktop-image-notices.txt'));
 console.log(`Prepared agent-desktop ${manifest.version} (${os}-${arch}) at ${target}`);

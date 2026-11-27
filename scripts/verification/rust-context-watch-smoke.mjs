@@ -70,7 +70,7 @@ try {
   assert(!(await request('queryContext',{query:'menu appearance',strategy:'hybrid'},'context.results')).results.some(hit=>hit.file_path==='menu.md'));
   checks.push('Close and restart the actual process, resume background indexing, and remove deleted evidence');
   await watch(false);await until(state=>!state.watcher?.enabled&&!state.watcher?.operation);await close();
-  const database=new DatabaseSync(semanticPath);database.exec('PRAGMA user_version=88');database.close();
+  const database=new DatabaseSync(path.toNamespacedPath(semanticPath));database.exec('PRAGMA user_version=88');database.close();
   const damaged=fs.readFileSync(semanticPath);
   bridge=startBridge(executable,project,appRoot);await bridge.ready;
   await request('initialize',{projectRoot:project},'state');

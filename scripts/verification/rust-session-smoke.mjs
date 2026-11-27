@@ -51,7 +51,7 @@ try {
   await request('shutdown',{},'shutdown');
   assert.equal((await bridge.closed).code,0);
   const dbPath=path.join(dataRoot,'conversations.sqlite3');
-  const db=new DatabaseSync(dbPath);
+  const db=new DatabaseSync(path.toNamespacedPath(dbPath));
   const messages=Array.from({length:73},(_,i)=>JSON.stringify({role:'Reverie',content:`${i}\r\n正文😀\n`,unknown:{keep:true}}));
   const insert=db.prepare('INSERT INTO messages VALUES (?,?,?,?,?)');
   db.exec('BEGIN IMMEDIATE');
@@ -67,7 +67,7 @@ try {
   const head=(await request('getSession',{sessionId:second.id,select:false,before:tail.before},'session')).session;
   assert.equal(head.messages.length,13);assert.equal(head.before,null);
   await request('renameSession',{sessionId:second.id,name:'renamed'},'session.updated');
-  const read=new DatabaseSync(dbPath,{readOnly:true});
+  const read=new DatabaseSync(path.toNamespacedPath(dbPath),{readOnly:true});
   assert.deepEqual(read.prepare('SELECT payload FROM messages ORDER BY sequence').all().map(row=>row.payload),rawBefore);
   read.close();
   await request('deleteSession',{sessionId:first.id,confirmed:true},'session.updated');
@@ -75,7 +75,7 @@ try {
   await request('shutdown',{},'shutdown');
   assert.equal((await bridge.closed).code,0);
   const backup=path.join(dataRoot,'backups/conversations.before-rust-3.0.sqlite3');
-  const backupDb=new DatabaseSync(backup,{readOnly:true});
+  const backupDb=new DatabaseSync(path.toNamespacedPath(backup),{readOnly:true});
   assert.equal(backupDb.prepare('PRAGMA quick_check').get().quick_check,'ok');
   assert.equal(backupDb.prepare('SELECT count(*) AS count FROM messages').get().count,73);
   backupDb.close();

@@ -148,7 +148,7 @@ try {
   assert.equal((await request('getSession',{projectRoot:second,sessionId:sessionB.id})).session.name,'renamed');
   checks.push('Durable queued intent, replay protection, restart and desktop session response contract');
   const stateAfter = (await request('getState',{projectRoot:second})).state;
-  const db = new DatabaseSync(path.join(stateAfter.workspace.project_data_dir,'conversations.sqlite3'),{readOnly:true});
+  const db = new DatabaseSync(path.toNamespacedPath(path.join(stateAfter.workspace.project_data_dir,'conversations.sqlite3')),{readOnly:true});
   assert.equal(db.prepare('PRAGMA user_version').get().user_version,7);
   db.close();
   if (serverError) throw serverError;

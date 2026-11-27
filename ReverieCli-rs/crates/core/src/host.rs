@@ -43,7 +43,7 @@ struct Waiter {
 
 pub struct RunControl {
     pub cancel: CancellationToken,
-    commit_gate: Mutex<()>,
+    commit_gate: Arc<Mutex<()>>,
     pub session_id: String,
     pub project_root: PathBuf,
     assistant: bool,
@@ -597,7 +597,7 @@ impl KernelHost {
             let id = format!("wstyle-{}", Uuid::new_v4().simple());
             let control = Arc::new(RunControl {
                 cancel: self.context_cancel.child_token(),
-                commit_gate: Mutex::new(()),
+                commit_gate: Default::default(),
                 session_id: session.clone(),
                 project_root: root.clone(),
                 assistant: false,
@@ -929,7 +929,7 @@ impl KernelHost {
         let run = self.prepare(&request, id, resumed.as_ref())?;
         let control = Arc::new(RunControl {
             cancel: CancellationToken::new(),
-            commit_gate: Mutex::new(()),
+            commit_gate: Default::default(),
             session_id: run.session.clone(),
             project_root: run.root.clone(),
             assistant: run.assistant,

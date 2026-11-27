@@ -154,7 +154,7 @@ impl KernelHost {
         store.ensure_reduction_run(&session, None)?;
         let control = Arc::new(RunControl {
             cancel: CancellationToken::new(),
-            commit_gate: Mutex::new(()),
+            commit_gate: Default::default(),
             session_id: session.clone(),
             project_root: kernel.project_root.clone(),
             assistant: kernel.assistant_mode,

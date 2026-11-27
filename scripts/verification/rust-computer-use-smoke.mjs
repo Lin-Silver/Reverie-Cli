@@ -9,8 +9,9 @@ import {fileURLToPath} from 'node:url';
 import {startBridge} from './rust-bridge-client.mjs';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
-const argv = process.argv.slice(2).filter(a => a !== '--status-only');
+const argv = process.argv.slice(2).filter(a => !['--status-only','--physical'].includes(a));
 const statusOnly = process.argv.includes('--status-only');
+const physical = process.argv.includes('--physical');
 const executable = path.resolve(argv[0] || path.join(repo, 'ReverieCli-rs/target/release', process.platform === 'win32' ? 'reverie.exe' : 'reverie'));
 const directory = path.resolve(argv[1] || path.join(repo, '.runtime/rust-3.0/computer-use-smoke'));
 fs.mkdirSync(directory, {recursive: true});
@@ -22,6 +23,8 @@ const checks = [];
 let fixture, bridge, scenario, expectedTools, serverError, sequence = 0;
 let imageBlocks=[];
 let previousRef, windowId;
+let previousImage;
+const contenderPrompt = 'Check the desktop from a second kernel.';
 const source = 'Reverie 原生桌面 😀';
 const artifact = path.join(root, 'fixture-saved.txt');
 const tool = (name, args = {}) => ({name: 'computer_' + name, args});
@@ -106,6 +109,9 @@ function* screenshot(vision) {
   const shot=data(yield tool('screenshot',{window_id:windowId,max_dimension:640}));
   assert.equal(shot.model_visible,vision);
   assert.equal(shot.target.id,windowId);
+  if(!vision) {
+    refusal(yield tool('click',{image_id:shot.image_id,x:1,y:1,physical:true}),'STALE_IMAGE');
+  }
   const saved=fs.readFileSync(shot.path);
   assert.equal(saved.readUInt32BE(16),shot.width);
   assert.equal(saved.readUInt32BE(20),shot.height);
@@ -131,9 +137,121 @@ function* screenshot(vision) {
   checks.push(vision ? 'vision request carried the exact captured PNG, preserved pixels after preview replacement and checked crop bounds' :
     'text-only model received a local PNG with independently measured fixture pixels and no image payload');
 }
+function marks(file) {
+  const dest=path.join(root,file);
+  return fs.existsSync(dest) ? fs.readFileSync(dest,'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
+}
+function coloredTargets(shot) {
+  const script=`
+    Add-Type -AssemblyName System.Drawing
+    $bitmap=[Drawing.Bitmap]::FromFile($env:REVERIE_FIXTURE_PNG)
+    try {
+      $pink=@(); $blue=@()
+      for($y=0;$y -lt $bitmap.Height;$y+=3){for($x=0;$x -lt $bitmap.Width;$x+=3){
+        $c=$bitmap.GetPixel($x,$y)
+        if($c.R -eq 255 -and $c.G -eq 105 -and $c.B -eq 180){$pink+=,[PSCustomObject]@{x=$x;y=$y}}
+        if($c.R -eq 135 -and $c.G -eq 206 -and $c.B -eq 250){$blue+=,[PSCustomObject]@{x=$x;y=$y}}
+      }}
+      if($pink.Count -lt 8 -or $blue.Count -lt 20){throw 'Expected fixture colors are missing from this screenshot'}
+      $px=$pink.x|Measure-Object -Minimum -Maximum;$py=$pink.y|Measure-Object -Minimum -Maximum
+      $bx=$blue.x|Measure-Object -Minimum -Maximum;$by=$blue.y|Measure-Object -Minimum -Maximum
+      [PSCustomObject]@{x=($px.Minimum+$px.Maximum)/2;y=($py.Minimum+$py.Maximum)/2;
+        ax=(3*$bx.Minimum+$bx.Maximum)/4;bx=($bx.Minimum+3*$bx.Maximum)/4;cy=($by.Minimum+$by.Maximum)/2}|ConvertTo-Json -Compress
+    } finally { $bitmap.Dispose() }
+  `;
+  return JSON.parse(execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],
+    {encoding:'utf8',env:{...process.env,REVERIE_FIXTURE_PNG:shot.path},windowsHide:true}));
+}
+function changeFixture(action) {
+  const script=`
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FixtureHost{
+      [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr w,out uint p);
+      [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr w,uint m,IntPtr a,IntPtr b);}'
+    $w=[IntPtr][long]$env:REVERIE_FIXTURE_HWND;$owner=[uint32]0
+    $null=[FixtureHost]::GetWindowThreadProcessId($w,[ref]$owner)
+    if($owner -ne [uint32]$env:REVERIE_FIXTURE_PID){throw 'Fixture HWND changed'}
+    if([FixtureHost]::SendMessageW($w,0x8519,[IntPtr][int]$env:REVERIE_FIXTURE_ACTION,[IntPtr]::Zero).ToInt64() -ne 1){throw 'Fixture did not acknowledge its control message'}
+  `;
+  execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,timeout:12000,
+    env:{...process.env,REVERIE_FIXTURE_HWND:windowId.slice(2),REVERIE_FIXTURE_PID:String(fixture.pid),REVERIE_FIXTURE_ACTION:String(action)}});
+}
+async function waitForClicks(expected) {
+  const until=Date.now()+5000;
+  while(Date.now()<until && marks('clicks.log').length<expected) await delay(20);
+  assert.equal(marks('clicks.log').length,expected);
+}
+async function* coordinateInput() {
+  yield* discover();
+  data(yield tool('window',{action:'focus',window_id:windowId}));
+  const base=data(yield tool('screenshot',{window_id:windowId}));
+  assert.equal(base.coordinate_available,true);
+  assert.equal(base.target.is_focused,true);
+  const x=Math.floor(base.original_width*0.6);
+  const region={x,y:0,width:base.original_width-x,height:base.original_height};
+  const capture=()=>tool('screenshot',{window_id:windowId,region,max_dimension:360});
+  const click=(image,x,y)=>tool('click',{image_id:image.image_id,x,y,physical:true});
+  const initial=data(yield capture());
+  const latest=data(yield capture());
+  const pts=coloredTargets(latest);
+  refusal(yield click(initial,pts.x,pts.y),'STALE_IMAGE');
+  refusal(yield click(latest,latest.width,pts.y),'INVALID_ARGS');
+  assert.equal(marks('clicks.log').length,0);
+  const sent=data(yield click(latest,pts.x,pts.y));
+  assert.equal(sent.disposition.delivery,'delivered_unverified');
+  await waitForClicks(1);
+  refusal(yield click(latest,pts.x,pts.y),'STALE_IMAGE');
+  const fresh=data(yield capture());
+  const drag=tool('drag',{from_image_id:fresh.image_id,from_x:pts.ax,from_y:pts.cy,to_image_id:fresh.image_id,to_x:pts.bx,to_y:pts.cy});
+  assert.equal(data(yield drag).disposition.retry,'unsafe');
+  data(yield tool('wait',{window_id:windowId,selector:':Drag completed: 1'}));
+  const gesture=marks('drag.log').map(s=>s.split(' '));
+  assert.deepEqual(gesture.map(row=>row[0]),['down','up']);
+  assert(Number(gesture[1][1])-Number(gesture[0][1])>30);
+  checks.push('cropped, downscaled screenshot pixels clicked the pink button once and dragged across the blue canvas; independent window logs and counter matched');
+  const moved=data(yield capture());
+  changeFixture(1);
+  refusal(yield click(moved,pts.x,pts.y),'STALE_IMAGE');
+  data(yield tool('window',{action:'focus',window_id:windowId}));
+  const covered=data(yield capture());
+  assert.equal(covered.target.is_focused,true);
+  changeFixture(2);
+  try {refusal(yield click(covered,pts.ax,pts.cy),'TARGET_OCCLUDED');}finally { changeFixture(3); }
+  assert.equal(marks('clicks.log').length,1);
+  assert.equal(marks('drag.log').length,2);
+  previousImage=data(yield capture()).image_id;
+  checks.push('replaced, consumed, out-of-bounds, moved-window and covered screenshot targets were refused without additional fixture input');
+}
+function* foreignImage() {
+  refusal(yield tool('click',{image_id:previousImage,x:1,y:1,physical:true}),'STALE_IMAGE');
+  checks.push('a separate run could not reuse the previous run screenshot for input');
+}
+async function* strictCoordinates(){
+  yield* discover();
+  data(yield tool('window',{action:'focus',window_id:windowId}));
+  const capture=()=>tool('screenshot',{window_id:windowId,max_dimension:640});
+  const shot=data(yield capture());
+  const {x,y}=coloredTargets(shot);
+  const click=(s,px)=>tool('click',{physical:true,image_id:s.image_id,x:px,y});
+  const before=marks('clicks.log').length;
+  const denied=yield click(shot,x);
+  assert.equal(denied.success,false);assert.match(denied.error,/denied|refused|rejected/i);
+  assert.equal(marks('clicks.log').length,before);
+  data(yield click(shot,x));
+  await waitForClicks(before+1);
+  data(yield click(data(yield capture()),x+1));
+  await waitForClicks(before+2);
+  checks.push('Strict denied a real pointer request before dispatch, then reused the click-tool session grant on a fresh image and different pixel');
+}
+function* escapeWait(){
+  yield* discover();
+  data(yield tool('window',{action:'focus',window_id:windowId}));
+  yield tool('wait',{window_id:windowId,selector:':reverie-never-present',timeout_ms:60000});
+}
 function* restricted() {
   const r = yield tool('list_windows');
   assert.equal(r.success,false); assert.match(r.error,/full_control/);
+  const sent=yield tool('click',{image_id:'not-authorized',x:1,y:1,physical:true});
+  assert.equal(sent.success,false);assert.match(sent.error,/full_control/);
   checks.push('explicit permission level refused off-workspace observation');
 }
 function* strict() {
@@ -154,12 +272,21 @@ const server = http.createServer(async (req,res) => {
     let body = '';
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
+    if (request.messages.some(m => m.role === 'user' && m.content === contenderPrompt)) {
+      const last = request.messages.at(-1);
+      if (last.role === 'tool') assert.equal(data(JSON.parse(last.content)).version, '1.2.0');
+      const message = last.role === 'tool' ? {role:'assistant',content:'Second kernel observed the desktop.'} :
+        {role:'assistant',content:null,tool_calls:[{id:'other-status',type:'function',function:{name:'computer_status',arguments:'{}'}}]};
+      res.writeHead(200,{'content-type':'application/json'});
+      res.end(JSON.stringify({choices:[{message,finish_reason:last.role === 'tool' ? 'stop' : 'tool_calls'}]}));
+      return;
+    }
     const names = request.tools.map(t => t.function.name);
     assert(names.includes('computer_status'));
     assert.equal(names.includes('computer_click'), expectedTools);
     imageBlocks=request.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(b=>b.type==='image_url'):[]);
     const last = request.messages.findLast(m=>m.role==='tool') ?? request.messages.at(-1);
-    const next = scenario.next(last.role === 'tool' ? JSON.parse(last.content) : undefined);
+    const next = await scenario.next(last.role === 'tool' ? JSON.parse(last.content) : undefined);
     const message = next.done ? {role:'assistant',content:'Fixture checks complete.'} :
       {role:'assistant',content:null,tool_calls:[{id:'desktop-' + (++sequence),type:'function',
         function:{name:next.value.name,arguments:JSON.stringify(next.value.args)}}]};
@@ -176,9 +303,37 @@ fs.writeFileSync(path.join(app,'.reverie/config.json'), JSON.stringify({mode:'re
 async function request(action, payload) {
   return bridge.request(action,{projectRoot:project,...payload},90000);
 }
+async function checkContendingKernel(release) {
+  const otherProject = path.join(root,'second-workspace'), otherApp = path.join(root,'second-app');
+  fs.mkdirSync(otherProject);
+  fs.mkdirSync(path.join(otherApp,'.reverie'),{recursive:true});
+  fs.copyFileSync(path.join(app,'.reverie/config.json'),path.join(otherApp,'.reverie/config.json'));
+  const other = startBridge(executable,otherProject,otherApp,{NO_PROXY:'127.0.0.1,localhost'});
+  try {
+    await other.ready;
+    const payload = {projectRoot:otherProject};
+    await other.request('initialize',payload);
+    const {session} = await other.request('createSession',{...payload,name:'competing kernel'});
+    const response = other.request('runPrompt',{...payload,sessionId:session.id,runId:'competing',prompt:contenderPrompt,noIndex:true},30000);
+    const deadline = Date.now()+8000;
+    while (!other.events.some(e=>e.event?.event?.tool_name==='computer_status')) {
+      if (serverError) throw serverError;
+      assert(Date.now()<deadline,'second kernel must reach the desktop tool');
+      await delay(20);
+    }
+    changeFixture(5);
+    assert.equal(await Promise.race([response.then(()=>true),delay(350,false)]),false,'second process entered while the first held the desktop');
+    await release();
+    const reply = await response;
+    assert.equal(reply.result.output_text,'Second kernel observed the desktop.');
+    checks.push('two independent SDK kernel processes serialized desktop access across different workspaces and resumed after cancelling the owner');
+    await other.request('shutdown',payload);
+    assert.equal((await other.closed).code,0);
+  } finally { if(other.child.exitCode===null) other.child.kill(); }
+}
 async function run(id, actions, level='full_control', cancel=false, decisions=[]) {
   const {session} = await request('createSession',{name:id});
-  if(id==='desktop-vision') {
+  if(['desktop-vision','desktop-pointer','desktop-foreign-image','desktop-strict-pointer'].includes(id)) {
     const selected=await request('selectModel',{sessionId:session.id,source:'standard',modelId:'desktop-vision'});
     assert.equal(selected.type,'model.selected');
   }
@@ -202,14 +357,19 @@ async function run(id, actions, level='full_control', cancel=false, decisions=[]
       if (!pid) await delay(50);
     }
     assert(pid,'must witness the live native wait before requesting cancellation');
-    await request('stopPrompt',{sessionId:session.id,runId:id});
+    const stop=()=>request('stopPrompt',{sessionId:session.id,runId:id});
+    if(cancel==='escape') changeFixture(4);
+    else if(physical) await checkContendingKernel(stop);
+    else await stop();
     const stopped = await response;
     assert.equal(stopped.result.state,'cancelled');
     assert.throws(()=>process.kill(pid,0), {code:'ESRCH'});
-    checks.push('cancelled a witnessed native wait process through the SDK and verified its exit');
+    checks.push(cancel==='escape' ? 'foreground fixture injected OS Escape during a text-only native wait without capturing a screenshot; run cancelled and process exited without an SDK stop request' :
+      'cancelled a witnessed native wait process through the SDK and verified its exit');
   } else {
     const answered = new Set();
-    for (const decision of decisions) {
+    for (const item of decisions) {
+      const [toolName,decision]=Array.isArray(item)?item:['computer_list_windows',item];
       const until=Date.now()+12000;
       let approval;
       while (Date.now()<until && !approval) {
@@ -218,7 +378,7 @@ async function run(id, actions, level='full_control', cancel=false, decisions=[]
         if (!approval) await delay(20);
       }
       assert(approval,'missing Strict approval');
-      assert.equal(approval.tool,'computer_list_windows');
+      assert.equal(approval.tool,toolName);
       answered.add(approval.approval_id);
       await request('resolveApproval',{sessionId:session.id,approvalId:approval.approval_id,decision});
     }
@@ -234,7 +394,7 @@ try {
     const file = path.join(root,'ReverieRustFixture.exe');
     execFileSync(path.join(process.env.WINDIR,'Microsoft.NET/Framework64/v4.0.30319/csc.exe'),['/nologo','/target:winexe',
       '/reference:System.Drawing.dll','/reference:System.Windows.Forms.dll','/out:'+file,path.join(repo,'scripts/verification/fixtures/computer-use/Fixture.cs')],{windowsHide:true});
-    fixture=spawn(file,[artifact],{stdio:'ignore',env:{...process.env,REVERIE_EXTENDED_FIXTURE:'1'}});
+    fixture=spawn(file,[artifact],{stdio:'ignore',env:{...process.env,REVERIE_EXTENDED_FIXTURE:'1',...(physical?{REVERIE_POINTER_FIXTURE:root}:{})}});
   }
   bridge = startBridge(executable,project,app,{NO_PROXY:'127.0.0.1,localhost'});
   await bridge.ready;
@@ -244,6 +404,14 @@ try {
     await run('desktop-new-run',foreign);
     await run('desktop-text-image',()=>screenshot(false));
     await run('desktop-vision',()=>screenshot(true));
+    if(physical){
+      await run('desktop-pointer',coordinateInput);
+      await run('desktop-foreign-image',foreignImage);
+      await run('desktop-strict-pointer',strictCoordinates,'full_control',false,[
+        ['computer_list_windows','session'],['computer_window','session'],['computer_screenshot','session'],
+        ['computer_click','deny'],['computer_click','session']]);
+      await run('desktop-escape',escapeWait,'full_control','escape');
+    }
     await run('desktop-strict',strict,'full_control',false,['deny','session']);
     await run('desktop-cancel',waiting,'full_control',true);
   }

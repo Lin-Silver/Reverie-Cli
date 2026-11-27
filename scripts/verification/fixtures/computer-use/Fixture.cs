@@ -10,6 +10,17 @@ public class DesktopFixture : Form {
     string output;
     DataObject clipboardBackup;
     bool clipboardSaved;
+    string pointerDirectory;
+    Panel pointerCanvas;
+    Form cover;
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr h,IntPtr after,int x,int y,int width,int height,uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
+    class CoverWindow : Form {
+        protected override bool ShowWithoutActivation { get { return true; } }
+        protected override CreateParams CreateParams { get { var p=base.CreateParams; p.ExStyle |= 0x08000000; return p; } }
+    }
     public DesktopFixture(string destination) {
         output = destination;
         Text = "Reverie Computer Use Verification";
@@ -58,9 +69,46 @@ public class DesktopFixture : Form {
             canvas.MouseDown += delegate(object sender, MouseEventArgs e) { if(e.Button == MouseButtons.Left) { dragging=true; origin=e.Location; } };
             canvas.MouseUp += delegate(object sender, MouseEventArgs e) { if(dragging && Math.Abs(e.X-origin.X)+Math.Abs(e.Y-origin.Y)>30) { completed++; dragCount.Text="Drag completed: " + completed; } dragging=false; };
             Controls.Add(canvas);
+            pointerDirectory=Environment.GetEnvironmentVariable("REVERIE_POINTER_FIXTURE");
+            if(!String.IsNullOrEmpty(pointerDirectory)){
+                pointerCanvas=canvas;
+                var button=new Button {Text="Coordinate click", Location=new Point(710,540), Size=new Size(200,48),
+                    FlatStyle=FlatStyle.Flat, UseVisualStyleBackColor=false, BackColor=Color.HotPink};
+                button.FlatAppearance.MouseOverBackColor=button.BackColor;
+                button.Click += delegate { File.AppendAllText(Path.Combine(pointerDirectory,"clicks.log"),"click\n"); };
+                canvas.MouseDown += delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)File.AppendAllText(Path.Combine(pointerDirectory,"drag.log"),"down "+e.X+" "+e.Y+"\n");};
+                canvas.MouseUp += delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Left)File.AppendAllText(Path.Combine(pointerDirectory,"drag.log"),"up "+e.X+" "+e.Y+"\n");};
+                Controls.Add(button);
+            }
             Controls.Add(new Button { Name="duplicateIdentity", AccessibleName="Duplicate identity", Text="Identity A", Location=new Point(710,430), Size=new Size(200,35) });
             Controls.Add(new Button { Name="duplicateIdentity", AccessibleName="Duplicate identity", Text="Identity B", Location=new Point(710,480), Size=new Size(200,35) });
         }
+    }
+    protected override void WndProc(ref Message m) {
+        if(m.Msg==0x8519 && !String.IsNullOrEmpty(pointerDirectory)){
+            switch(m.WParam.ToInt32()){
+            case 1: Left+=17; break;
+            case 2:
+                var rect=pointerCanvas.RectangleToScreen(pointerCanvas.ClientRectangle);
+                cover=new CoverWindow {ShowInTaskbar=false,FormBorderStyle=FormBorderStyle.None,StartPosition=FormStartPosition.Manual,BackColor=Color.Brown};
+                // Show the topmost occluder without activating it or changing the foreground owner.
+                if(!SetWindowPos(cover.Handle,new IntPtr(-1),rect.X,rect.Y,rect.Width,rect.Height,0x0050)){m.Result=IntPtr.Zero;return;}
+                break;
+            case 3: if(cover!=null){cover.Close();cover=null;}break;
+            case 4:
+                if(GetForegroundWindow()!=Handle){m.Result=IntPtr.Zero;return;}
+                keybd_event(0x1b,0,0,UIntPtr.Zero);
+                try {System.Threading.Thread.Sleep(180);} finally {keybd_event(0x1b,0,2,UIntPtr.Zero);}
+                break;
+            case 5:
+                using(var mutex=System.Threading.Mutex.OpenExisting(@"Local\ReverieDesktopOperations.v1")){
+                    if(mutex.WaitOne(0)){mutex.ReleaseMutex();m.Result=IntPtr.Zero;return;}
+                }
+                break;
+            }
+            m.Result=new IntPtr(1);return;
+        }
+        base.WndProc(ref m);
     }
     void RestoreClipboard() {
         if (!clipboardSaved) return;

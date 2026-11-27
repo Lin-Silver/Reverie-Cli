@@ -174,7 +174,7 @@ impl KernelHost {
         model["max_tokens"] = json!(maximum);
         let id = format!("aio-decision-{}", Uuid::new_v4().simple());
         let control = Arc::new(RunControl {
-            commit_gate: Mutex::new(()),
+            commit_gate: Default::default(),
             cancel: self.context_cancel.child_token(),
             session_id: aio::MAINLINE.into(),
             project_root: root.clone(),
@@ -298,7 +298,7 @@ mod tests {
                 .unwrap();
             let control = Arc::new(RunControl {
                 cancel: tokio_util::sync::CancellationToken::new(),
-                commit_gate: Mutex::new(()),
+                commit_gate: Default::default(),
                 session_id: aio::MAINLINE.into(),
                 project_root: host.project_root().unwrap(),
                 assistant: true,

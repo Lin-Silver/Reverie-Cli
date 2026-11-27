@@ -7,6 +7,8 @@ use std::{
 };
 
 pub mod command;
+#[cfg(windows)]
+pub mod desktop;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 

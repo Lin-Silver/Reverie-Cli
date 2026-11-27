@@ -153,6 +153,7 @@ jobs:
       - name: Run actual desktop bridge and task recovery checks
         run: node scripts/verification/rust-desktop-bridge-smoke.mjs
       - name: Run actual scrolling terminal and single-prompt checks
+        timeout-minutes: 5
         run: node scripts/verification/rust-tui-smoke.mjs
       - name: Run actual plugin preparation, trust, activation and terminal cancellation checks
         run: node scripts/verification/rust-plugins-tui-smoke.mjs

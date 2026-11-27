@@ -101,32 +101,45 @@ fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mod
   base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'TUI_FIXTURE_KEY'}], active_model_source: 'standard', active_model_index: 0, stream_responses: true, auto_index: false,
   security: {permission_level: 'full_control', permission_mode: 'default'}}));
 const environment = {...process.env, REVERIE_APP_ROOT: appRoot, NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
+function markPhase(label) {
+  fs.writeFileSync(path.join(root, 'last-phase.txt'), label);
+  if (process.env.CI) console.log('Terminal check: ' + label);
+}
 async function wait(condition, label) {
+  markPhase(label);
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {if (condition()) return; await delay(20);}
   throw new Error(`Timed out: ${label}; terminal exit=${JSON.stringify(terminalExit)}`);
 }
 function headless(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {cwd: project, env: environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']});
+    const prompt = args[args.indexOf('--prompt') + 1];
+    markPhase('headless ' + prompt);
+    const child = spawn(executable, args, {cwd: project, env: environment, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000});
     let stdout = ''; let stderr = '';
     child.stdout.on('data', bytes => {stdout += bytes.toString();});
     child.stderr.on('data', bytes => {stderr += bytes.toString();});
     child.on('error', reject);
-    child.on('exit', code => resolve({code, stdout, stderr}));
+    child.on('close', (code, signal) => {
+      if (signal) reject(new Error(`Headless fixture ${prompt} stopped by ${signal}: ${stderr}`));
+      else resolve({code, stdout, stderr});
+    });
     child.stdin.end();
   });
 }
 let database;
 try {
   const bridge = startBridge(executable, project, appRoot);
+  markPhase('SDK initialization');
   await bridge.ready;
   const state = (await bridge.request('initialize', {projectRoot: project})).state;
   await bridge.request('shutdown');
+  markPhase('SDK shutdown');
   assert.equal((await bridge.closed).code, 0);
   database = new DatabaseSync(path.join(state.workspace.project_data_dir, 'conversations.sqlite3'), {readOnly: true});
   const messageRows = () => database.prepare('SELECT payload FROM messages ORDER BY rowid').all().map(row => JSON.parse(row.payload));
   const completedCount = () => database.prepare("SELECT count(*) AS count FROM task_runs WHERE state='completed'").get().count;
+  markPhase('opening pseudoterminal');
   terminal = pty.spawn(executable, ['--project', project, '--no-index'], {name: 'xterm-256color', cols: 84, rows: 26, cwd: project, env: environment});
   terminal.onData(bytes => {output += bytes; display.write(bytes);});
   terminal.onExit(value => {terminalExit = value;});

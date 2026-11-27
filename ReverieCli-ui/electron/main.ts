@@ -19,6 +19,7 @@ import { parseDesktopLaunchOptions, resolveDesktopStartupMode } from "./launch-o
 import { normalizeThemePreference, type ThemePreference, windowAppearance } from "./appearance";
 import { createWindowTray, showWindow } from "./window-tray";
 import { CoreBridge } from "./core-bridge";
+import { DesktopBrowser, type BrowserPanelCommand } from "./desktop-browser";
 import { createGitBranch, getGitWorkspaceStatus, switchGitBranch } from "./git-workspace";
 import { importAttachments, saveClipboardImage, validateAttachments, type ComposerAttachment } from "./attachments";
 import { gitSnapshot, gitPatch, gitMutate, gitCommit, gitPushPlan, gitPush, gitOutput, readPreview, listDirectory, readEditorFile, saveEditorFile, type DiffScope, type PushPlan } from "./workbench";
@@ -287,6 +288,7 @@ let aioHost:AiOHost|null=null;
 let quitRequested = false;
 let quitDialogOpen = false;
 let bridge: CoreBridge | null = null;
+let desktopBrowser: DesktopBrowser | null = null;
 const terminals = new TerminalManager(message => mainWindow?.webContents.send("core:event", message));
 const journal = new RunJournal();
 const executors = new Map<string, { worker: CoreBridge; root: string; sessionId: string; runId: string; interactionId?: string; assistantId?: 'aio' }>();
@@ -437,6 +439,7 @@ async function createWindow(): Promise<void> {
       mainWindow.webContents.send("core:event", message);
     }
   }, bridgeEnvironment);
+  desktopBrowser = new DesktopBrowser(mainWindow, bridge, message => { void log(message); });
   void bridge.start().catch((error) => log(`Core startup failed: ${error instanceof Error ? error.message : String(error)}`));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -516,6 +519,11 @@ ipcMain.handle("core:request", async (_event, rawAction: unknown, rawPayload?: u
   const action = assertCoreAction(rawAction);
   const payload = normalizeCorePayload(rawPayload);
   return executeCoreRequest(action,payload);
+});
+
+ipcMain.handle("desktop:browser-panel", (event, root: string, sessionId: string, command: BrowserPanelCommand) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Browser panel requires the desktop window.");
+  return desktopBrowser?.panel(root, sessionId, command) ?? [];
 });
 
 async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,payload:JsonRecord):Promise<JsonRecord> {
@@ -630,7 +638,15 @@ async function executeCoreRequest(action:ReturnType<typeof assertCoreAction>,pay
       await writeRun('running',undefined,String(payload.executionRoot || root));
       if (stopBeforeStart.has(lease.id)) throw new Error("Run stopped before tools started.");
       if (viewCall) viewInstances.require(payload);
-      const response = await worker.request(action, payload, onEvent);
+      if (!viewCall) await desktopBrowser?.prepare(root, record.id);
+      let response: JsonRecord;
+      let keepTabs = false;
+      try {
+        response = await worker.request(action, payload, onEvent);
+        keepTabs = (response.result as JsonRecord | undefined)?.success === true;
+      } finally {
+        if (!viewCall) desktopBrowser?.finish(record.id, !keepTabs);
+      }
       runRevision = Number(response.run_revision ?? runRevision);
       const result = viewCall ? { success: response.status === "success", output_text: response.output, error: response.error } : response.result as JsonRecord;
       const cancelled = result.state === "cancelled" || !result.success && stopBeforeStart.has(lease.id);

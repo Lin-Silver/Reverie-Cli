@@ -2435,3 +2435,6 @@ button svg { flex-shrink: 0; }
   .pane-resizer.inspector-resizer { display: block; top: 54px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-shell > .workbench-panel, .conversation-display-menu { transform: none; } }
+.browser-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.browser-page-slot { flex: 1; min-height: 1px; }
+.browser-panel select { min-width: 0; max-width: 75%; }

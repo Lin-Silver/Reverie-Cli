@@ -30,7 +30,13 @@ pub fn run() -> io::Result<()> {
         &Reply::new(
             None,
             "ready",
-            Map::from_iter([("protocol_version".into(), json!(1))]),
+            Map::from_iter([
+                ("protocol_version".into(), json!(1)),
+                (
+                    "browser_protocol".into(),
+                    json!(reverie_core::browser::BROWSER_PROTOCOL),
+                ),
+            ]),
         ),
     )?;
     for line in io::stdin().lock().lines() {

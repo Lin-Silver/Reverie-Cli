@@ -3,6 +3,7 @@ import { WebContentsView, session } from "electron";
 import type { BrowserWindow, Session } from "electron";
 import type { AdapterResult, BrowserCompletion, BrowserHostRef, BrowserProfile, BrowserRequest, BrowserScope, BrowserTab, Delivery } from "../src/generated/core-types";
 import { BROWSER_PROTOCOL, browserId, browserRequest, browserSummaryUrl, browserTitle, browserUrl } from "./browser-policy";
+import { BrowserPage } from "./browser-page";
 
 export interface BrowserInvalidation {
   host: BrowserHostRef;
@@ -36,6 +37,7 @@ interface Guest {
   scope: BrowserScope;
   profile: BrowserProfile;
   view: WebContentsView;
+  page: BrowserPage;
   revision: number;
   announced: boolean;
   unavailable: boolean;
@@ -134,6 +136,11 @@ export class BrowserHost {
     this.changed();
   }
 
+  closeTab(tabId: string): void {
+    const guest = this.tabs.get(tabId);
+    if (guest) this.closeGuest(guest);
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
@@ -219,9 +226,10 @@ export class BrowserHost {
       nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, webviewTag: false, webSecurity: true,
       allowRunningInsecureContent: false, navigateOnDragDrop: false, disableDialogs: true, safeDialogs: true, devTools: false, spellcheck: false } });
     const guest: Guest = { id: `tab-${randomUUID()}`, owner: context.owner, scope: { ...context.request.scope }, profile: { ...context.request.profile },
-      view, revision: 1, announced: false, unavailable: false, closed: false, notifications: Promise.resolve(), notificationError: false };
+      view, page: new BrowserPage(view.webContents, () => this.invalidate(guest)), revision: 1, announced: false, unavailable: false, closed: false, notifications: Promise.resolve(), notificationError: false };
     context.guest = guest; this.tabs.set(guest.id, guest);
-    this.selected = guest.id; this.options.parent.contentView.addChildView(view); view.setBounds(this.bounds); this.setVisible(this.visible);
+    if (!this.visible || !this.selected) this.selected = guest.id;
+    this.options.parent.contentView.addChildView(view); view.setBounds(this.bounds); this.setVisible(this.visible);
     const contents = view.webContents;
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     contents.on("will-attach-webview", event => event.preventDefault());
@@ -236,9 +244,12 @@ export class BrowserHost {
     contents.once("destroyed", () => this.retireGuest(guest));
     contents.debugger.on("detach", () => { if (!guest.closed) { guest.unavailable = true; this.invalidate(guest); for (const active of this.active.values()) if (active.guest === guest) this.cancel(active.request.request_id); } });
     try {
+      // Chromium initializes the guest renderer on its first committed document.
+      if (!contents.getURL()) { await contents.loadURL("about:blank"); this.check(context); }
       contents.debugger.attach("1.3");
       await contents.debugger.sendCommand("Page.enable"); this.check(context);
       await contents.debugger.sendCommand("Runtime.enable"); this.check(context);
+      await guest.page.init(); this.check(context);
       await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", { enabled: true, cancel: true }); this.check(context);
       return guest;
     } catch (error) { this.closeGuest(guest); throw error; }
@@ -249,7 +260,7 @@ export class BrowserHost {
     guest.closed = true;
     this.invalidate(guest, true);
     this.tabs.delete(guest.id);
-    if (this.selected === guest.id) this.selected = this.tabs.keys().next().value;
+    if (this.selected === guest.id) { this.selected = undefined; this.visible = false; }
     for (const active of this.active.values()) if (active.guest === guest && active.request.action.action !== "close") this.cancel(active.request.request_id);
     this.changed();
   }
@@ -280,6 +291,27 @@ export class BrowserHost {
       this.check(context); context.started = true;
       return { type: "listed", tabs };
     }
-    throw new Error("Browser action is not available in this implementation slice.");
+    const guest = this.guest(context, action.action === "observe" ? action.tab_id : action.target.tab_id);
+    const revision = guest.revision;
+    const check = () => {
+      this.check(context);
+      if (guest.revision !== revision) throw new Error("Observe this browser tab again.");
+    };
+    if (action.action === "observe") {
+      context.started = true;
+      const observation = await guest.page.observe(context.request.request_id, guest.scope.project_root, check);
+      const tab = await this.report(guest, false);
+      check();
+      return {type:"observed", observation:{...observation, tab}};
+    }
+    if (action.target.revision !== revision) throw new Error("Observe this browser tab again.");
+    await guest.page.act(action, () => { check(); context.started = true; });
+    this.check(context);
+    if (action.action === "close") {
+      this.closeGuest(guest);
+      await guest.notifications;
+      return {type:"closed",tab_id:guest.id};
+    }
+    return {type:"changed",tab:await this.report(guest, true)};
   }
 }

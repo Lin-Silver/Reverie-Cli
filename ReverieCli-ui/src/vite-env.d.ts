@@ -10,6 +10,7 @@ import type { FilePatch, GitSnapshot, Preview, PushPlan } from "../electron/work
 type JsonRecord = Record<string, unknown>;
 
 interface ReverieDesktopApi {
+  browserPanel(root:string,sessionId:string,command:import("../electron/desktop-browser").BrowserPanelCommand):Promise<import("../electron/desktop-browser").PanelTab[]>;
   request<Action extends CoreAction>(action: Action, payload: CorePayload<Action>): Promise<CoreResponse<Action>>;
   cancel(owner?: {projectRoot:string;sessionId:string}): Promise<void>;
   notify(payload: { title: string; body: string }): Promise<void>;

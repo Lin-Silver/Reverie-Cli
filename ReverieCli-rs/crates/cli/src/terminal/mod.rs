@@ -342,6 +342,12 @@ impl Tui {
                 let settings = self.request("listSettings", json!({"sessionId":self.session})).await?;
                 self.screen.print(&serde_json::to_string_pretty(&settings["settings"])? )?;
             }
+            Some("/browser-profile") => {
+                let [_, value] = args.as_slice() else { return Err("Use /browser-profile persistent|ephemeral.".into()); };
+                self.request("setSetting", json!({"sessionId":self.session,"key":"browser_profile","value":value})).await?;
+                self.screen.print(&format!("Browser profile: {value}"))?;
+                self.refresh().await?;
+            }
             Some("/permission") => {
                 let (key, value) = match args.as_slice() {
                     [_, fallback, value] if fallback == "fallback" => ("auto_review_fallback", value.as_str()),
@@ -744,7 +750,7 @@ impl Tui {
 pub fn run(project: PathBuf, session: Option<String>, no_index: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let host=Arc::new(KernelHost::new(Kernel::new(project)?));
+        let host=Arc::new(KernelHost::for_cli(Kernel::new(project)?));
         let (sender,events)=mpsc::unbounded_channel();
         let sink: EventSink=Arc::new(move |event| { let _=sender.send(event); });
         let screen=Screen::new()?;

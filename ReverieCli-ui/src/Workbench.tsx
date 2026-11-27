@@ -4,6 +4,7 @@ import type { DiffScope, FilePatch, GitFile, GitSnapshot, PushPlan } from "../el
 import { useI18n } from "./i18n";
 
 import { FileBrowser } from "./FileBrowser";
+import { BrowserPanel } from "./BrowserPanel";
 import { useViewPresentation } from "./ViewPresentation";
 export { parseFileLink } from "./file-links";
 
@@ -103,7 +104,7 @@ export function Workbench({root,sessionId,running,onDraft,onReview,children,open
     {controlledOpen===undefined && <button type="button" className="workbench-trigger" aria-label={t("工作面板")} aria-expanded={open} onClick={()=>setOpen(!open)}><GitBranch size={15}/>{t("工作面板")}</button>}
     <section className={`workbench-panel inspector ${open?"open":""} ${tab==="view" && presentation.active?.mode==="fullscreen"?"with-view":""}`} aria-label={t("工作面板")} aria-hidden={!open || undefined} inert={!open || undefined} onKeyDown={event=>{if(event.key==="Escape" && !confirmation){event.stopPropagation();close();}}}>
       <header className="workbench-header"><nav aria-label={t("工作面板")} onKeyDown={event=>{if(!["ArrowLeft","ArrowRight","Home","End"].includes(event.key))return;const buttons=[...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];const current=buttons.indexOf(document.activeElement as HTMLButtonElement);const next=event.key==="Home"?0:event.key==="End"?buttons.length-1:(current+(event.key==="ArrowRight"?1:-1)+buttons.length)%buttons.length;event.preventDefault();buttons[next]?.focus();buttons[next]?.click();}}>
-        {[ ["git","Git 改动"],["file","文件"],["review","只读审查"],["session","运行与终端"],...(changesPanel?[["changes","AI 改动"]]:[]),...(contextPanel?[["context","上下文"]]:[]),...(activityPanel?[["activity","活动"]]:[]),...(presentation.active?.mode==="fullscreen"?[["view","交互式视图"]]:[]) ].map(([value,label])=><button type="button" key={value} className={tab===value?"active":""} aria-pressed={tab===value} onClick={()=>{setTab(value);if(value==="file")setFileVisited(true);}}>{t(label)}</button>)}
+        {[ ["git","Git 改动"],["file","文件"],["browser","浏览器"],["review","只读审查"],["session","运行与终端"],...(changesPanel?[["changes","AI 改动"]]:[]),...(contextPanel?[["context","上下文"]]:[]),...(activityPanel?[["activity","活动"]]:[]),...(presentation.active?.mode==="fullscreen"?[["view","交互式视图"]]:[]) ].map(([value,label])=><button type="button" key={value} className={tab===value?"active":""} aria-pressed={tab===value} onClick={()=>{setTab(value);if(value==="file")setFileVisited(true);}}>{t(label)}</button>)}
       </nav><button type="button" className="icon-button" aria-label={t("收起右侧栏")} onClick={close}><PanelRightClose size={16}/></button></header>
 
       {error && <div role="alert" className="persistent-error">{error}<button type="button" onClick={()=>void refresh()}>{t("重试")}</button></div>}
@@ -137,6 +138,7 @@ export function Workbench({root,sessionId,running,onDraft,onReview,children,open
         {reviews.map(review=><article className="review-record" key={review.id}><header><strong>{review.scope}</strong><small>{review.createdAt} · {review.version.slice(0,12)}</small>{snapshot && review.version!==snapshot.version && <span>{t("发现已过期")}</span>}</header>{review.formatError && <p role="alert">{t("审查输出格式无效，请查看原文或重新审查")}</p>}{review.findings.length?review.findings.map((finding,index)=><div className="finding" key={index}><strong>{finding.priority} · {finding.title}</strong><button type="button" onClick={()=>void loadFile(finding.path,finding.line)}>{finding.path}:{finding.line}</button><p>{finding.trigger}</p><p>{t("预期")}: {finding.expected}</p><p>{t("实际")}: {finding.actual}</p><p>{t("依据")}: {finding.evidence}</p><button type="button" disabled={busy} onClick={()=>void updateFinding(review,index,"viewed")}>{t(finding.viewed?"已查看":"标为已查看")}</button><button type="button" disabled={busy} onClick={()=>void updateFinding(review,index,"resolved")}>{t(finding.resolved?"已解决":"标为已解决")}</button><button type="button" onClick={()=>onDraft(`${t("修复这个审查发现")}: ${finding.priority} ${finding.title}\n${finding.path}:${finding.line}\n${finding.trigger}\nExpected: ${finding.expected}\nActual: ${finding.actual}\nEvidence: ${finding.evidence}\nReview version: ${review.version}`)}>{t("修复加入下一轮")}</button></div>):<pre>{review.output}</pre>}{review.formatError && review.findings.length>0 && <details><summary>{t("审查原始输出")}</summary><pre>{review.output}</pre></details>}</article>)}
       </div>}
       {tab==="session" && children}
+      {open && tab==="browser" && <BrowserPanel key={ownerKey} root={root} sessionId={sessionId}/>}
       {tab==="changes" && changesPanel}
       {tab==="context" && contextPanel}
       {tab==="activity" && activityPanel}

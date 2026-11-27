@@ -3,6 +3,7 @@ use serde_json::{Map, Value, json};
 
 const SETTINGS: &[&str] = &[
     "mode",
+    "browser_profile",
     "max_context_tokens",
     "stream_responses",
     "auto_index",
@@ -108,11 +109,14 @@ pub fn sources(config: &Value) -> Value {
 
 pub fn capture(config: &Value) -> Value {
     let model = active(config);
-    let settings = Map::from_iter(SETTINGS.iter().filter_map(|key| {
+    let mut settings = Map::from_iter(SETTINGS.iter().filter_map(|key| {
         config
             .get(*key)
             .map(|value| (key.to_string(), without_secrets(value)))
     }));
+    settings
+        .entry("browser_profile")
+        .or_insert_with(|| json!("persistent"));
     json!({"version":1,"model_ref":{"source":config["active_model_source"].as_str().unwrap_or("standard"),"model":model.and_then(|m|m["model"].as_str()).unwrap_or_default(),"profile_id":model.and_then(|m|m["profile_id"].as_str()).unwrap_or_default()},"settings":settings,"provider_settings":{},"model_settings":{},"rules":"","pinned_skills":config.get("pinned_skills").cloned().unwrap_or_else(||json!([])),"plugins":{}})
 }
 
@@ -189,6 +193,7 @@ pub fn assign_setting(
 
 pub fn validate_setting(key: &str, value: &Value) -> Result<()> {
     match key {
+        "browser_profile" if matches!(value.as_str(), Some("persistent" | "ephemeral")) => Ok(()),
         "permission_mode"
             if value
                 .as_str()
@@ -256,6 +261,7 @@ pub fn settings(config: &Value, path: &std::path::Path, workspace_mode: bool) ->
     }).collect();
     let security = &config["security"];
     items.extend([
+        json!({"name":"Browser profile","key":"browser_profile","kind":"choice","value":config["browser_profile"].as_str().unwrap_or("persistent"),"choices":["persistent","ephemeral"],"labels":{"persistent":"Dedicated persistent profile","ephemeral":"Temporary run profile"},"description":"Storage for Chrome in Reverie."}),
         json!({"name":"Permission mode","key":"permission_mode","kind":"choice","value":crate::permissions::mode(security),"choices":crate::permissions::MODES,"labels":{"strict":"Strict","normal":"Normal","auto":"Auto","full_access":"Full Access"},"description":"Approval policy for model tool calls."}),
         json!({"name":"Auto review fallback","key":"auto_review_fallback","kind":"choice","value":crate::permissions::fallback(security),"choices":crate::permissions::FALLBACKS,"labels":{"wait":"Wait for a human","deny":"Deny and continue"},"description":"Wait for human approval or deny the call while independent work continues."})
     ]);

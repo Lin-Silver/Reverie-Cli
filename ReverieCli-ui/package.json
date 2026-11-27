@@ -5,7 +5,7 @@
   "description": "Reverie desktop — a native GUI host for the Reverie CLI core",
   "homepage": "https://github.com/Lin-Silver/Reverie-Cli",
   "desktopName": "Reverie",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/entry.js",
   "author": {
     "name": "Lin-Silver",
     "email": "linsilver54@gmail.com"

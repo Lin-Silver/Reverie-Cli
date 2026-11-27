@@ -3,6 +3,7 @@ import type { CoreActionName } from "./core-actions";
 import type { GitWorkspaceStatus } from "./git-workspace";
 import type { ComposerAttachment } from "./attachments";
 import type { FilePatch, GitSnapshot, Preview, PushPlan } from "./workbench";
+import type { BrowserPanelCommand, PanelTab } from "./desktop-browser";
 
 type JsonRecord = Record<string, unknown>;
 type EventListener = (message: JsonRecord) => void;
@@ -16,6 +17,7 @@ type UiPreferencesPayload = JsonRecord & {
 };
 
 contextBridge.exposeInMainWorld("reverie", {
+  browserPanel: (root:string, sessionId:string, command:BrowserPanelCommand) => ipcRenderer.invoke("desktop:browser-panel",root,sessionId,command) as Promise<PanelTab[]>,
   request: (action: CoreActionName, payload: JsonRecord = {}) =>
     ipcRenderer.invoke("core:request", action, payload) as Promise<JsonRecord>,
   cancel: (owner?: {projectRoot:string;sessionId:string}) => ipcRenderer.invoke("core:cancel", owner) as Promise<void>,

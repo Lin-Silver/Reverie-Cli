@@ -141,3 +141,19 @@ export const VERIFY_KEY_FUNCTION = String.raw`function (observationId) {
   while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
   return !(active?.tagName === 'IFRAME' || active?.tagName === 'INPUT' && active.type === 'file');
 }`;
+
+export const SCROLL_FUNCTION = String.raw`function (observationId, elementId, dx, dy) {
+  const store = globalThis.__reverieBrowserObservation;
+  if (!store || store.id !== observationId || store.dirty) return false;
+  let node = elementId === null ? document.scrollingElement : this;
+  if (!node || elementId !== null && store.entries.get(elementId)?.node !== node) return false;
+  while (node && node !== document.scrollingElement) {
+    const style = getComputedStyle(node);
+    const horizontal = dx && /auto|scroll|overlay/.test(style.overflowX) && node.scrollWidth > node.clientWidth;
+    const vertical = dy && /auto|scroll|overlay/.test(style.overflowY) && node.scrollHeight > node.clientHeight;
+    if (horizontal || vertical) break;
+    node = node.parentElement || node.getRootNode()?.host;
+  }
+  (node || window).scrollBy({left:dx,top:dy,behavior:'instant'});
+  return true;
+}`;

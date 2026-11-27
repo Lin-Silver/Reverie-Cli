@@ -9,6 +9,10 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 ];
 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
+  "浏览器": "Browser",
+  "浏览器标签页": "Browser tab",
+  "关闭标签页": "Close tab",
+  "此会话尚无浏览器标签页。": "This conversation has no browser tabs yet.",
   "MCP 远端地址": "MCP remote endpoint",
   "选择目录中的远端地址": "Choose an endpoint from the catalog",
   "此条目需先配置外部包运行时。": "Configure this entry's external package runtime first.",
@@ -1312,6 +1316,10 @@ const ENGLISH_TRANSLATIONS: Record<string, string> = {
 // shared with the CLI. Keep a reverse map for the Chinese UI so those rows do
 // not bypass the otherwise source-keyed translation table.
 const CHINESE_TRANSLATIONS: Record<string, string> = {
+  "Browser profile": "浏览器配置",
+  "Dedicated persistent profile": "专用持久配置",
+  "Temporary run profile": "仅本次运行",
+  "Storage for Chrome in Reverie.": "选择内置浏览器是否保留网站数据。",
   "Mode": "模式",
   "Active Source": "当前来源",
   "Standard Model": "标准模型",

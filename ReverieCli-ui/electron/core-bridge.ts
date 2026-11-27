@@ -20,6 +20,9 @@ export class CoreBridge {
   private sequence = 0;
   private actions: Set<string> | null = null;
   private closed = false;
+  browserProtocol?: string;
+  onBrowserEvent?: (event: JsonRecord) => void;
+  onBrowserDisconnect?: () => void;
   private pending = new Map<string, {
     resolve: (value: JsonRecord) => void;
     reject: (reason: Error) => void;
@@ -45,6 +48,12 @@ export class CoreBridge {
   supports(action: string): boolean { return this.actions === null || this.actions.has(action); }
   hasActivePrompt(): boolean {
     return [...this.pending.values()].some(item => ["runPrompt", "resumePrompt", "callViewTool"].includes(item.action));
+  }
+
+  private disconnectBrowser(): void {
+    if (this.browserProtocol === undefined) return;
+    this.browserProtocol = undefined;
+    this.onBrowserDisconnect?.();
   }
 
   async start(): Promise<void> {
@@ -89,6 +98,7 @@ export class CoreBridge {
         const capabilities = (message.capabilities ?? (message.state as JsonRecord | undefined)?.capabilities) as JsonRecord | undefined;
         if (Array.isArray(capabilities?.actions)) this.actions = new Set(capabilities.actions.filter((item): item is string => typeof item === "string"));
         if (message.type === "ready" && message.id === undefined && !ready) {
+          this.browserProtocol = typeof message.browser_protocol === "string" ? message.browser_protocol : undefined;
           ready = true;
           clearTimeout(timer);
           resolve();
@@ -96,6 +106,11 @@ export class CoreBridge {
         }
         const request = this.pending.get(String(message.id ?? ""));
         if (message.type === "prompt.event") {
+          const event = message.event as JsonRecord | undefined;
+          if (typeof event?.type === "string" && event.type.startsWith("browser.")) {
+            this.onBrowserEvent?.(event);
+            return;
+          }
           (request?.onEvent ?? this.sendEvent)(message);
           return;
         }
@@ -116,6 +131,7 @@ export class CoreBridge {
         lines.close();
         const error = new Error(`Reverie core exited (${code ?? signal ?? "unknown"})`);
         if (this.child === child) {
+          this.disconnectBrowser();
           for (const request of this.pending.values()) {
             if (request.timer) clearTimeout(request.timer);
             request.reject(error);
@@ -159,6 +175,7 @@ export class CoreBridge {
     this.closed = close;
     const child = this.child;
     if (!child) return;
+    this.disconnectBrowser();
     for (const request of this.pending.values()) {
       if (request.timer) clearTimeout(request.timer);
       request.reject(new Error(reason));

@@ -20,7 +20,7 @@ pub fn run(
     no_index: bool,
     json_output: bool,
 ) -> Result<()> {
-    let host = Arc::new(KernelHost::new(Kernel::new(project)?));
+    let host = Arc::new(KernelHost::for_cli(Kernel::new(project)?));
     let runtime = tokio::runtime::Runtime::new()?;
     let printed = Arc::new(AtomicBool::new(false));
     let event_printed = printed.clone();

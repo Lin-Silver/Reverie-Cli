@@ -22,6 +22,7 @@ pub use catalog::{tool_catalog, tool_catalog_for};
 mod aio;
 pub use aio::PendingAioDecision;
 mod approval;
+mod browser;
 mod context;
 mod pending;
 pub use context::PendingCompaction;
@@ -87,6 +88,7 @@ struct Run {
     mcp_servers: Vec<crate::mcp::ServerConfig>,
     mcp_diagnostics: Vec<Value>,
     mcp: Mutex<Option<Arc<crate::mcp::McpSnapshot>>>,
+    local_browser: tokio::sync::OnceCell<browser::Component>,
     semantic: Option<Arc<crate::semantic_resources::ModelVersion>>,
     semantic_error: Option<String>,
     reasoning: String,
@@ -117,6 +119,8 @@ pub struct KernelHost {
     market_jobs: Mutex<HashMap<String, CancellationToken>>,
     plugin_jobs: Mutex<HashMap<String, CancellationToken>>,
     mcp: Arc<crate::mcp::McpRuntime>,
+    browsers: browser::Browsers,
+    browser_component: Option<PathBuf>,
     connectors: Mutex<Option<Arc<crate::connectors::ConnectorManager>>>,
     aio: Mutex<Option<modes::aio::AioStore>>,
     aio_last_decision: Mutex<Option<Instant>>,
@@ -133,6 +137,8 @@ impl KernelHost {
             market_jobs: Mutex::new(HashMap::new()),
             plugin_jobs: Mutex::new(HashMap::new()),
             mcp: Arc::new(crate::mcp::McpRuntime::new()),
+            browsers: browser::Browsers::default(),
+            browser_component: None,
             connectors: Mutex::new(None),
             aio: Mutex::new(None),
             aio_last_decision: Mutex::new(None),
@@ -142,6 +148,7 @@ impl KernelHost {
     }
 
     pub fn cancel_all(&self) {
+        self.browsers.close();
         self.context_cancel.cancel();
         self.mcp.cancel_all();
         if let Ok(connectors) = self.connectors.lock()
@@ -182,6 +189,10 @@ impl KernelHost {
         }
         let id = request.id.clone();
         let result = match request.action.as_str() {
+            action @ ("registerBrowserHost"
+            | "unregisterBrowserHost"
+            | "completeBrowserRequest"
+            | "invalidateBrowserTab") => self.browsers.control(action, &request.payload, sink),
             "refreshMarket" => {
                 let refresh = self.refresh_market(&request.payload).await;
                 refresh.map(|value| ("market.entries", value))
@@ -209,6 +220,7 @@ impl KernelHost {
                 ))
             })(),
             "shutdown" => {
+                self.browsers.close();
                 self.close_extensions().await;
                 return lock(&self.kernel)
                     .map(|mut kernel| kernel.dispatch(request))
@@ -855,6 +867,7 @@ impl KernelHost {
             mcp_servers: mcp_configuration.servers,
             mcp_diagnostics: mcp_configuration.diagnostics,
             mcp: Mutex::new(None),
+            local_browser: tokio::sync::OnceCell::new(),
             semantic,
             semantic_error,
             reasoning: String::new(),
@@ -949,6 +962,9 @@ impl KernelHost {
             json!({"type":"run.started","prompt":run.prompt,"history_message_count":run.history_count}),
         );
         let execution = Box::pin(self.execute(&mut run, &control, &sink)).await;
+        if let Some(component) = run.local_browser.take() {
+            component.close().await;
+        }
         let state = if execution.is_ok() {
             "completed"
         } else if control.cancel.is_cancelled() {
@@ -1153,6 +1169,9 @@ impl KernelHost {
             }
             self.adjust_run_context(run, control, sink).await?;
             let mut catalog = tool_catalog_for(run.config["mode"].as_str().unwrap_or("reverie"));
+            if run.config["mode"] != "writer" && (self.browser_component.is_some() || self.browsers.available()?) {
+                catalog.push(browser::definition());
+            }
             let auth = self
                 .mcp_authorization(&run.mcp_servers, &control.cancel)
                 .await?;
@@ -1377,6 +1396,9 @@ impl KernelHost {
                 .ok_or("Explicit user answer is required.")?
                 .to_owned();
             return Ok(ToolResult::ok(response, answer));
+        }
+        if call.name == "browser" {
+            return self.browser_tool(run, control, args).await;
         }
         let mcp_snapshot = { lock(&run.mcp)?.clone() };
         let mcp_tool = mcp_snapshot

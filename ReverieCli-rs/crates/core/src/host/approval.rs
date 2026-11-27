@@ -59,6 +59,7 @@ impl KernelHost {
         let read_only = mode_tool
             .or(mcp_read_only)
             .or(mcp_read.then_some(true))
+            .or_else(|| (call.name == "browser").then(|| args["action"] == "list"))
             .unwrap_or_else(|| {
                 call.name == "userInput" || reverie_platform::is_read_only(&call.name, args)
             });

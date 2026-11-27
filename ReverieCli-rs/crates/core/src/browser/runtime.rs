@@ -383,6 +383,18 @@ impl BrowserRuntime {
         tab_id: &str,
         revision: u64,
     ) -> BrowserResult<()> {
+        self.update_tab_revision(key, scope, profile, tab_id, revision, false)
+    }
+
+    pub(crate) fn update_tab_revision(
+        &self,
+        key: &AdapterKey,
+        scope: &BrowserScope,
+        profile: &BrowserProfile,
+        tab_id: &str,
+        revision: u64,
+        closed: bool,
+    ) -> BrowserResult<()> {
         let mut state = self.lock()?;
         authenticate(&state, key)?;
         let tab = state
@@ -397,6 +409,9 @@ impl BrowserRuntime {
         }
         tab.record.revision = revision;
         tab.observation = None;
+        if closed {
+            state.tabs.remove(&(key.host.clone(), tab_id.into()));
+        }
         Ok(())
     }
 

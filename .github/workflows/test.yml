@@ -82,6 +82,10 @@ jobs:
         run: cargo build --manifest-path ReverieCli-rs/Cargo.toml --release --locked
       - name: Check generated desktop protocol types
         run: node ReverieCli-ui/scripts/generate-core-types.mjs --check
+      - name: Verify the packaged native Computer Use engine through the SDK
+        run: |
+          node scripts/prepare-computer-use.mjs ReverieCli-rs/target/release
+          node scripts/verification/rust-computer-use-smoke.mjs --status-only
       - name: Run actual native entry and SDK checks
         run: node scripts/verification/rust-smoke.mjs
       - name: Run actual configuration and session checks

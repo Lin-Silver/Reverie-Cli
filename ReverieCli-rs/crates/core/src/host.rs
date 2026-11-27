@@ -23,6 +23,7 @@ mod aio;
 pub use aio::PendingAioDecision;
 mod approval;
 mod browser;
+mod computer;
 mod context;
 mod pending;
 pub use context::PendingCompaction;
@@ -89,6 +90,7 @@ struct Run {
     mcp_diagnostics: Vec<Value>,
     mcp: Mutex<Option<Arc<crate::mcp::McpSnapshot>>>,
     local_browser: tokio::sync::OnceCell<browser::Component>,
+    desktop: computer::RunDesktop,
     semantic: Option<Arc<crate::semantic_resources::ModelVersion>>,
     semantic_error: Option<String>,
     reasoning: String,
@@ -868,6 +870,7 @@ impl KernelHost {
             mcp_diagnostics: mcp_configuration.diagnostics,
             mcp: Mutex::new(None),
             local_browser: tokio::sync::OnceCell::new(),
+            desktop: computer::RunDesktop::new(),
             semantic,
             semantic_error,
             reasoning: String::new(),
@@ -1169,6 +1172,7 @@ impl KernelHost {
             }
             self.adjust_run_context(run, control, sink).await?;
             let mut catalog = tool_catalog_for(run.config["mode"].as_str().unwrap_or("reverie"));
+            catalog.extend(computer::definitions(run.config["mode"].as_str().unwrap_or("reverie"), &run.config));
             if run.config["mode"] != "writer" && let Some(browser) = self.browser_definition(run)? {
                 catalog.push(browser);
             }
@@ -1399,6 +1403,9 @@ impl KernelHost {
         }
         if call.name == "browser" {
             return self.browser_tool(run, control, args).await;
+        }
+        if computer::read_only(&call.name).is_some() {
+            return run.computer_tool(&call.name, args, &control.cancel).await;
         }
         let mcp_snapshot = { lock(&run.mcp)?.clone() };
         let mcp_tool = mcp_snapshot

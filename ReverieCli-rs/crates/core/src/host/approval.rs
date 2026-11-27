@@ -57,6 +57,7 @@ impl KernelHost {
             return Err("This tool is not available in the active conversation mode.".into());
         }
         let read_only = mode_tool
+            .or_else(|| super::computer::read_only(&call.name))
             .or(mcp_read_only)
             .or(mcp_read.then_some(true))
             .or_else(|| (call.name == "browser").then(|| args["action"] == "list"))
@@ -68,6 +69,12 @@ impl KernelHost {
             .unwrap_or("full_control");
         if !["read_only", "workspace_write", "developer", "full_control"].contains(&level) {
             return Err("Invalid configured permission level.".into());
+        }
+        if super::computer::read_only(&call.name).is_some()
+            && call.name != "computer_status"
+            && !super::computer::full_control(&run.config)
+        {
+            return Err("Desktop access requires the full_control permission level.".into());
         }
         let mut described = review::describe_call(
             &call.id,

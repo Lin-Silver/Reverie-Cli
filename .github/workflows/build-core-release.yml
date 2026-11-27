@@ -49,6 +49,10 @@ jobs:
         run: cargo build --manifest-path ReverieCli-rs/Cargo.toml --release --locked
       - name: Verify actual native program and record its identity
         run: node scripts/verification/rust-smoke.mjs ReverieCli-rs/target/release/${{ matrix.binary }} .runtime/rust-candidate/native-smoke.json
+      - name: Package and verify the native Computer Use component
+        run: |
+          node scripts/prepare-computer-use.mjs ReverieCli-rs/target/release
+          node scripts/verification/rust-computer-use-smoke.mjs --status-only
       - name: Upload candidate and actual verification record
         uses: actions/upload-artifact@v4
         with:
@@ -56,5 +60,6 @@ jobs:
           path: |
             ReverieCli-rs/target/release/${{ matrix.binary }}
             ReverieCli-rs/target/release/builtin_skills/
+            ReverieCli-rs/target/release/computer-use/
             .runtime/rust-candidate/native-smoke.json
           if-no-files-found: error

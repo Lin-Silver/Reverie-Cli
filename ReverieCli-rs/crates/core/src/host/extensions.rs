@@ -641,6 +641,11 @@ impl KernelHost {
                         )
                     })
                     .collect::<Vec<_>>();
+                tools.extend(
+                    super::computer::definitions(mode, &pending.configuration)
+                        .iter()
+                        .map(|tool| super::catalog::describe(tool, "built-in", "desktop", mode)),
+                );
                 tools.extend(snapshot.tools.iter().map(|tool| {
                     super::catalog::describe(&tool.definition, "mcp", "extensions", mode)
                 }));

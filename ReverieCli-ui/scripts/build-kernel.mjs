@@ -28,7 +28,9 @@ command(process.execPath, [path.join(uiRoot, 'scripts/generate-core-types.mjs'),
 mkdirSync(kernelDirectory, {recursive: true});
 mkdirSync(generatedDirectory, {recursive: true});
 const staged = path.join(kernelDirectory, executableName);
+command(process.execPath, [path.join(repositoryRoot, 'scripts/prepare-computer-use.mjs'), path.dirname(executable)], {stdio: 'inherit'});
 copyFileSync(executable, staged);
+cpSync(path.join(path.dirname(executable), 'computer-use'), path.join(kernelDirectory, 'computer-use'), {recursive: true});
 cpSync(path.join(metadata.target_directory, 'release/builtin_skills'), path.join(kernelDirectory, 'builtin_skills'), {recursive:true});
 if (process.platform !== 'win32') chmodSync(staged, 0o755);
 copyFileSync(path.join(repositoryRoot, 'LICENSE'), path.join(kernelDirectory, 'LICENSE.txt'));

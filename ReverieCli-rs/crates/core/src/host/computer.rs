@@ -136,6 +136,20 @@ const TOOLS: &[Tool] = &[
         true,
     ),
     tool(
+        "computer_focus",
+        "Give keyboard focus to one observed control. This may bring its window forward.",
+        &["ref"],
+        &["timeout_ms"],
+        true,
+    ),
+    tool(
+        "computer_type_text",
+        "Insert literal text at an observed editable control. Semantic input is the default; physical=true permits focus and keyboard input. Maximum 10,000 UTF-8 bytes.",
+        &["ref", "text"],
+        &["physical", "timeout_ms"],
+        true,
+    ),
+    tool(
         "computer_set_value",
         "Set a control value using accessibility. Observe again to verify.",
         &["ref", "value"],
@@ -186,7 +200,8 @@ impl Tool {
         for &key in self.required.iter().chain(self.optional) {
             properties.insert(key.into(), match key {
                 "timeout_ms" => json!({"type":"integer","minimum":1,"maximum":60000}),
-                "exact" => json!({"type":"boolean"}),
+                "exact" | "physical" => json!({"type":"boolean"}),
+                "text" => json!({"type":"string","maxLength":10000}),
                 "property" if self.name == "computer_get" => json!({"type":"string","enum":["text","value","title","bounds","role","states"]}),
                 "property" => json!({"type":"string","enum":["visible","enabled","checked","focused","expanded","selected"]}),
                 "state" => json!({"type":"string","enum":["checked","expanded"]}),
@@ -317,6 +332,16 @@ impl Run {
         let tool = &TOOLS[index];
         if let Err(error) = VALIDATORS[index].validate(p) {
             return Ok(result(failure(name, "INVALID_ARGS", error, false)));
+        }
+        if name == "computer_type_text"
+            && p["text"].as_str().is_some_and(|text| text.len() > 10_000)
+        {
+            return Ok(result(failure(
+                name,
+                "INVALID_ARGS",
+                "Text exceeds 10,000 UTF-8 bytes.",
+                false,
+            )));
         }
         let _lease = tokio::select! {biased;
             _ = cancel.cancelled() => return Ok(result(failure(name,"CANCELLED","Cancelled before desktop dispatch.",false))),
@@ -476,6 +501,15 @@ impl Desktop {
             args.push(format!("--timeout-ms={timeout}"));
         }
         match name {
+            "focus" => args.push("--headed".into()),
+            "type_text" => {
+                command = "type".into();
+                if p["physical"] == true {
+                    args.push("--headed".into());
+                }
+                args.push("--stdin".into());
+                stdin = p["text"].as_str();
+            }
             "window" => {
                 command = match p["action"].as_str().unwrap() {
                     "focus" => "focus-window",

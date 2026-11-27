@@ -105,6 +105,10 @@ public class DesktopFixture : Form {
                     if(mutex.WaitOne(0)){mutex.ReleaseMutex();m.Result=IntPtr.Zero;return;}
                 }
                 break;
+            case 6:
+                if(!editor.Focused || editor.Text!="A12Z"){m.Result=IntPtr.Zero;return;}
+                editor.Select(1,2);
+                break;
             }
             m.Result=new IntPtr(1);return;
         }

@@ -180,6 +180,29 @@ async function waitForClicks(expected) {
   while(Date.now()<until && marks('clicks.log').length<expected) await delay(20);
   assert.equal(marks('clicks.log').length,expected);
 }
+function* focusedText() {
+  yield* discover();
+  data(yield tool('window',{action:'focus',window_id:windowId}));
+  const editor = () => control('Verification editor');
+  data(yield tool('set_value',{ref:yield* editor(),value:'A12Z'}));
+  const target = yield* editor();
+  data(yield tool('focus',{ref:target}));
+  refusal(yield tool('type_text',{ref:target,text:'old reference',physical:true}),'STALE_REF');
+  assert.equal(data(yield tool('is',{ref:yield* editor(),property:'focused'})).result,true);
+  changeFixture(6);
+  const insert = '中文😀 --headed';
+  const denied = yield tool('type_text',{ref:yield* editor(),text:insert});
+  refusal(denied,'POLICY_DENIED');
+  assert.equal(data(yield tool('get',{ref:yield* editor(),property:'value'})).value,'A12Z');
+  const fresh = yield* editor();
+  refusal(yield tool('type_text',{ref:fresh,text:'界'.repeat(3334),physical:true}),'INVALID_ARGS');
+  data(yield tool('type_text',{ref:fresh,text:insert,physical:true}));
+  const edited = 'A' + insert + 'Z';
+  assert.equal(data(yield tool('get',{ref:yield* editor(),property:'value'})).value,edited);
+  data(yield tool('click',{ref:yield* control('Save verification')}));
+  assert.equal(fs.readFileSync(artifact,'utf8').replace(/^\uFEFF/,''),edited);
+  checks.push('observed editor focus and UTF-8 text insertion at a real selection; default Windows physical-input refusal, byte limit, stale ref, accessibility and saved file checked');
+}
 async function* coordinateInput() {
   yield* discover();
   data(yield tool('window',{action:'focus',window_id:windowId}));
@@ -405,6 +428,7 @@ try {
     await run('desktop-text-image',()=>screenshot(false));
     await run('desktop-vision',()=>screenshot(true));
     if(physical){
+      await run('desktop-focused-text',focusedText);
       await run('desktop-pointer',coordinateInput);
       await run('desktop-foreign-image',foreignImage);
       await run('desktop-strict-pointer',strictCoordinates,'full_control',false,[

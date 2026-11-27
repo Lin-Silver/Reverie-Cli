@@ -145,7 +145,27 @@ pub enum ActionKind {
     Scroll,
     Key,
     Navigate,
+    Back,
+    Forward,
+    Reload,
     Close,
+}
+
+impl ActionKind {
+    pub const ALL: &[Self] = &[
+        Self::Open,
+        Self::List,
+        Self::Observe,
+        Self::Click,
+        Self::Type,
+        Self::Scroll,
+        Self::Key,
+        Self::Navigate,
+        Self::Back,
+        Self::Forward,
+        Self::Reload,
+        Self::Close,
+    ];
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -255,6 +275,15 @@ pub enum BrowserAction {
         target: BrowserTarget,
         url: String,
     },
+    Back {
+        target: BrowserTarget,
+    },
+    Forward {
+        target: BrowserTarget,
+    },
+    Reload {
+        target: BrowserTarget,
+    },
     Close {
         target: BrowserTarget,
     },
@@ -271,6 +300,9 @@ impl BrowserAction {
             Self::Scroll { .. } => ActionKind::Scroll,
             Self::Key { .. } => ActionKind::Key,
             Self::Navigate { .. } => ActionKind::Navigate,
+            Self::Back { .. } => ActionKind::Back,
+            Self::Forward { .. } => ActionKind::Forward,
+            Self::Reload { .. } => ActionKind::Reload,
             Self::Close { .. } => ActionKind::Close,
         }
     }
@@ -282,6 +314,9 @@ impl BrowserAction {
             | Self::Scroll { target, .. }
             | Self::Key { target, .. }
             | Self::Navigate { target, .. }
+            | Self::Back { target }
+            | Self::Forward { target }
+            | Self::Reload { target }
             | Self::Close { target } => Some(target),
             _ => None,
         }

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { BROWSER_PROTOCOL, browserId, browserRequest, browserSummaryUrl, browserTitle, browserUrl, observedPage, pngDimensions } from "./browser-policy";
+import { BROWSER_PROTOCOL, browserActions, browserId, browserRequest, browserSummaryUrl, browserTitle, browserUrl, observedPage, pngDimensions } from "./browser-policy";
 
 const request = (action: unknown = { action: "list" }) => ({
   protocol: BROWSER_PROTOCOL, request_id: "request-1", host: { host_id: "host-1", generation: "generation-1" },
@@ -13,12 +13,18 @@ const element = () => ({ element_id: "e0", role: "button", name: "Save", text: "
 const page = () => ({ viewport: { width: 800, height: 600, device_scale_factor: 1.25 }, elements: [element()] });
 
 describe("browser host input policy", () => {
+  it("registers only shared actions and preserves the first v1 kernel's vocabulary", () => {
+    expect(browserActions(undefined)).toEqual(["open","list","observe","navigate","click","type","key","scroll","close"]);
+    expect(browserActions(["open","forward","unknown"])).toEqual(["open","forward"]);
+    expect(browserActions([])).toEqual([]);
+  });
   it("requires explicit profile and only accepts the finite generated actions", () => {
     for (const action of [
       { action: "list" }, { action: "open", url: "https://example.invalid/" }, { action: "observe", tab_id: "tab-1" },
       { action: "click", target, element_id: "e0" }, { action: "type", target, element_id: "e0", text: "中文\n😀", replace: true },
       { action: "scroll", target, element_id: null, delta_x: -10000, delta_y: 10000 }, { action: "key", target, key: "arrow_down", shift: false },
       { action: "navigate", target, url: "about:blank" }, { action: "close", target },
+      { action: "back", target }, { action: "forward", target }, { action: "reload", target },
     ]) expect(browserRequest(request(action)).action).toEqual(action);
     const missing = request() as Record<string, unknown>; delete missing.profile;
     expect(() => browserRequest(missing)).toThrow();

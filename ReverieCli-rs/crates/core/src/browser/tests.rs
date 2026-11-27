@@ -22,17 +22,7 @@ fn descriptor() -> AdapterDescriptor {
         host_id: "fixture-host".into(),
         engine: "Rust test adapter".into(),
         engine_version: "fixture-1".into(),
-        actions: vec![
-            ActionKind::Open,
-            ActionKind::List,
-            ActionKind::Observe,
-            ActionKind::Click,
-            ActionKind::Type,
-            ActionKind::Scroll,
-            ActionKind::Key,
-            ActionKind::Navigate,
-            ActionKind::Close,
-        ],
+        actions: ActionKind::ALL.to_vec(),
         profile_modes: vec![ProfileMode::Ephemeral],
     }
 }
@@ -386,6 +376,24 @@ async fn finite_actions_use_owned_observations() {
         },
     )
     .await;
+    for action in ["back", "forward", "reload"] {
+        let target = observe(&fixture, record.clone()).await;
+        let action: BrowserAction =
+            serde_json::from_value(json!({ "action": action, "target": target })).unwrap();
+        record.revision += 1;
+        perform(
+            &fixture,
+            action.clone(),
+            AdapterResult::Changed {
+                tab: record.clone(),
+            },
+        )
+        .await;
+        assert_eq!(
+            rejected(begin(&fixture, action)).code,
+            FailureCode::StaleObservation
+        );
+    }
     let target = observe(&fixture, record).await;
     perform(
         &fixture,
@@ -1012,7 +1020,7 @@ fn adapter_generation_changes_retire_old_credentials() {
         .iter()
         .copied()
         .collect::<HashSet<_>>();
-    assert_eq!(kinds.len(), 9);
+    assert_eq!(kinds.len(), ActionKind::ALL.len());
 }
 
 #[test]

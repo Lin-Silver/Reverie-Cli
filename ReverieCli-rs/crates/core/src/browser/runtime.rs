@@ -125,7 +125,7 @@ impl BrowserRuntime {
             || descriptor.engine_version.len() > 128
             || descriptor.engine_version.chars().any(char::is_control)
             || descriptor.actions.is_empty()
-            || descriptor.actions.len() > 9
+            || descriptor.actions.len() > ActionKind::ALL.len()
             || descriptor.actions.iter().collect::<HashSet<_>>().len() != descriptor.actions.len()
             || descriptor.profile_modes.is_empty()
             || descriptor.profile_modes.len() > 2

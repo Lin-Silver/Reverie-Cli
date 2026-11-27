@@ -16,6 +16,7 @@ vi.mock("electron", async () => {
     sendCommand(method: string, params?: unknown) { return mocks.command ? mocks.command(method, params) : Promise.resolve({}); }
   }
   class Contents extends EventEmitter {
+    navigationHistory = { canGoBack: () => false, canGoForward: () => false };
     debugger = new Debugger();
     url = "about:blank"; title = "Fixture"; destroyed = false;
     windowOpen = undefined as undefined | (() => { action: string });

@@ -16,6 +16,7 @@ const server=http.createServer(async(request,response)=>{
   if(request.url==='/form'){
     visits.push(request.headers['user-agent']);
     response.setHeader('Content-Type','text/html; charset=utf-8');
+    response.setHeader('Cache-Control','no-store');
     response.end('<title>CLI browser form</title><button onclick="localStorage.saved=\'stored\';document.querySelector(\'p\').textContent=localStorage.saved">Save</button><p id="status"></p><script>document.querySelector("p").textContent=localStorage.saved||"fresh"</script>');
     return;
   }
@@ -46,6 +47,16 @@ function* form(mode,initial,save){
   if(save){
     assert.equal((yield {action:'click',target:seen.target,element_id:seen.button}).success,true);
     seen=check(yield {action:'observe',tab_id},'stored');
+    assert.equal((yield {action:'navigate',target:seen.target,url:base+'/form#saved'}).success,true);
+    seen=check(yield {action:'observe',tab_id},'stored');
+    for(const [action,url] of [['back','/form'],['forward','/form#saved'],['reload','/form#saved']]){
+      const before=visits.length;
+      const reply=yield {action,target:seen.target};
+      assert.equal(reply.success,true,JSON.stringify(reply));assert.equal(reply.data.result.tab.url,base+url);
+      seen=check(yield {action:'observe',tab_id},'stored');
+      assert.equal(visits.length,before+(action==='reload'?1:0));
+    }
+    checks.push('The independent component traverses fragment history and reloads the persisted page from the server');
   }
   assert.equal((yield {action:'close',target:seen.target}).success,true);
 }
@@ -70,7 +81,7 @@ try{
   await run('reopen','persistent',form('persistent','stored',false));
   await run('isolated','ephemeral',form('ephemeral','fresh',false));
   assert.deepEqual(fs.readdirSync(profileRoot),['persistent']);
-  assert.equal(visits.length,3);assert(visits.every(ua=>/Chrome\/\d+/.test(ua)));
+  assert.equal(visits.length,4);assert(visits.every(ua=>/Chrome\/\d+/.test(ua)));
   checks.push('Packaged CLI launches its Electron sibling and the real web form changes after a model click','Persistent storage survives a fresh CLI process; temporary storage and component exit are verified at return');
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({passed:true,checks,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),calls,visits},null,2));
   console.log('CLI browser smoke passed: '+root);

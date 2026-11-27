@@ -36,6 +36,10 @@ pub fn run() -> io::Result<()> {
                     "browser_protocol".into(),
                     json!(reverie_core::browser::BROWSER_PROTOCOL),
                 ),
+                (
+                    "browser_actions".into(),
+                    json!(reverie_core::browser::ActionKind::ALL),
+                ),
             ]),
         ),
     )?;

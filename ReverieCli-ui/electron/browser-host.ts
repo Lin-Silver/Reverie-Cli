@@ -3,7 +3,7 @@ import { WebContentsView, session } from "electron";
 import type { BrowserWindow, Session } from "electron";
 import type { AdapterResult, BrowserCompletion, BrowserHostRef, BrowserProfile, BrowserRequest, BrowserScope, BrowserTab, Delivery } from "../src/generated/core-types";
 import { BROWSER_PROTOCOL, browserId, browserRequest, browserSummaryUrl, browserTitle, browserUrl } from "./browser-policy";
-import { BrowserPage } from "./browser-page";
+import { BrowserPage, navigateHistory, type HistoryAction } from "./browser-page";
 
 export interface BrowserInvalidation {
   host: BrowserHostRef;
@@ -19,7 +19,7 @@ export interface BrowserHostState {
   disposed: boolean;
   frame_support: "main_frame_and_open_shadow";
   busy: number;
-  tabs: { tab: BrowserTab; scope: BrowserScope; profile: BrowserProfile; loading: boolean; available: boolean; active: boolean }[];
+  tabs: { tab: BrowserTab; scope: BrowserScope; profile: BrowserProfile; loading: boolean; available: boolean; active: boolean; canGoBack: boolean; canGoForward: boolean; busy: boolean }[];
 }
 
 export interface BrowserHostOptions {
@@ -114,7 +114,9 @@ export class BrowserHost {
     return { host: { ...this.options.host }, disposed: this.disposed, frame_support: "main_frame_and_open_shadow", busy: this.busy.size,
       tabs: Array.from(this.tabs.values()).map(guest => ({ tab: { ...this.tabRecord(guest), url: browserSummaryUrl(guest.view.webContents.getURL()) },
         scope: { ...guest.scope }, profile: { ...guest.profile }, loading: guest.view.webContents.isLoading(),
-        available: !guest.unavailable && !guest.closed, active: guest.id === this.selected })) };
+        available: !guest.unavailable && !guest.closed, active: guest.id === this.selected,
+        canGoBack: guest.view.webContents.navigationHistory.canGoBack(), canGoForward: guest.view.webContents.navigationHistory.canGoForward(),
+        busy: this.busy.has(guest.owner) })) };
   }
 
   setBounds(bounds: Electron.Rectangle): void {
@@ -139,6 +141,15 @@ export class BrowserHost {
   closeTab(tabId: string): void {
     const guest = this.tabs.get(tabId);
     if (guest) this.closeGuest(guest);
+  }
+
+  async navigateTab(tabId: string, action: HistoryAction): Promise<void> {
+    const guest = this.tabs.get(tabId);
+    if (!guest || guest.unavailable || guest.closed || this.busy.has(guest.owner)) throw new Error("Browser tab is unavailable.");
+    this.busy.add(guest.owner);
+    this.changed();
+    try { await navigateHistory(guest.view.webContents, action, () => this.invalidate(guest)); }
+    finally { this.busy.delete(guest.owner); this.changed(); }
   }
 
   async dispose(): Promise<void> {
@@ -240,6 +251,7 @@ export class BrowserHost {
     contents.on("will-navigate", event => { if (!browserUrl(event.url)) event.preventDefault(); });
     contents.on("will-redirect", event => { if (!browserUrl(event.url)) event.preventDefault(); });
     contents.on("did-start-navigation", () => this.invalidate(guest));
+    contents.on("did-stop-loading", () => this.changed());
     contents.on("did-navigate-in-page", () => this.invalidate(guest));
     contents.on("did-frame-navigate", () => this.invalidate(guest));
     contents.on("page-title-updated", () => this.invalidate(guest));

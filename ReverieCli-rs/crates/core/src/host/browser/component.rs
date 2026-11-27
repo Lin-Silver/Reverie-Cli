@@ -102,6 +102,10 @@ impl Component {
                 listener.local_addr()?.port().to_string(),
             )
             .env("REVERIE_BROWSER_TOKEN", &token)
+            .env(
+                "REVERIE_BROWSER_ACTIONS",
+                serde_json::to_string(ActionKind::ALL)?,
+            )
             .env_remove("ELECTRON_RUN_AS_NODE")
             .stdin(Stdio::null())
             .stdout(Stdio::null())

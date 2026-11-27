@@ -1169,8 +1169,8 @@ impl KernelHost {
             }
             self.adjust_run_context(run, control, sink).await?;
             let mut catalog = tool_catalog_for(run.config["mode"].as_str().unwrap_or("reverie"));
-            if run.config["mode"] != "writer" && (self.browser_component.is_some() || self.browsers.available()?) {
-                catalog.push(browser::definition());
+            if run.config["mode"] != "writer" && let Some(browser) = self.browser_definition(run)? {
+                catalog.push(browser);
             }
             let auth = self
                 .mcp_authorization(&run.mcp_servers, &control.cancel)

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
 import type { PanelTab } from "../electron/desktop-browser";
 import { useI18n } from "./i18n";
 
@@ -21,6 +22,11 @@ export function BrowserPanel({root,sessionId}:{root:string;sessionId:string}) {
     return () => { live = false; off(); };
   },[root,sessionId]);
   const tabId = tab?.id;
+  const navigate = (operation: "back" | "forward" | "reload") => {
+    if (!tabId) return;
+    void window.reverie.browserPanel(root,sessionId,{operation,tab:tabId})
+      .then(() => setError(""), failure => setError(String(failure)));
+  };
   useLayoutEffect(() => {
     const element = slot.current;
     if (!element || !tabId) return;
@@ -42,6 +48,9 @@ export function BrowserPanel({root,sessionId}:{root:string;sessionId:string}) {
   return <div className="browser-panel">
     {error && <p role="alert">{error}</p>}
     {tab ? <><div className="workbench-toolbar">
+      <button type="button" aria-label={t("后退")} title={t("后退")} disabled={tab.busy || !tab.canGoBack} onClick={() => navigate("back")}><ArrowLeft size={16}/></button>
+      <button type="button" aria-label={t("前进")} title={t("前进")} disabled={tab.busy || !tab.canGoForward} onClick={() => navigate("forward")}><ArrowRight size={16}/></button>
+      <button type="button" aria-label={t("重新加载")} title={t("重新加载")} disabled={tab.busy} onClick={() => navigate("reload")}><RefreshCw size={16}/></button>
       <select aria-label={t("浏览器标签页")} value={tab.id} onChange={event => setSelected(event.target.value)}>
         {tabs.map(item => <option key={item.id} value={item.id}>{item.title || item.url}</option>)}
       </select>

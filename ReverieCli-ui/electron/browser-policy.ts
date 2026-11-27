@@ -1,7 +1,15 @@
 import path from "node:path";
-import type { BrowserElement, BrowserRequest, Rectangle, Viewport } from "../src/generated/core-types";
+import type { ActionKind, BrowserElement, BrowserRequest, Rectangle, Viewport } from "../src/generated/core-types";
 
 export const BROWSER_PROTOCOL = "reverie.browser.v1";
+const originalActions: ActionKind[] = ["open","list","observe","navigate","click","type","key","scroll","close"];
+const supportedActions: ActionKind[] = [...originalActions,"back","forward","reload"];
+
+export function browserActions(offered: unknown): ActionKind[] {
+  if (offered == null) return [...originalActions]; // Earlier v1 kernels omit the action list.
+  if (!Array.isArray(offered)) throw new Error("Invalid browser capabilities.");
+  return supportedActions.filter(action => offered.includes(action));
+}
 const KEYS = new Set(["enter", "tab", "escape", "backspace", "delete", "space", "arrow_up", "arrow_down", "arrow_left", "arrow_right", "home", "end", "page_up", "page_down"]);
 
 function object(value: unknown): Record<string, unknown> {
@@ -68,7 +76,8 @@ export function browserRequest(value: unknown): BrowserRequest {
       if (typeof action.key !== "string" || !KEYS.has(action.key) || typeof action.shift !== "boolean") throw new Error("Invalid browser key.");
       break;
     case "navigate": fields(action, ["action", "target", "url"]); target(action.target); if (!browserUrl(action.url)) throw new Error("Invalid browser URL."); break;
-    case "close": fields(action, ["action", "target"]); target(action.target); break;
+    case "back": case "forward": case "reload": case "close":
+      fields(action, ["action", "target"]); target(action.target); break;
     default: throw new Error("Unsupported browser action.");
   }
   return structuredClone(result) as BrowserRequest;

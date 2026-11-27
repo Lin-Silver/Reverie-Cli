@@ -6,14 +6,16 @@ import { createInterface } from "node:readline";
 import { connect } from "node:net";
 import { once } from "node:events";
 import { BrowserHost } from "./browser-host";
-import { browserActions, browserSession } from "./desktop-browser";
-import { BROWSER_PROTOCOL } from "./browser-policy";
+import { browserSession } from "./desktop-browser";
+import { BROWSER_PROTOCOL, browserActions } from "./browser-policy";
 import type { BrowserRequest } from "../src/generated/core-types";
 
 const directory = process.env.REVERIE_BROWSER_DATA;
 const port = Number(process.env.REVERIE_BROWSER_PORT), token = process.env.REVERIE_BROWSER_TOKEN;
+const actions = browserActions(JSON.parse(process.env.REVERIE_BROWSER_ACTIONS ?? "null"));
 delete process.env.REVERIE_BROWSER_TOKEN;
 delete process.env.REVERIE_BROWSER_PORT;
+delete process.env.REVERIE_BROWSER_ACTIONS;
 if (!Number.isInteger(port) || port<1 || port>65535 || !token || !/^[a-f0-9]{32}$/.test(token)) throw new Error("Missing browser component channel.");
 if (!directory || !path.isAbsolute(directory)) throw new Error("Browser component requires a profile directory.");
 mkdirSync(directory,{recursive:true});
@@ -40,7 +42,7 @@ if (ownsProfile) void app.whenReady().then(async () => {
   });
   window.once("closed",() => lines.close());
   try {
-    await send({protocol:BROWSER_PROTOCOL,descriptor:{host_id:id,engine:"Electron Chromium",engine_version:process.versions.chrome,actions:browserActions,profile_modes:["persistent","ephemeral"]}});
+    await send({protocol:BROWSER_PROTOCOL,descriptor:{host_id:id,engine:"Electron Chromium",engine_version:process.versions.chrome,actions,profile_modes:["persistent","ephemeral"]}});
     for await (const line of records) {
       const event = JSON.parse(line);
       if (event.type === "browser.attach" && !host && event.host?.host_id === id) {

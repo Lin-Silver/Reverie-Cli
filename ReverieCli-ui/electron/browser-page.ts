@@ -2,7 +2,7 @@ import type { WebContents } from "electron";
 import type { BrowserAction, PageObservation } from "../src/generated/core-types";
 import { saveBrowserImage } from "./browser-artifacts";
 import { FOCUS_ELEMENT_FUNCTION, OBSERVE_FUNCTION, RESOLVE_ELEMENT_FUNCTION, SCROLL_FUNCTION, VERIFY_FOCUSED_ELEMENT_FUNCTION, VERIFY_KEY_FUNCTION, VERIFY_OBSERVATION_FUNCTION } from "./browser-observation";
-import { observedPage, pngDimensions, type ObservedPage } from "./browser-policy";
+import { browserUrl, observedPage, pngDimensions, type ObservedPage } from "./browser-policy";
 
 const world = "reverie-browser-observer";
 const binding = "__reverieInvalidate";
@@ -11,6 +11,50 @@ const keys = {
   space: [" ",32], arrow_up: ["ArrowUp",38], arrow_down: ["ArrowDown",40], arrow_left: ["ArrowLeft",37], arrow_right: ["ArrowRight",39],
   home: ["Home",36], end: ["End",35], page_up: ["PageUp",33], page_down: ["PageDown",34],
 } as const;
+
+export type HistoryAction = "back" | "forward" | "reload";
+
+/** Electron's history methods return before Chromium commits the navigation. */
+export async function navigateHistory(contents: WebContents, action: HistoryAction, begin: () => void) {
+  const history = contents.navigationHistory;
+  const offset = action === "back" ? -1 : action === "forward" ? 1 : 0;
+  const index = history.getActiveIndex() + offset;
+  const entry = history.getEntryAtIndex(index);
+  if (!entry || !browserUrl(entry.url) || contents.isLoadingMainFrame()) throw new Error("Browser history entry is unavailable.");
+
+  await new Promise<void>((resolve, reject) => {
+    function finish(error?: Error) {
+      clearTimeout(timer);
+      contents.off("did-finish-load", loaded);
+      contents.off("did-navigate-in-page", inPage);
+      contents.off("did-fail-load", failed);
+      contents.off("destroyed", interrupted);
+      contents.off("render-process-gone", interrupted);
+      if (error) reject(error); else resolve();
+    }
+    function loaded() {
+      if (history.getActiveIndex() === index && browserUrl(contents.getURL())) finish();
+      else interrupted();
+    }
+    function inPage(_event: Electron.Event, _url: string, mainFrame: boolean) {
+      if (offset && mainFrame && history.getActiveIndex() === index) loaded();
+    }
+    function failed(_event: Electron.Event, _code: number, _description: string, _url: string, mainFrame: boolean) {
+      if (mainFrame) interrupted();
+    }
+    function interrupted() { finish(new Error("Browser navigation did not complete.")); }
+    const timer = setTimeout(interrupted, 45000);
+    contents.once("did-finish-load", loaded);
+    contents.on("did-navigate-in-page", inPage);
+    contents.on("did-fail-load", failed);
+    contents.once("destroyed", interrupted);
+    contents.once("render-process-gone", interrupted);
+    try {
+      begin();
+      if (offset) history.goToOffset(offset); else contents.reload();
+    } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
+  });
+}
 
 /** The guest page never receives the adapter token or a caller-supplied expression. */
 export class BrowserPage {
@@ -69,6 +113,10 @@ export class BrowserPage {
         if (!element) throw new Error("Unknown browser element.");
         objectId = (await this.call(RESOLVE_ELEMENT_FUNCTION, [snapshot.id, action.element_id], target, false)).objectId;
         if (!objectId) throw new Error("Browser element changed.");
+      }
+      if (action.action === "back" || action.action === "forward" || action.action === "reload") {
+        await navigateHistory(this.contents, action.action, begin);
+        return;
       }
       begin();
       switch (action.action) {

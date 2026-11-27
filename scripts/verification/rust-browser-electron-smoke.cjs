@@ -16,7 +16,7 @@ process.env.REVERIE_DESKTOP_RUNTIME_ROOT = desktop;
 process.env.NO_PROXY = [process.env.NO_PROXY,'localhost','127.0.0.1'].filter(Boolean).join(',');
 process.argv = [process.execPath,ui,'--gui','--project',project];
 app.setPath('userData',path.join(desktop,'user-data'));
-const checks=[], observations=[], actions=[];
+const checks=[], observations=[], actions=[], pageRequests=[];
 let win,base,sessionId,routine,modelFailure,finalText,requestNumber=0,heldRequest=false;
 const snapshot = () => ({checks,actions,observations,chromium:process.versions.chrome,electron:process.versions.electron,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex')});
 const evaluate = js => win.webContents.executeJavaScript(js,true);
@@ -70,6 +70,30 @@ async function* browserFlow() {
   const scrolled=yield {action:'scroll',target:scroll.target,element_id:null,delta_x:0,delta_y:120};assert.equal(scrolled.success,true,JSON.stringify(scrolled));
   assert.equal(await guest().executeJavaScript("window.scrollY"),120);
   checks.push('List, navigation, Tab focus and exact scroll displacement through the model tool');
+  async function* move(action, from, url) {
+    const result=yield {action,target:from.target};
+    assert.equal(result.success,true,JSON.stringify(result));
+    assert.equal(result.data.result.tab.url,url);
+    const seen=inspect(yield {action:'observe',tab_id});
+    assert.equal(seen.page.tab.url,url);
+    return seen;
+  }
+  const atNext=inspect(yield {action:'observe',tab_id});
+  const unavailable=yield {action:'forward',target:atNext.target};
+  assert.equal(unavailable.success,false);assert.equal(unavailable.data.delivery,'not_started');
+  const current=inspect(yield {action:'observe',tab_id});
+  const previous=yield* move('back',current,base+'/page');
+  const restored=yield* move('forward',previous,base+'/page?next');
+  const requests=pageRequests.length;
+  const reloaded=yield* move('reload',restored,base+'/page?next');
+  assert.equal(pageRequests.length,requests+1);assert.equal(pageRequests.at(-1),'/page?next');
+  const anchor=yield {action:'navigate',target:reloaded.target,url:base+'/page?next#section'};
+  assert.equal(anchor.success,true,JSON.stringify(anchor));
+  const sameDocument=inspect(yield {action:'observe',tab_id});
+  const beforeBack=pageRequests.length;
+  yield* move('back',sameDocument,base+'/page?next');
+  assert.equal(pageRequests.length,beforeBack);
+  checks.push('History traversal across documents and fragments, unavailable forward refusal and confirmed reload request');
 }
 async function* profileFlow(mode) {
   const open=yield {action:'open',url:base+'/page'};
@@ -83,7 +107,8 @@ async function* profileFlow(mode) {
 const server=http.createServer(async(req,res)=>{
   if(req.url==='/hold') { heldRequest=true; res.on('close',()=>{heldRequest=false;}); return; }
   if(req.url.startsWith('/page')){
-    res.writeHead(200,{'content-type':'text/html; charset=utf-8'});
+    pageRequests.push(req.url);
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
     res.end('<title>Reverie browser fixture</title><label>Message<input id="entry"></label><button onclick="localStorage.setItem(\'saved\',entry.value);document.querySelector(\'p\').textContent=\'Saved: \'+entry.value">Save</button><p>Ready</p><div style="height:200vh"></div>');return;
   }
   if(req.url!=='/v1/chat/completions'){res.writeHead(404);res.end();return;}
@@ -119,6 +144,19 @@ app.whenReady().then(async()=>{
     await until(()=>evaluate("document.body.innerText.includes('Browser interaction verified') && window.browserEvents.includes('conversation.saved') && !document.querySelector('.send-behavior')"),'first browser turn saved');
     sessionId=(await rpc('getState',{})).state.sessions.current_session_id;
     assert(sessionId);
+    async function sidebarClick(label) {
+      let point;
+      await until(async()=> {
+        point=await evaluate(`(() => {const b=document.querySelector('.browser-panel button[aria-label="${label}"]');if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+        return point;
+      },'enabled sidebar '+label);
+      for(const type of ['mouseDown','mouseUp'])win.webContents.sendInputEvent({type,...point,button:'left',clickCount:1});
+    }
+    await sidebarClick('Back');await until(()=>guest()?.getURL()===base+'/page','sidebar back');
+    await sidebarClick('Forward');await until(()=>guest()?.getURL()===base+'/page?next','sidebar forward');
+    const requests=pageRequests.length;
+    await sidebarClick('Reload');await until(()=>pageRequests.length===requests+1 && !guest().isLoadingMainFrame(),'sidebar reload completed');
+    checks.push('Physical pointer events on the production sidebar Back, Forward and Reload controls change the native guest');
     for(const mode of ['persistent','ephemeral']) {
       await rpc('setSetting',{sessionId,key:'browser_profile',value:mode});
       routine=profileFlow(mode);finalText='Verified '+mode;

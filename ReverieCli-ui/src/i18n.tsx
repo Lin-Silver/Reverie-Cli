@@ -11,6 +11,8 @@ export const UI_LANGUAGE_OPTIONS: ReadonlyArray<{ id: UiLanguage; label: string 
 const ENGLISH_TRANSLATIONS: Record<string, string> = {
   "浏览器": "Browser",
   "浏览器标签页": "Browser tab",
+  "后退": "Back",
+  "前进": "Forward",
   "关闭标签页": "Close tab",
   "此会话尚无浏览器标签页。": "This conversation has no browser tabs yet.",
   "MCP 远端地址": "MCP remote endpoint",

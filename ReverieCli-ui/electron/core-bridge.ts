@@ -21,6 +21,7 @@ export class CoreBridge {
   private actions: Set<string> | null = null;
   private closed = false;
   browserProtocol?: string;
+  browserActions?: string[];
   onBrowserEvent?: (event: JsonRecord) => void;
   onBrowserDisconnect?: () => void;
   private pending = new Map<string, {
@@ -53,6 +54,7 @@ export class CoreBridge {
   private disconnectBrowser(): void {
     if (this.browserProtocol === undefined) return;
     this.browserProtocol = undefined;
+    this.browserActions = undefined;
     this.onBrowserDisconnect?.();
   }
 
@@ -99,6 +101,7 @@ export class CoreBridge {
         if (Array.isArray(capabilities?.actions)) this.actions = new Set(capabilities.actions.filter((item): item is string => typeof item === "string"));
         if (message.type === "ready" && message.id === undefined && !ready) {
           this.browserProtocol = typeof message.browser_protocol === "string" ? message.browser_protocol : undefined;
+          this.browserActions = Array.isArray(message.browser_actions) ? message.browser_actions.filter((action): action is string => typeof action === "string") : undefined;
           ready = true;
           clearTimeout(timer);
           resolve();

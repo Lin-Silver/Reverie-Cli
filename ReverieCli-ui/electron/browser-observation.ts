@@ -98,11 +98,14 @@ export const VERIFY_OBSERVATION_FUNCTION = String.raw`function (observationId) {
   return Boolean(store && store.id === observationId && !store.dirty && innerWidth === store.viewport.width && innerHeight === store.viewport.height && devicePixelRatio === store.viewport.device_scale_factor);
 }`;
 
-export const RESOLVE_ELEMENT_FUNCTION = String.raw`function (observationId, elementId) {
+export const RESOLVE_ELEMENT_FUNCTION = String.raw`function (observationId, elementId, action, origin) {
   const store = globalThis.__reverieBrowserObservation;
   if (!store || store.id !== observationId || store.dirty || innerWidth !== store.viewport.width || innerHeight !== store.viewport.height || devicePixelRatio !== store.viewport.device_scale_factor) return null;
   const entry = store.entries.get(elementId);
-  if (!entry || !entry.node.isConnected || entry.node.disabled || entry.node.getAttribute('aria-disabled') === 'true' || entry.node.tagName === 'IFRAME' || entry.node.tagName === 'INPUT' && entry.node.type === 'file') return null;
+  if (!entry || !entry.node.isConnected || entry.node.disabled || entry.node.getAttribute('aria-disabled') === 'true' || entry.node.tagName === 'IFRAME') return null;
+  const fileInput = entry.node.tagName === 'INPUT' && entry.node.type === 'file';
+  if (fileInput !== (action === 'upload') || fileInput && (entry.node.webkitdirectory || location.origin !== origin)) return null;
+  if (action === 'download' && !(entry.node instanceof HTMLAnchorElement && entry.node.hasAttribute('href'))) return null;
   const current = store.describe(entry.node);
   if (!current || current.fingerprint !== entry.fingerprint || !current.point || current.point.x !== entry.point.x || current.point.y !== entry.point.y) return null;
   return entry.node;

@@ -5,14 +5,18 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import {setTimeout as delay} from 'node:timers/promises';
+import fileCases from './rust-browser-file-cases.cjs';
 
 const binary=path.resolve(process.argv[2]), directory=path.resolve(process.argv[3]||'.runtime/rust-3.0/browser-cli');
 fs.mkdirSync(directory,{recursive:true});
 const root=fs.mkdtempSync(path.join(directory,'case-')), project=path.join(root,'project'), app=path.join(root,'application');
 for(const folder of [project,path.join(app,'.reverie')])fs.mkdirSync(folder,{recursive:true});
 const checks=[],visits=[],calls=[];
+const files=fileCases(project);
 let base,scenario,routine,error;
 const server=http.createServer(async(request,response)=>{
+  if(await files.serve(request,response))return;
   if(request.url==='/form'){
     visits.push(request.headers['user-agent']);
     response.setHeader('Content-Type','text/html; charset=utf-8');
@@ -26,7 +30,7 @@ const server=http.createServer(async(request,response)=>{
     const body=JSON.parse(raw);
     assert.equal(body.tools.some(tool=>tool.function.name==='browser'),scenario!=='missing');
     const prior=body.messages.at(-1);
-    const next=routine.next(prior.role==='tool'?JSON.parse(prior.content):undefined);
+    const next=await routine.next(prior.role==='tool'?JSON.parse(prior.content):undefined);
     const message=next.done?{role:'assistant',content:'Verified '+scenario}:{role:'assistant',content:null,tool_calls:[{id:'act-'+calls.length,type:'function',function:{name:'browser',arguments:JSON.stringify(next.value)}}]};
     if(!next.done)calls.push(next.value.action);
     response.setHeader('Content-Type','application/json');response.end(JSON.stringify({choices:[{message,finish_reason:next.done?'stop':'tool_calls'}]}));
@@ -80,10 +84,15 @@ try{
   await run('first','persistent',form('persistent','fresh',true));
   await run('reopen','persistent',form('persistent','stored',false));
   await run('isolated','ephemeral',form('ephemeral','fresh',false));
+  await run('files','ephemeral',files.flow(base,'full_access',async check=>{
+    const limit=Date.now()+10000;
+    while(!check()) { assert(Date.now()<limit,'File upload request did not arrive');await delay(20); }
+  }));
+  checks.push('The packaged CLI transfers binary bytes in both directions using its own Chromium component');
   assert.deepEqual(fs.readdirSync(profileRoot),['persistent']);
   assert.equal(visits.length,4);assert(visits.every(ua=>/Chrome\/\d+/.test(ua)));
   checks.push('Packaged CLI launches its Electron sibling and the real web form changes after a model click','Persistent storage survives a fresh CLI process; temporary storage and component exit are verified at return');
-  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({passed:true,checks,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),calls,visits},null,2));
+  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({passed:true,checks,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),calls,visits,transfers:files.evidence()},null,2));
   console.log('CLI browser smoke passed: '+root);
 }catch(failure){fs.writeFileSync(path.join(root,'failure.json'),JSON.stringify({checks,calls,visits,error:String(failure.stack||failure)},null,2));console.error(root,failure);process.exitCode=1;}
 finally{server.closeAllConnections();server.close();}

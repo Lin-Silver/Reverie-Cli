@@ -148,6 +148,8 @@ pub enum ActionKind {
     Back,
     Forward,
     Reload,
+    Upload,
+    Download,
     Close,
 }
 
@@ -164,6 +166,8 @@ impl ActionKind {
         Self::Back,
         Self::Forward,
         Self::Reload,
+        Self::Upload,
+        Self::Download,
         Self::Close,
     ];
 }
@@ -284,6 +288,17 @@ pub enum BrowserAction {
     Reload {
         target: BrowserTarget,
     },
+    Upload {
+        target: BrowserTarget,
+        element_id: String,
+        origin: String,
+        path: String,
+    },
+    Download {
+        target: BrowserTarget,
+        element_id: String,
+        path: String,
+    },
     Close {
         target: BrowserTarget,
     },
@@ -303,6 +318,8 @@ impl BrowserAction {
             Self::Back { .. } => ActionKind::Back,
             Self::Forward { .. } => ActionKind::Forward,
             Self::Reload { .. } => ActionKind::Reload,
+            Self::Upload { .. } => ActionKind::Upload,
+            Self::Download { .. } => ActionKind::Download,
             Self::Close { .. } => ActionKind::Close,
         }
     }
@@ -317,6 +334,8 @@ impl BrowserAction {
             | Self::Back { target }
             | Self::Forward { target }
             | Self::Reload { target }
+            | Self::Upload { target, .. }
+            | Self::Download { target, .. }
             | Self::Close { target } => Some(target),
             _ => None,
         }

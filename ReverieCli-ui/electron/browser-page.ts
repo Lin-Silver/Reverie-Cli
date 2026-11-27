@@ -1,4 +1,5 @@
 import type { WebContents } from "electron";
+import { downloadLink } from "./browser-download";
 import type { BrowserAction, PageObservation } from "../src/generated/core-types";
 import { saveBrowserImage } from "./browser-artifacts";
 import { FOCUS_ELEMENT_FUNCTION, OBSERVE_FUNCTION, RESOLVE_ELEMENT_FUNCTION, SCROLL_FUNCTION, VERIFY_FOCUSED_ELEMENT_FUNCTION, VERIFY_KEY_FUNCTION, VERIFY_OBSERVATION_FUNCTION } from "./browser-observation";
@@ -80,7 +81,7 @@ export class BrowserPage {
     return reply.result;
   }
 
-  async observe(id: string, root: string, check: () => void): Promise<Omit<PageObservation, "tab">> {
+  async observe(id: string, root: string, visible: boolean, check: () => void): Promise<Omit<PageObservation, "tab">> {
     const debug = this.contents.debugger;
     const tree = await debug.sendCommand("Page.getFrameTree");
     const frameId = tree.frameTree.frame.id as string;
@@ -89,8 +90,12 @@ export class BrowserPage {
     const target = { executionContextId };
     const page = observedPage((await this.call(OBSERVE_FUNCTION, [id,binding], target)).value, frameId);
     check();
-    const captured = await debug.sendCommand("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
-    const png = Buffer.from(captured.data, "base64"), size = pngDimensions(png);
+    // CDP waits for the first frame of a visible guest. A hidden guest needs
+    // Electron's capturePage to wake its compositor without selecting the view.
+    const png = visible
+      ? Buffer.from((await debug.sendCommand("Page.captureScreenshot", {format:"png",captureBeyondViewport:false})).data,"base64")
+      : (await this.contents.capturePage()).toPNG();
+    const size = pngDimensions(png);
     if (snapshot !== this.snapshot || !(await this.call(VERIFY_OBSERVATION_FUNCTION, [id], target)).value) throw new Error("Browser observation expired.");
     check();
     await saveBrowserImage(root, id, png);
@@ -100,7 +105,7 @@ export class BrowserPage {
       returned_height: size.height, capture: { x: 0, y: 0, width: page.viewport.width, height: page.viewport.height } } };
   }
 
-  async act(action: Exclude<BrowserAction, {action:"open"|"list"|"observe"}>, begin: () => void) {
+  async act(action: Exclude<BrowserAction, {action:"open"|"list"|"observe"}>, begin: () => void, signal: AbortSignal) {
     const snapshot = this.snapshot;
     if (!snapshot?.page || action.target.observation_id !== snapshot.id) throw new Error("Browser observation expired.");
     const target = { executionContextId: snapshot.context }, debug = this.contents.debugger;
@@ -111,15 +116,25 @@ export class BrowserPage {
     try {
       if ("element_id" in action && action.element_id) {
         if (!element) throw new Error("Unknown browser element.");
-        objectId = (await this.call(RESOLVE_ELEMENT_FUNCTION, [snapshot.id, action.element_id], target, false)).objectId;
+        objectId = (await this.call(RESOLVE_ELEMENT_FUNCTION, [snapshot.id, action.element_id, action.action, action.action === "upload" ? action.origin : null], target, false)).objectId;
         if (!objectId) throw new Error("Browser element changed.");
       }
       if (action.action === "back" || action.action === "forward" || action.action === "reload") {
         await navigateHistory(this.contents, action.action, begin);
         return;
       }
+      if (action.action === "download") {
+        const url = (await this.call("function () { return this.href; }", [], {objectId: objectId!})).value;
+        if (!browserUrl(url) || url === "about:blank") throw new Error("Choose an HTTP(S) download link.");
+        begin();
+        await downloadLink(this.contents, url, action.path, signal);
+        return;
+      }
       begin();
       switch (action.action) {
+        case "upload":
+          await debug.sendCommand("DOM.setFileInputFiles", {objectId, files:[action.path]});
+          break;
         case "navigate": await this.contents.loadURL(action.url); break;
         case "close": break; // The owner disposes the verified guest.
         case "click": {

@@ -17,8 +17,9 @@ process.env.NO_PROXY = [process.env.NO_PROXY,'localhost','127.0.0.1'].filter(Boo
 process.argv = [process.execPath,ui,'--gui','--project',project];
 app.setPath('userData',path.join(desktop,'user-data'));
 const checks=[], observations=[], actions=[], pageRequests=[];
+const files=require('./rust-browser-file-cases.cjs')(project);
 let win,base,sessionId,routine,modelFailure,finalText,requestNumber=0,heldRequest=false;
-const snapshot = () => ({checks,actions,observations,chromium:process.versions.chrome,electron:process.versions.electron,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex')});
+const snapshot = () => ({checks,actions,observations,transfers:files.evidence(),chromium:process.versions.chrome,electron:process.versions.electron,binary,sha256:crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex')});
 const evaluate = js => win.webContents.executeJavaScript(js,true);
 async function until(check,label) {
   const deadline=Date.now()+55000;
@@ -105,6 +106,7 @@ async function* profileFlow(mode) {
   checks.push('Verified '+mode+' browser storage through a separate run');
 }
 const server=http.createServer(async(req,res)=>{
+  if(await files.serve(req,res)) return;
   if(req.url==='/hold') { heldRequest=true; res.on('close',()=>{heldRequest=false;}); return; }
   if(req.url.startsWith('/page')){
     pageRequests.push(req.url);
@@ -114,9 +116,19 @@ const server=http.createServer(async(req,res)=>{
   if(req.url!=='/v1/chat/completions'){res.writeHead(404);res.end();return;}
   try {
     let raw='';for await(const part of req)raw+=part;
-    const body=JSON.parse(raw); assert(body.tools.some(t=>t.function.name==='browser')); assert(!body.tools.some(t=>t.function.name==='registerBrowserHost'));
+    const body=JSON.parse(raw);
+    res.setHeader('content-type','application/json');
+    if (!body.tools?.length && body.messages[1]?.content.startsWith('Review the following tool calls.')) {
+      const envelope=JSON.parse(body.messages[1].content.split('\n\n').slice(1).join('\n\n'));
+      const reviews=envelope.calls.map(call=>({id:call.id,risk:'low',decision:'allow',reason:'Local form fixture.',concerns:[]}));
+      res.end(JSON.stringify({choices:[{message:{role:'assistant',content:JSON.stringify({reviews,batch_risk:'low'})},finish_reason:'stop'}]}));return;
+    }
+    assert(body.tools.some(t=>t.function.name==='browser')); assert(!body.tools.some(t=>t.function.name==='registerBrowserHost'));
     const last=body.messages.at(-1);
     const reply=last.role==='tool'?JSON.parse(last.content):undefined;
+    if(reply?.status==='pending_approval') {
+      res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'Awaiting upload permission.'},finish_reason:'stop'}]}));return;
+    }
     const step=await routine.next(reply);
     let message;
     if(step.done) message={role:'assistant',content:finalText};
@@ -173,6 +185,37 @@ app.whenReady().then(async()=>{
     assert.equal((await pending).result.state,'cancelled');
     await until(()=>!heldRequest,'cancelled network request closed');
     checks.push('Stopping a real pending navigation retires the run and closes the guest connection');
+    await evaluate("window.fileApprovals=[];window.reverie.onEvent(message=>{if(message.event?.type==='approval.request')window.fileApprovals.push(message.event)});true");
+    for (const [mode,decisions] of [
+      ['normal',[['upload','once']]], ['auto',[['upload','once']]],
+      ['strict',[['open','session'],['upload','deny'],['upload','session']]], ['full_access',[]]
+    ]) {
+      await rpc('setSetting',{sessionId,key:'permission_mode',value:mode});
+      const start=await evaluate('window.fileApprovals.length');
+      routine=files.flow(base,mode,until);finalText='Verified files '+mode;
+      const running=rpc('runPrompt',{sessionId,projectRoot:project,prompt:finalText,noIndex:true});running.catch(()=>{});
+      for(const [index,[action,decision]] of decisions.entries()) {
+        let approval;
+        await until(async()=>approval=await evaluate('window.fileApprovals['+(start+index)+']'),'file approval '+mode+' '+action);
+        assert.equal(approval.arguments.action,action);
+        if(action==='upload') { assert.equal(approval.arguments.origin,base);assert.equal(approval.arguments.path,'作品.bin'); }
+        await rpc('resolveApproval',{sessionId,approvalId:approval.approval_id,decision});
+      }
+      const reply=await running;if(modelFailure)throw modelFailure;
+      assert.equal(reply.result.output_text,finalText,JSON.stringify(reply.result));assert.equal(await evaluate('window.fileApprovals.length'),start+decisions.length);
+      checks.push('Actual Chromium file selection and server byte readback with '+mode+' approvals');
+    }
+    routine=files.slow(base);
+    const slow=rpc('runPrompt',{sessionId,projectRoot:project,prompt:'Cancel a partial attachment download.',noIndex:true});slow.catch(()=>{});
+    await until(files.held,'streaming partial download');
+    await rpc('stopPrompt',{sessionId,projectRoot:project});assert.equal((await slow).result.state,'cancelled');
+    await until(()=>!files.held(),'cancelled attachment connection closed');files.verifyCleanup();
+    const config=await rpc('getConversationConfig',{sessionId});
+    await rpc('getConversationConfig',{sessionId,revision:config.revision,configuration:{...config.configuration,settings:{...config.configuration.settings,security:{permission_level:'read_only',permission_mode:'full_access'}}}});
+    routine=files.readOnly();finalText='Read-only transfers denied';
+    const blocked=await rpc('runPrompt',{sessionId,projectRoot:project,prompt:finalText,noIndex:true});if(modelFailure)throw modelFailure;
+    assert.equal(blocked.result.output_text,finalText);
+    checks.push('Authenticated download bytes, no overwrite, workspace boundary, separate upload grant, pinned file content, read-only refusals and cancelled download cleanup');
     const events=await evaluate('window.browserEvents');assert(events.includes('browser.tabsChanged')); assert(!events.includes('browser.request')&&!events.includes('browser.cancel'));
     await assert.rejects(rpc('registerBrowserHost',{}),/Unsupported/);
     checks.push('Temporary guest retired at run end; desktop IPC keeps private adapter controls and requests out of the renderer');

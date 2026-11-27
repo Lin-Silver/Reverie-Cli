@@ -94,6 +94,7 @@ impl KernelHost {
             None if reverie_platform::command::is_command(&call.name) => {
                 permissions::command_key(args)?
             }
+            None if call.name == "browser" && args["action"] == "upload" => "browser:upload".into(),
             None if matches!(call.name.as_str(), "mcp-resources-read" | "mcp-prompts-get") => {
                 let server = args["server_id"]
                     .as_str()
@@ -241,8 +242,16 @@ impl KernelHost {
         let mut risk = policy.call.prior;
         let mut source = review::VerdictSource::Policy;
         let mut concerns = Vec::new();
+        let upload = call.name == "browser" && args["action"] == "upload";
+        let upload_reason = || {
+            format!(
+                "Allow {} to receive the workspace file {}?",
+                args["origin"], args["path"]
+            )
+        };
         let reason = match mode {
             "full_access" => return Ok(None),
+            "normal" | "strict" if upload => upload_reason(),
             "normal" if !reverie_platform::command::is_command(&call.name) => return Ok(None),
             "normal" => "Normal mode requires approval for terminal commands.".to_owned(),
             "strict" => "Strict mode requires explicit approval.".to_owned(),
@@ -259,16 +268,22 @@ impl KernelHost {
                     && !verdict.is_some_and(|v| v.denied)
                     && !risk.requires_approval(config.approve_risk_at)
                 {
-                    return Ok(None);
-                }
-                let reason = verdict
-                    .map(|v| v.reason.clone())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "No valid review was returned for this call.".into());
-                match permissions::fallback(&run.config["security"]) {
-                    "deny" => return Err(format!("Auto review denied this call: {reason}").into()),
-                    "wait" => reason,
-                    _ => return Err("Invalid Auto review fallback.".into()),
+                    if !upload {
+                        return Ok(None);
+                    }
+                    upload_reason()
+                } else {
+                    let reason = verdict
+                        .map(|v| v.reason.clone())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "No valid review was returned for this call.".into());
+                    match permissions::fallback(&run.config["security"]) {
+                        "deny" => {
+                            return Err(format!("Auto review denied this call: {reason}").into());
+                        }
+                        "wait" => reason,
+                        _ => return Err("Invalid Auto review fallback.".into()),
+                    }
                 }
             }
             _ => return Err("Invalid configured permission mode.".into()),

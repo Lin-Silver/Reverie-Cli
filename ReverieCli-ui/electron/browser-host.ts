@@ -53,6 +53,7 @@ interface ActiveRequest {
   started: boolean;
   cancelled: boolean;
   settled: boolean;
+  abort: AbortController;
   guest?: Guest;
   resolve(completion: BrowserCompletion): void;
 }
@@ -93,7 +94,7 @@ export class BrowserHost {
     if (this.disposed || request.host.host_id !== this.options.host.host_id || request.host.generation !== this.options.host.generation
       || this.active.has(request.request_id) || this.busy.has(owner)) return Promise.resolve(completion(request, "not_started"));
     const promise = new Promise<BrowserCompletion>(resolve => {
-      const context: ActiveRequest = { request, owner, started: false, cancelled: false, settled: false, resolve };
+      const context: ActiveRequest = { request, owner, started: false, cancelled: false, settled: false, abort: new AbortController(), resolve };
       this.active.set(request.request_id, context); this.busy.add(owner);
       const release = () => { this.active.delete(request.request_id); this.busy.delete(owner); this.changed(); };
       void Promise.resolve().then(() => this.dispatch(context)).then(result => { release(); this.finish(context, result); }, () => { release(); this.finish(context, context.started ? "unknown" : "not_started"); });
@@ -106,6 +107,7 @@ export class BrowserHost {
     const context = this.active.get(requestId);
     if (!context || context.settled) return;
     context.cancelled = true;
+    context.abort.abort();
     this.finish(context, context.started ? "unknown" : "not_started");
     // Keep the ownership slot until any in-flight native operation and release cleanup settle.
   }
@@ -314,13 +316,14 @@ export class BrowserHost {
     };
     if (action.action === "observe") {
       context.started = true;
-      const observation = await guest.page.observe(context.request.request_id, guest.scope.project_root, check);
+      const visible = guest.view.getVisible() && this.options.parent.isVisible() && !this.options.parent.isMinimized();
+      const observation = await guest.page.observe(context.request.request_id, guest.scope.project_root, visible, check);
       const tab = await this.report(guest, false);
       check();
       return {type:"observed", observation:{...observation, tab}};
     }
     if (action.target.revision !== revision) throw new Error("Observe this browser tab again.");
-    await guest.page.act(action, () => { check(); context.started = true; });
+    await guest.page.act(action, () => { check(); context.started = true; }, context.abort.signal);
     this.check(context);
     if (action.action === "close") {
       this.closeGuest(guest);

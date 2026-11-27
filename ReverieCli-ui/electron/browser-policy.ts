@@ -3,7 +3,7 @@ import type { ActionKind, BrowserElement, BrowserRequest, Rectangle, Viewport } 
 
 export const BROWSER_PROTOCOL = "reverie.browser.v1";
 const originalActions: ActionKind[] = ["open","list","observe","navigate","click","type","key","scroll","close"];
-const supportedActions: ActionKind[] = [...originalActions,"back","forward","reload"];
+const supportedActions: ActionKind[] = [...originalActions,"back","forward","reload","upload","download"];
 
 export function browserActions(offered: unknown): ActionKind[] {
   if (offered == null) return [...originalActions]; // Earlier v1 kernels omit the action list.
@@ -76,6 +76,11 @@ export function browserRequest(value: unknown): BrowserRequest {
       if (typeof action.key !== "string" || !KEYS.has(action.key) || typeof action.shift !== "boolean") throw new Error("Invalid browser key.");
       break;
     case "navigate": fields(action, ["action", "target", "url"]); target(action.target); if (!browserUrl(action.url)) throw new Error("Invalid browser URL."); break;
+    case "upload": case "download":
+      fields(action, ["action","target","element_id","path",...(action.action === "upload" ? ["origin"] : [])]); target(action.target);
+      if (!browserId(action.element_id) || typeof action.path !== "string" || !path.isAbsolute(action.path) || action.path.includes("\0")) throw new Error("Invalid browser transfer.");
+      if (action.action === "upload" && (!browserUrl(action.origin) || new URL(action.origin).origin !== action.origin)) throw new Error("Invalid upload origin.");
+      break;
     case "back": case "forward": case "reload": case "close":
       fields(action, ["action", "target"]); target(action.target); break;
     default: throw new Error("Unsupported browser action.");

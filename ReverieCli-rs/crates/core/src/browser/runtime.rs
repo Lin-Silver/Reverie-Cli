@@ -42,6 +42,8 @@ struct Tab {
     owner: Owner,
     record: BrowserTab,
     observation: Option<Observation>,
+    // Chromium reads selected files lazily, including after a persistent run ends.
+    uploads: Vec<tempfile::TempDir>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,6 +255,26 @@ impl BrowserRuntime {
             request_id,
             receiver: Some(receiver),
         })
+    }
+
+    pub(crate) fn keep_upload(
+        &self,
+        reply: &BrowserReply,
+        directory: tempfile::TempDir,
+    ) -> BrowserResult<()> {
+        let AdapterResult::Changed { tab } = &reply.result else {
+            return Err(invalid());
+        };
+        let mut state = self.lock()?;
+        if let Some(current) = state
+            .tabs
+            .get_mut(&(reply.host.clone(), tab.tab_id.clone()))
+            && current.owner.scope == reply.scope
+            && current.owner.profile == reply.profile
+        {
+            current.uploads.push(directory);
+        }
+        Ok(())
     }
 
     fn dispatch(&self, id: &str, sink: EventSink) -> BrowserResult<()> {
@@ -477,6 +499,23 @@ impl BrowserRuntime {
 }
 
 impl PendingBrowserRequest {
+    pub(crate) fn set_transfer_path(&self, staged: String) -> BrowserResult<()> {
+        let mut state = self.runtime.lock()?;
+        let pending = state
+            .pending
+            .get_mut(&self.request_id)
+            .ok_or_else(invalid)?;
+        match &mut pending.request.action {
+            BrowserAction::Upload { path, .. } | BrowserAction::Download { path, .. }
+                if pending.stage == Stage::Prepared =>
+            {
+                *path = staged;
+                Ok(())
+            }
+            _ => Err(invalid()),
+        }
+    }
+
     pub fn request_id(&self) -> &str {
         &self.request_id
     }
@@ -603,6 +642,14 @@ fn validate_request(state: &State, request: &BrowserRequest) -> BrowserResult<()
             return Err(invalid());
         }
         let tab = owned_tab(state, request, id)?;
+        if let BrowserAction::Upload { origin, .. } = &request.action
+            && (!valid_url(origin)
+                || reqwest::Url::parse(&tab.record.url)
+                    .ok()
+                    .is_none_or(|url| url.origin().ascii_serialization() != *origin))
+        {
+            return Err(invalid());
+        }
         if let Some(target) = request.action.target() {
             let observation = tab
                 .observation
@@ -616,7 +663,9 @@ fn validate_request(state: &State, request: &BrowserRequest) -> BrowserResult<()
             }
             let element = match &request.action {
                 BrowserAction::Click { element_id, .. }
-                | BrowserAction::Type { element_id, .. } => Some(element_id),
+                | BrowserAction::Type { element_id, .. }
+                | BrowserAction::Upload { element_id, .. }
+                | BrowserAction::Download { element_id, .. } => Some(element_id),
                 BrowserAction::Scroll { element_id, .. } => element_id.as_ref(),
                 _ => None,
             };
@@ -787,6 +836,7 @@ fn update_tab(state: &mut State, request: &BrowserRequest, record: &BrowserTab) 
         owner: Owner::of(request),
         record: record.clone(),
         observation: None,
+        uploads: Vec::new(),
     });
     if tab.record.revision != record.revision
         || tab.record.url != record.url

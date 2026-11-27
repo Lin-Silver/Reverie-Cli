@@ -23,3 +23,7 @@ the Electron/Chromium and optional runtime distributions.
 Sources: [tiktoken-rs LICENSE](https://github.com/zurawiki/tiktoken-rs/blob/72a5a800651a1cea1ad609292446ba02c80e3bcd/LICENSE),
 [vendored commit](https://github.com/zurawiki/tiktoken-rs/tree/72a5a800651a1cea1ad609292446ba02c80e3bcd/vendor),
 [tiktoken LICENSE](https://github.com/openai/tiktoken/blob/4e71bbe0c078468e00fefbf94b39849389f346e5/LICENSE).
+
+## Browser file transfers
+
+The workspace file boundary uses cap-std and cap-fs-ext 4.0.3, from Bytecode Alliance revision `b7acf8e8807fe3fab991884d2208b7e03d35a409`. The lockfile pins each downloaded package. The notices for the eleven added packages retain the upstream copyright and selected license texts, including the LLVM exception for winx. Identical texts share one entry. [Bundled notices](browser-file-transfer-notices.txt)

@@ -285,17 +285,24 @@ async fn native_stdio_lifecycle_and_evidence() -> Result<()> {
         updated["document"]["content_sha256"],
         diagnostics["document"]["content_sha256"]
     );
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let updated = runtime
-        .query(&root, query(Action::Diagnostics, "源码 😀.rs"), &token)
-        .await?;
-    assert_eq!(updated["diagnostics"]["version"], 2);
-    assert!(
-        updated["diagnostics"]["discarded_version_mismatch"]
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let updated = runtime
+            .query(&root, query(Action::Diagnostics, "源码 😀.rs"), &token)
+            .await?;
+        if updated["diagnostics"]["discarded_version_mismatch"]
             .as_u64()
-            .unwrap_or(0)
-            >= 1
-    );
+            .is_some_and(|count| count >= 1)
+        {
+            assert_eq!(updated["diagnostics"]["version"], 2);
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "The LSP client did not discard the delayed version-1 diagnostics."
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(
         audit(&audit_path)
             .iter()

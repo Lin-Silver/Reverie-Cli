@@ -223,6 +223,14 @@ try {
     const [a,b,c]=catalog.models.map(row=>row.profile_id);
     assert.equal(new Set([a,b,c]).size,3); assert.equal(catalog.selected_profile_id,b);
     assert(raw.equals(fs.readFileSync(inventoryFile)));
+    if(split) {
+      const backups=path.join(path.dirname(inventoryFile),'backups');
+      const names=()=>fs.existsSync(backups)?fs.readdirSync(backups).sort():[];
+      const before=names();
+      for(const id of [c,a,b])await request('selectModel',{source:'standard',modelId:'same-name',profileId:id});
+      assert(raw.equals(fs.readFileSync(inventoryFile))); assert.deepEqual(names(),before);
+      checks.push('Three workspace model switches preserve split inventory bytes and create no inventory backups');
+    }
     await request('deleteStandardModel',{index:0,profileId:a});
     const changed=await request('updateStandardModel',{index:2,profileId:c,model:{model_display_name:'C edited'}});
     assert.equal(changed.index,1);
@@ -241,7 +249,10 @@ try {
       const selectedRoot=JSON.parse(fs.readFileSync(modelFile));
       fs.writeFileSync(modelFile,JSON.stringify({...selectedRoot,active_model_index:0}));
       assert.equal((await request('getWorkspaceConfig')).workspace.active_model.profile_id,b);
-      fs.writeFileSync(modelFile,JSON.stringify(selectedRoot));
+      fs.writeFileSync(modelFile,JSON.stringify({...selectedRoot,standard_selection_revision:'before-inventory-replacement'}));
+      await request('selectModel',{source:'standard',modelId:'same-name',profileId:c});
+      assert.equal((await request('getWorkspaceConfig')).workspace.active_model.profile_id,c);
+      assert.equal(JSON.parse(fs.readFileSync(modelFile)).standard_selection_revision,selectedRoot.standard_selection_revision);
     }
     const remaining=await request('deleteStandardModel',{index:0}); // Legacy index-only SDK call.
     assert.equal(remaining.workspace.active_model.profile_id,c);

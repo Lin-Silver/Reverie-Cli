@@ -740,21 +740,25 @@ impl Kernel {
                         format!("Provider source {source} has not yet been migrated.").into(),
                     );
                 }
-                let mut selected = self.config.effective()?;
                 let model = payload["modelId"]
                     .as_str()
                     .or_else(|| payload["model"].as_str())
                     .ok_or("Model id is required.")?;
-                if let Some(id) = payload["sessionId"].as_str() {
+                let choose = || -> io::Result<Value> {
+                    let mut config = self.config.effective()?;
                     let index = models::selection_index(
-                        selected["models"]
+                        config["models"]
                             .as_array()
-                            .ok_or("Model inventory is missing.")?,
+                            .ok_or_else(|| io::Error::other("Model inventory is missing."))?,
                         model,
                         &payload["profileId"],
                     )?;
-                    selected["active_model_source"] = json!(source);
-                    selected["active_model_index"] = json!(index);
+                    config["active_model_source"] = json!(source);
+                    config["active_model_index"] = json!(index);
+                    Ok(config)
+                };
+                let selected = if let Some(id) = payload["sessionId"].as_str() {
+                    let selected = choose()?;
                     let page = self.session_store()?.page(id, None, 1)?;
                     let mut snapshot = page
                         .metadata
@@ -762,21 +766,30 @@ impl Kernel {
                         .cloned()
                         .unwrap_or_else(|| models::capture(&selected));
                     snapshot["model_ref"] = models::capture(&selected)["model_ref"].clone();
-                    selected = models::resolve(&selected, &snapshot)?;
+                    let selected = models::resolve(&selected, &snapshot)?;
                     self.session_store()?.update_metadata(
                         id,
                         Map::from_iter([("runtime_config".into(), snapshot)]),
                         page.revision,
                     )?;
+                    selected
                 } else {
-                    self.config.update_standard_models(true, |items, active| {
-                        *active = models::selection_index(items, model, &payload["profileId"])?;
-                        selected["models"] = json!(items);
-                        selected["active_model_index"] = json!(*active);
-                        selected["active_model_source"] = json!(source);
+                    let mut selected = Value::Null;
+                    self.config.update(|root| {
+                        selected = choose()?;
+                        for key in [
+                            "active_model_source",
+                            "active_model_index",
+                            "standard_selection_revision",
+                        ] {
+                            if let Some(value) = selected.get(key) {
+                                root.insert(key.into(), value.clone());
+                            }
+                        }
                         Ok(())
                     })?;
-                }
+                    selected
+                };
                 let model = models::active(&selected).ok_or("Selected model is unavailable.")?;
                 Ok((
                     "model.selected",
@@ -787,7 +800,7 @@ impl Kernel {
                 self.config.effective()?;
                 let mut edited_index = 0;
                 let mut added_profile = None;
-                self.config.update_standard_models(false, |items, active| {
+                self.config.update_standard_models(|items, active| {
                     if action == "deleteStandardModel" {
                         let index = models::edit_index(items, payload)?;
                         items.remove(index);

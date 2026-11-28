@@ -221,7 +221,6 @@ impl ConfigStore {
 
     pub fn update_standard_models(
         &self,
-        select: bool,
         edit: impl FnOnce(&mut Vec<Value>, &mut usize) -> io::Result<()>,
     ) -> io::Result<()> {
         self.update(|root| {
@@ -264,9 +263,6 @@ impl ConfigStore {
                 apply(root, &mut active)?;
             }
             root.insert("active_model_index".into(), json!(active));
-            if select {
-                root.insert("active_model_source".into(), json!("standard"));
-            }
             Ok(())
         })?;
         Ok(())
@@ -296,6 +292,7 @@ impl ConfigStore {
                     pending_standard_index(value.as_object().unwrap(), profile.as_object().unwrap())
                 {
                     value["active_model_index"] = json!(index);
+                    value["standard_selection_revision"] = profile["selection_revision"].clone();
                 }
             } else if let Some(chat) = profile.get("chat") {
                 value[&source] = chat.clone();

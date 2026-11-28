@@ -31,6 +31,8 @@
 
 第 12 项已在 Windows release 和真实 Electron 窗口复验。切换前的请求到达第一份配置的回环地址，切换后的三次对话请求全部到达第二份配置的地址。两种存储布局均通过旧配置身份恢复、目标消失时拒绝写入、删除前一行后保留默认模型，以及模型改名后重新打开会话的检查。手工写入重复配置 ID 时，按 ID 的操作会报告歧义。复验入口见[桌面 smoke](../../scripts/verification/rust-electron-smoke.mjs)和[Provider smoke](../../scripts/verification/rust-provider-smoke.mjs)。
 
+分文件布局的回归还检查连续三次切换工作区默认模型，仅将选择写入主配置，逐字节核对 Provider 库存并比较备份文件列表。提交 `3ad8c41` 的 D 盘解包 GUI 在正常启动时记录了 Chromium GPU 进程退出码 `0x80000003`。将 260 个桌面运行文件逐一校验后放在 C 盘，打包 GUI 选中第二份配置，实际请求到达对应的回环地址。D 盘原地的解包 CLI 通过 Skills/Motion 全流程。
+
 提交 `b2923f4` 的 Windows release 通过 164 项 Cargo 测试和 28 组已有 smoke，Cargo 单独标记的 OAuth、LSP、MCP 三项由对应 smoke 执行。四个平台均通过 Skills/Motion，六个 CI 作业全部成功。Windows SDK 在应用内关闭了两种菜单和一个模态对话框，随后继续任务。该批次的两次实体 Esc 人工验收都到时由 SDK 停止。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46087861812)
 
 Motion 的打包验收逐项核对安装副本中的实际文件名和 SHA-256。工作区外的入口在执行前也检查清单，并拒绝额外、缺失或被改写的文件。回归使用一个额外的无害文本文件覆盖旧版仅校验清单内文件的情况。

@@ -54,6 +54,7 @@ let terminalExit;
 let held;
 let namedCredential = 'terminal-only-test-key';
 let releaseNamedQuestion;
+const activationRoutes = [];
 const heldMarkets = new Set();
 let serverFailure;
 function frame(response, data) {response.write(`data: ${JSON.stringify(data)}\n\n`);}
@@ -73,6 +74,17 @@ const server = http.createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     requests.push(body);
+    const lastPrompt = Array.isArray(body.messages) ? body.messages.at(-1)?.content : undefined;
+    if (['VERIFY_CURRENT_ROUTE', 'VERIFY_OLDER_ROUTE', 'VERIFY_NEW_ROUTE'].includes(lastPrompt)) {
+      const older = lastPrompt === 'VERIFY_OLDER_ROUTE';
+      assert.equal(request.url, older ? '/v1/chat/completions' : '/named/v1/chat/completions');
+      assert.equal(body.model, older ? 'tui-fixture' : 'Qwen/Qwen3.8-27B');
+      assert.equal(request.headers.authorization, 'Bearer ' + (older ? 'TUI_FIXTURE_KEY' : namedCredential));
+      activationRoutes.push({prompt: lastPrompt, path: request.url, model: body.model});
+      response.writeHead(200, {'content-type': 'text/event-stream'});
+      finish(response, lastPrompt + '_CONFIRMED');
+      return;
+    }
     if (body.model === 'Qwen/Qwen3.8-27B') {
       assert.equal(request.url, '/named/v1/chat/completions');
       assert.equal(request.headers.authorization, 'Bearer '+namedCredential);
@@ -440,10 +452,30 @@ try {
     terminal.write('env:REVERIE_TUI_MODEL_KEY\r');
     await wait(()=>activeRef().source==='modelscope' && config().active_model_source==='modelscope','current conversation and workspace default activated');
     assert.deepEqual(await readSnapshot(existing),preserved);
-    const future=(await sdk('createSession',{name:'After named provider activation'})).session.id;
+    async function sendFrom(sessionId, caption, prompt) {
+      await wait(() => viewportText().includes(caption), 'model and conversation in footer: ' + caption);
+      terminal.write(prompt + '\r');
+      const saved = database.prepare("SELECT 1 FROM messages WHERE session_id=? AND json_extract(payload,'$.role')='Reverie' AND json_extract(payload,'$.content')=?");
+      await wait(() => saved.get(sessionId, prompt + '_CONFIRMED'), 'authenticated reply saved to ' + sessionId);
+      await wait(() => viewportText().includes(caption), 'ready for the next conversation switch');
+    }
+    await sendFrom(activeId, 'Qwen3.8-27B · New conversation', 'VERIFY_CURRENT_ROUTE');
+    const index = (await sdk('listSessions')).sessions.items.findIndex(item => item.id === existing);
+    assert(index >= 0);
+    terminal.write('/sessions\r');
+    await wait(() => viewportText().includes('Choose conversation'), 'session picker after activation');
+    terminal.write('\x1b[B'.repeat(index) + '\r');
+    await sendFrom(existing, 'tui-fixture · Existing independent standard conversation', 'VERIFY_OLDER_ROUTE');
+    terminal.write('/session new After named provider activation\r');
+    const findFuture = database.prepare("SELECT id FROM conversations WHERE name='After named provider activation' AND deleted=0");
+    await wait(() => findFuture.get(), 'new conversation created from the terminal');
+    const future = findFuture.get().id;
     assert.deepEqual((await readSnapshot(future)).model_ref,activeRef());
+    await sendFrom(future, 'Qwen3.8-27B · After named provider activation', 'VERIFY_NEW_ROUTE');
+    assert.equal(activationRoutes.length, 3);
     await sdk('selectModel',{source:'standard',modelId:'tui-fixture',profileId:'tui-profile'});
     checks.push('Cancelled activation preserved current and default sources; successful activation updated both and a new session inherited it, leaving the older session snapshot intact');
+    checks.push('The terminal footer and authenticated requests match each selected conversation after activation: current ModelScope, older standard, newly created ModelScope');
     privateOutput();
   } finally {
     await admin.request('shutdown'); assert.equal((await admin.closed).code,0);
@@ -463,7 +495,7 @@ try {
   checks.push('Native single-prompt JSON entry and no implicit headless authorization');
   if (serverFailure) throw serverFailure;
   report = {schema: 'reverie.rust-tui-smoke.v1', passed: true, verified_at: new Date().toISOString(), executable,
-    executable_sha256: crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'), root, platform: process.platform, checks,
+    executable_sha256: crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'), root, platform: process.platform, checks, activationRoutes,
     scope: 'Actual native executable and pseudoterminal input/output, shared Rust kernel, SQLite transcript and loopback model fixture; not physical keyboard/IME, GUI, DPI or full terminal acceptance.'};
 } catch (error) {
   console.error(JSON.stringify({error:String(error),terminalExit,prompts,terminal_tail:stripVTControlCharacters(output).slice(-3500)}));

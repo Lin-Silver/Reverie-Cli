@@ -31,6 +31,8 @@
 13. 具名 ModelScope 来源已接通 Rust、SDK、终端和桌面。内置目录有 6 个当前模型，另保留 3 个旧模型供已有会话选择。终端从 `/modelscope` 进入，桌面在“模型与提供商”中设置地址和密钥来源。会话保存模型、思考档、输出上限和超时，连接及凭据由共享 Provider 配置解析。在线刷新按地址与凭据绑定目录，成功的空目录可以覆盖旧列表，刷新失败继续使用上次成功结果。
 14. Rust 终端的 `/modelscope status` 显示当前模型、连接地址和凭据来源。`/modelscope key` 在遮罩输入框接受密钥或 `env:变量名`，`/modelscope endpoint` 可编辑或恢复默认地址。按维护者确认，`/modelscope activate` 切换当前会话，并设置以后新会话的默认来源，其他已有会话保留原选择。`/modelscope model <id>` 只切换当前会话。Windows release 的伪终端验收分别读取了三个会话的配置，并验证取消启用、两种凭据发起的实际请求，以及录入密钥期间到达的模型提问。[终端验收入口](../../scripts/verification/rust-tui-smoke.mjs)
 
+Windows 解包内核 `dc97928` 的终端进一步实测了第 14 项的实际发送行为。启用当下的会话和之后从终端新建的会话均向 `/named/v1/chat/completions` 发送 Qwen 请求。重新打开的旧会话向 `/v1/chat/completions` 发送原标准模型请求。三次都核对了终端底栏、服务端收到的模型和鉴权、写回原会话的回复。同批解包 CLI 的隐式目录共 10,615 个字符，26 项各出现一次；真实 Chrome 完成 8 帧 Motion 预览和导出。Windows Cargo 通过 171 项，3 个专用夹具由各自 smoke 执行，28 组现有功能 smoke 全部通过。
+
 第 13 项的 Windows 独立及桌面解包 release 分别通过了 28 次回环 HTTP 请求，覆盖内联和分文件配置、四个模型家族、会话重启、密钥切换、慢请求期间换地址、空目录和禁用来源。独立终端、实际 Electron 窗口及指定独立 ModelScope 审批模型也已验收。桌面在 Qwen 的思考菜单选择“低”后，服务收到 `/named/v1/chat/completions`、正确的鉴权和 `reasoning_effort=low`。这批使用本机夹具凭据，厂商账户、配额和线上可用模型按第 2.3 节继续跟踪。[SDK 复验入口](../../scripts/verification/rust-modelscope-smoke.mjs)
 
 同批 Windows 解包 CLI 的普通请求列出全部 26 个有效技能，共 10,519 字符。实际浏览器完成 Motion 预览后，命令导出 CSS、WAAPI 和类型声明；Strict、只读和审计也通过。上一开发提交 `8d5b23d` 的四平台 Rust、桌面和文档共六个 CI 作业均通过。[Skills 验收入口](../../scripts/verification/rust-skills-smoke.mjs) · [上一提交 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46104855421)

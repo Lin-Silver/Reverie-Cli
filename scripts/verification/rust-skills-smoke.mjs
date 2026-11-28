@@ -35,7 +35,17 @@ assert(registered.includes('photo-to-3d/SKILL.md'));assert(registered.includes('
 assert(registered.includes('reverie-motion/SKILL.md'));
 const motionFiles=JSON.parse(fs.readFileSync(new URL('../../ReverieCli-rs/resources/builtin_skills/reverie-motion-files.json',import.meta.url),'utf8'));
 for(const relative of ['LICENSE','NOTICE.md','PROVENANCE.json','LICENSES/OpenMotion-MIT.txt'])assert(relative in motionFiles);
-for(const [relative,expected] of Object.entries(motionFiles))assert.equal(hash(fs.readFileSync(path.join(assets,'reverie-motion',relative))),expected,relative);
+const motionRoot=path.join(assets,'reverie-motion');
+assert(fs.lstatSync(motionRoot).isDirectory());
+const installedMotion={};
+for(const entry of fs.readdirSync(motionRoot,{recursive:true,withFileTypes:true})) {
+  if(entry.isDirectory())continue;
+  const file=path.join(entry.parentPath,entry.name);
+  const relative=path.relative(motionRoot,file).split(path.sep).join('/');
+  assert(entry.isFile() && Object.hasOwn(motionFiles,relative),`Unreviewed Motion entry: ${relative}`);
+  installedMotion[relative]=hash(fs.readFileSync(file));
+}
+assert.deepEqual(installedMotion,motionFiles,'Installed Motion file list and hashes must match the reviewed package');
 checks.push(`Standalone deployment matches all ${Object.keys(motionFiles).length} reviewed Motion files and licenses`);
 
 function skill(base,name,body,implicit=true) {

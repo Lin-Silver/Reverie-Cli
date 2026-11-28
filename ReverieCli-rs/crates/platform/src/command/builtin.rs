@@ -1,6 +1,10 @@
 use crate::Result;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub const MOTION_ENTRY: &str = "runtime/bin/reverie-motion.mjs";
 const FILES: &str = include_str!("../../../../resources/builtin_skills/reverie-motion-files.json");
@@ -34,18 +38,30 @@ pub(super) fn motion_guard(install: &Path, operand: &Path) -> Result<Option<(Str
     if !registered.iter().any(|p| p == "reverie-motion/SKILL.md") {
         return Err("Motion is not registered in the installed builtin skill manifest.".into());
     }
-    for (relative, hash) in serde_json::from_str::<BTreeMap<String, String>>(FILES)? {
-        let file = package.join(relative);
-        if file.canonicalize()? != file || !file.is_file() {
+    let mut expected: BTreeMap<PathBuf, String> = serde_json::from_str(FILES)?;
+    for entry in walkdir::WalkDir::new(&package).min_depth(1) {
+        let entry = entry?;
+        let file = entry.path();
+        if file.canonicalize()? != file {
             return Err("Invalid installed Motion file location.".into());
         }
-        let digest: String = Sha256::digest(fs::read(&file)?)
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let hash = expected
+            .remove(file.strip_prefix(&package)?)
+            .filter(|_| entry.file_type().is_file())
+            .ok_or("Unreviewed file in the installed Motion package.")?;
+        let digest: String = Sha256::digest(fs::read(file)?)
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
         if digest != hash {
             return Err("Installed Motion files differ from the reviewed package.".into());
         }
+    }
+    if !expected.is_empty() {
+        return Err("The installed Motion package is missing reviewed files.".into());
     }
     let guard = assets.join("reverie-motion-host.mjs");
     if guard.canonicalize()? != guard || fs::read(&guard)? != GUARD {
@@ -101,12 +117,18 @@ mod tests {
         assert!(motion_guard(tmp.path(), &entry).is_err());
         fs::write(manifest, r#"["reverie-motion/SKILL.md"]"#).unwrap();
         assert!(motion_guard(tmp.path(), &entry).unwrap().is_some());
+        let unexpected = package.join("runtime/unlisted.txt");
+        fs::write(&unexpected, "not included in the reviewed package").unwrap();
+        assert!(motion_guard(tmp.path(), &entry).is_err());
+        fs::remove_file(unexpected).unwrap();
         assert!(
             motion_guard(tmp.path(), &package.join("runtime/lib/cli.mjs"))
                 .unwrap()
                 .is_none()
         );
         fs::write(package.join("runtime/lib/cli.mjs"), "// changed module").unwrap();
+        assert!(motion_guard(tmp.path(), &entry).is_err());
+        fs::remove_file(package.join("runtime/lib/cli.mjs")).unwrap();
         assert!(motion_guard(tmp.path(), &entry).is_err());
     }
 }

@@ -25,7 +25,7 @@
 7. 已接入窗口截图、裁剪、缩放与模型视觉输入。Windows release 使用真实窗口颜色和回环请求的 PNG 字节验证了视觉与纯文本两条路径。
 8. Windows 已通过截图坐标点击和拖拽验收。自有窗口的事件日志记录了实际落点；过期引用、窗口移动、遮挡和 Strict 拒绝均没有增加输入计数。两个独立 SDK 内核已验证同一桌面的占用、取消与恢复。纯文本会话也已验证由夹具注入的系统 Escape 取消原生等待。[桌面控制说明](computer-use.md)
 9. 已接入 `computer_focus` 和 `computer_type_text`。Windows SDK 已在真实编辑框中聚焦、选区插入中文和 emoji，并独立核对了保存文件。下一项是有明确目标窗口的组合键，验收时检查实际按键效果、系统保留组合和取消时的按键释放。继续补齐 Provider、模式及独立组件，四档物理 DPI 和跨平台正式发行沿用第 4、5 节的验收要求。
-   维护者已确认 Escape 的行为。模型可向指定窗口发送 Escape 来关闭菜单或对话框；用户亲按 Escape 时仍取消桌面任务。验收分别读回应用状态与任务状态。
+   Windows 已接入应用内 Escape。模型可在指定窗口关闭 WinForms 菜单、原生菜单和模态对话框，任务继续运行。用户亲按 Escape 的停止路径独立保留。系统保留组合继续拒绝，带修饰键的应用快捷键及其中断释放仍待验收。[操作与复验方法](computer-use.md)
 10. 标准模型的环境变量选择器已连到 Rust SDK。Windows release 和桌面表单实际验证了变量名建议、切换密钥来源、保存后保留上下文长度与自定义请求头，以及向回环服务发送认证请求。SDK 另测了四种模型协议。本轮验证使用独立测试变量。
 
 `7f17e62` 的 Windows release 与桌面解包 CLI 具有相同 SHA-256 `e3147a5056ff8adce388f6934317731beb23097c05a83909ed5bc913e71ad2a4`。两者均通过 17 项 Skills 检查。解包版发给回环模型的普通请求中，技能目录共 10,439 个字符，26 个有效技能各出现一次。Motion 在真实 Chrome 中生成 8 帧并导出 CSS、WAAPI 和类型声明。原包、仓库、release、桌面暂存和解包目录中的 30 个 Motion 文件逐一匹配。Windows Cargo 通过 163 项，另有 3 项由独立夹具执行。28 个既有 smoke 均正常退出。GitHub Test 六个作业全部通过，其中 Windows x64、Linux x64、macOS arm64 和 macOS x64 均通过 Skills 检查。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46005355224)

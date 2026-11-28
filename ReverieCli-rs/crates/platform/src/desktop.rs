@@ -48,9 +48,13 @@ fn physical<T>(operation: impl FnOnce() -> Option<T>) -> Option<T> {
     result
 }
 
+fn window_handle(id: &str) -> Option<usize> {
+    id.strip_prefix("w-")?.parse().ok()
+}
+
 impl Window {
     pub fn observe(id: &str, pid: u32) -> Option<Self> {
-        let handle = id.strip_prefix("w-")?.parse().ok()?;
+        let handle = window_handle(id)?;
         physical(|| Self::read(handle, pid))
     }
 
@@ -158,6 +162,82 @@ pub enum Button {
 
 pub fn escape_down() -> bool {
     unsafe { GetAsyncKeyState(i32::from(VK_ESCAPE)) < 0 }
+}
+
+/// Queue Escape for this application's active window without changing physical keyboard state.
+pub fn application_escape(id: &str, expected_pid: u64) -> Result<(), Failure> {
+    let window = window_handle(id)
+        .ok_or_else(|| refused("STALE_WINDOW", "Invalid window identity."))?
+        as HWND;
+    let mut pid = 0;
+    let thread = unsafe { GetWindowThreadProcessId(window, &mut pid) };
+    let mut gui = GUITHREADINFO {
+        cbSize: size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    if thread == 0
+        || u64::from(pid) != expected_pid
+        || unsafe { GetGUIThreadInfo(thread, &mut gui) } == 0
+        || gui.hwndActive != window
+        || unsafe { IsWindowEnabled(window) } == 0
+    {
+        return Err(refused(
+            "TARGET_NOT_FOCUSED",
+            "Observe the active menu or dialog window.",
+        ));
+    }
+    let owns = |handle: HWND| {
+        let mut owner = 0;
+        !handle.is_null()
+            && unsafe { GetWindowThreadProcessId(handle, &mut owner) } == thread
+            && owner == pid
+            && unsafe { GetAncestor(handle, GA_ROOT) } == window
+    };
+    let failed = || {
+        refused(
+            "INPUT_REJECTED",
+            "Windows refused the application Escape message.",
+        )
+    };
+    if gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE) != 0 {
+        if !owns(gui.hwndMenuOwner) {
+            return Err(refused(
+                "TARGET_NOT_FOCUSED",
+                "The active menu belongs to another window.",
+            ));
+        }
+        return if unsafe { PostMessageW(gui.hwndMenuOwner, WM_CANCELMODE, 0, 0) } != 0 {
+            Ok(())
+        } else {
+            Err(failed())
+        };
+    }
+    if !owns(gui.hwndFocus) {
+        return Err(refused(
+            "TARGET_NOT_FOCUSED",
+            "The observed window has no focused input target.",
+        ));
+    }
+    let scan = unsafe { MapVirtualKeyW(u32::from(VK_ESCAPE), MAPVK_VK_TO_VSC) };
+    let down = 1 | (scan << 16);
+    let posted = |message, bits: u32| unsafe {
+        PostMessageW(
+            gui.hwndFocus,
+            message,
+            usize::from(VK_ESCAPE),
+            bits as i32 as isize,
+        ) != 0
+    };
+    if !posted(WM_KEYDOWN, down) {
+        return Err(failed());
+    }
+    if !posted(WM_KEYUP, down | 0xc0000000) {
+        return Err(Failure {
+            uncertain: true,
+            ..failed()
+        });
+    }
+    Ok(())
 }
 
 impl Window {

@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows.Forms;
 
 public class DesktopFixture : Form {
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SetActiveWindow(IntPtr window);
     int clicks;
     Label counter;
     TextBox editor;
@@ -62,6 +63,40 @@ public class DesktopFixture : Form {
         Controls.Add(restore);
         if (Environment.GetEnvironmentVariable("REVERIE_EXTENDED_FIXTURE") == "1") {
             Size = new Size(1000, 760);
+            var openDialog = new Button { Text="Open dismissal dialog", Location=new Point(710,25), Size=new Size(200,34) };
+            openDialog.Click += delegate {
+                BeginInvoke(new Action(delegate {
+                    using (var dialog=new Form { Text="Reverie dismissal dialog", StartPosition=FormStartPosition.CenterParent }) {
+                        var cancel=new Button { Text="Cancel", DialogResult=DialogResult.Cancel };
+                        dialog.Controls.Add(cancel);
+                        dialog.CancelButton=cancel;
+                        var result=dialog.ShowDialog(this);
+                        File.WriteAllText(output+".dialog",result.ToString());
+                    }
+                }));
+            };
+            Controls.Add(openDialog);
+            var openMenu=new Button { Text="Open dismissal menu", Location=new Point(710,65), Size=new Size(200,34) };
+            var menu=new ContextMenuStrip();
+            menu.Items.Add("Keep this menu open");
+            openMenu.Click += delegate {
+                SetActiveWindow(Handle);
+                openMenu.Focus();
+                menu.Show(openMenu,0,openMenu.Height);
+            };
+            menu.Opened += delegate { File.WriteAllText(output+".menu","open"); };
+            menu.Closed += delegate(object sender,ToolStripDropDownClosedEventArgs e){File.WriteAllText(output+".menu",e.CloseReason.ToString());};
+            Controls.Add(openMenu);
+            var nativeMenu=new ContextMenu(new[]{new MenuItem("Keep native menu open")});
+            var openNativeMenu=new Button { Text="Open native menu", Location=new Point(420,215), Size=new Size(180,32) };
+            nativeMenu.Popup += delegate { File.WriteAllText(output+".native-menu","open"); };
+            openNativeMenu.Click += delegate { BeginInvoke(new Action(delegate {
+                SetActiveWindow(Handle);
+                openNativeMenu.Focus();
+                nativeMenu.Show(openNativeMenu,new Point(0,openNativeMenu.Height));
+                File.WriteAllText(output+".native-menu","closed");
+            })); };
+            Controls.Add(openNativeMenu);
             Label dragCount = new Label { Name="dragCount", Text="Drag completed: 0", Location=new Point(710,120), Size=new Size(230,30) };
             Controls.Add(dragCount);
             bool dragging = false; Point origin = Point.Empty; int completed = 0;

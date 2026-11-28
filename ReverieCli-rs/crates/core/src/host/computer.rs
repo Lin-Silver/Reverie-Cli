@@ -142,6 +142,14 @@ const TOOLS: &[Tool] = &[
         &["timeout_ms"],
         true,
     ),
+    #[cfg(windows)]
+    tool(
+        "computer_press_key",
+        "Send application-local Escape to the active window of the observed application. Use it to dismiss a menu or dialog and observe the result.",
+        &["window_id", "key"],
+        &[],
+        true,
+    ),
     tool(
         "computer_type_text",
         "Insert literal text at an observed editable control. Semantic input is the default; physical=true permits focus and keyboard input. Maximum 10,000 UTF-8 bytes.",
@@ -209,6 +217,7 @@ impl Tool {
                 "value" => json!({"type":"string","maxLength":65536}),
                 "direction" => json!({"type":"string","enum":["up","down","left","right"]}),
                 "amount" => json!({"type":"integer","minimum":1,"maximum":100}),
+                "key" => json!({"type":"string","enum":["Escape","escape","Esc","esc"]}),
                 "action" => json!({"type":"string","enum":["focus","move","resize","minimize","maximize","restore"]}),
                 "x"|"y" => json!({"type":"integer","minimum":i32::MIN,"maximum":i32::MAX}),
                 "width"|"height" => json!({"type":"integer","minimum":1,"maximum":i32::MAX}),
@@ -405,7 +414,7 @@ impl Run {
         if tool.writes || name == "computer_list_windows" {
             state.pointer = None;
         }
-        Ok(result(state.execute(tool, p, cancel).await))
+        Ok(result(state.execute(tool, p, control).await))
     }
 }
 
@@ -446,7 +455,8 @@ impl Desktop {
         ))
     }
 
-    async fn execute(&mut self, tool: &Tool, p: &Value, cancel: &CancellationToken) -> Value {
+    async fn execute(&mut self, tool: &Tool, p: &Value, control: &super::RunControl) -> Value {
+        let cancel = &control.cancel;
         let name = tool.name.trim_start_matches("computer_");
         let mut command = name.replace('_', "-");
         let mut args = Vec::new();
@@ -485,6 +495,35 @@ impl Desktop {
             self.refs.clear();
             self.window = None;
             return error;
+        }
+        #[cfg(windows)]
+        if name == "press_key" {
+            let Some(pid) = window.as_ref().and_then(|w| w["pid"].as_u64()) else {
+                return failure(
+                    name,
+                    "STALE_WINDOW",
+                    "Observe the active window again.",
+                    false,
+                );
+            };
+            let Ok(_commit) = super::lock(&control.commit_gate) else {
+                return failure(name, "INPUT_BUSY", "Desktop input is unavailable.", false);
+            };
+            if reverie_platform::desktop::escape_down() {
+                control.cancel.cancel();
+            }
+            if cancel.is_cancelled() {
+                return failure(name, "CANCELLED", "Cancelled before sending Escape.", false);
+            }
+            return match reverie_platform::desktop::application_escape(
+                p["window_id"].as_str().unwrap_or_default(),
+                pid,
+            ) {
+                Ok(()) => json!({"version":"2.6","ok":true,"command":"press-key","data":{
+                    "window_id":p["window_id"],"key":"Escape","verification_scope":"window_message_queue",
+                    "disposition":{"delivery":"delivered_unverified","retry":"unsafe"}}}),
+                Err(e) => failure(name, e.code, e.message, e.uncertain),
+            };
         }
         for flag in ["app", "name", "role", "property", "direction"] {
             if let Some(value) = p[flag].as_str() {
@@ -601,6 +640,20 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn application_escape_requires_an_exact_window_and_has_no_global_override() {
+        let index = TOOLS
+            .iter()
+            .position(|tool| tool.name == "computer_press_key")
+            .unwrap();
+        let schema = &VALIDATORS[index];
+        assert_eq!(read_only("computer_press_key"), Some(false));
+        assert!(schema.is_valid(&json!({"key":"Escape","window_id":"w-1"})));
+        assert!(!schema.is_valid(&json!({"key":"Escape"})));
+        assert!(!schema.is_valid(&json!({"key":"Escape","window_id":"w-1","force":true})));
+        assert!(!schema.is_valid(&json!({"key":"Alt+Tab","window_id":"w-1"})));
+    }
 
     #[test]
     fn window_id_reuse_requires_the_same_process_instance() {

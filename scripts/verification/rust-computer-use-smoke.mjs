@@ -36,7 +36,7 @@ function data(reply) {
 }
 function refusal(reply, expected) {
   assert.equal(reply.success, false);
-  assert.equal(reply.data.error.code, expected, reply.error);
+  assert.equal(reply.data?.error?.code, expected, reply.error);
   assert.deepEqual(reply.data.error.disposition, {delivery: 'not_delivered', retry: 'safe'});
 }
 function findNode(node, name) {
@@ -103,6 +103,42 @@ function* interactive() {
 function* foreign() {
   refusal(yield tool('click', {ref:previousRef}), 'STALE_REF');
   checks.push('new run rejected the previous run control ref');
+}
+async function* applicationEscape() {
+  yield* discover();
+  refusal(yield tool('press_key',{window_id:'never-listed',key:'Escape'}),'UNKNOWN_WINDOW');
+  refusal(yield tool('press_key',{window_id:windowId,key:'Alt+Tab'}),'INVALID_ARGS');
+  data(yield tool('click',{ref:yield* control('Open dismissal dialog')}));
+  let dialog;
+  const deadline=Date.now()+5000;
+  do {
+    const windows=data(yield tool('list_windows',{app:'ReverieRustFixture.exe'}));
+    dialog=windows.find(w=>w.pid===fixture.pid && w.title==='Reverie dismissal dialog');
+    if(!dialog) await delay(25);
+  } while(!dialog && Date.now()<deadline);
+  assert(dialog,'Owned modal dialog did not open');
+  refusal(yield tool('press_key',{window_id:windowId,key:'Escape'}),'TARGET_NOT_FOCUSED');
+  assert(!fs.existsSync(artifact+'.dialog'));
+  data(yield tool('press_key',{window_id:dialog.id,key:'Escape'}));
+  await untilFile(artifact+'.dialog','Cancel');
+  yield* discover();
+  data(yield tool('click',{ref:yield* control('Open dismissal menu')}));
+  await untilFile(artifact+'.menu','open');
+  data(yield tool('press_key',{window_id:windowId,key:'Escape'}));
+  await untilFile(artifact+'.menu','Keyboard');
+  data(yield tool('click',{ref:yield* control('Open native menu')}));
+  await untilFile(artifact+'.native-menu','open');
+  data(yield tool('press_key',{window_id:windowId,key:'Escape'}));
+  await untilFile(artifact+'.native-menu','closed');
+  checks.push('Window-local Escape dismissed an owned modal, a WinForms menu and a native menu, refused the wrong window and left the SDK task running');
+}
+async function untilFile(file,text) {
+  const deadline=Date.now()+5000;
+  while(Date.now()<deadline) {
+    if(fs.existsSync(file) && fs.readFileSync(file,'utf8')===text) return;
+    await delay(20);
+  }
+  assert.fail('Fixture did not record '+text+' in '+path.basename(file));
 }
 function* screenshot(vision) {
   yield* discover();
@@ -307,6 +343,7 @@ const server = http.createServer(async (req,res) => {
     const names = request.tools.map(t => t.function.name);
     assert(names.includes('computer_status'));
     assert.equal(names.includes('computer_click'), expectedTools);
+    assert.equal(names.includes('computer_press_key'), expectedTools && process.platform==='win32');
     imageBlocks=request.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(b=>b.type==='image_url'):[]);
     const last = request.messages.findLast(m=>m.role==='tool') ?? request.messages.at(-1);
     const next = await scenario.next(last.role === 'tool' ? JSON.parse(last.content) : undefined);
@@ -425,6 +462,7 @@ try {
   await run('desktop-controls',statusOnly ? status : interactive);
   if (!statusOnly) {
     await run('desktop-new-run',foreign);
+    await run('desktop-local-escape',applicationEscape);
     await run('desktop-text-image',()=>screenshot(false));
     await run('desktop-vision',()=>screenshot(true));
     if(physical){

@@ -95,6 +95,17 @@ fn selected<'a>(cfg: &Value, rows: &'a [Value], live: bool) -> Option<&'a Value>
 }
 
 fn reasoning(row: &Value, raw: &str) -> Value {
+    let control = row["thinking_control"]
+        .as_str()
+        .unwrap_or(if row["thinking"] == true {
+            "fixed"
+        } else {
+            "none"
+        });
+    if matches!(control, "none" | "fixed") {
+        let value = if control == "fixed" { "fixed" } else { "" };
+        return json!({"control":control,"options":[],"value":value});
+    }
     let options = row["thinking_options"]
         .as_array()
         .map(Vec::as_slice)
@@ -111,22 +122,12 @@ fn reasoning(row: &Value, raw: &str) -> Value {
         "extra_high" | "xhigh" if !allows("xhigh") => "max",
         v => v,
     };
-    let control = row["thinking_control"]
-        .as_str()
-        .unwrap_or(if row["thinking"] == true {
-            "fixed"
-        } else {
-            "none"
-        });
     let value = if allows(value) {
         value
     } else if allows(text(row, "default_thinking_choice")) {
         text(row, "default_thinking_choice")
     } else {
-        options
-            .first()
-            .and_then(|o| o["id"].as_str())
-            .unwrap_or(if control == "fixed" { "fixed" } else { "" })
+        options.first().and_then(|o| o["id"].as_str()).unwrap_or("")
     };
     json!({"control":control,"options":options,"value":value})
 }
@@ -225,6 +226,9 @@ pub(super) fn runtime(cfg: &Value) -> Option<Value> {
         "api_key":key(cfg)?,"max_tokens":max,"request_timeout":positive(cfg,"timeout",300),
         "max_context_tokens":row["context_length"].as_u64().unwrap_or_else(||positive(cfg,"max_context_tokens",262144)),"supports_vision":row["vision"]==true,"tool_calling":row["tool_calling"]!=false,
         "temperature":1.0,"top_p":1.0});
+    if matches!(choice["control"].as_str(), Some("none" | "fixed")) {
+        return Some(model);
+    }
     let kwargs = match builtin(id).map(|row| text(row, "id")).unwrap_or(id) {
         DEFAULT_MODEL => {
             model["top_p"] = json!(0.95);

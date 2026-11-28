@@ -148,7 +148,19 @@ try {
     assert.equal(source(await request('getModelSources',{sessionId:session})).selected_model_id,unknown.id);
     assert.equal(traffic.length,before);
     await talk(session,'first',unknown.id);
-    first.status=200; first.catalog={data:[]};
+    first.status=200;
+    first.catalog={data:[{id:qwen,reasoning:false},{id:glm,thinking_control:'fixed'}]};
+    rows=source(await refresh(session));
+    for (const [id,control] of [[qwen,'none'],[glm,'fixed']]) {
+      const row=rows.models.find(m=>m.id===id);
+      assert.equal(row.reasoning.control,control);
+      assert.deepEqual(row.reasoning.options,[]);
+      await select(id,'high',session);
+      const actual=await talk(session,'first',id);
+      assert.equal(actual.kwargs,undefined);
+      assert.equal(actual.effort,undefined);
+    }
+    first.catalog={data:[]};
     const empty=source(await refresh(session));
     assert.equal(empty.catalog_live,true); assert.deepEqual(empty.models,[]);
     await closeBridge(); await launch(); assert.deepEqual(source(await request('getModelSources',{sessionId:session})).models,[]);

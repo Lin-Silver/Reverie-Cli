@@ -34,6 +34,8 @@
 
 同批 Windows 解包 CLI 的普通请求列出全部 26 个有效技能，共 10,519 字符。实际浏览器完成 Motion 预览后，命令导出 CSS、WAAPI 和类型声明；Strict、只读和审计也通过。上一开发提交 `8d5b23d` 的四平台 Rust、桌面和文档共六个 CI 作业均通过。[Skills 验收入口](../../scripts/verification/rust-skills-smoke.mjs) · [上一提交 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46104855421)
 
+复查 API 目录和内置目录冲突的情况时，`97c46af` 的解包 CLI 在 Qwen 已声明禁用思考后仍发出了 `enable_thinking=true`。现已改为遵守实时目录的能力声明。对禁用思考的 Qwen 和固定思考的 GLM，设置界面隐藏档位，实际请求省略思考参数。扩展后的 Windows release 检查发出了 34 次本机 HTTP 请求，并检查了两种配置布局。[复验脚本](../../scripts/verification/rust-modelscope-smoke.mjs)
+
 第 12 项已在 Windows release 和真实 Electron 窗口复验。切换前的请求到达第一份配置的回环地址，切换后的三次对话请求全部到达第二份配置的地址。两种存储布局均通过旧配置身份恢复、目标消失时拒绝写入、删除前一行后保留默认模型，以及模型改名后重新打开会话的检查。手工写入重复配置 ID 时，按 ID 的操作会报告歧义。复验入口见[桌面 smoke](../../scripts/verification/rust-electron-smoke.mjs)和[Provider smoke](../../scripts/verification/rust-provider-smoke.mjs)。
 
 分文件布局的回归还检查连续三次切换工作区默认模型，仅将选择写入主配置，逐字节核对 Provider 库存并比较备份文件列表。提交 `3ad8c41` 的 D 盘解包 GUI 在正常启动时记录了 Chromium GPU 进程退出码 `0x80000003`。将 260 个桌面运行文件逐一校验后放在 C 盘，打包 GUI 选中第二份配置，实际请求到达对应的回环地址。D 盘原地的解包 CLI 通过 Skills/Motion 全流程。

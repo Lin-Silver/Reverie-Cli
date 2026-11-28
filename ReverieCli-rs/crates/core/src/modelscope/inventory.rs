@@ -157,10 +157,15 @@ fn parse(payload: &Value) -> crate::Result<Vec<Value>> {
                 row["thinking_control"] = json!(mode);
             }
             if let Some(opts) = raw["thinking_options"].as_array() {
-                let options = opts.iter().filter_map(|o| {
-                let id=o["id"].as_str()?;
-                Some(json!({"id":id,"label":o["label"].as_str().unwrap_or(id),"description":text(o,"description")}))
-            }).collect::<Vec<_>>();
+                let options = opts
+                    .iter()
+                    .filter_map(|option| {
+                        let id = option["id"].as_str()?;
+                        let label = option["label"].as_str().unwrap_or(id);
+                        let description = text(option, "description");
+                        Some(json!({"id":id, "label":label, "description":description}))
+                    })
+                    .collect::<Vec<_>>();
                 row["thinking_options"] = json!(options);
             }
             if let Some(choice) = raw["default_thinking_choice"].as_str() {

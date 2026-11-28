@@ -41,4 +41,6 @@ node scripts/verification/rust-computer-use-smoke.mjs --status-only
 
 内核在投递前检查前台窗口、进程、控件焦点以及用户已经按住的修饰键和目标键，并一次提交整组按下与释放事件。Win 组合、带修饰键的 Escape、Alt+Tab、Alt+F4、Alt+Space 和 Ctrl+Alt+Delete 均被拒绝。工具返回 `foreground_input_queue` 表示 Windows 接收了输入事件，调用者需重新观察应用效果。其他桌面程序或用户仍可能改变前台。
 
+普通组合键的目标在后台时，工具返回 `TARGET_NOT_FOCUSED`。模型须显式调用 `computer_window` 的 `focus` 操作并重发按键。双窗口检查让第二个非模态窗口持有前台，再向仍可用的第一个窗口发送 Ctrl+S。夹具确认前台仍属于第二个窗口，且该窗口未收到保存命令。显式聚焦第一个窗口及其编辑框后，重新发送 Ctrl+S 可以读回选区。
+
 `c296323` 的 Windows 解包版通过了上述 13 项窗口检查。独立人工验收使用同一二进制和回环模型。内核完成一次按应用名过滤的窗口查询后等待模型响应，维护者亲按 Esc，运行于 2026-11-28 01:08:35 UTC 返回 `cancelled`。夹具记录 `waiting=true`、`sdk_stop_sent=false`，未注入按键。更早两个由超时清理的样本保留为未通过的人工尝试。

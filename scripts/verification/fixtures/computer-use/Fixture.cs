@@ -49,7 +49,13 @@ public class DesktopFixture : Form {
         Controls.Add(new Button { Text="Identical control", Location=new Point(20,350), Size=new Size(170,30) });
         Controls.Add(new Button { Text="Identical control", Location=new Point(20,390), Size=new Size(170,30) });
         Button second = new Button { Name="second", Text="Open second window", Location=new Point(20,450), Size=new Size(220,35) };
-        second.Click += delegate { new Form { Text="Reverie Verification Second Window", Size=new Size(350,200) }.Show(this); };
+        second.Click += delegate {
+            var other=new Form { Text="Reverie Verification Second Window", Size=new Size(350,200), KeyPreview=true };
+            other.KeyDown += delegate(object sender, KeyEventArgs e) {
+                if(e.KeyData==(Keys.Control|Keys.S)) File.WriteAllText(output+".second-save","received");
+            };
+            other.Show(this);
+        };
         Controls.Add(second);
         Button backup = new Button { Name="backupClipboard", Text="Backup clipboard", Location=new Point(20,490), Size=new Size(130,30) };
         backup.Click += delegate {
@@ -166,6 +172,11 @@ public class DesktopFixture : Form {
                 if(!editor.Focused || editor.Text!="A12Z"){m.Result=IntPtr.Zero;return;}
                 editor.Select(1,2);
                 break;
+            case 7:
+                var active=Form.ActiveForm;
+                m.Result=active!=null && active.Text=="Reverie Verification Second Window" &&
+                         GetForegroundWindow()==active.Handle && Enabled ? new IntPtr(1) : IntPtr.Zero;
+                return;
             }
             m.Result=new IntPtr(1);return;
         }

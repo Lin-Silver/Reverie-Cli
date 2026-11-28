@@ -168,6 +168,21 @@ async function* windowShortcuts() {
   refusal(yield shortcut('Alt+Shift+Tab'),'INVALID_ARGS');
   refusal(yield shortcut('Win+R'),'INVALID_ARGS');
   checks.push('Strict refused a window shortcut then reused a session grant for different keys; real Ctrl+S read back word and full-editor selections');
+  data(yield tool('click',{ref:yield* control('Open second window')}));
+  const windows=data(yield tool('list_windows',{app:'ReverieRustFixture.exe'}));
+  const other=windows.find(w=>w.pid===fixture.pid && w.title==='Reverie Verification Second Window');
+  assert(other,'Second nonmodal window must be visible');
+  data(yield tool('window',{window_id:other.id,action:'focus'}));
+  changeFixture(7);
+  refusal(yield shortcut('Ctrl+S'),'TARGET_NOT_FOCUSED');
+  changeFixture(7);
+  assert(!fs.existsSync(artifact+'.second-save'));
+  data(yield tool('window',{window_id:windowId,action:'focus'}));
+  data(yield tool('focus',{ref:yield* control('Verification editor')}));
+  data(yield shortcut('End'));
+  data(yield shortcut('Ctrl+S'));
+  await untilFile(artifact+'.selection','');
+  checks.push('An enabled background window rejected Ctrl+S while the other fixture kept foreground and received no save; explicit focus restored delivery');
 }
 function* shortcutDuringStop() {
   yield* prepareShortcutEditor();
@@ -527,7 +542,7 @@ try {
   if (physical || shortcutsOnly) {
     await run('desktop-shortcuts',windowShortcuts,'full_control',false,[
       ['computer_list_windows','session'],['computer_window','session'],['computer_find','session'],
-      ['computer_set_value','session'],['computer_focus','session'],['computer_press_key','deny'],['computer_press_key','session']]);
+      ['computer_set_value','session'],['computer_focus','session'],['computer_press_key','deny'],['computer_press_key','session'],['computer_click','session']]);
     await run('desktop-shortcut-stop',shortcutDuringStop,'full_control','shortcut');
   }
   await run('desktop-low-level',restricted,'read_only');

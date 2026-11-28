@@ -188,7 +188,7 @@ if (process.argv.includes('--fixture-child')) {
   let timer;
   const exitCode = await new Promise((resolve, reject) => {
     child.on('error', reject);
-    child.on('exit', code => {clearTimeout(timer); resolve(code);});
+    child.on('close', code => {clearTimeout(timer); resolve(code);});
     timer = setTimeout(() => {child.kill(); reject(new Error('Rust LSP fixture build/test exceeded 15 minutes'));}, 900000);
   });
   const auditRows = fs.existsSync(audit) ? fs.readFileSync(audit, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];

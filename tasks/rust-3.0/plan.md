@@ -36,6 +36,8 @@
 
 复查 API 目录和内置目录冲突的情况时，`97c46af` 的解包 CLI 在 Qwen 已声明禁用思考后仍发出了 `enable_thinking=true`。现已改为遵守实时目录的能力声明。对禁用思考的 Qwen 和固定思考的 GLM，设置界面隐藏档位，实际请求省略思考参数。扩展后的 Windows release 检查发出了 34 次本机 HTTP 请求，并检查了两种配置布局。[复验脚本](../../scripts/verification/rust-modelscope-smoke.mjs)
 
+`a9edb9a` 的 Windows release、桌面暂存和解包内核 SHA-256 均为 `9a02a3da5a1a44398f6efcb1ae4636a16976233bb3099e41609fe696fbcaa792`。解包版的隐式目录有 26 项、10,525 字符；30 个 Motion 文件与原包和 Git 对象逐一匹配，Chrome 156 生成 8 帧。独立及解包 CLI 均完成 34 次 ModelScope 回环请求。本机 Cargo 通过 171 项，3 个专用夹具由 smoke 执行，28 组现有 smoke 均通过。LSP smoke 首次在原生用例成功退出后读漏最终输出；改为等待子进程标准流关闭后，原有断言全部通过。打包 GUI 在 C 盘逐文件核对的 260 个桌面运行文件上完成了设置、选低思考档和发送消息。D 盘解包 CLI 原地通过，D 盘正常启动 GUI 时的 GPU 退出问题仍在发行验收中。[功能提交](https://github.com/Lin-Silver/Reverie-Cli/commit/a9edb9a7cb1e3e8cf29f8e9c3b7a3c013b8f2c7d)
+
 第 12 项已在 Windows release 和真实 Electron 窗口复验。切换前的请求到达第一份配置的回环地址，切换后的三次对话请求全部到达第二份配置的地址。两种存储布局均通过旧配置身份恢复、目标消失时拒绝写入、删除前一行后保留默认模型，以及模型改名后重新打开会话的检查。手工写入重复配置 ID 时，按 ID 的操作会报告歧义。复验入口见[桌面 smoke](../../scripts/verification/rust-electron-smoke.mjs)和[Provider smoke](../../scripts/verification/rust-provider-smoke.mjs)。
 
 分文件布局的回归还检查连续三次切换工作区默认模型，仅将选择写入主配置，逐字节核对 Provider 库存并比较备份文件列表。提交 `3ad8c41` 的 D 盘解包 GUI 在正常启动时记录了 Chromium GPU 进程退出码 `0x80000003`。将 260 个桌面运行文件逐一校验后放在 C 盘，打包 GUI 选中第二份配置，实际请求到达对应的回环地址。D 盘原地的解包 CLI 通过 Skills/Motion 全流程。

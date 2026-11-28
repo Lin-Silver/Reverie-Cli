@@ -28,9 +28,13 @@
    Windows 已接入应用内 Escape。模型可在指定窗口关闭 WinForms 菜单、原生菜单和模态对话框，任务继续运行。用户亲按 Escape 的停止路径独立保留。系统保留组合继续拒绝，带修饰键的应用快捷键及其中断释放仍待验收。[操作与复验方法](computer-use.md)
 10. 标准模型的环境变量选择器已连到 Rust SDK。Windows release 和桌面表单实际验证了变量名建议、切换密钥来源、保存后保留上下文长度与自定义请求头，以及向回环服务发送认证请求。SDK 另测了四种模型协议。本轮验证使用独立测试变量。
 
-提交 `b2923f4` 的 Windows release 通过 164 项 Cargo 测试和 28 组已有 smoke，Cargo 单独标记的 OAuth、LSP、MCP 三项由对应 smoke 执行。四个平台均通过 Skills/Motion，六个 CI 作业全部成功。Windows SDK 在应用内关闭了两种菜单和一个模态对话框，随后继续任务。两次实体 Esc 人工验收都到时由 SDK 停止，实体键盘仍待人工验证。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46087861812)
+提交 `b2923f4` 的 Windows release 通过 164 项 Cargo 测试和 28 组已有 smoke，Cargo 单独标记的 OAuth、LSP、MCP 三项由对应 smoke 执行。四个平台均通过 Skills/Motion，六个 CI 作业全部成功。Windows SDK 在应用内关闭了两种菜单和一个模态对话框，随后继续任务。该批次的两次实体 Esc 人工验收都到时由 SDK 停止。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46087861812)
 
 Motion 的打包验收逐项核对安装副本中的实际文件名和 SHA-256。工作区外的入口在执行前也检查清单，并拒绝额外、缺失或被改写的文件。回归使用一个额外的无害文本文件覆盖旧版仅校验清单内文件的情况。
+
+`c296323` 的 Windows release 和桌面解包内核 SHA-256 均为 `1085861d6de1bbe21f2da9aa45da1d0e3d37d6ff1c11e838518c22fd8b077f4f`。两者分别通过 17 项 Skills/Motion 检查，解包版的隐式目录为 10,427 字符、26 项。加入清单外文件后，SDK 在启动前拒绝了 doctor。还原原包后，doctor 执行成功，两次结果均有审计记录。实体 Esc 与应用内 Escape 已在同一解包内核分别验收，详见[桌面控制说明](computer-use.md)。
+
+同一功能提交的本机 Cargo 通过 164 项，3 项专用夹具由 smoke 单独执行，28 组既有 smoke 全部正常退出。GitHub 的六个作业通过，Windows x64、Linux x64 和两种 macOS 均执行了独立 Skills 检查。[功能提交 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46090924125)
 
 `7f17e62` 的 Windows release 与桌面解包 CLI 具有相同 SHA-256 `e3147a5056ff8adce388f6934317731beb23097c05a83909ed5bc913e71ad2a4`。两者均通过 17 项 Skills 检查。解包版发给回环模型的普通请求中，技能目录共 10,439 个字符，26 个有效技能各出现一次。Motion 在真实 Chrome 中生成 8 帧并导出 CSS、WAAPI 和类型声明。原包、仓库、release、桌面暂存和解包目录中的 30 个 Motion 文件逐一匹配。Windows Cargo 通过 163 项，另有 3 项由独立夹具执行。28 个既有 smoke 均正常退出。GitHub Test 六个作业全部通过，其中 Windows x64、Linux x64、macOS arm64 和 macOS x64 均通过 Skills 检查。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46005355224)
 

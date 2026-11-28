@@ -95,10 +95,11 @@ try {
     await launch();
     let rows=source(await request('getModelSources'));
     assert.equal(rows.models.length,6); assert.equal(rows.catalog_live,false);
+    assert.equal(rows.api_key_source,'config'); assert.equal(rows.enabled,true);
     assert.equal(rows.config.values.api_url,first.url+'/v1');
     assert.equal((await request('revealProviderSecret',{kind:'provider',source:'modelscope',field:'api_key'})).value,'fixture-literal');
     assert.equal((await bridge.request('revealProviderSecret',{kind:'provider',source:'modelscope',field:'api_url'})).type,'error');
-    await patch({api_key_env:'REVERIE_NAMED_TEST_KEY'});
+    assert.equal(source(await patch({api_key_env:'REVERIE_NAMED_TEST_KEY'})).api_key_source,'env');
     assert.equal((await request('revealProviderSecret',{kind:'provider',source:'modelscope'})).value,'');
     await select(qwen,'low');
     const session=(await request('createSession',{name:layout})).session.id;
@@ -178,7 +179,7 @@ try {
     assert.equal(source(await request('getModelSources')).catalog_live,false);
     await select(qwen,'low',session); await talk(session,'second',qwen);
     await refresh(session);
-    await patch({api_key_env:'REVERIE_MODELSCOPE_ABSENT_KEY'});
+    assert.equal(source(await patch({api_key_env:'REVERIE_MODELSCOPE_ABSENT_KEY'})).api_key_source,'none');
     assert.equal(source(await request('getModelSources')).catalog_live,false);
     const denied=await bridge.request('runPrompt',{sessionId:session,prompt:'no key',noIndex:true});
     assert.equal(denied.type,'error'); assert.match(denied.error,/API key/);
@@ -186,6 +187,7 @@ try {
     const disabled = JSON.parse(fs.readFileSync(configFile));
     (split ? disabled.chat : disabled.modelscope).enabled = false;
     fs.writeFileSync(configFile,JSON.stringify(disabled));
+    assert.equal(source(await request('getModelSources')).enabled,false);
     const disabledRun=await bridge.request('runPrompt',{sessionId:session,prompt:'disabled',noIndex:true});
     assert.equal(disabledRun.type,'error'); assert.match(disabledRun.error,/disabled/i);
     if(split) {

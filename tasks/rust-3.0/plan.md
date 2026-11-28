@@ -29,6 +29,7 @@
 11. Rust 终端可用 `/model add <id> <base_url> [api_key_env] [--provider <transport>]` 添加标准模型，默认使用 OpenAI Chat。验证时用同一模型名创建 OpenAI Chat、OpenAI Responses、Anthropic 和 Gemini 四份配置，按配置 ID 选中，逐一检查实际 HTTP 路径、认证头、请求体及终端收到的回复。各厂商的在线目录、账户登录和真实模型质量仍按第 2.3 节跟踪。
 12. 桌面模型选择、目录刷新、上下文长度和图片能力使用标准配置的 `profile_id` 区分同名模型。编辑或删除前重新按配置 ID 查找当前记录。验收覆盖普通配置文件和 `provider_files.standard` 分文件、无 ID 的旧数据、确认框打开期间列表变化、工作区默认与已有会话的独立选择，以及桌面实际发出的 HTTP 请求。
 13. 具名 ModelScope 来源已接通 Rust、SDK、终端和桌面。内置目录有 6 个当前模型，另保留 3 个旧模型供已有会话选择。终端从 `/modelscope` 进入，桌面在“模型与提供商”中设置地址和密钥来源。会话保存模型、思考档、输出上限和超时，连接及凭据由共享 Provider 配置解析。在线刷新按地址与凭据绑定目录，成功的空目录可以覆盖旧列表，刷新失败继续使用上次成功结果。
+14. Rust 终端的 `/modelscope status` 显示当前模型、连接地址和凭据来源。`/modelscope key` 在遮罩输入框接受密钥或 `env:变量名`，`/modelscope endpoint` 可编辑或恢复默认地址。按维护者确认，`/modelscope activate` 切换当前会话，并设置以后新会话的默认来源，其他已有会话保留原选择。`/modelscope model <id>` 只切换当前会话。Windows release 的伪终端验收分别读取了三个会话的配置，并验证取消启用、两种凭据发起的实际请求，以及录入密钥期间到达的模型提问。[终端验收入口](../../scripts/verification/rust-tui-smoke.mjs)
 
 第 13 项的 Windows 独立及桌面解包 release 分别通过了 28 次回环 HTTP 请求，覆盖内联和分文件配置、四个模型家族、会话重启、密钥切换、慢请求期间换地址、空目录和禁用来源。独立终端、实际 Electron 窗口及指定独立 ModelScope 审批模型也已验收。桌面在 Qwen 的思考菜单选择“低”后，服务收到 `/named/v1/chat/completions`、正确的鉴权和 `reasoning_effort=low`。这批使用本机夹具凭据，厂商账户、配额和线上可用模型按第 2.3 节继续跟踪。[SDK 复验入口](../../scripts/verification/rust-modelscope-smoke.mjs)
 

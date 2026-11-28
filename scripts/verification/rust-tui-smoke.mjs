@@ -52,6 +52,8 @@ const displayReplies = display.onData(bytes => {
 let output = '';
 let terminalExit;
 let held;
+let namedCredential = 'terminal-only-test-key';
+let releaseNamedQuestion;
 const heldMarkets = new Set();
 let serverFailure;
 function frame(response, data) {response.write(`data: ${JSON.stringify(data)}\n\n`);}
@@ -73,10 +75,17 @@ const server = http.createServer(async (request, response) => {
     requests.push(body);
     if (body.model === 'Qwen/Qwen3.8-27B') {
       assert.equal(request.url, '/named/v1/chat/completions');
-      assert.equal(request.headers.authorization, 'Bearer terminal-only-test-key');
+      assert.equal(request.headers.authorization, 'Bearer '+namedCredential);
       assert.equal(body.reasoning_effort,'low');
       assert.deepEqual(body.chat_template_kwargs,{enable_thinking:true});
       response.writeHead(200, {'content-type':'text/event-stream'});
+      if (body.messages.at(-1).content === 'KEY_DURING_QUESTION') {
+        releaseNamedQuestion = () => {
+          frame(response,{choices:[{delta:{tool_calls:[{index:0,id:'named-modal',function:{name:'userInput',arguments:JSON.stringify({question:'Named model question',options:['Continue','Cancel']})}}]},finish_reason:'tool_calls'}]});
+          response.end('data: [DONE]\n\n');
+        };
+        return;
+      }
       finish(response,'TUI_MODELSCOPE_CONFIRMED');
       return;
     }
@@ -133,7 +142,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mode: 'reverie', models: [{model: 'tui-fixture', profile_id: 'tui-profile', provider: 'openai-chat',
   base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'TUI_FIXTURE_KEY'}], active_model_source: 'standard', active_model_index: 0, stream_responses: true, auto_index: false,
   security: {permission_level: 'full_control', permission_mode: 'default'}}));
-const environment = {...process.env, MODELSCOPE_API_KEY:'', MODELSCOPE_TOKEN:'', MODELSCOPE_ACCESS_TOKEN:'', REVERIE_APP_ROOT: appRoot, REVERIE_TUI_MODEL_KEY:'terminal-only-test-key', NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
+const environment = {...process.env, MODELSCOPE_API_KEY:'', MODELSCOPE_TOKEN:'', MODELSCOPE_ACCESS_TOKEN:'', REVERIE_TUI_MISSING_REFERENCE:'', REVERIE_APP_ROOT: appRoot, REVERIE_TUI_MODEL_KEY:'terminal-only-test-key', NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
 function markPhase(label) {
   fs.writeFileSync(path.join(root, 'last-phase.txt'), label);
   if (process.env.CI) console.log('Terminal check: ' + label);
@@ -341,6 +350,104 @@ try {
   terminal.write('CHECK_NAMED_SOURCE\r');
   await wait(()=>messageRows().some(m=>m.role==='Reverie' && m.content==='TUI_MODELSCOPE_CONFIRMED'),'authenticated ModelScope turn and terminal reply');
   checks.push('Native PTY saved ModelScope URL and key reference, selected Qwen low reasoning and received its authenticated reply');
+  await wait(()=>!viewportText().includes('Reverie is working'),'named model turn complete');
+  const config=()=>JSON.parse(fs.readFileSync(configFile));
+  terminal.write('/modelscope check\r');
+  await wait(()=>screenText().includes('API key: environment') && screenText().includes(namedUrl+'/v1'),'status resolves the configured environment credential and URL');
+  terminal.write('/modelscope baseurl default\r');
+  await wait(()=>config().modelscope.api_url==='','endpoint reset');
+  terminal.write('/modelscope endpoint\r');
+  await wait(()=>viewportText().includes('restores the default') && viewportText().includes('api-inference.modelscope.cn'),'current endpoint editor');
+  terminal.write('\x15'+namedUrl+'\r');
+  await wait(()=>config().modelscope.api_url===namedUrl,'edited endpoint persisted');
+  const secrets = ['literal-tui-modelscope-fixture','cancelled-private-fixture','inline-private-fixture'];
+  function privateOutput() {
+    for(const secret of secrets) {
+      assert(!stripVTControlCharacters(output).includes(secret),'Fixture credential in terminal output');
+      assert(!screenText().includes(secret),'Fixture credential in terminal scrollback');
+      assert(!JSON.stringify(messageRows()).includes(secret),'Fixture credential in conversation');
+      assert(!JSON.stringify(requests).includes(secret),'Fixture credential in model request body');
+    }
+  }
+  terminal.write('/modelscope APIKEY '+secrets[2]+'\r');
+  await wait(()=>viewportText().includes('Use /modelscope'),'inline secret rejected');
+  terminal.write('\x1b[A');
+  await wait(()=>viewportText().includes('/modelscope endpoint'),'invalid secret command excluded from recall');
+  terminal.write('\x15/modelscope LOGIN\r');
+  await wait(()=>viewportText().includes('Input masked'),'literal credential editor');
+  terminal.write(secrets[0]);
+  await wait(()=>viewportText().includes('********'),'credential is masked');
+  privateOutput();
+  terminal.write('\r');
+  await wait(()=>config().modelscope.api_key===secrets[0] && !config().modelscope.api_key_env,'literal credential saved without old reference');
+  namedCredential=secrets[0];
+  const replies=()=>messageRows().filter(m=>m.role==='Reverie' && m.content==='TUI_MODELSCOPE_CONFIRMED').length;
+  terminal.write('CHECK_LITERAL_KEY\r');
+  await wait(()=>replies()===2,'authenticated chat using the saved literal');
+  terminal.write('/permission full_access\r');
+  await wait(()=>JSON.parse(database.prepare('SELECT metadata FROM conversations WHERE deleted=0 ORDER BY updated_at DESC LIMIT 1').get().metadata).runtime_config.settings.security.permission_mode==='full_access','question can run without an approval dialog');
+  terminal.write('KEY_DURING_QUESTION\r');
+  await wait(()=>!!releaseNamedQuestion,'loopback model waiting before asking question');
+  terminal.write('/modelscope key\r');
+  await wait(()=>viewportText().includes('Input masked'),'open credential editor during model request');
+  terminal.write(secrets[1]); await wait(()=>viewportText().includes('********'),'in-flight credential masked');
+  releaseNamedQuestion();
+  await wait(()=>database.prepare("SELECT count(*) AS n FROM task_runs WHERE state='waiting_user'").get().n===1,'running model reached its user question while editing the key');
+  assert(viewportText().includes('Input masked'));
+  privateOutput();
+  terminal.write('\x1b');
+  await wait(()=>viewportText().includes('Named model question'),'question delivered after cancelling credential change');
+  terminal.write('\r');
+  await wait(()=>replies()===3,'original running task completes after question');
+  assert.equal(config().modelscope.api_key,secrets[0]);
+  terminal.write('/modelscope api-key\r');
+  await wait(()=>viewportText().includes('Input masked'),'masked environment reference');
+  terminal.write('ENV:REVERIE_TUI_MODEL_KEY\r');
+  await wait(()=>config().modelscope.api_key_env==='REVERIE_TUI_MODEL_KEY' && !config().modelscope.api_key,'environment reference replaces the literal');
+  namedCredential='terminal-only-test-key';
+  terminal.write('CHECK_REFERENCE\r');
+  await wait(()=>replies()===4,'real request after changing credential source');
+  privateOutput();
+  checks.push('ModelScope status, endpoint reset and editor, masked literal and environment reference, private history and an actual question during credential entry');
+  await wait(()=>!viewportText().includes('Reverie is working'),'ready for ModelScope activation');
+  const activeId=database.prepare('SELECT id FROM conversations WHERE deleted=0 ORDER BY updated_at DESC LIMIT 1').get().id;
+  const admin=startBridge(executable,project,appRoot,environment);
+  await admin.ready;
+  const sdk=async (action,payload={})=>{
+    const response=await admin.request(action,{projectRoot:project,...payload});
+    assert.notEqual(response.type,'error',response.error);
+    return response;
+  };
+  try {
+    await sdk('initialize');
+    const existing=(await sdk('createSession',{name:'Existing independent standard conversation'})).session.id;
+    const readSnapshot=async id=>(await sdk('getConversationConfig',{sessionId:id})).configuration;
+    const preserved=await readSnapshot(existing);
+    assert.equal(preserved.model_ref.source,'standard');
+    terminal.write('/model tui-fixture\r');
+    const activeRef=()=>JSON.parse(database.prepare('SELECT metadata FROM conversations WHERE id=?').get(activeId).metadata).runtime_config.model_ref;
+    await wait(()=>activeRef().source==='standard','current conversation returned to standard');
+    terminal.write('/modelscope key-env REVERIE_TUI_MISSING_REFERENCE\r');
+    await wait(()=>config().modelscope.api_key_env==='REVERIE_TUI_MISSING_REFERENCE','unavailable environment reference stored');
+    terminal.write('/modelscope activate\r');
+    await wait(()=>viewportText().includes('Input masked'),'activation requests a missing credential');
+    terminal.write(secrets[1]+'\x03');
+    await wait(()=>!viewportText().includes('Input masked'),'Ctrl+C cancelled activation');
+    assert.equal(activeRef().source,'standard');
+    assert.equal(config().active_model_source,'standard');
+    assert.equal(config().modelscope.api_key_env,'REVERIE_TUI_MISSING_REFERENCE');
+    terminal.write('/modelscope use\r'); await wait(()=>viewportText().includes('Input masked'),'retry activation using alias');
+    terminal.write('env:REVERIE_TUI_MODEL_KEY\r');
+    await wait(()=>activeRef().source==='modelscope' && config().active_model_source==='modelscope','current conversation and workspace default activated');
+    assert.deepEqual(await readSnapshot(existing),preserved);
+    const future=(await sdk('createSession',{name:'After named provider activation'})).session.id;
+    assert.deepEqual((await readSnapshot(future)).model_ref,activeRef());
+    await sdk('selectModel',{source:'standard',modelId:'tui-fixture',profileId:'tui-profile'});
+    checks.push('Cancelled activation preserved current and default sources; successful activation updated both and a new session inherited it, leaving the older session snapshot intact');
+    privateOutput();
+  } finally {
+    await admin.request('shutdown'); assert.equal((await admin.closed).code,0);
+  }
   terminal.write('/quit\r');
   await wait(() => terminalExit !== undefined, 'normal terminal exit');
   assert.equal(terminalExit.exitCode, 0);

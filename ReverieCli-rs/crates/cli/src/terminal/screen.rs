@@ -1,5 +1,5 @@
 use super::{
-    Panel, PanelKind,
+    Panel,
     connectors::{masked_input, private_command},
     cursor_backend::CursorBackend,
     input::{Input, display_text, wrapped},
@@ -105,8 +105,7 @@ impl Screen {
         panel: Option<&Panel>,
     ) -> io::Result<()> {
         self.terminal.draw(|frame| {
-            let hidden = panel
-                .is_some_and(|panel| matches!(panel.kind, PanelKind::ConnectorSecret))
+            let hidden = panel.is_some_and(|panel| panel.kind.is_secret())
                 || panel.is_none() && private_command(&input.text);
             let masked = hidden.then(|| masked_input(input));
             let input = masked.as_ref().unwrap_or(input);

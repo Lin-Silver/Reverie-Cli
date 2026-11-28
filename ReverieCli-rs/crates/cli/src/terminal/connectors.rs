@@ -21,8 +21,16 @@ struct AuthorizationFlow {
 
 pub(super) fn private_command(text: &str) -> bool {
     let mut words = text.split_whitespace();
-    matches!(words.next(), Some("/connectors" | "/connector"))
-        && matches!(words.next(), Some("key" | "api-key"))
+    match (words.next(), words.next()) {
+        (Some("/connectors" | "/connector"), Some("key" | "api-key")) => true,
+        (Some("/modelscope"), Some(action)) => {
+            matches!(
+                action.to_ascii_lowercase().as_str(),
+                "key" | "api-key" | "apikey" | "login"
+            )
+        }
+        _ => false,
+    }
 }
 pub(super) fn masked_input(input: &Input) -> Input {
     let mask = |text: &str| {

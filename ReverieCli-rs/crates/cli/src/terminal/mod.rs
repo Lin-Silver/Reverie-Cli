@@ -31,6 +31,8 @@ enum PanelKind {
     Question,
     Approval,
     Models,
+    ModelScopeKey { activate: bool },
+    ModelScopeUrl,
     Sessions,
     ContextRemoval,
     PluginConfirmation,
@@ -40,6 +42,12 @@ enum PanelKind {
     ConnectorConfirmation,
 }
 impl PanelKind {
+    fn is_secret(&self) -> bool {
+        matches!(self, Self::ConnectorSecret | Self::ModelScopeKey { .. })
+    }
+    fn is_provider_input(&self) -> bool {
+        matches!(self, Self::ModelScopeKey { .. } | Self::ModelScopeUrl)
+    }
     fn is_connector(&self) -> bool {
         matches!(
             self,
@@ -50,10 +58,11 @@ impl PanelKind {
         )
     }
     fn accepts_input(&self) -> bool {
-        matches!(
-            self,
-            Self::Question | Self::Approval | Self::ConnectorInput | Self::ConnectorSecret
-        )
+        self.is_provider_input()
+            || matches!(
+                self,
+                Self::Question | Self::Approval | Self::ConnectorInput | Self::ConnectorSecret
+            )
     }
 }
 pub(super) struct Panel {
@@ -192,6 +201,9 @@ impl Tui {
         if panel.kind.is_connector() {
             return self.submit_connector_panel(cancelled).await;
         }
+        if panel.kind.is_provider_input() {
+            return self.submit_modelscope_input(cancelled).await;
+        }
         let index = panel.selected;
         match panel.kind {
             PanelKind::PluginConfirmation => {
@@ -306,7 +318,7 @@ impl Tui {
         match args.first().map(String::as_str) {
             Some("/quit" | "/exit" | "/q") => { self.stop().await?; self.quitting = true; }
             Some("/stop" | "/cancel") => self.stop().await?,
-            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/modelscope [model <id> [reasoning] | key-env <name> | url <base> | refresh]\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
+            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/modelscope [status | key | activate | model [id [reasoning]] | key-env <name> | endpoint [URL] | refresh]\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
             Some("/resume") => {
                 if args.len() != 1 { return Err("Use /resume without replacement prompt text.".into()); }
                 self.start_resume()?;
@@ -381,20 +393,18 @@ impl Tui {
         match key.code {
             KeyCode::Char('c')
                 if control
-                    && self
-                        .panel
-                        .as_ref()
-                        .is_some_and(|panel| panel.kind.is_connector()) =>
+                    && self.panel.as_ref().is_some_and(|panel| {
+                        panel.kind.is_connector() || panel.kind.is_provider_input()
+                    }) =>
             {
                 self.submit_panel(true).await?
             }
             KeyCode::Char('d')
                 if control
                     && self.input.text.is_empty()
-                    && self
-                        .panel
-                        .as_ref()
-                        .is_some_and(|panel| panel.kind.is_connector()) =>
+                    && self.panel.as_ref().is_some_and(|panel| {
+                        panel.kind.is_connector() || panel.kind.is_provider_input()
+                    }) =>
             {
                 self.submit_panel(true).await?
             }
@@ -652,14 +662,36 @@ impl Tui {
         Ok(())
     }
     async fn loop_events(&mut self) -> Result<()> {
+        let mut waiting_dialogs = VecDeque::new();
         loop {
-            while let Ok(event) = self.events.try_recv() {
+            // A run can request approval while the user is typing a credential.
+            // Deliver that dialog after the form closes so its input never becomes a chat draft.
+            let editing = self
+                .panel
+                .as_ref()
+                .is_some_and(|p| p.kind.is_secret() || p.kind.is_provider_input());
+            if self.panel.is_none()
+                && let Some(event) = waiting_dialogs.pop_front()
+            {
                 self.event(event).await?;
             }
-            if self
-                .background
-                .as_ref()
-                .is_some_and(|task| task.is_finished())
+            while let Ok(event) = self.events.try_recv() {
+                if editing
+                    && matches!(
+                        event["type"].as_str(),
+                        Some("approval.request" | "user.question")
+                    )
+                {
+                    waiting_dialogs.push_back(event);
+                } else {
+                    self.event(event).await?;
+                }
+            }
+            if !editing
+                && self
+                    .background
+                    .as_ref()
+                    .is_some_and(|task| task.is_finished())
             {
                 let reply = self.background.take().unwrap().await?;
                 while let Ok(event) = self.events.try_recv() {
@@ -679,8 +711,9 @@ impl Tui {
                 }
                 self.refresh().await?;
             }
-            if self.active.as_ref().is_some_and(|task| task.is_finished()) {
+            if !editing && self.active.as_ref().is_some_and(|task| task.is_finished()) {
                 let reply = self.active.take().unwrap().await?;
+                waiting_dialogs.clear();
                 while let Ok(event) = self.events.try_recv() {
                     self.event(event).await?;
                 }
@@ -721,28 +754,29 @@ impl Tui {
             self.screen
                 .draw(&self.input, &status, &self.pending, self.panel.as_ref())?;
             if let Some(event) = self.input_events.poll(Duration::from_millis(20))? {
-                let outcome =
-                    match event {
-                        Event::Key(key) => self.key(key).await,
-                        Event::Paste(text) => {
-                            if let Some(panel) = self.panel.as_mut()
-                                && panel.kind.accepts_input()
-                            {
-                                panel.selected = panel.options.len() - 1;
-                            }
-                            if self.panel.as_ref().is_some_and(|panel| {
-                                matches!(panel.kind, PanelKind::ConnectorSecret)
-                            }) {
-                                self.input.insert(&text);
-                            } else {
-                                self.input.insert(&display_text(
-                                    &text.replace("\r\n", "\n").replace('\r', "\n"),
-                                ));
-                            }
-                            Ok(())
+                let outcome = match event {
+                    Event::Key(key) => self.key(key).await,
+                    Event::Paste(text) => {
+                        if let Some(panel) = self.panel.as_mut()
+                            && panel.kind.accepts_input()
+                        {
+                            panel.selected = panel.options.len() - 1;
                         }
-                        _ => Ok(()),
-                    };
+                        if self
+                            .panel
+                            .as_ref()
+                            .is_some_and(|panel| panel.kind.is_secret())
+                        {
+                            self.input.insert(&text);
+                        } else {
+                            self.input.insert(&display_text(
+                                &text.replace("\r\n", "\n").replace('\r', "\n"),
+                            ));
+                        }
+                        Ok(())
+                    }
+                    _ => Ok(()),
+                };
                 if let Err(error) = outcome {
                     self.status = error.to_string();
                 }

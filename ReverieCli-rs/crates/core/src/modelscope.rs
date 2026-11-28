@@ -150,12 +150,20 @@ pub(super) fn source(config: &Value) -> Value {
         .filter(|row| live || row["deprecated"] != true || text(row, "id") == id)
         .map(|row| public_row(row, if text(row, "id") == id { choice } else { "" }))
         .collect();
+    let key_source = if key(cfg).is_none() {
+        "none"
+    } else if !text(cfg, "api_key").is_empty() {
+        "config"
+    } else {
+        "env"
+    };
     json!({"id":"modelscope","display_name":"ModelScope","active":config["active_model_source"]=="modelscope",
+        "enabled":cfg["enabled"]!=false,"api_key_source":key_source,
         "selected_model_id":id,"selected_reasoning":selected.map(|row|reasoning(row,choice)).unwrap_or_else(||json!({"control":"none","options":[],"value":""})),
         "models":models,"catalog_live":live,"config_fields":[
             {"key":"api_key","label":"API key","kind":"secret"},{"key":"api_key_env","label":"API key environment variable","kind":"text"},
             {"key":"api_url","label":"API URL","kind":"url"},{"key":"timeout","label":"Timeout (seconds)","kind":"int","min":10,"max":3600}],
-        "config":{"values":{"api_key_env":text(cfg,"api_key_env"),"api_url":base_url(cfg),"timeout":positive(cfg,"timeout",300)},
+        "config":{"values":{"api_key_env":text(cfg,"api_key_env"),"api_url":base_url(cfg),"timeout":positive(cfg,"timeout",300),"max_tokens":positive(cfg,"max_tokens",16384)},
             "configured_secrets":{"api_key":!text(cfg,"api_key").is_empty()}}})
 }
 

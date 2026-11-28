@@ -33,6 +33,7 @@ const server = http.createServer(async(request,response)=>{
   try {
     const chunks=[];for await(const chunk of request)chunks.push(chunk);
     const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    assert.equal(request.headers.authorization,'Bearer desktop-environment-fixture');
     const prompt=body.messages.findLast(message=>message.role==='user').content;
     const last=body.messages.at(-1);
     response.writeHead(200,{'content-type':'text/event-stream'});
@@ -50,10 +51,10 @@ const server = http.createServer(async(request,response)=>{
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({models:[{model:'desktop-fixture',profile_id:'desktop-profile',provider:'openai-chat',model_display_name:'Rust 本地验收模型',
-  base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'fixture-only'}],active_model_source:'standard',active_model_index:0,
+  base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'fixture-only',max_context_tokens:65536,custom_headers:{'x-fixture-saved':'preserve'}}],active_model_source:'standard',active_model_index:0,
   mode:'reverie',auto_index:false,stream_responses:true,security:{permission_mode:'strict',permission_level:'full_control'}}));
 fs.writeFileSync(path.join(runtimeRoot,'desktop-settings.json'),JSON.stringify({projectRoot,coreAppRoot:appRoot,ui:{language:'zh-CN',startupMode:'gui',uiVariant:'classic',classicTheme:'dark'}}));
-const options={uiRoot,runtimeRoot,projectRoot,outputRoot:root,answer,fileContent,outputFile};
+const options={uiRoot,runtimeRoot,projectRoot,outputRoot:root,appRoot,answer,fileContent,outputFile};
 if(process.argv[3]||process.argv[4]) {
   if(!process.argv[3]||!process.argv[4])throw new Error('Supply both a real semantic bundle and its manifest SHA-256.');
   options.semantic={directory:path.resolve(process.argv[3]),digest:process.argv[4]};
@@ -66,7 +67,7 @@ let timer;
 try {
   const electron=require(path.join(uiRoot,'node_modules/electron'));
   child=spawn(electron,[path.join(repositoryRoot,'scripts/verification/rust-electron-probe.cjs'),optionsFile],{
-    cwd:uiRoot,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined},stdio:['ignore','pipe','pipe'],
+    cwd:uiRoot,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined,REVERIE_DESKTOP_TEST_KEY:'desktop-environment-fixture'},stdio:['ignore','pipe','pipe'],
   });
   let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
   timer=setTimeout(()=>child.kill(),90_000);

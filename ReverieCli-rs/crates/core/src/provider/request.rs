@@ -100,16 +100,7 @@ impl Transport {
         mut request: reqwest::RequestBuilder,
         model: &Value,
     ) -> Result<reqwest::RequestBuilder> {
-        let key = model["api_key"]
-            .as_str()
-            .filter(|key| !key.trim().is_empty())
-            .map(str::to_owned)
-            .or_else(|| {
-                model["api_key_env"]
-                    .as_str()
-                    .and_then(|name| std::env::var(name).ok())
-                    .filter(|key| !key.trim().is_empty())
-            });
+        let (_, key) = crate::models::api_key(model);
         if let Some(key) = key {
             request = match self {
                 Self::Anthropic => request.header("x-api-key", key),

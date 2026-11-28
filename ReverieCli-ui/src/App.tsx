@@ -3075,7 +3075,7 @@ function ProviderSettings({
           {source.id === "standard" && <button type="button" className="primary-button small" onClick={addStandard}><Plus size={14} />{t("添加模型")}</button>}
         </div>
         <div className="settings-model-grid">
-          {source.models.map((model) => (
+          {source.models.map((model, index) => (
             <div className={`settings-model-card ${source.active && source.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
               <button type="button" className="model-card-main" onClick={() => selectModel(source, model)}>
                 <div><strong>{model.display_name}</strong><span title={model.id}>{model.id}</span></div>
@@ -3085,8 +3085,8 @@ function ProviderSettings({
               <div className="tag-row"><span>{formatTokens(model.context_length)} {t("上下文")}</span>{model.vision && <span>{t("视觉")}</span>}{model.tool_calling && <span>{t("工具")}</span>}{model.reasoning.control !== "none" && <span>{t(model.reasoning.control)}</span>}</div>
               {source.id === "standard" && (
                 <div className="model-card-actions">
-                  <button type="button" className="edit-model" onClick={() => editStandard(Number(model.id), model)} aria-label={t("编辑标准模型")} title={t("编辑标准模型")}><Pencil size={13} /></button>
-                  <button type="button" className="delete-model" onClick={() => deleteStandard(Number(model.id))} aria-label={t("删除")} title={t("删除")}><Trash2 size={13} /></button>
+                  <button type="button" className="edit-model" onClick={() => editStandard(index, model)} aria-label={t("编辑标准模型")} title={t("编辑标准模型")}><Pencil size={13} /></button>
+                  <button type="button" className="delete-model" onClick={() => deleteStandard(index)} aria-label={t("删除")} title={t("删除")}><Trash2 size={13} /></button>
                 </div>
               )}
             </div>
@@ -3588,7 +3588,7 @@ function standardModelDraft(model?: ModelRecord | null): Record<string, unknown>
     supports_vision: Boolean(model.vision),
     // Carried through untouched: the form has no header editor, and dropping
     // the key here would silently erase headers on every edit.
-    custom_headers: { ...(model.custom_headers ?? {}) },
+    ...(model.custom_headers && { custom_headers: { ...model.custom_headers } }),
     api_key_env: model.api_key_source === "config" ? "" : model.api_key_env ?? "",
   };
 }

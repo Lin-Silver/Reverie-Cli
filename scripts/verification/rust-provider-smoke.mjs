@@ -131,7 +131,31 @@ async function request(action,payload={}) {
   return reply;
 }
 try {
-  bridge=startBridge(executable,project,appRoot);await bridge.ready;await request('initialize');
+  bridge=startBridge(executable,project,appRoot,{
+    REVERIE_SMOKE_EMPTY_TOKEN:'   ', REVERIE_SMOKE_ORDINARY:'ordinary', 'REVERIE-SMOKE-KEY':'invalid-name'
+  });await bridge.ready;await request('initialize');
+  const environment=await request('listApiKeyEnvironmentVariables');
+  assert.equal(environment.type,'provider.environment');
+  assert(environment.names.includes('REVERIE_PROVIDER_SMOKE_KEY'));
+  assert(environment.names.every((name,i)=>typeof name==='string'&&(!i||environment.names[i-1]<name)));
+  assert(!environment.names.some(name=>['REVERIE_SMOKE_EMPTY_TOKEN','REVERIE_SMOKE_ORDINARY','REVERIE-SMOKE-KEY'].includes(name)));
+  assert(!JSON.stringify(environment).includes(process.env.REVERIE_PROVIDER_SMOKE_KEY));
+  const modelFile=path.join(appRoot,'.reverie/config.json');
+  const modelAtZero=()=>JSON.parse(fs.readFileSync(modelFile,'utf8')).models[0];
+  const change=async model=>(await request('updateStandardModel',{index:0,model})).models.sources[0].models[0];
+  const literal='literal-fixture-only';
+  assert.equal((await change({api_key:literal,api_key_env:''})).api_key_source,'config');
+  await change({api_key:'',description:'edited without re-entering the key'});
+  assert.equal(modelAtZero().api_key,literal);
+  const beforeInvalid=fs.readFileSync(modelFile);
+  const invalid=await bridge.request('updateStandardModel',{index:0,model:{api_key_env:'bad-name'}});
+  assert.equal(invalid.type,'error'); assert(beforeInvalid.equals(fs.readFileSync(modelFile)));
+  const envRow=await change({api_key_env:' REVERIE_PROVIDER_SMOKE_KEY '});
+  assert.equal(envRow.api_key_source,'env'); assert.equal(envRow.api_key_configured,true);
+  assert.equal(envRow.api_key_env,'REVERIE_PROVIDER_SMOKE_KEY');
+  assert(!('api_key' in envRow)); assert(!modelAtZero().api_key);
+  assert(!fs.readFileSync(modelFile,'utf8').includes(process.env.REVERIE_PROVIDER_SMOKE_KEY));
+  checks.push('Credential suggestions contain sorted variable names only; editing a standard model preserves a stored key or switches to its validated environment reference');
   for(const transport of transports) {
     await request('selectModel',{source:'standard',modelId:transport+'-fixture'});
     for(const stream of [true,false]) {

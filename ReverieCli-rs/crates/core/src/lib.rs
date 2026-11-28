@@ -130,6 +130,7 @@ pub const ACTIONS: &[&str] = &[
     "refreshMarket",
     "stopMarketRefresh",
     "getModelSources",
+    "listApiKeyEnvironmentVariables",
     "selectModel",
     "addStandardModel",
     "updateStandardModel",
@@ -411,6 +412,12 @@ impl Kernel {
         }
         if !ACTIONS.contains(&action) {
             return Err(format!("Unknown action: {action}").into());
+        }
+        if action == "listApiKeyEnvironmentVariables" {
+            return Ok((
+                "provider.environment",
+                json!({"names":models::api_key_environment_names()}),
+            ));
         }
         self.configure_assistant(payload)?;
         if let Some(root) = payload["projectRoot"].as_str() {
@@ -810,6 +817,7 @@ impl Kernel {
                             .as_object()
                             .cloned()
                             .ok_or_else(|| io::Error::other("Model settings are required."))?;
+                        models::normalize_key_edit(&mut model)?;
                         if action == "addStandardModel"
                             && model
                                 .get("model")

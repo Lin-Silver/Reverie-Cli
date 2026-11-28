@@ -71,6 +71,25 @@ app.whenReady().then(async()=>{
       await wait(`document.querySelector('select[aria-label="Auto 审查拒绝或失败时"]').value===${JSON.stringify(choice)}`,'The selected Auto fallback did not reach the settings view');
     }
     await screenshot('permission-settings.png');
+    const modelsTab=`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='模型与提供商')`;
+    await evaluate(`${modelsTab}.click()`);
+    await wait("!!document.querySelector('.settings-model-card .edit-model')",'The standard model was missing from settings');
+    await evaluate("document.querySelector('.settings-model-card .edit-model').click()");
+    await wait("!!document.querySelector('.api-key-environment-field button')",'The standard model edit dialog did not open');
+    await evaluate("document.querySelector('.api-key-environment-field button').click()");
+    await wait("!!document.querySelector('datalist option[value=REVERIE_DESKTOP_TEST_KEY]')",'The native environment suggestion did not reach the real model form');
+    await evaluate(`(() => {
+      const field=document.querySelector('.api-key-environment-field input');
+      const suggestion=field.list.querySelector('option[value=REVERIE_DESKTOP_TEST_KEY]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,suggestion.value);
+      field.dispatchEvent(new Event('input',{bubbles:true}));
+    })()`);
+    await evaluate("document.querySelector('.form-modal button[type=submit]').click()");
+    await wait("!document.querySelector('.form-modal')",'The model reference was not saved');
+    const savedModel=JSON.parse(fs.readFileSync(path.join(options.appRoot,'.reverie/config.json'),'utf8')).models[0];
+    if(savedModel.api_key || savedModel.api_key_env!=='REVERIE_DESKTOP_TEST_KEY' || savedModel.max_context_tokens!==65536
+        || savedModel.custom_headers?.['x-fixture-saved']!=='preserve')throw new Error('Saving the environment reference changed other model settings or retained the literal key');
+    checks.push('Editing the named standard model lists actual native environment references, saves the selected name and preserves its context size and redacted headers');
     await evaluate('document.querySelector(".footer-settings").click()');
     checks.push('All four native permission modes and the two selectable Auto fallback choices are present in the actual settings window');
     await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='技能').click()`);

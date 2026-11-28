@@ -1,5 +1,76 @@
 use crate::Result;
 use serde_json::{Map, Value, json};
+use std::{env, io, sync::LazyLock};
+
+static ENV_NAME: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
+
+pub fn api_key_environment_names() -> Vec<String> {
+    let mut names: Vec<_> = env::vars_os()
+        .filter_map(|(name, value)| {
+            let name = name.into_string().ok()?;
+            let upper = name.to_ascii_uppercase();
+            (ENV_NAME.is_match(&name)
+                && ["KEY", "TOKEN", "SECRET"]
+                    .iter()
+                    .any(|part| upper.contains(part))
+                && !value.to_str()?.trim().is_empty())
+            .then_some(name)
+        })
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+pub fn normalize_key_edit(model: &mut Map<String, Value>) -> io::Result<()> {
+    if let Some(value) = model.get_mut("api_key_env") {
+        let name = match value {
+            Value::Null => "",
+            Value::String(name) => name.trim(),
+            _ => {
+                return Err(io::Error::other(
+                    "API key environment variable must be a name.",
+                ));
+            }
+        };
+        if !name.is_empty() && !ENV_NAME.is_match(name) {
+            return Err(io::Error::other(
+                "Invalid API key environment variable name.",
+            ));
+        }
+        *value = json!(name);
+    }
+    if model
+        .get("api_key_env")
+        .and_then(Value::as_str)
+        .is_some_and(|name| !name.is_empty())
+    {
+        model.insert("api_key".into(), json!(""));
+    } else if let Some(key) = model.get("api_key") {
+        if key.as_str().is_some_and(|key| !key.trim().is_empty()) {
+            model.insert("api_key_env".into(), json!(""));
+        } else {
+            // Desktop edits leave masked keys blank. An explicit clearFields removes the key.
+            model.remove("api_key");
+        }
+    }
+    Ok(())
+}
+
+pub fn api_key(model: &Value) -> (&'static str, Option<String>) {
+    if let Some(literal) = model["api_key"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return ("config", Some(literal.to_owned()));
+    }
+    let Some(name) = model["api_key_env"].as_str().filter(|s| !s.is_empty()) else {
+        return ("none", None);
+    };
+    let key = env::var(name).ok().filter(|s| !s.trim().is_empty());
+    ("env", key)
+}
 
 const SETTINGS: &[&str] = &[
     "mode",
@@ -78,17 +149,9 @@ pub fn sources(config: &Value) -> Value {
         .into_iter()
         .flatten()
         .map(|model| {
-            let key = model["api_key"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .or_else(|| {
-                    model["api_key_env"]
-                        .as_str()
-                        .and_then(|key| std::env::var(key).ok())
-                });
             let mut safe = without_secrets(model);
             safe["id"] = model["model"].clone();
+            safe["context_length"] = model["max_context_tokens"].clone();
             safe["display_name"] = model
                 .get("model_display_name")
                 .unwrap_or(&model["model"])
@@ -98,7 +161,9 @@ pub fn sources(config: &Value) -> Value {
             safe["vision"] = json!(model["supports_vision"].as_bool().unwrap_or(false));
             safe["tool_calling"] = json!(true);
             safe["thinking"] = json!(false);
-            safe["api_key_configured"] = json!(key.is_some_and(|key| !key.is_empty()));
+            let (source, key) = api_key(model);
+            safe["api_key_configured"] = json!(key.is_some());
+            safe["api_key_source"] = json!(source);
             safe["reasoning"] = json!({"control":"none","options":[],"value":""});
             safe
         })

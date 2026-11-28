@@ -1,5 +1,7 @@
 //! Physical coordinates are bound to the DWM frame captured by Windows Graphics Capture.
+mod keyboard;
 mod occupation;
+pub use keyboard::WindowKey;
 pub use occupation::occupy;
 
 use serde::Serialize;

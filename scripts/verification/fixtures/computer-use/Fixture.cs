@@ -17,6 +17,7 @@ public class DesktopFixture : Form {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern bool SetWindowPos(IntPtr h,IntPtr after,int x,int y,int width,int height,uint flags);
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
     class CoverWindow : Form {
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -107,6 +108,11 @@ public class DesktopFixture : Form {
             pointerDirectory=Environment.GetEnvironmentVariable("REVERIE_POINTER_FIXTURE");
             if(!String.IsNullOrEmpty(pointerDirectory)){
                 pointerCanvas=canvas;
+                editor.KeyUp += delegate(object sender, KeyEventArgs e) {
+                    if(File.Exists(output+".shortcut-down") && e.Modifiers==Keys.None &&
+                       GetAsyncKeyState((int)Keys.ControlKey)>=0 && GetAsyncKeyState((int)Keys.ShiftKey)>=0 && GetAsyncKeyState((int)Keys.S)>=0)
+                        File.WriteAllText(output+".shortcut-up","released");
+                };
                 var button=new Button {Text="Coordinate click", Location=new Point(710,540), Size=new Size(200,48),
                     FlatStyle=FlatStyle.Flat, UseVisualStyleBackColor=false, BackColor=Color.HotPink};
                 button.FlatAppearance.MouseOverBackColor=button.BackColor;
@@ -118,6 +124,22 @@ public class DesktopFixture : Form {
             Controls.Add(new Button { Name="duplicateIdentity", AccessibleName="Duplicate identity", Text="Identity A", Location=new Point(710,430), Size=new Size(200,35) });
             Controls.Add(new Button { Name="duplicateIdentity", AccessibleName="Duplicate identity", Text="Identity B", Location=new Point(710,480), Size=new Size(200,35) });
         }
+    }
+    protected override bool ProcessCmdKey(ref Message message, Keys keys) {
+        if(!String.IsNullOrEmpty(pointerDirectory) && editor.Focused) {
+            if(keys==(Keys.Control|Keys.S)) {
+                File.WriteAllText(output+".selection",editor.SelectedText);
+                return true;
+            }
+            if(keys==(Keys.Control|Keys.Shift|Keys.S) && File.Exists(output+".hold-shortcut")) {
+                File.WriteAllText(output+".shortcut-down","Ctrl+Shift+S");
+                var end=DateTime.UtcNow.AddSeconds(12);
+                while(!File.Exists(output+".resume-shortcut") && DateTime.UtcNow<end)
+                    System.Threading.Thread.Sleep(10);
+                return true;
+            }
+        }
+        return base.ProcessCmdKey(ref message,keys);
     }
     protected override void WndProc(ref Message m) {
         if(m.Msg==0x8519 && !String.IsNullOrEmpty(pointerDirectory)){

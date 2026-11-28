@@ -11,7 +11,7 @@ Rust 内核通过 `computer_*` 工具调用随包提供的 agent-desktop 1.2.0�
 | `computer_screenshot` | 捕获指定窗口，核对捕获前后的进程、窗口边界与显示器配置。支持按原图像素裁剪和等比例缩小。纯文本模型得到 PNG 路径，视觉模型额外收到捕获时的图片字节。 |
 | `computer_get`、`computer_is` | 从本轮最近一次观察中取得控件引用，实际读取控件属性或状态。 |
 | `computer_focus`、`computer_type_text` | 将键盘焦点交给具体控件，或在其插入点写入文字。一次输入支持 10,000 个 UTF-8 字节。Windows 原生适配器需要 `physical: true` 才会发送物理输入。默认的语义请求若被拒绝，由调用者决定下一步。 |
-| Windows `computer_press_key` | 目前支持 `{"window_id":"…","key":"Escape"}`。从本轮窗口列表选择应用当前活动的窗口；打开模态框后使用对话框自己的 ID。成功表示 Windows 接收了消息，使用新的观察确认菜单或对话框已关闭。 |
+| Windows `computer_press_key` | 从本轮窗口列表指定目标。支持单独的 Escape、字母数字、F1–F24、编辑和导航键，以及 Ctrl、Alt、Shift 的组合。普通按键要求目标已在前台并有键盘焦点。例如先用 `computer_window` 聚焦窗口，再用 `computer_press_key` 发送 `Ctrl+Shift+Left`。应用内 Escape 使用窗口消息，打开模态框后须使用对话框自己的 ID。 |
 | `computer_click`、`computer_set_value`、`computer_set_state`、`computer_select`、`computer_scroll`、`computer_scroll_to` | 使用原生无障碍接口。一次输入消耗当前观察，后续输入需要新引用。原生返回实际送达状态；结果不确定时应重新观察。 |
 | Windows 坐标点击及 `computer_drag` | 使用本轮视觉模型最近收到的窗口截图。点击须指定 `physical: true`，拖拽两端须在同一张图内。坐标按返回图像像素计算，可使用裁剪和缩小后的图。 |
 
@@ -36,5 +36,9 @@ node scripts/verification/rust-computer-use-smoke.mjs --status-only
 文字输入检查让测试窗口自行选中 `A12Z` 中的 `12`。普通调用保留原文；显式物理输入把选区替换为 `中文😀 --headed`。夹具同时检查系统报告的焦点、无障碍接口读回的值及点击“保存”后的 UTF-8 内容。Windows 拒绝前台切换时，工具报告未投递。
 
 普通 Windows 窗口 smoke 还会打开一个模态对话框、一个 WinForms 菜单和一个原生菜单。模型向对话框的父窗口发送 Escape 时，内核拒绝投递。发给正确窗口后，夹具记录对话框的取消结果和菜单关闭状态，SDK 继续同一任务。应用内 Escape 经过目标窗口的消息队列；用户亲按键盘时，桌面任务的停止监听继续读取系统键盘状态。
+
+在 Windows 上追加 `--shortcuts` 可单独复验窗口快捷键，`--physical` 也包括这组检查。Strict 首次拒绝后，夹具确认保存命令未执行。会话授权后，编辑器用 `End`、`Ctrl+Shift+Left` 和 `Ctrl+A` 改变选区，保存处理程序分别读回 `beta` 和 `alpha beta`。另一项检查在窗口处理 `Ctrl+Shift+S` 时通过 SDK 取消任务，随后由窗口记录 KeyUp 并读取 Ctrl、Shift、S 的实际释放状态。
+
+内核在投递前检查前台窗口、进程、控件焦点以及用户已经按住的修饰键和目标键，并一次提交整组按下与释放事件。Win 组合、带修饰键的 Escape、Alt+Tab、Alt+F4、Alt+Space 和 Ctrl+Alt+Delete 均被拒绝。工具返回 `foreground_input_queue` 表示 Windows 接收了输入事件，调用者需重新观察应用效果。其他桌面程序或用户仍可能改变前台。
 
 `c296323` 的 Windows 解包版通过了上述 13 项窗口检查。独立人工验收使用同一二进制和回环模型。内核完成一次按应用名过滤的窗口查询后等待模型响应，维护者亲按 Esc，运行于 2026-11-28 01:08:35 UTC 返回 `cancelled`。夹具记录 `waiting=true`、`sdk_stop_sent=false`，未注入按键。更早两个由超时清理的样本保留为未通过的人工尝试。

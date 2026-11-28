@@ -9,9 +9,11 @@ import {fileURLToPath} from 'node:url';
 import {startBridge} from './rust-bridge-client.mjs';
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
-const argv = process.argv.slice(2).filter(a => !['--status-only','--physical'].includes(a));
+const argv = process.argv.slice(2).filter(a => !['--status-only','--physical','--shortcuts'].includes(a));
 const statusOnly = process.argv.includes('--status-only');
 const physical = process.argv.includes('--physical');
+const shortcutsOnly = process.argv.includes('--shortcuts');
+assert([statusOnly, physical, shortcutsOnly].filter(Boolean).length <= 1, 'Choose one desktop smoke mode.');
 const executable = path.resolve(argv[0] || path.join(repo, 'ReverieCli-rs/target/release', process.platform === 'win32' ? 'reverie.exe' : 'reverie'));
 const directory = path.resolve(argv[1] || path.join(repo, '.runtime/rust-3.0/computer-use-smoke'));
 fs.mkdirSync(directory, {recursive: true});
@@ -107,6 +109,7 @@ function* foreign() {
 async function* applicationEscape() {
   yield* discover();
   refusal(yield tool('press_key',{window_id:'never-listed',key:'Escape'}),'UNKNOWN_WINDOW');
+  refusal(yield tool('press_key',{window_id:'never-listed',key:'Ctrl+S'}),'UNKNOWN_WINDOW');
   refusal(yield tool('press_key',{window_id:windowId,key:'Alt+Tab'}),'INVALID_ARGS');
   data(yield tool('click',{ref:yield* control('Open dismissal dialog')}));
   let dialog;
@@ -118,6 +121,7 @@ async function* applicationEscape() {
   } while(!dialog && Date.now()<deadline);
   assert(dialog,'Owned modal dialog did not open');
   refusal(yield tool('press_key',{window_id:windowId,key:'Escape'}),'TARGET_NOT_FOCUSED');
+  refusal(yield tool('press_key',{window_id:windowId,key:'Ctrl+S'}),'TARGET_NOT_FOCUSED');
   assert(!fs.existsSync(artifact+'.dialog'));
   data(yield tool('press_key',{window_id:dialog.id,key:'Escape'}));
   await untilFile(artifact+'.dialog','Cancel');
@@ -132,13 +136,44 @@ async function* applicationEscape() {
   await untilFile(artifact+'.native-menu','closed');
   checks.push('Window-local Escape dismissed an owned modal, a WinForms menu and a native menu, refused the wrong window and left the SDK task running');
 }
-async function untilFile(file,text) {
-  const deadline=Date.now()+5000;
+async function untilFile(file,text,timeout=5000) {
+  const deadline=Date.now()+timeout;
   while(Date.now()<deadline) {
+    if(serverError) throw serverError;
     if(fs.existsSync(file) && fs.readFileSync(file,'utf8')===text) return;
     await delay(20);
   }
   assert.fail('Fixture did not record '+text+' in '+path.basename(file));
+}
+function* prepareShortcutEditor() {
+  yield* discover();
+  data(yield tool('window',{window_id:windowId,action:'focus'}));
+  data(yield tool('set_value',{ref:yield* control('Verification editor'),value:'alpha beta'}));
+  data(yield tool('focus',{ref:yield* control('Verification editor')}));
+}
+const shortcut = key => tool('press_key',{window_id:windowId,key});
+async function* windowShortcuts() {
+  yield* prepareShortcutEditor();
+  const denied=yield shortcut('Ctrl+S');
+  assert.equal(denied.success,false);
+  assert.match(denied.error,/denied|refused|rejected/i);
+  assert(!fs.existsSync(artifact+'.selection'));
+  assert.equal(data(yield shortcut('End')).verification_scope,'foreground_input_queue');
+  data(yield shortcut('Ctrl+Shift+Left'));
+  data(yield shortcut('Ctrl+S'));
+  await untilFile(artifact+'.selection','beta');
+  data(yield shortcut('Ctrl+A'));
+  data(yield shortcut('Ctrl+S'));
+  await untilFile(artifact+'.selection','alpha beta');
+  refusal(yield shortcut('Alt+Shift+Tab'),'INVALID_ARGS');
+  refusal(yield shortcut('Win+R'),'INVALID_ARGS');
+  checks.push('Strict refused a window shortcut then reused a session grant for different keys; real Ctrl+S read back word and full-editor selections');
+}
+function* shortcutDuringStop() {
+  yield* prepareShortcutEditor();
+  fs.writeFileSync(artifact+'.hold-shortcut','hold');
+  yield shortcut('Ctrl+Shift+S');
+  yield tool('wait',{window_id:windowId,selector:':reverie-never-present',timeout_ms:60000});
 }
 function* screenshot(vision) {
   yield* discover();
@@ -311,7 +346,11 @@ function* restricted() {
   assert.equal(r.success,false); assert.match(r.error,/full_control/);
   const sent=yield tool('click',{image_id:'not-authorized',x:1,y:1,physical:true});
   assert.equal(sent.success,false);assert.match(sent.error,/full_control/);
-  checks.push('explicit permission level refused off-workspace observation');
+  if(process.platform==='win32') {
+    const pressed=yield tool('press_key',{window_id:'never-authorized',key:'Ctrl+S'});
+    assert.equal(pressed.success,false);assert.match(pressed.error,/full_control/);
+  }
+  checks.push('explicit permission level refused off-workspace observation and input');
 }
 function* strict() {
   const denied = yield tool('list_windows',{app:'ReverieRustFixture.exe'});
@@ -403,7 +442,15 @@ async function run(id, actions, level='full_control', cancel=false, decisions=[]
   assert.equal(saved.type,'conversation.config');
   scenario = actions(); expectedTools = level === 'full_control';
   const response = request('runPrompt',{sessionId:session.id,runId:id,prompt:'Exercise the owned desktop fixture.',noIndex:true});
-  if (cancel) {
+  if (cancel==='shortcut') {
+    try {
+      await untilFile(artifact+'.shortcut-down','Ctrl+Shift+S',25000);
+      await request('stopPrompt',{sessionId:session.id,runId:id});
+      assert.equal((await response).result.state,'cancelled');
+    } finally { fs.writeFileSync(artifact+'.resume-shortcut','resume'); }
+    await untilFile(artifact+'.shortcut-up','released');
+    checks.push('Cancelled while the fixture handled Ctrl+Shift+S; it later consumed key-up and independently observed Ctrl, Shift and S all released');
+  } else if (cancel) {
     const until = Date.now()+25000;
     let pid;
     while (Date.now() < until && !pid) {
@@ -454,13 +501,13 @@ try {
     const file = path.join(root,'ReverieRustFixture.exe');
     execFileSync(path.join(process.env.WINDIR,'Microsoft.NET/Framework64/v4.0.30319/csc.exe'),['/nologo','/target:winexe',
       '/reference:System.Drawing.dll','/reference:System.Windows.Forms.dll','/out:'+file,path.join(repo,'scripts/verification/fixtures/computer-use/Fixture.cs')],{windowsHide:true});
-    fixture=spawn(file,[artifact],{stdio:'ignore',env:{...process.env,REVERIE_EXTENDED_FIXTURE:'1',...(physical?{REVERIE_POINTER_FIXTURE:root}:{})}});
+    fixture=spawn(file,[artifact],{stdio:'ignore',env:{...process.env,REVERIE_EXTENDED_FIXTURE:'1',...(physical||shortcutsOnly?{REVERIE_POINTER_FIXTURE:root}:{})}});
   }
   bridge = startBridge(executable,project,app,{NO_PROXY:'127.0.0.1,localhost'});
   await bridge.ready;
   await request('initialize',{});
-  await run('desktop-controls',statusOnly ? status : interactive);
-  if (!statusOnly) {
+  if(!shortcutsOnly) await run('desktop-controls',statusOnly ? status : interactive);
+  if (!statusOnly && !shortcutsOnly) {
     await run('desktop-new-run',foreign);
     await run('desktop-local-escape',applicationEscape);
     await run('desktop-text-image',()=>screenshot(false));
@@ -476,6 +523,12 @@ try {
     }
     await run('desktop-strict',strict,'full_control',false,['deny','session']);
     await run('desktop-cancel',waiting,'full_control',true);
+  }
+  if (physical || shortcutsOnly) {
+    await run('desktop-shortcuts',windowShortcuts,'full_control',false,[
+      ['computer_list_windows','session'],['computer_window','session'],['computer_find','session'],
+      ['computer_set_value','session'],['computer_focus','session'],['computer_press_key','deny'],['computer_press_key','session']]);
+    await run('desktop-shortcut-stop',shortcutDuringStop,'full_control','shortcut');
   }
   await run('desktop-low-level',restricted,'read_only');
   await request('shutdown',{});

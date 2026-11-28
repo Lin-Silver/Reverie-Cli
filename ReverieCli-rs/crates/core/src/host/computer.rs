@@ -145,7 +145,7 @@ const TOOLS: &[Tool] = &[
     #[cfg(windows)]
     tool(
         "computer_press_key",
-        "Send application-local Escape to the active window of the observed application. Use it to dismiss a menu or dialog and observe the result.",
+        "Send a key or application shortcut to one observed window, e.g. Ctrl+A, Ctrl+Shift+Left or Alt+F. Physical shortcuts require foreground focus. Escape dismisses the application's active menu or dialog. Observe again to verify the effect.",
         &["window_id", "key"],
         &[],
         true,
@@ -217,7 +217,9 @@ impl Tool {
                 "value" => json!({"type":"string","maxLength":65536}),
                 "direction" => json!({"type":"string","enum":["up","down","left","right"]}),
                 "amount" => json!({"type":"integer","minimum":1,"maximum":100}),
-                "key" => json!({"type":"string","enum":["Escape","escape","Esc","esc"]}),
+                "key" => json!({"type":"string","maxLength":48,"pattern":r"^(?:[a-zA-Z]+\+){0,3}[a-zA-Z0-9_]+$",
+                    "not":{"allOf":[{"pattern":r"(?:^|\+)(?:[aA][lL][tT]|[oO][pP][tT][iI][oO][nN])\+"},
+                        {"pattern":r"\+(?:[tT][aA][bB]|[fF]4|[sS][pP][aA][cC][eE])$"}]}}),
                 "action" => json!({"type":"string","enum":["focus","move","resize","minimize","maximize","restore"]}),
                 "x"|"y" => json!({"type":"integer","minimum":i32::MIN,"maximum":i32::MAX}),
                 "width"|"height" => json!({"type":"integer","minimum":1,"maximum":i32::MAX}),
@@ -498,6 +500,11 @@ impl Desktop {
         }
         #[cfg(windows)]
         if name == "press_key" {
+            let text = p["key"].as_str().unwrap_or_default();
+            let key = match reverie_platform::desktop::WindowKey::parse(text) {
+                Ok(key) => key,
+                Err(e) => return failure(name, e.code, e.message, false),
+            };
             let Some(pid) = window.as_ref().and_then(|w| w["pid"].as_u64()) else {
                 return failure(
                     name,
@@ -513,15 +520,21 @@ impl Desktop {
                 control.cancel.cancel();
             }
             if cancel.is_cancelled() {
-                return failure(name, "CANCELLED", "Cancelled before sending Escape.", false);
+                return failure(
+                    name,
+                    "CANCELLED",
+                    "Cancelled before sending the key.",
+                    false,
+                );
             }
-            return match reverie_platform::desktop::application_escape(
-                p["window_id"].as_str().unwrap_or_default(),
-                pid,
-            ) {
-                Ok(()) => json!({"version":"2.6","ok":true,"command":"press-key","data":{
-                    "window_id":p["window_id"],"key":"Escape","verification_scope":"window_message_queue",
+            return match key.send(p["window_id"].as_str().unwrap_or_default(), pid) {
+                Ok(scope) => json!({"version":"2.6","ok":true,"command":"press-key","data":{
+                    "window_id":p["window_id"],"key":if key.is_escape() { "Escape" } else { text },"verification_scope":scope,
                     "disposition":{"delivery":"delivered_unverified","retry":"unsafe"}}}),
+                Err(e) if e.code == "PHYSICAL_ESCAPE" => {
+                    control.cancel.cancel();
+                    failure(name, "CANCELLED", e.message, false)
+                }
                 Err(e) => failure(name, e.code, e.message, e.uncertain),
             };
         }
@@ -650,6 +663,8 @@ mod tests {
         let schema = &VALIDATORS[index];
         assert_eq!(read_only("computer_press_key"), Some(false));
         assert!(schema.is_valid(&json!({"key":"Escape","window_id":"w-1"})));
+        assert!(schema.is_valid(&json!({"key":"Ctrl+A","window_id":"w-1"})));
+        assert!(schema.is_valid(&json!({"key":"Ctrl+Shift+Left","window_id":"w-1"})));
         assert!(!schema.is_valid(&json!({"key":"Escape"})));
         assert!(!schema.is_valid(&json!({"key":"Escape","window_id":"w-1","force":true})));
         assert!(!schema.is_valid(&json!({"key":"Alt+Tab","window_id":"w-1"})));

@@ -20,6 +20,7 @@ pub mod lsp;
 mod markets;
 pub mod mcp;
 pub mod models;
+mod modelscope;
 mod modes;
 mod permissions;
 pub mod plugins;
@@ -132,7 +133,9 @@ pub const ACTIONS: &[&str] = &[
     "getModelSources",
     "refreshModelSources",
     "listApiKeyEnvironmentVariables",
+    "revealProviderSecret",
     "selectModel",
+    "setProviderConfig",
     "addStandardModel",
     "updateStandardModel",
     "deleteStandardModel",
@@ -213,13 +216,17 @@ impl Kernel {
     }
 
     pub fn effective_config(&mut self, id: Option<&str>) -> Result<Value> {
+        self.session_config(id, false)
+    }
+
+    fn session_config(&mut self, id: Option<&str>, browsing_catalog: bool) -> Result<Value> {
         let defaults = self.config.effective()?;
         let Some(id) = id else {
             return Ok(defaults);
         };
         let page = self.session_store()?.page(id, None, 1)?;
         match page.metadata.get("runtime_config") {
-            Some(snapshot) => models::resolve(&defaults, snapshot),
+            Some(snapshot) => models::resolve_selection(&defaults, snapshot, browsing_catalog),
             None => Ok(defaults),
         }
     }
@@ -729,13 +736,13 @@ impl Kernel {
                     json!({"models":models::sources(&config),"workspace":self.workspace(&config),"settings":models::settings(&config,&self.config.path,self.workspace_mode)}),
                 ))
             }
-            "getModelSources" | "refreshModelSources" => {
-                let config = self.effective_config(payload["sessionId"].as_str())?;
+            "getModelSources" => {
+                let config = self.session_config(payload["sessionId"].as_str(), true)?;
                 Ok(("models", json!({"models":models::sources(&config)})))
             }
             "selectModel" => {
                 let source = payload["source"].as_str().unwrap_or("standard");
-                if source != "standard" {
+                if !matches!(source, "standard" | "modelscope") {
                     return Err(
                         format!("Provider source {source} has not yet been migrated.").into(),
                     );
@@ -744,8 +751,22 @@ impl Kernel {
                     .as_str()
                     .or_else(|| payload["model"].as_str())
                     .ok_or("Model id is required.")?;
-                let choose = || -> io::Result<Value> {
-                    let mut config = self.config.effective()?;
+                let choose = |mut config: Value, snapshot: &Value| -> io::Result<Value> {
+                    config["active_model_source"] = json!(source);
+                    if source == "modelscope" {
+                        if snapshot["model_ref"]["source"] == source {
+                            modelscope::apply_session_settings(
+                                &mut config["modelscope"],
+                                &snapshot["provider_settings"],
+                            );
+                        }
+                        modelscope::choose(
+                            &mut config["modelscope"],
+                            model,
+                            payload["reasoning"].as_str(),
+                        )?;
+                        return Ok(config);
+                    }
                     let index = models::selection_index(
                         config["models"]
                             .as_array()
@@ -753,19 +774,23 @@ impl Kernel {
                         model,
                         &payload["profileId"],
                     )?;
-                    config["active_model_source"] = json!(source);
                     config["active_model_index"] = json!(index);
                     Ok(config)
                 };
                 let selected = if let Some(id) = payload["sessionId"].as_str() {
-                    let selected = choose()?;
                     let page = self.session_store()?.page(id, None, 1)?;
+                    let selected = choose(
+                        self.config.effective()?,
+                        page.metadata.get("runtime_config").unwrap_or(&Value::Null),
+                    )?;
                     let mut snapshot = page
                         .metadata
                         .get("runtime_config")
                         .cloned()
                         .unwrap_or_else(|| models::capture(&selected));
-                    snapshot["model_ref"] = models::capture(&selected)["model_ref"].clone();
+                    let mut captured = models::capture(&selected);
+                    snapshot["model_ref"] = captured["model_ref"].take();
+                    snapshot["provider_settings"] = captured["provider_settings"].take();
                     let selected = models::resolve(&selected, &snapshot)?;
                     self.session_store()?.update_metadata(
                         id,
@@ -773,10 +798,18 @@ impl Kernel {
                         page.revision,
                     )?;
                     selected
+                } else if source == "modelscope" {
+                    let cfg = self.config.update_modelscope(true, |cfg| {
+                        modelscope::choose(cfg, model, payload["reasoning"].as_str())
+                    })?;
+                    let mut selected = self.config.effective()?;
+                    selected["modelscope"] = cfg;
+                    selected["active_model_source"] = json!(source);
+                    selected
                 } else {
                     let mut selected = Value::Null;
                     self.config.update(|root| {
-                        selected = choose()?;
+                        selected = choose(self.config.effective()?, &Value::Null)?;
                         for key in [
                             "active_model_source",
                             "active_model_index",
@@ -790,10 +823,49 @@ impl Kernel {
                     })?;
                     selected
                 };
-                let model = models::active(&selected).ok_or("Selected model is unavailable.")?;
+                let model = if source == "modelscope" {
+                    let cfg = &selected["modelscope"];
+                    json!({"model":cfg["selected_model_id"],"model_display_name":cfg["selected_model_display_name"],"provider":"openai-chat"})
+                } else {
+                    models::without_secrets(
+                        &models::active(&selected).ok_or("Selected model is unavailable.")?,
+                    )
+                };
                 Ok((
                     "model.selected",
-                    json!({"models":models::sources(&selected),"selected":models::without_secrets(model),"workspace":self.workspace(&selected)}),
+                    json!({"models":models::sources(&selected),"selected":model,"workspace":self.workspace(&selected)}),
+                ))
+            }
+            "setProviderConfig" => {
+                if payload["source"] != "modelscope" {
+                    return Err("Unsupported provider configuration.".into());
+                }
+                self.config
+                    .update_modelscope(false, |cfg| modelscope::patch(cfg, payload))?;
+                let effective = self.session_config(payload["sessionId"].as_str(), true)?;
+                Ok((
+                    "provider.updated",
+                    json!({"models":models::sources(&effective),"workspace":self.workspace(&effective)}),
+                ))
+            }
+            "revealProviderSecret" => {
+                let config = self.config.effective()?;
+                if payload["field"].as_str().unwrap_or("api_key") != "api_key" {
+                    return Err("Unknown secret field.".into());
+                }
+                let row = match payload["kind"].as_str() {
+                    Some("provider") if payload["source"] == "modelscope" => &config["modelscope"],
+                    Some("standard") => {
+                        let items = config["models"]
+                            .as_array()
+                            .ok_or("Missing model inventory.")?;
+                        &items[models::edit_index(items, payload)?]
+                    }
+                    _ => return Err("Unsupported provider secret.".into()),
+                };
+                Ok((
+                    "provider.secret",
+                    json!({"value":row["api_key"].as_str().unwrap_or("")}),
                 ))
             }
             "addStandardModel" | "updateStandardModel" | "deleteStandardModel" => {

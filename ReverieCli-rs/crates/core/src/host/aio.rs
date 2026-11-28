@@ -163,7 +163,6 @@ impl KernelHost {
         }
         let configuration = models::resolve(&defaults, &snapshot)?;
         let mut model = models::active(&configuration)
-            .cloned()
             .ok_or("Select an available AiO model before making a decision.")?;
         let maximum = model["max_output_tokens"]
             .as_u64()

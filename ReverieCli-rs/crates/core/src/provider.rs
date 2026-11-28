@@ -225,7 +225,11 @@ impl ProviderClient {
             .client
             .post(address)
             .timeout(Duration::from_secs(
-                config["api_timeout"].as_u64().unwrap_or(60).max(1),
+                model["request_timeout"]
+                    .as_u64()
+                    .or(config["api_timeout"].as_u64())
+                    .unwrap_or(60)
+                    .max(1),
             ))
             .json(&body);
         request = transport.authenticate(request, model)?;

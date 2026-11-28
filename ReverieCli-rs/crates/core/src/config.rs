@@ -168,6 +168,16 @@ impl ConfigStore {
         &self,
         edit: impl FnOnce(&mut Map<String, Value>) -> io::Result<()>,
     ) -> io::Result<Value> {
+        self.update_if(|fields| {
+            edit(fields)?;
+            Ok(true)
+        })
+    }
+
+    fn update_if(
+        &self,
+        edit: impl FnOnce(&mut Map<String, Value>) -> io::Result<bool>,
+    ) -> io::Result<Value> {
         let parent = self
             .path
             .parent()
@@ -181,11 +191,13 @@ impl ConfigStore {
             .open(parent.join("config.lock"))?;
         lock.lock()?;
         let mut value = self.load()?;
-        edit(
+        if !edit(
             value
                 .as_object_mut()
                 .expect("load validates the configuration object"),
-        )?;
+        )? {
+            return Ok(value);
+        }
         if self.path.exists() && !self.backup_taken.load(Ordering::Acquire) {
             let backup = parent.join("backups");
             fs::create_dir_all(&backup)?;
@@ -217,6 +229,49 @@ impl ConfigStore {
             return Err(io::Error::other("Invalid provider profile filename."));
         }
         Ok(self.path.parent().unwrap().join("Providers").join(filename))
+    }
+
+    pub(crate) fn update_modelscope(
+        &self,
+        activate: bool,
+        edit: impl FnOnce(&mut Value) -> io::Result<()>,
+    ) -> io::Result<Value> {
+        let mut selected = Value::Null;
+        self.update_if(|root| {
+            let apply = |section: &mut Value| {
+                if section.is_null() {
+                    *section = json!({});
+                }
+                if !section.is_object() {
+                    return Err(io::Error::other("Invalid ModelScope configuration."));
+                }
+                let previous = section.clone();
+                edit(section)?;
+                selected = section.clone();
+                Ok(previous != *section)
+            };
+            let changed = if let Some(file) = root
+                .get("provider_files")
+                .and_then(|files| files.get("modelscope"))
+            {
+                Self::at(self.provider_path(file)?).update_if(|profile| {
+                    if profile.get("provider_id").and_then(Value::as_str) != Some("modelscope") {
+                        return Err(io::Error::other("Provider profile identity mismatch."));
+                    }
+                    apply(profile.entry("chat").or_insert_with(|| json!({})))
+                })?;
+                false
+            } else {
+                apply(root.entry("modelscope").or_insert_with(|| json!({})))?
+            };
+            let switched = activate
+                && root.get("active_model_source").and_then(Value::as_str) != Some("modelscope");
+            if switched {
+                root.insert("active_model_source".into(), json!("modelscope"));
+            }
+            Ok(changed || switched)
+        })?;
+        Ok(selected)
     }
 
     pub fn update_standard_models(
@@ -300,6 +355,9 @@ impl ConfigStore {
         }
         if let Some(items) = value["models"].as_array_mut() {
             crate::models::fill_profile_ids(items);
+        }
+        if !value["modelscope"].is_null() && !value["modelscope"].is_object() {
+            return Err(io::Error::other("Invalid ModelScope configuration."));
         }
         Ok(value)
     }

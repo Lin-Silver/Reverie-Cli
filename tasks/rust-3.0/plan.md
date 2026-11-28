@@ -28,6 +28,11 @@
 10. 标准模型的环境变量选择器已连到 Rust SDK。Windows release 和桌面表单实际验证了变量名建议、切换密钥来源、保存后保留上下文长度与自定义请求头，以及向回环服务发送认证请求。SDK 另测了四种模型协议。本轮验证使用独立测试变量。
 11. Rust 终端可用 `/model add <id> <base_url> [api_key_env] [--provider <transport>]` 添加标准模型，默认使用 OpenAI Chat。验证时用同一模型名创建 OpenAI Chat、OpenAI Responses、Anthropic 和 Gemini 四份配置，按配置 ID 选中，逐一检查实际 HTTP 路径、认证头、请求体及终端收到的回复。各厂商的在线目录、账户登录和真实模型质量仍按第 2.3 节跟踪。
 12. 桌面模型选择、目录刷新、上下文长度和图片能力使用标准配置的 `profile_id` 区分同名模型。编辑或删除前重新按配置 ID 查找当前记录。验收覆盖普通配置文件和 `provider_files.standard` 分文件、无 ID 的旧数据、确认框打开期间列表变化、工作区默认与已有会话的独立选择，以及桌面实际发出的 HTTP 请求。
+13. 具名 ModelScope 来源已接通 Rust、SDK、终端和桌面。内置目录有 6 个当前模型，另保留 3 个旧模型供已有会话选择。终端从 `/modelscope` 进入，桌面在“模型与提供商”中设置地址和密钥来源。会话保存模型、思考档、输出上限和超时，连接及凭据由共享 Provider 配置解析。在线刷新按地址与凭据绑定目录，成功的空目录可以覆盖旧列表，刷新失败继续使用上次成功结果。
+
+第 13 项的 Windows 独立及桌面解包 release 分别通过了 28 次回环 HTTP 请求，覆盖内联和分文件配置、四个模型家族、会话重启、密钥切换、慢请求期间换地址、空目录和禁用来源。独立终端、实际 Electron 窗口及指定独立 ModelScope 审批模型也已验收。桌面在 Qwen 的思考菜单选择“低”后，服务收到 `/named/v1/chat/completions`、正确的鉴权和 `reasoning_effort=low`。这批使用本机夹具凭据，厂商账户、配额和线上可用模型按第 2.3 节继续跟踪。[SDK 复验入口](../../scripts/verification/rust-modelscope-smoke.mjs)
+
+同批 Windows 解包 CLI 的普通请求列出全部 26 个有效技能，共 10,519 字符。实际浏览器完成 Motion 预览后，命令导出 CSS、WAAPI 和类型声明；Strict、只读和审计也通过。上一开发提交 `8d5b23d` 的四平台 Rust、桌面和文档共六个 CI 作业均通过。[Skills 验收入口](../../scripts/verification/rust-skills-smoke.mjs) · [上一提交 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46104855421)
 
 第 12 项已在 Windows release 和真实 Electron 窗口复验。切换前的请求到达第一份配置的回环地址，切换后的三次对话请求全部到达第二份配置的地址。两种存储布局均通过旧配置身份恢复、目标消失时拒绝写入、删除前一行后保留默认模型，以及模型改名后重新打开会话的检查。手工写入重复配置 ID 时，按 ID 的操作会报告歧义。复验入口见[桌面 smoke](../../scripts/verification/rust-electron-smoke.mjs)和[Provider smoke](../../scripts/verification/rust-provider-smoke.mjs)。
 

@@ -4,6 +4,7 @@ mod cursor_backend;
 mod input;
 mod input_events;
 mod markets;
+mod models;
 mod plugins;
 mod screen;
 mod skills;
@@ -237,7 +238,7 @@ impl Tui {
             }
             PanelKind::Models if !cancelled => {
                 let row = &panel.source[index];
-                self.request("selectModel", json!({"sessionId":self.session,"source":"standard","modelId":row["id"],"profileId":row["profile_id"]})).await?;
+                self.request("selectModel", json!({"sessionId":self.session,"source":row["source"],"modelId":row["id"],"profileId":row["profile_id"]})).await?;
             }
             PanelKind::Sessions if !cancelled => {
                 self.session = panel.source[index]["id"]
@@ -305,7 +306,7 @@ impl Tui {
         match args.first().map(String::as_str) {
             Some("/quit" | "/exit" | "/q") => { self.stop().await?; self.quitting = true; }
             Some("/stop" | "/cancel") => self.stop().await?,
-            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
+            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/modelscope [model <id> [reasoning] | key-env <name> | url <base> | refresh]\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
             Some("/resume") => {
                 if args.len() != 1 { return Err("Use /resume without replacement prompt text.".into()); }
                 self.start_resume()?;
@@ -328,12 +329,8 @@ impl Tui {
                 self.request("selectModel", json!({"sessionId":self.session,"source":"standard","modelId":args[1]})).await?;
                 self.refresh().await?;
             }
-            Some("/model" | "/models") => {
-                let models = self.request("getModelSources", json!({"sessionId":self.session})).await?["models"]["sources"][0]["models"].clone();
-                let labels = models.as_array().into_iter().flatten().map(|model| format!("{} ({})", model["display_name"].as_str().unwrap_or_default(), model["transport"].as_str().unwrap_or("openai-chat"))).collect::<Vec<_>>();
-                if labels.is_empty() { return Err("No models configured. Use /model add <id> <base_url> [api_key_env].".into()); }
-                self.panel(PanelKind::Models, "Choose model".into(), labels, models, false);
-            }
+            Some("/model" | "/models") => self.show_model_catalog(None).await?,
+            Some("/modelscope") => self.modelscope_command(&args[1..]).await?,
             Some("/session" | "/new") if args.first().is_some_and(|value| value == "/new") || args.get(1).is_some_and(|value| value == "new") => {
                 if self.active.is_some() || self.compaction_owner.is_some() { return Err("Stop the active run before switching conversations.".into()); }
                 let session = self.request("createSession", json!({"name":args.iter().skip(2).cloned().collect::<Vec<_>>().join(" ")})).await?["session"].clone();

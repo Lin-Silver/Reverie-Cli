@@ -71,6 +71,15 @@ const server = http.createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     requests.push(body);
+    if (body.model === 'Qwen/Qwen3.8-27B') {
+      assert.equal(request.url, '/named/v1/chat/completions');
+      assert.equal(request.headers.authorization, 'Bearer terminal-only-test-key');
+      assert.equal(body.reasoning_effort,'low');
+      assert.deepEqual(body.chat_template_kwargs,{enable_thinking:true});
+      response.writeHead(200, {'content-type':'text/event-stream'});
+      finish(response,'TUI_MODELSCOPE_CONFIRMED');
+      return;
+    }
     if (body.model === 'shared-tui-model' || request.url.includes('/models/shared-tui-model:')) {
       const url = new URL(request.url,'http://127.0.0.1');
       const protocol = url.pathname.endsWith('/messages') ? 'anthropic' : url.pathname.endsWith('/responses') ? 'openai-responses'
@@ -124,7 +133,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mode: 'reverie', models: [{model: 'tui-fixture', profile_id: 'tui-profile', provider: 'openai-chat',
   base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'TUI_FIXTURE_KEY'}], active_model_source: 'standard', active_model_index: 0, stream_responses: true, auto_index: false,
   security: {permission_level: 'full_control', permission_mode: 'default'}}));
-const environment = {...process.env, REVERIE_APP_ROOT: appRoot, REVERIE_TUI_MODEL_KEY:'terminal-only-test-key', NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
+const environment = {...process.env, MODELSCOPE_API_KEY:'', MODELSCOPE_TOKEN:'', MODELSCOPE_ACCESS_TOKEN:'', REVERIE_APP_ROOT: appRoot, REVERIE_TUI_MODEL_KEY:'terminal-only-test-key', NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
 function markPhase(label) {
   fs.writeFileSync(path.join(root, 'last-phase.txt'), label);
   if (process.env.CI) console.log('Terminal check: ' + label);
@@ -321,6 +330,17 @@ try {
   await wait(()=>messageRows().filter(m=>m.role==='Reverie' && m.content==='TRANSPORT_RECEIVED_anthropic').length===2,'request after choosing the earlier Anthropic profile');
   assert(!fs.readFileSync(configFile,'utf8').includes(environment.REVERIE_TUI_MODEL_KEY));
   checks.push('Added four same-name profiles in the real terminal, selected each exact profile, and received replies over all four authenticated HTTP protocols');
+  await wait(()=>!viewportText().includes('Reverie is working'),'terminal ready for ModelScope');
+  const namedUrl='http://127.0.0.1:'+server.address().port+'/named';
+  terminal.write('/modelscope url '+namedUrl+'\r');
+  await wait(()=>JSON.parse(fs.readFileSync(configFile)).modelscope?.api_url===namedUrl,'stored ModelScope URL');
+  terminal.write('/modelscope key-env REVERIE_TUI_MODEL_KEY\r');
+  await wait(()=>JSON.parse(fs.readFileSync(configFile)).modelscope.api_key_env==='REVERIE_TUI_MODEL_KEY','stored ModelScope key reference');
+  terminal.write('/modelscope model Qwen/Qwen3.8-27B low\r');
+  await wait(()=>JSON.parse(database.prepare('SELECT metadata FROM conversations WHERE deleted=0 ORDER BY updated_at DESC LIMIT 1').get().metadata).runtime_config.provider_settings.reasoning_effort==='low','selected ModelScope reasoning');
+  terminal.write('CHECK_NAMED_SOURCE\r');
+  await wait(()=>messageRows().some(m=>m.role==='Reverie' && m.content==='TUI_MODELSCOPE_CONFIRMED'),'authenticated ModelScope turn and terminal reply');
+  checks.push('Native PTY saved ModelScope URL and key reference, selected Qwen low reasoning and received its authenticated reply');
   terminal.write('/quit\r');
   await wait(() => terminalExit !== undefined, 'normal terminal exit');
   assert.equal(terminalExit.exitCode, 0);

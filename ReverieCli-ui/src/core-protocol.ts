@@ -168,7 +168,7 @@ interface CoreRequestMap {
   stopContextOperation:{payload:{operationId:string};response:Envelope<'context.control',{operation_id:string;state:string}>};
   queryContext:{payload:ContextOperationPayload&{query:string;strategy?:'auto'|'basic'|'hybrid';limit?:number;estimatedTokens?:number};response:Envelope<'context.results',{results:Array<{file_path:string;start_line:number;end_line:number;content:string;content_hash:string;revision:number;sources:string[]}>;context_engine:NonNullable<WorkspaceState['context_engine']>;retrieval:Record<string,unknown>;operation_id:string}>};
   getContextUsage: { payload: { sessionId?: string }; response: Envelope<"context.usage", { usage: CoreContextUsage | null }> };
-  revealProviderSecret: { payload: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }; response: Envelope<"provider.secret", { value: string }> };
+  revealProviderSecret: { payload: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; profileId?: string; providerId?: string }; response: Envelope<"provider.secret", { value: string }> };
   listApiKeyEnvironmentVariables: { payload: Record<string, never>; response: Envelope<"provider.environment", { names: string[] }> };
   getSubagents: { payload: EmptyPayload; response: Envelope<"subagents", { subagents: SubagentsState }> };
   getSubagentRunLog: { payload: { runId: string }; response: Envelope<"subagent.log", { run_id: string; log: SubagentRunLog }> };
@@ -196,14 +196,14 @@ interface CoreRequestMap {
   getTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.statistics", { statistics: TokenStatisticsData }> };
   exportTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.csv", { filename: string; content: string }> };
   setTokenPrice: { payload: { modelKey: string; price: TokenPrice }; response: Envelope<"token.price", { model_key: string; price: TokenPrice }> };
-  refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
+  refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState; catalog_error?: string }> };
   selectModel: { payload: { source: string; modelId: string; profileId?: string; reasoning?: string; compact?: boolean }; response: Envelope<"model.selected", ModelSelectionResult> };
   getImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   refreshImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   selectImageModel: { payload: { source: string; modelId: string }; response: Envelope<"image-model.selected", { selected: Record<string, unknown>; imageModels: ImageModelSourcesState }> };
   setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models?: ModelSourcesState; workspace?: WorkspaceState }> };
   listSettings: { payload: EmptyPayload; response: Envelope<"settings", { settings: SettingsState }> };
-  setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
+  setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[]; sessionId?: string; projectRoot?: string; assistantId?: "aio" }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
   addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; profile_id?: string; models: ModelSourcesState; workspace: WorkspaceState }> };
   updateStandardModel: { payload: StandardModelTarget & { model: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   deleteStandardModel: { payload: StandardModelTarget; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };

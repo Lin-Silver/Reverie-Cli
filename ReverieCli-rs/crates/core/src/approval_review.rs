@@ -330,10 +330,15 @@ impl ModelSelection {
     pub fn request_model(&self, review: &ReviewConfig) -> Option<Value> {
         self.model.clone().map(|mut model| {
             model["temperature"] = json!(0);
-            model["max_tokens"] = json!(review.max_tokens);
-            model["max_output_tokens"] = json!(review.max_tokens);
+            let limit = model["max_output_tokens"]
+                .as_u64()
+                .or(model["max_tokens"].as_u64())
+                .unwrap_or(review.max_tokens)
+                .min(review.max_tokens);
+            model["max_tokens"] = json!(limit);
+            model["max_output_tokens"] = json!(limit);
             if model.get("max_completion_tokens").is_some() {
-                model["max_completion_tokens"] = json!(review.max_tokens);
+                model["max_completion_tokens"] = json!(limit);
             }
             model
         })
@@ -365,6 +370,15 @@ pub fn select_model(
                     .unwrap_or(review.model_index);
                 models.get(index).cloned()
             })
+        } else if source == "modelscope" {
+            let mut cfg = configuration["modelscope"].clone();
+            if review.model.is_empty()
+                || crate::modelscope::choose(&mut cfg, &review.model, None).is_ok()
+            {
+                crate::modelscope::runtime(&cfg)
+            } else {
+                None
+            }
         } else {
             resolved_custom_source.cloned().map(|mut model| {
                 if model.is_object() && !review.model.is_empty() {

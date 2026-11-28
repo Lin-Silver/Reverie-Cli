@@ -37,6 +37,16 @@ const server = http.createServer(async(request,response)=>{
     const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
     assert.equal(request.headers.authorization,'Bearer desktop-environment-fixture');
     const prompt=body.messages.findLast(message=>message.role==='user').content;
+    if(prompt==='MODELSCOPE') {
+      assert.equal(request.url,'/named/v1/chat/completions');
+      assert.equal(body.model,'Qwen/Qwen3.8-27B');
+      assert.equal(body.reasoning_effort,'low');
+      assert.deepEqual(body.chat_template_kwargs,{enable_thinking:true});
+      routes.set(prompt,request.url);
+      response.writeHead(200,{'content-type':'text/event-stream'});
+      response.end('data: '+JSON.stringify({choices:[{delta:{content:'DESKTOP_MODELSCOPE_CONFIRMED'},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');
+      return;
+    }
     assert.equal(body.model,'desktop-fixture');
     assert.equal(request.url,prompt==='QUESTION'?'/v1/chat/completions':'/alternate/chat/completions');
     routes.set(prompt,request.url);
@@ -62,7 +72,7 @@ fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({model
     base_url:`http://127.0.0.1:${server.address().port}/alternate`,api_key_env:'REVERIE_DESKTOP_TEST_KEY',max_context_tokens:32768},disposable('delete-target')],active_model_source:'standard',active_model_index:1,
   mode:'reverie',auto_index:false,stream_responses:true,security:{permission_mode:'strict',permission_level:'full_control'}}));
 fs.writeFileSync(path.join(runtimeRoot,'desktop-settings.json'),JSON.stringify({projectRoot,coreAppRoot:appRoot,ui:{language:'zh-CN',startupMode:'gui',uiVariant:'classic',classicTheme:'dark'}}));
-const options={uiRoot,runtimeRoot,projectRoot,outputRoot:root,appRoot,answer,fileContent,outputFile};
+const options={uiRoot,runtimeRoot,projectRoot,outputRoot:root,appRoot,answer,fileContent,outputFile,namedUrl:'http://127.0.0.1:'+server.address().port+'/named'};
 if(process.argv[3]||process.argv[4]) {
   if(!process.argv[3]||!process.argv[4])throw new Error('Supply both a real semantic bundle and its manifest SHA-256.');
   options.semantic={directory:path.resolve(process.argv[3]),digest:process.argv[4]};
@@ -75,7 +85,7 @@ let timer;
 try {
   const electron=require(path.join(uiRoot,'node_modules/electron'));
   child=spawn(electron,[path.join(repositoryRoot,'scripts/verification/rust-electron-probe.cjs'),optionsFile],{
-    cwd:uiRoot,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined,REVERIE_DESKTOP_TEST_KEY:'desktop-environment-fixture'},stdio:['ignore','pipe','pipe'],
+    cwd:uiRoot,windowsHide:true,env:{...process.env,ELECTRON_RUN_AS_NODE:undefined,MODELSCOPE_API_KEY:'',MODELSCOPE_TOKEN:'',MODELSCOPE_ACCESS_TOKEN:'',REVERIE_DESKTOP_TEST_KEY:'desktop-environment-fixture'},stdio:['ignore','pipe','pipe'],
   });
   let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
   timer=setTimeout(()=>child.kill(),90_000);
@@ -86,7 +96,7 @@ try {
   const reportFile=path.join(root,'report.json');
   const report=JSON.parse(fs.readFileSync(reportFile,'utf8'));
   assert.equal(report.passed,true);
-  assert.deepEqual([...routes.keys()],['QUESTION','WRITE','COMMAND','WAIT']);
+  assert.deepEqual([...routes.keys()],['QUESTION','WRITE','COMMAND','WAIT','MODELSCOPE']);
   report.routes=Object.fromEntries(routes);
   report.kernel_sha256=createHash('sha256').update(fs.readFileSync(report.paths.kernelPath)).digest('hex');
   fs.writeFileSync(reportFile,JSON.stringify(report,null,2)+'\n');

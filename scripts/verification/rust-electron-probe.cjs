@@ -242,6 +242,33 @@ app.whenReady().then(async()=>{
     const submitted=saved.session.messages.filter(message=>message.role==='user').map(message=>message.content);
     if(JSON.stringify(submitted)!==JSON.stringify(['QUESTION','WRITE','COMMAND','WAIT']))throw new Error('The native desktop submitted a duplicated or unexpected user turn: '+JSON.stringify(submitted));
     checks.push('Live output, targeted stop and persisted interrupted text');
+    await evaluate("document.querySelector('.footer-settings').click()");
+    await evaluate(`${modelsTab}.click()`);
+    await wait("Array.from(document.querySelectorAll('.provider-tabs button')).some(b=>b.textContent==='ModelScope')",'ModelScope settings tab is missing');
+    await evaluate("Array.from(document.querySelectorAll('.provider-tabs button')).find(b=>b.textContent==='ModelScope').click()");
+    const changeField=async (selector,value)=>evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await changeField('.provider-config label input[type=text]',options.namedUrl);
+    await evaluate("document.querySelector('.provider-config .api-key-environment-field button').click()");
+    await wait("!!document.querySelector('datalist option[value=REVERIE_DESKTOP_TEST_KEY]')",'ModelScope key variable picker did not load');
+    await changeField('.api-key-environment-field input','REVERIE_DESKTOP_TEST_KEY');
+    await evaluate("document.querySelector('.provider-config .section-heading button').click()");
+    await wait("window.reverie.request('getModelSources').then(r=>r.models.sources.find(s=>s.id==='modelscope').config.values.api_key_env==='REVERIE_DESKTOP_TEST_KEY')",'ModelScope settings did not persist');
+    await evaluate("document.querySelector('.settings-model-card .model-card-main').click()");
+    await wait("document.querySelector('.settings-model-card.active span[title]')?.title==='Qwen/Qwen3.8-27B'",'The named model was not selected');
+    await evaluate("document.querySelector('.footer-settings').click()");
+    await evaluate("document.querySelector('.reasoning-trigger').click()");
+    await wait("document.querySelectorAll('.reasoning-menu button').length===4",'Qwen thinking options did not appear');
+    await evaluate("document.querySelectorAll('.reasoning-menu button')[1].click()");
+    await wait(`window.reverie.request('getConversationConfig',{sessionId:${JSON.stringify(session)}}).then(r=>r.configuration.provider_settings.reasoning_effort==='low')`,'The selected thinking level did not reach the conversation');
+    const draft=await evaluate("document.querySelector('.composer textarea').value");
+    if (draft === 'WAIT') {
+      await evaluate("document.querySelector('.composer textarea').select()");
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Backspace'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Backspace'});
+    }
+    await prompt('MODELSCOPE');
+    await wait("document.body.innerText.includes('DESKTOP_MODELSCOPE_CONFIRMED')",'Named model reply did not reach the desktop');
+    checks.push('Real desktop ModelScope form, saved API URL and key reference, model card, reasoning menu and authenticated reply');
     await screenshot('finished.png');
     fs.writeFileSync(path.join(options.outputRoot,'report.json'),JSON.stringify({passed:true,scope:'actual Electron and native Rust with a loopback model; no external service or full product acceptance',checks,errors,paths},null,2)+'\n');
     console.log(JSON.stringify({passed:true,checks:checks.length,report:path.join(options.outputRoot,'report.json')}));

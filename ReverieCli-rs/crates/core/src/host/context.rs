@@ -144,8 +144,7 @@ impl KernelHost {
             .unwrap_or_else(|| models::capture(&defaults));
         let config = models::resolve(&defaults, &snapshot)?;
         let model = models::active(&config)
-            .ok_or("Select a configured model before compacting context.")?
-            .clone();
+            .ok_or("Select a configured model before compacting context.")?;
         let store = if kernel.assistant_mode {
             SessionStore::open_assistant(&super::modes::aio::data_directory(&kernel.app_root))?
         } else {

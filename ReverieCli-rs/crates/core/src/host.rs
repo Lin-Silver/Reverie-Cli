@@ -18,7 +18,9 @@ use uuid::Uuid;
 mod extensions;
 pub use extensions::PendingExtension;
 mod catalog;
+mod model_catalog;
 pub use catalog::{tool_catalog, tool_catalog_for};
+pub use model_catalog::PendingModelRefresh;
 mod aio;
 pub use aio::PendingAioDecision;
 mod approval;
@@ -191,6 +193,10 @@ impl KernelHost {
         }
         let id = request.id.clone();
         let result = match request.action.as_str() {
+            "refreshModelSources" => match self.begin_model_refresh(&request.payload) {
+                Ok(pending) => return pending.complete(id).await,
+                Err(e) => return Reply::error(id, e),
+            },
             action @ ("registerBrowserHost"
             | "unregisterBrowserHost"
             | "completeBrowserRequest"
@@ -583,7 +589,6 @@ impl KernelHost {
                 defaults
             };
             let mut model = models::active(&configuration)
-                .cloned()
                 .ok_or("Select an available model before WStyle review/extraction.")?;
             let request =
                 modes::wstyle::model_request(&app, &root, &configuration, &mut selected, &command)?;
@@ -737,9 +742,13 @@ impl KernelHost {
         }
         let mode = modes::normalize(config["mode"].as_str().unwrap_or("reverie"))?;
         config["mode"] = json!(mode);
-        let model = models::active(&config)
-            .ok_or("Select a configured model before running a prompt.")?
-            .clone();
+        let model = models::active(&config).ok_or_else(|| {
+            if config["active_model_source"] == "modelscope" {
+                crate::modelscope::unavailable(&config["modelscope"])
+            } else {
+                "Select a configured model before running a prompt."
+            }
+        })?;
         let root = kernel.project_root.clone();
         let execution_root = match payload["executionRoot"].as_str() {
             Some(root) => crate::config::canonical_project(std::path::Path::new(root))?,
@@ -1202,6 +1211,9 @@ impl KernelHost {
                     })
                     .map(|tool| tool.definition.clone()),
             );
+            if run.model["tool_calling"] == false {
+                catalog.clear();
+            }
             if (iteration == 0 && (!snapshot.servers.is_empty() || !run.mcp_diagnostics.is_empty()))
                 || !auth.diagnostics.is_empty()
             {

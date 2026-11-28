@@ -2623,7 +2623,7 @@ function RulesEditor({ item, update }: { item: SettingItem; update: (key: string
 }
 
 /** Fetch one raw stored secret from the core on explicit demand (viewing/editing). */
-type RevealSecret = (params: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; providerId?: string }) => Promise<string>;
+type RevealSecret = (params: { kind: "provider" | "standard" | "custom"; field?: string; source?: string; index?: number; profileId?: string; providerId?: string }) => Promise<string>;
 
 function ProviderFieldControl({ field, value, configured, update, reveal }: { field: ConfigField; value: unknown; configured: boolean; update: (key: string, value: unknown) => void; reveal?: () => Promise<string> }) {
   const { t } = useI18n();
@@ -6554,6 +6554,7 @@ export default function App() {
       if (sequence !== configurationRequestSequence.current ||
           ownerKey(draftOwner.current.root, draftOwner.current.id, draftOwner.current.assistantId) !== owner) return;
       setState((current) => current ? { ...current, models: response.models } : current);
+      if (response.catalog_error) toast(response.catalog_error, "error");
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -6586,6 +6587,7 @@ export default function App() {
       ...(params.field ? { field: params.field } : {}),
       ...(params.source ? { source: params.source } : {}),
       ...(typeof params.index === "number" ? { index: params.index } : {}),
+      ...(params.profileId ? { profileId: params.profileId } : {}),
       ...(params.providerId ? { providerId: params.providerId } : {}),
     });
     return String(response.value ?? "");
@@ -6595,13 +6597,15 @@ export default function App() {
     try {
       const response = await window.reverie.request("setProviderConfig", {
         source: source.id,
+        projectRoot, sessionId: configurationSessionId,
+        ...(configurationSessionId && session?.metadata.assistant_id === "aio" ? {assistantId: "aio" as const} : {}),
         patch,
         ...(clearFields.length ? { clearFields } : {}),
       });
       setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
       toast(t("provider.saved", { name: source.display_name }), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [t, toast]);
+  }, [t, toast, projectRoot, configurationSessionId, session?.metadata.assistant_id]);
 
   const standardInventoryChanged = useCallback((response: Pick<DesktopState, "models" | "workspace">) => {
     conversationViews.current.clear();
@@ -7243,7 +7247,7 @@ export default function App() {
       {commandOpen && <CommandPalette commands={state.commands.items} close={() => setCommandOpen(false)} choose={chooseCommand} />}
       {sessionSearchOpen && <SessionSearch close={() => setSessionSearchOpen(false)} openSession={(id) => void openOwnedSession(id)} />}
       {renameSessionTarget && <RenameSessionModal session={renameSessionTarget} close={() => setRenameSessionTarget(null)} save={(name) => void renameSession(name)} />}
-      {standardModelForm && <StandardModelModal target={standardModelForm.target} close={() => setStandardModelForm(null)} save={(model, clearApiKey) => void saveStandard(model, clearApiKey)} reveal={standardModelForm.target ? () => revealSecret({ kind: "standard", index: standardModelForm.target!.index }) : undefined} />}
+      {standardModelForm && <StandardModelModal target={standardModelForm.target} close={() => setStandardModelForm(null)} save={(model, clearApiKey) => void saveStandard(model, clearApiKey)} reveal={standardModelForm.target ? () => revealSecret({ kind: "standard", index: standardModelForm.target!.index, profileId: standardModelForm.target!.model.profile_id }) : undefined} />}
       {providerModal && (
         <CustomProviderModal
           provider={providerModal.provider}

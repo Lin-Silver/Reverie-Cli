@@ -189,8 +189,6 @@ impl KernelHost {
                 .unwrap_or("full_control"),
             configuration,
         );
-        // Nonstandard catalogs resolve through the ordinary model migration; until
-        // available, the reviewer explicitly follows the actual executing model.
         let selection = review::select_model(&run.config, &run.model, configuration, None);
         let started = Instant::now();
         let cancel = control.cancel.child_token();

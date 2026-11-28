@@ -215,6 +215,26 @@ pub fn run() -> io::Result<()> {
                     task_host.cancel_all();
                 }
             }));
+        } else if request.action == "refreshModelSources" {
+            let pending = match host.begin_model_refresh(&request.payload) {
+                Ok(p) => p,
+                Err(error) => {
+                    write(&output, &Reply::error(request.id, error))?;
+                    continue;
+                }
+            };
+            let task_output = output.clone();
+            let task_failure = failure.clone();
+            let task_host = host.clone();
+            tasks.push(runtime.spawn(async move {
+                let reply = pending.complete(request.id).await;
+                if let Err(error) = write(&task_output, &reply) {
+                    if let Ok(mut failure) = task_failure.lock() {
+                        *failure = Some(error.to_string());
+                    }
+                    task_host.cancel_all();
+                }
+            }));
         } else if KernelHost::is_mode_async_action(&request.action) {
             let task_host = host.clone();
             let task_output = output.clone();

@@ -40,11 +40,12 @@ function finish(response, message) {
 
 const server = http.createServer(async (request, response) => {
   try {
-    assert.equal(request.url, '/v1/chat/completions');
     let bytes = '';
     for await (const chunk of request) bytes += chunk;
     const body = JSON.parse(bytes);
-    assert.equal(request.headers.authorization, 'Bearer FIXTURE_SECRET');
+    const namedReviewer = body.model === 'ZhipuAI/GLM-5.3';
+    assert.equal(request.url, namedReviewer ? '/review/v1/chat/completions' : '/v1/chat/completions');
+    assert.equal(request.headers.authorization, namedReviewer ? 'Bearer NAMED_REVIEW_FIXTURE' : 'Bearer FIXTURE_SECRET');
     assert.equal(body.stream, false);
     const reviewing = body.messages[0]?.content === reviewSystem;
     requests.push({case: phase.name, kind: reviewing ? 'review' : 'main', model: body.model,
@@ -55,6 +56,10 @@ const server = http.createServer(async (request, response) => {
       assert(!body.tools?.length, 'Reviewer must have no execution tools');
       assert.equal(body.temperature, 0);
       assert.equal(body.max_tokens, phase.maxTokens || 900);
+      if (namedReviewer) {
+        assert.deepEqual(body.chat_template_kwargs, {enable_thinking:true,reasoning_effort:'high'});
+        assert(!bytes.includes('NAMED_REVIEW_FIXTURE'));
+      }
       assert(!bytes.includes('FIXTURE_SECRET'), 'Transport credentials must not enter reviewer messages');
       const user = body.messages[1];
       assert.equal(user.role, 'user');
@@ -127,6 +132,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const models = ['global-default', 'session-main', 'fixture-reviewer'].map(model => ({model, profile_id: model,
   provider: 'openai-chat', base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'FIXTURE_SECRET'}));
 fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mode: 'reverie', models,
+  modelscope:{api_url:'http://127.0.0.1:'+server.address().port+'/review',api_key:'NAMED_REVIEW_FIXTURE',reasoning_effort:'high'},
   active_model_source: 'standard', active_model_index: 0, auto_index: false, stream_responses: false,
   security: {permission_level: 'full_control', permission_mode: 'auto_check'}}));
 
@@ -249,6 +255,10 @@ try {
 
   const pinned = await session('custom review model', {model_mode: 'custom', source: 'standard', model: 'fixture-reviewer', max_tokens: 400});
   await run(pinned, 'custom', [write('custom.txt')], {reviewModel: 'fixture-reviewer', maxTokens: 400});
+  const named = await session('separate ModelScope reviewer', {model_mode:'custom',source:'modelscope',model:'ZhipuAI/GLM-5.3',max_tokens:450});
+  await run(named,'named-review',[write('named-review.txt')],{reviewModel:'ZhipuAI/GLM-5.3',maxTokens:450});
+  assert(exists('named-review.txt'));
+  passed('Standard execution and ModelScope review use separately authenticated endpoints and model-specific thinking settings');
   const fallback = await session('unavailable pinned model', {model_mode: 'custom', source: 'standard', model: 'missing', model_index: 999});
   await run(fallback, 'custom-fallback', [write('custom-fallback.txt')]);
   assert(exists('custom.txt') && exists('custom-fallback.txt'));

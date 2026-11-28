@@ -130,10 +130,15 @@ pub fn without_secrets(value: &Value) -> Value {
     }
 }
 
-pub fn active(config: &Value) -> Option<&Value> {
-    if config["active_model_source"].as_str().unwrap_or("standard") != "standard" {
-        return None;
+pub fn active(config: &Value) -> Option<Value> {
+    match config["active_model_source"].as_str().unwrap_or("standard") {
+        "standard" => standard(config).cloned(),
+        "modelscope" => crate::modelscope::runtime(&config["modelscope"]),
+        _ => None,
     }
+}
+
+fn standard(config: &Value) -> Option<&Value> {
     config["models"]
         .as_array()?
         .get(config["active_model_index"].as_u64().unwrap_or(0) as usize)
@@ -248,11 +253,18 @@ pub fn sources(config: &Value) -> Value {
         })
         .collect();
     let active = active_summary(config);
-    json!({"active_source":config["active_model_source"].as_str().unwrap_or("standard"),"active_model":active,"sources":[{"id":"standard","display_name":"Manual Model","active":config["active_model_source"].as_str().unwrap_or("standard")=="standard","selected_model_id":active["id"],"selected_profile_id":active["profile_id"],"selected_reasoning":{"control":"none","options":[],"value":""},"models":models,"config_fields":[],"catalog_live":false}]})
+    let manual = standard(config);
+    json!({"active_source":config["active_model_source"].as_str().unwrap_or("standard"),"active_model":active,"sources":[{"id":"standard","display_name":"Manual Model","active":config["active_model_source"].as_str().unwrap_or("standard")=="standard","selected_model_id":manual.map(|m|&m["model"]),"selected_profile_id":manual.map(|m|&m["profile_id"]),"selected_reasoning":{"control":"none","options":[],"value":""},"models":models,"config_fields":[],"catalog_live":false},crate::modelscope::source(config)]})
 }
 
 pub fn capture(config: &Value) -> Value {
-    let model = active(config);
+    let named = config["active_model_source"] == "modelscope";
+    let reference = if named {
+        crate::modelscope::reference(&config["modelscope"])
+    } else {
+        let model = standard(config);
+        json!({"source":config["active_model_source"].as_str().unwrap_or("standard"),"model":model.and_then(|m|m["model"].as_str()).unwrap_or_default(),"profile_id":model.and_then(|m|m["profile_id"].as_str()).unwrap_or_default()})
+    };
     let mut settings = Map::from_iter(SETTINGS.iter().filter_map(|key| {
         config
             .get(*key)
@@ -261,17 +273,25 @@ pub fn capture(config: &Value) -> Value {
     settings
         .entry("browser_profile")
         .or_insert_with(|| json!("persistent"));
-    json!({"version":1,"model_ref":{"source":config["active_model_source"].as_str().unwrap_or("standard"),"model":model.and_then(|m|m["model"].as_str()).unwrap_or_default(),"profile_id":model.and_then(|m|m["profile_id"].as_str()).unwrap_or_default()},"settings":settings,"provider_settings":{},"model_settings":{},"rules":"","pinned_skills":config.get("pinned_skills").cloned().unwrap_or_else(||json!([])),"plugins":{}})
+    json!({"version":1,"model_ref":reference,"settings":settings,"provider_settings":if named {crate::modelscope::session_settings(&config["modelscope"])}else{json!({})},"model_settings":{},"rules":"","pinned_skills":config.get("pinned_skills").cloned().unwrap_or_else(||json!([])),"plugins":{}})
 }
 
 pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
+    resolve_selection(defaults, snapshot, false)
+}
+
+pub(super) fn resolve_selection(
+    defaults: &Value,
+    snapshot: &Value,
+    browsing_catalog: bool,
+) -> Result<Value> {
     if snapshot["version"] != 1 || !snapshot["settings"].is_object() {
         return Err("Invalid conversation configuration.".into());
     }
     let source = snapshot["model_ref"]["source"]
         .as_str()
         .unwrap_or("standard");
-    if source != "standard" {
+    if !matches!(source, "standard" | "modelscope") {
         return Err(format!("Provider source {source} has not yet been migrated.").into());
     }
     let mut config = defaults.clone();
@@ -288,7 +308,19 @@ pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
     config["pinned_skills"] = pins;
     config["active_model_source"] = json!(source);
     let reference = &snapshot["model_ref"];
-    if let Some(model) = reference["model"].as_str().filter(|s| !s.is_empty()) {
+    if source == "modelscope" {
+        let cfg = &mut config["modelscope"];
+        if !cfg.is_null() && !cfg.is_object() {
+            return Err("Invalid ModelScope configuration.".into());
+        }
+        crate::modelscope::apply_session_settings(cfg, &snapshot["provider_settings"]);
+        if let Some(id) = reference["model"].as_str().filter(|s| !s.is_empty())
+            && let Err(error) = crate::modelscope::choose(cfg, id, None)
+            && !browsing_catalog
+        {
+            return Err(error.into());
+        }
+    } else if let Some(model) = reference["model"].as_str().filter(|s| !s.is_empty()) {
         let matches: Vec<usize> = config["models"]
             .as_array()
             .ok_or("Model inventory is missing.")?

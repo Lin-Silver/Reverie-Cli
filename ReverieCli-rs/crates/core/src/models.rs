@@ -277,13 +277,20 @@ pub fn capture(config: &Value) -> Value {
 }
 
 pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
-    resolve_selection(defaults, snapshot, false)
+    resolve_selection(defaults, snapshot, SelectionUse::Execution)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SelectionUse {
+    Execution,
+    State,
+    Catalog,
 }
 
 pub(super) fn resolve_selection(
     defaults: &Value,
     snapshot: &Value,
-    browsing_catalog: bool,
+    purpose: SelectionUse,
 ) -> Result<Value> {
     if snapshot["version"] != 1 || !snapshot["settings"].is_object() {
         return Err("Invalid conversation configuration.".into());
@@ -316,14 +323,15 @@ pub(super) fn resolve_selection(
         crate::modelscope::apply_session_settings(cfg, &snapshot["provider_settings"]);
         if let Some(id) = reference["model"].as_str().filter(|s| !s.is_empty())
             && let Err(error) = crate::modelscope::choose(cfg, id, None)
-            && !browsing_catalog
+            && purpose != SelectionUse::Catalog
         {
             return Err(error.into());
         }
     } else if let Some(model) = reference["model"].as_str().filter(|s| !s.is_empty()) {
-        let matches: Vec<usize> = config["models"]
+        let items = config["models"]
             .as_array()
-            .ok_or("Model inventory is missing.")?
+            .ok_or("Model inventory is missing.")?;
+        let matches: Vec<usize> = items
             .iter()
             .enumerate()
             .filter_map(|(index, item)| {
@@ -334,10 +342,15 @@ pub(super) fn resolve_selection(
                 same.then_some(index)
             })
             .collect();
-        if matches.len() != 1 {
-            return Err("Saved conversation model profile is unavailable or ambiguous.".into());
-        }
-        config["active_model_index"] = json!(matches[0]);
+        let index = match matches.as_slice() {
+            [index] => *index,
+            _ if purpose == SelectionUse::Execution => {
+                return Err("Saved conversation model profile is unavailable or ambiguous.".into());
+            }
+            // An out-of-range index leaves the catalog visible without selecting a replacement.
+            _ => items.len(),
+        };
+        config["active_model_index"] = json!(index);
     }
     for key in SETTINGS {
         if let Some(value) = snapshot["settings"].get(*key) {
@@ -457,6 +470,24 @@ mod tests {
         rows[0]["model_display_name"] = json!("edited");
         fill_profile_ids(&mut rows);
         assert_eq!(rows[0]["profile_id"], expected);
+    }
+
+    #[test]
+    fn a_missing_or_ambiguous_saved_profile_can_be_reselected_but_cannot_run() {
+        let defaults = json!({"active_model_index":0, "models":[
+            {"model":"shared", "profile_id":"a"}, {"model":"shared", "profile_id":"b"}
+        ]});
+        for id in ["deleted", ""] {
+            let saved = json!({"version":1, "settings":{"mode":"writer"},
+                "model_ref":{"source":"standard", "model":"shared", "profile_id":id}});
+            for purpose in [SelectionUse::State, SelectionUse::Catalog] {
+                let view = resolve_selection(&defaults, &saved, purpose).unwrap();
+                assert_eq!(view["mode"], "writer");
+                assert_eq!(view["models"], defaults["models"]);
+                assert!(active_summary(&view).is_null());
+            }
+            assert!(resolve(&defaults, &saved).is_err());
+        }
     }
 
     #[test]

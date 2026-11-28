@@ -32,6 +32,40 @@ fn key_patch(input: &str) -> Result<Value> {
 }
 
 impl Tui {
+    pub(super) async fn confirm_model_removal(&mut self, args: &[String]) -> Result<()> {
+        let [number] = args else {
+            return Err("Use /model delete <number>.".into());
+        };
+        let index = number
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .ok_or("Enter a positive standard model number from /model.")?;
+        let catalog = self.request("getModelSources", json!({})).await?;
+        let model = catalog["models"]["sources"]
+            .as_array()
+            .and_then(|sources| sources.iter().find(|s| s["id"] == "standard"))
+            .and_then(|source| source["models"].get(index))
+            .ok_or("Standard model number is out of range.")?;
+        let profile = model["profile_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or("Standard model profile has no identity.")?;
+        let name = model["display_name"].as_str().unwrap_or_default();
+        let transport = model["transport"].as_str().unwrap_or_default();
+        self.panel(
+            PanelKind::ModelRemoval,
+            format!("Delete standard model #{number}?"),
+            vec![
+                "Cancel".into(),
+                format!("Delete {name} ({transport}) · {profile}"),
+            ],
+            json!({"profileId":profile}),
+            false,
+        );
+        Ok(())
+    }
+
     pub(super) async fn show_model_catalog(&mut self, only: Option<&str>) -> Result<()> {
         let catalog = self
             .request("getModelSources", json!({"sessionId":self.session}))

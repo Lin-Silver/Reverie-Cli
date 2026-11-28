@@ -159,6 +159,14 @@ function markPhase(label) {
   fs.writeFileSync(path.join(root, 'last-phase.txt'), label);
   if (process.env.CI) console.log('Terminal check: ' + label);
 }
+function openTerminal(sessionId) {
+  terminalExit = undefined;
+  const args = ['--project', project, '--no-index'];
+  if (sessionId) args.push('--session', sessionId);
+  terminal = pty.spawn(executable, args, {name: 'xterm-256color', cols: display.cols, rows: display.rows, cwd: project, env: environment});
+  terminal.onData(bytes => {output += bytes; display.write(bytes);});
+  terminal.onExit(value => {terminalExit = value;});
+}
 async function wait(condition, label) {
   markPhase(label);
   const deadline = Date.now() + 10000;
@@ -194,9 +202,7 @@ try {
   const messageRows = () => database.prepare('SELECT payload FROM messages ORDER BY rowid').all().map(row => JSON.parse(row.payload));
   const completedCount = () => database.prepare("SELECT count(*) AS count FROM task_runs WHERE state='completed'").get().count;
   markPhase('opening pseudoterminal');
-  terminal = pty.spawn(executable, ['--project', project, '--no-index'], {name: 'xterm-256color', cols: 84, rows: 26, cwd: project, env: environment});
-  terminal.onData(bytes => {output += bytes; display.write(bytes);});
-  terminal.onExit(value => {terminalExit = value;});
+  openTerminal();
   await wait(() => stripVTControlCharacters(output).includes('Use /help for commands') && screenText().includes('Reverie CLI'), 'native terminal startup');
   assert(!output.includes('\x1b[?1049h'));
   // A busy bracketed-paste parser can withhold CPR. The renderer must keep its
@@ -481,6 +487,79 @@ try {
     checks.push('Cancelled activation preserved current and default sources; successful activation updated both and a new session inherited it, leaving the older session snapshot intact');
     checks.push('The terminal footer and authenticated requests match each selected conversation after activation: current ModelScope, older standard, newly created ModelScope');
     privateOutput();
+
+    const addProfile = async (model, provider = 'openai-chat') => (await sdk('addStandardModel', {
+      model: {model, provider, base_url: baseUrl, api_key_env: 'REVERIE_TUI_MODEL_KEY'},
+    })).profile_id;
+    const profiles = () => config().models.map(model => model.profile_id);
+    const prefix = await addProfile('temporary-first');
+    const target = await addProfile('deletion-twin');
+    const twin = await addProfile('deletion-twin', 'anthropic');
+    const beforeInvalid = fs.readFileSync(configFile);
+    for (const [command, diagnostic] of [
+      ['/model delete 0', 'positive standard model number'],
+      ['/model delete ' + (profiles().length + 1), 'number is out of range'],
+    ]) {
+      terminal.write(command + '\r');
+      await wait(() => viewportText().includes(diagnostic), 'invalid deletion number rejected');
+      terminal.write('\x15');
+      assert.deepEqual(fs.readFileSync(configFile), beforeInvalid);
+    }
+    async function openDeletion(id, verb = 'delete') {
+      const number = profiles().indexOf(id) + 1;
+      assert(number > 0);
+      terminal.write('/model ' + verb + ' ' + number + '\r');
+      await wait(() => viewportText().includes('Delete standard model #' + number + '?'), 'confirm numbered standard profile ' + id);
+    }
+    await openDeletion(target, 'remove');
+    const beforeCancel = fs.readFileSync(configFile);
+    terminal.write('\r');
+    await wait(() => !viewportText().includes('Delete standard model #'), 'default choice cancelled deletion');
+    assert.deepEqual(fs.readFileSync(configFile), beforeCancel);
+    await openDeletion(target);
+    await sdk('deleteStandardModel', {profileId: prefix});
+    terminal.write('\x1b[B\r');
+    await wait(() => !profiles().includes(target), 'confirmed deletion used the original profile after a row moved');
+    assert(profiles().includes(twin));
+    const vanished = await addProfile('disappearing-profile');
+    await openDeletion(vanished);
+    await sdk('deleteStandardModel', {profileId: vanished});
+    const afterDisappearance = fs.readFileSync(configFile);
+    terminal.write('\x1b[B\r');
+    await wait(() => viewportText().includes('Model profile not found') && !viewportText().includes('Delete standard model #'), 'stale removal closed the dialog and reported the missing target');
+    assert.deepEqual(fs.readFileSync(configFile), afterDisappearance);
+
+    const chosen = await addProfile('terminal-selected-profile');
+    terminal.write('/model terminal-selected-profile\r');
+    const aliasId = aliasSession.get().id;
+    const savedRef = () => JSON.parse(database.prepare('SELECT metadata FROM conversations WHERE id=?').get(aliasId).metadata).runtime_config.model_ref;
+    await wait(() => savedRef().profile_id === chosen, 'temporary profile selected in the current conversation');
+    await openDeletion(chosen);
+    terminal.write('\x1b[B\r');
+    await wait(() => !profiles().includes(chosen) && viewportText().includes('Choose a model with /model'), 'removed selection leaves an actionable footer');
+    assert.equal(savedRef().profile_id, chosen);
+    const requestCount = requests.length;
+    const denied = await admin.request('runPrompt', {sessionId:aliasId, projectRoot:project, prompt:'missing profile', noIndex:true});
+    assert.equal(denied.type, 'error');
+    assert.match(denied.error, /unavailable or ambiguous/);
+    assert.equal(requests.length, requestCount);
+    await sdk('getSession', {sessionId:aliasId});
+    assert.equal((await sdk('getState')).state.workspace.active_model, null);
+    terminal.write('/quit\r');
+    await wait(() => terminalExit !== undefined, 'first terminal exited with the unresolved selection');
+    assert.equal(terminalExit.exitCode, 0);
+    const restartOffset = output.length;
+    openTerminal(aliasId);
+    await wait(() => stripVTControlCharacters(output.slice(restartOffset)).includes('Use /help for commands.')
+      && viewportText().includes('Choose a model with /model'), 'restarted terminal reopened the original conversation');
+    terminal.write('/model\r');
+    await wait(() => viewportText().includes('Choose model'), 'replacement picker in the affected conversation');
+    terminal.write('\r');
+    await wait(() => savedRef().profile_id === 'tui-profile', 'explicit replacement selected');
+    terminal.write('RECOVERED_PROFILE\r');
+    await wait(() => messageRows().some(m => m.content === 'UI_REPLY:\nRECOVERED_PROFILE'), 'real model reply after profile recovery');
+    assert(requests.some(r => r.model === 'tui-fixture' && r.messages?.at(-1)?.content === 'RECOVERED_PROFILE'));
+    checks.push('Confirmed standard model deletion by stable profile, numeric range, default cancellation, concurrent moves and disappearance, no fallback request, and an authenticated reply after explicit selection in a restarted terminal');
   } finally {
     await admin.request('shutdown'); assert.equal((await admin.closed).code,0);
   }

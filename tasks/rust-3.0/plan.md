@@ -30,6 +30,7 @@
 12. 桌面模型选择、目录刷新、上下文长度和图片能力使用标准配置的 `profile_id` 区分同名模型。编辑或删除前重新按配置 ID 查找当前记录。验收覆盖普通配置文件和 `provider_files.standard` 分文件、无 ID 的旧数据、确认框打开期间列表变化、工作区默认与已有会话的独立选择，以及桌面实际发出的 HTTP 请求。
 13. 具名 ModelScope 来源已接通 Rust、SDK、终端和桌面。内置目录有 6 个当前模型，另保留 3 个旧模型供已有会话选择。终端从 `/modelscope` 进入，桌面在“模型与提供商”中设置地址和密钥来源。会话保存模型、思考档、输出上限和超时，连接及凭据由共享 Provider 配置解析。在线刷新按地址与凭据绑定目录，成功的空目录可以覆盖旧列表，刷新失败继续使用上次成功结果。
 14. Rust 终端的 `/modelscope status` 显示当前模型、连接地址和凭据来源。`/modelscope key` 在遮罩输入框接受密钥或 `env:变量名`，`/modelscope endpoint` 可编辑或恢复默认地址。按维护者确认，`/modelscope activate` 切换当前会话，并设置以后新会话的默认来源，其他已有会话保留原选择。`/modelscope model <id>` 只切换当前会话。Windows release 的伪终端验收分别读取了三个会话的配置，并验证取消启用、两种凭据发起的实际请求，以及录入密钥期间到达的模型提问。[终端验收入口](../../scripts/verification/rust-tui-smoke.mjs)
+15. 在 Rust 终端用 `/model` 查看标准模型编号，用 `/model delete <编号>` 或 `/model remove <编号>` 删除配置。确认框默认选中取消，并显示模型、协议和配置 ID。Windows release 已验证同名配置、确认期间移除前一项、目标被另一客户端删除和越界编号。删除当前会话使用的配置后，重启终端能打开原会话，重新选择之前发出的模型请求数为零；选择替代配置后，回环服务收到请求，回复写回原会话。[终端回归](../../scripts/verification/rust-tui-smoke.mjs)
 
 Windows 解包内核 `dc97928` 的终端进一步实测了第 14 项的实际发送行为。启用当下的会话和之后从终端新建的会话均向 `/named/v1/chat/completions` 发送 Qwen 请求。重新打开的旧会话向 `/v1/chat/completions` 发送原标准模型请求。三次都核对了终端底栏、服务端收到的模型和鉴权、写回原会话的回复。同批解包 CLI 的隐式目录共 10,615 个字符，26 项各出现一次；真实 Chrome 完成 8 帧 Motion 预览和导出。Windows Cargo 通过 171 项，3 个专用夹具由各自 smoke 执行，28 组现有功能 smoke 全部通过。
 

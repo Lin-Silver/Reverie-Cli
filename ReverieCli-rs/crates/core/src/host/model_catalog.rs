@@ -15,7 +15,10 @@ impl KernelHost {
         }
         Ok(PendingModelRefresh {
             store: ConfigStore::at(kernel.config.path.clone()),
-            config: kernel.session_config(payload["sessionId"].as_str(), true)?,
+            config: kernel.session_config(
+                payload["sessionId"].as_str(),
+                crate::models::SelectionUse::Catalog,
+            )?,
         })
     }
 }

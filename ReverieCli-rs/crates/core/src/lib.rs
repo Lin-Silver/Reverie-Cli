@@ -216,17 +216,17 @@ impl Kernel {
     }
 
     pub fn effective_config(&mut self, id: Option<&str>) -> Result<Value> {
-        self.session_config(id, false)
+        self.session_config(id, models::SelectionUse::Execution)
     }
 
-    fn session_config(&mut self, id: Option<&str>, browsing_catalog: bool) -> Result<Value> {
+    fn session_config(&mut self, id: Option<&str>, purpose: models::SelectionUse) -> Result<Value> {
         let defaults = self.config.effective()?;
         let Some(id) = id else {
             return Ok(defaults);
         };
         let page = self.session_store()?.page(id, None, 1)?;
         match page.metadata.get("runtime_config") {
-            Some(snapshot) => models::resolve_selection(&defaults, snapshot, browsing_catalog),
+            Some(snapshot) => models::resolve_selection(&defaults, snapshot, purpose),
             None => Ok(defaults),
         }
     }
@@ -363,7 +363,10 @@ impl Kernel {
     }
 
     fn state(&mut self) -> Result<Value> {
-        let config = self.effective_config(self.view_session.clone().as_deref())?;
+        let config = self.session_config(
+            self.view_session.clone().as_deref(),
+            models::SelectionUse::State,
+        )?;
         let sessions = self.session_store()?.list()?;
         let skills = self.skills_state(self.view_session.clone().as_deref(), false)?;
         Ok(
@@ -737,7 +740,8 @@ impl Kernel {
                 ))
             }
             "getModelSources" => {
-                let config = self.session_config(payload["sessionId"].as_str(), true)?;
+                let config = self
+                    .session_config(payload["sessionId"].as_str(), models::SelectionUse::Catalog)?;
                 Ok(("models", json!({"models":models::sources(&config)})))
             }
             "selectModel" => {
@@ -842,7 +846,8 @@ impl Kernel {
                 }
                 self.config
                     .update_modelscope(false, |cfg| modelscope::patch(cfg, payload))?;
-                let effective = self.session_config(payload["sessionId"].as_str(), true)?;
+                let effective = self
+                    .session_config(payload["sessionId"].as_str(), models::SelectionUse::Catalog)?;
                 Ok((
                     "provider.updated",
                     json!({"models":models::sources(&effective),"workspace":self.workspace(&effective)}),

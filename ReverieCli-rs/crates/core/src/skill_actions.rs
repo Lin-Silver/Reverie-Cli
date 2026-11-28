@@ -107,7 +107,7 @@ impl Kernel {
     ) -> Result<SkillsState> {
         let pins = self.pinned_skills(session)?;
         let root = self.project_root.clone();
-        let configuration = self.effective_config(session)?;
+        let configuration = self.session_config(session, models::SelectionUse::State)?;
         let mode = configuration["mode"].as_str().unwrap_or("reverie");
         let catalog = self.skill_catalog_at(&root, mode, refresh)?;
         Ok(catalog.state(mode, &pins))

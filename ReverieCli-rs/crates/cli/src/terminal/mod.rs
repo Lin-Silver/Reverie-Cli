@@ -31,6 +31,7 @@ enum PanelKind {
     Question,
     Approval,
     Models,
+    ModelRemoval,
     ModelScopeKey { activate: bool },
     ModelScopeUrl,
     Sessions,
@@ -206,6 +207,15 @@ impl Tui {
         }
         let index = panel.selected;
         match panel.kind {
+            PanelKind::ModelRemoval => {
+                let panel = self.panel.take().unwrap();
+                self.input = panel.draft;
+                if !cancelled && index == 1 {
+                    self.request("deleteStandardModel", panel.source).await?;
+                    self.screen.print("Standard model profile deleted.")?;
+                }
+                return self.refresh().await;
+            }
             PanelKind::PluginConfirmation => {
                 if !cancelled && index == 1 {
                     let action = panel.source["action"]
@@ -318,10 +328,13 @@ impl Tui {
         match args.first().map(String::as_str) {
             Some("/quit" | "/exit" | "/q") => { self.stop().await?; self.quitting = true; }
             Some("/stop" | "/cancel") => self.stop().await?,
-            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/modelscope [status | key | activate | model [id [reasoning]] | key-env <name> | endpoint [URL] | refresh]\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
+            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\n/model delete <number> · /model remove <number>\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/modelscope [status | key | activate | model [id [reasoning]] | key-env <name> | endpoint [URL] | refresh]\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
             Some("/resume") => {
                 if args.len() != 1 { return Err("Use /resume without replacement prompt text.".into()); }
                 self.start_resume()?;
+            }
+            Some("/model") if matches!(args.get(1).map(String::as_str), Some("delete" | "remove")) => {
+                self.confirm_model_removal(&args[2..]).await?;
             }
             Some("/model") if args.get(1).is_some_and(|value| value == "add") => {
                 let (fields, provider) = match args[2..].split_last_chunk::<2>() {

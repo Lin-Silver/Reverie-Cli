@@ -739,16 +739,27 @@ impl Kernel {
                         format!("Provider source {source} has not yet been migrated.").into(),
                     );
                 }
-                let mut selected = self.effective_config(payload["sessionId"].as_str())?;
+                let mut selected = self.config.effective()?;
                 let model = payload["modelId"]
                     .as_str()
                     .or_else(|| payload["model"].as_str())
                     .ok_or("Model id is required.")?;
+                let profile = match payload.get("profileId") {
+                    None | Some(Value::Null) => None,
+                    Some(value) => Some(
+                        value
+                            .as_str()
+                            .filter(|id| !id.is_empty())
+                            .ok_or("Invalid model profile id.")?,
+                    ),
+                };
                 let index = selected["models"]
                     .as_array()
                     .ok_or("Model inventory is missing.")?
                     .iter()
-                    .position(|m| m["model"] == model)
+                    .position(|m| {
+                        m["model"] == model && profile.is_none_or(|id| m["profile_id"] == id)
+                    })
                     .ok_or("Model not found.")?;
                 selected["active_model_source"] = json!(source);
                 selected["active_model_index"] = json!(index);
@@ -760,6 +771,7 @@ impl Kernel {
                         .cloned()
                         .unwrap_or_else(|| models::capture(&selected));
                     snapshot["model_ref"] = models::capture(&selected)["model_ref"].clone();
+                    selected = models::resolve(&selected, &snapshot)?;
                     self.session_store()?.update_metadata(
                         id,
                         Map::from_iter([("runtime_config".into(), snapshot)]),
@@ -793,6 +805,7 @@ impl Kernel {
                 let store = profile.as_ref().unwrap_or(&self.config);
                 let action = action.to_string();
                 let mut edited_index = 0;
+                let mut added_profile = None;
                 store.update(|fields| {
                     let items = fields
                         .entry("models")
@@ -827,9 +840,11 @@ impl Kernel {
                             return Err(io::Error::other("Model id is required."));
                         }
                         if action == "addStandardModel" {
-                            model
+                            added_profile = model
                                 .entry("profile_id")
-                                .or_insert(json!(uuid::Uuid::new_v4().simple().to_string()));
+                                .or_insert_with(|| json!(uuid::Uuid::new_v4().simple().to_string()))
+                                .as_str()
+                                .map(str::to_owned);
                             edited_index = items.len();
                             items.push(json!(model));
                         } else {
@@ -857,10 +872,12 @@ impl Kernel {
                     }
                     Ok(())
                 })?;
-                Ok((
-                    "standard-model.updated",
-                    json!({"index":edited_index,"models":models::sources(&self.config.effective()?),"workspace":self.workspace(&self.config.effective()?)}),
-                ))
+                let effective = self.config.effective()?;
+                let mut reply = json!({"index":edited_index,"models":models::sources(&effective),"workspace":self.workspace(&effective)});
+                if let Some(id) = added_profile {
+                    reply["profile_id"] = json!(id);
+                }
+                Ok(("standard-model.updated", reply))
             }
             "listSettings" => {
                 let config = self.effective_config(payload["sessionId"].as_str())?;

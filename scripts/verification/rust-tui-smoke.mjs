@@ -71,6 +71,30 @@ const server = http.createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     requests.push(body);
+    if (body.model === 'shared-tui-model' || request.url.includes('/models/shared-tui-model:')) {
+      const url = new URL(request.url,'http://127.0.0.1');
+      const protocol = url.pathname.endsWith('/messages') ? 'anthropic' : url.pathname.endsWith('/responses') ? 'openai-responses'
+        : url.pathname.includes('/models/') ? 'gemini' : 'openai-chat';
+      const text = 'TRANSPORT_RECEIVED_' + protocol;
+      const key = request.headers[protocol==='anthropic'?'x-api-key':protocol==='gemini'?'x-goog-api-key':'authorization'];
+      assert.equal(key,(protocol.startsWith('openai')?'Bearer ':'')+'terminal-only-test-key');
+      let reply;
+      if (protocol === 'anthropic') {
+        assert.equal(url.pathname,'/v1/messages'); assert(Array.isArray(body.messages));
+        reply={type:'message',role:'assistant',content:[{type:'text',text}],stop_reason:'end_turn'};
+      } else if (protocol === 'openai-responses') {
+        assert.equal(url.pathname,'/v1/responses'); assert(Array.isArray(body.input));
+        reply={type:'response',status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text}]}]};
+      } else if (protocol === 'gemini') {
+        assert.equal(url.pathname,'/v1/models/shared-tui-model:streamGenerateContent'); assert(Array.isArray(body.contents));
+        reply={candidates:[{content:{role:'model',parts:[{text}]},finishReason:'STOP'}]};
+      } else {
+        assert.equal(url.pathname,'/v1/chat/completions'); assert(Array.isArray(body.messages));
+        reply={choices:[{message:{role:'assistant',content:text},finish_reason:'stop'}]};
+      }
+      response.writeHead(200,{'content-type':'application/json'}); response.end(JSON.stringify(reply));
+      return;
+    }
     response.writeHead(200, {'content-type': 'text/event-stream'});
     const last = body.messages.at(-1);
     if (last.role === 'tool') {
@@ -100,7 +124,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 fs.writeFileSync(path.join(appRoot, '.reverie/config.json'), JSON.stringify({mode: 'reverie', models: [{model: 'tui-fixture', profile_id: 'tui-profile', provider: 'openai-chat',
   base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key: 'TUI_FIXTURE_KEY'}], active_model_source: 'standard', active_model_index: 0, stream_responses: true, auto_index: false,
   security: {permission_level: 'full_control', permission_mode: 'default'}}));
-const environment = {...process.env, REVERIE_APP_ROOT: appRoot, NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
+const environment = {...process.env, REVERIE_APP_ROOT: appRoot, REVERIE_TUI_MODEL_KEY:'terminal-only-test-key', NO_PROXY: [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')};
 function markPhase(label) {
   fs.writeFileSync(path.join(root, 'last-phase.txt'), label);
   if (process.env.CI) console.log('Terminal check: ' + label);
@@ -268,6 +292,35 @@ try {
   await wait(() => screenText().includes('Retrieval: basic') && screenText().includes('共享 Rust 内核返回的终端证据。'), 'actual terminal context evidence');
   assert.equal(requests.length, modelRequests, 'Context management invoked the remote model');
   checks.push('Terminal resources, cancellable background indexing and actual shared-kernel evidence without a model request');
+  display.resize(100,26); terminal.resize(100,26);
+  const configFile=path.join(appRoot,'.reverie/config.json');
+  const baseUrl='http://127.0.0.1:'+server.address().port+'/v1';
+  const originalConfig=fs.readFileSync(configFile);
+  terminal.write('/model add invalid '+baseUrl+' --provider invalid-test\r');
+  await wait(()=>screenText().includes('invalid-test is not yet migrated'),'unsupported transport refused before saving');
+  assert.deepEqual(fs.readFileSync(configFile),originalConfig);
+  terminal.write('\x15'); // Ctrl+U clears the rejected command retained for correction.
+  for(const protocol of ['openai-chat','anthropic','openai-responses','gemini']) {
+    const option=protocol==='openai-chat'?'':' --provider '+protocol;
+    terminal.write('/model add shared-tui-model '+baseUrl+' REVERIE_TUI_MODEL_KEY'+option+'\r');
+    await wait(()=>{
+      const row=JSON.parse(fs.readFileSync(configFile)).models.at(-1);
+      const selected=JSON.parse(database.prepare('SELECT metadata FROM conversations WHERE deleted=0 ORDER BY updated_at DESC LIMIT 1').get().metadata).runtime_config.model_ref;
+      return row.model==='shared-tui-model' && row.provider===protocol && row.api_key_env==='REVERIE_TUI_MODEL_KEY' && selected.profile_id===row.profile_id;
+    },'added and selected exact '+protocol+' profile');
+    terminal.write('CHECK_TRANSPORT\r');
+    await wait(()=>messageRows().some(m=>m.role==='Reverie' && m.content==='TRANSPORT_RECEIVED_'+protocol),'terminal reply over '+protocol);
+    await wait(()=>!viewportText().includes('Reverie is working'),'terminal ready after '+protocol);
+  }
+  terminal.write('/model\r');
+  await wait(()=>viewportText().includes('shared-tui-model (anthropic)'),'same-name profiles with transport labels');
+  terminal.write('\x1b[B\x1b[B\r');
+  const anthropicId=JSON.parse(fs.readFileSync(configFile)).models.find(m=>m.provider==='anthropic').profile_id;
+  await wait(()=>JSON.parse(database.prepare('SELECT metadata FROM conversations WHERE deleted=0 ORDER BY updated_at DESC LIMIT 1').get().metadata).runtime_config.model_ref.profile_id===anthropicId,'model panel chose the exact same-name profile');
+  terminal.write('CHECK_PANEL_SELECTION\r');
+  await wait(()=>messageRows().filter(m=>m.role==='Reverie' && m.content==='TRANSPORT_RECEIVED_anthropic').length===2,'request after choosing the earlier Anthropic profile');
+  assert(!fs.readFileSync(configFile,'utf8').includes(environment.REVERIE_TUI_MODEL_KEY));
+  checks.push('Added four same-name profiles in the real terminal, selected each exact profile, and received replies over all four authenticated HTTP protocols');
   terminal.write('/quit\r');
   await wait(() => terminalExit !== undefined, 'normal terminal exit');
   assert.equal(terminalExit.exitCode, 0);

@@ -9,8 +9,8 @@ pub(super) enum Transport {
 }
 
 impl Transport {
-    pub fn from_model(model: &Value) -> Result<Self> {
-        match model["provider"].as_str().unwrap_or("openai-chat") {
+    pub fn parse(name: &str) -> Result<Self> {
+        match name {
             "openai" | "openai-chat" | "request" | "curl" => Ok(Self::Chat),
             "openai-responses" | "responses" => Ok(Self::Responses),
             "anthropic" | "anthropic-messages" | "claude" => Ok(Self::Anthropic),

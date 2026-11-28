@@ -196,14 +196,14 @@ interface CoreRequestMap {
   exportTokenStatistics: { payload: { filters?: TokenFilters; projectRoot?: string }; response: Envelope<"token.csv", { filename: string; content: string }> };
   setTokenPrice: { payload: { modelKey: string; price: TokenPrice }; response: Envelope<"token.price", { model_key: string; price: TokenPrice }> };
   refreshModelSources: { payload: EmptyPayload; response: Envelope<"models", { models: ModelSourcesState }> };
-  selectModel: { payload: { source: string; modelId: string; reasoning?: string; compact?: boolean }; response: Envelope<"model.selected", ModelSelectionResult> };
+  selectModel: { payload: { source: string; modelId: string; profileId?: string; reasoning?: string; compact?: boolean }; response: Envelope<"model.selected", ModelSelectionResult> };
   getImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   refreshImageModelSources: { payload: EmptyPayload; response: Envelope<"image-models", { imageModels: ImageModelSourcesState }> };
   selectImageModel: { payload: { source: string; modelId: string }; response: Envelope<"image-model.selected", { selected: Record<string, unknown>; imageModels: ImageModelSourcesState }> };
   setSetting: { payload: { key: string; value: unknown }; response: Envelope<"setting.updated", { success: boolean; message: string; settings: SettingsState; models?: ModelSourcesState; workspace?: WorkspaceState }> };
   listSettings: { payload: EmptyPayload; response: Envelope<"settings", { settings: SettingsState }> };
   setProviderConfig: { payload: { source: string; patch: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"provider.updated", { models: ModelSourcesState; workspace: WorkspaceState }> };
-  addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
+  addStandardModel: { payload: { model: Record<string, unknown> }; response: Envelope<"standard-model.updated", { index: number; profile_id?: string; models: ModelSourcesState; workspace: WorkspaceState }> };
   updateStandardModel: { payload: { index: number; model: Record<string, unknown>; clearFields?: string[] }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   deleteStandardModel: { payload: { index: number }; response: Envelope<"standard-model.updated", { index: number; models: ModelSourcesState; workspace: WorkspaceState }> };
   addCustomProvider: { payload: { provider: { name: string; base_url: string; api_key: string; api_key_env?: string; format: string } }; response: CustomProviderEnvelope };

@@ -27,7 +27,7 @@ Notes:
 | Command | Description |
 | --- | --- |
 | `/model` | Open the standard model selector |
-| `/model add` | Add a standard model preset |
+| `/model add` | Add a standard model preset. In the Rust terminal use `/model add <id> <base_url> [api_key_env] [--provider <transport>]`. Supported transports are `openai-chat` (default), `openai-responses`, `anthropic` and `gemini`. |
 | `/model delete <number>` | Delete a standard model preset |
 | `/subagent` | Open the managed SubAgent roster TUI |
 | `/subagent create` | Select a model and create a Subagent identified by ID |

@@ -26,6 +26,7 @@
 8. Windows 已通过截图坐标点击和拖拽验收。自有窗口的事件日志记录了实际落点；过期引用、窗口移动、遮挡和 Strict 拒绝均没有增加输入计数。两个独立 SDK 内核已验证同一桌面的占用、取消与恢复。纯文本会话也已验证由夹具注入的系统 Escape 取消原生等待。[桌面控制说明](computer-use.md)
 9. Windows SDK 已在真实编辑框中聚焦、选区插入中文和 emoji，并核对了保存文件。指定窗口的普通组合键已通过 release 验证。Strict 拒绝后没有保存，授权后换用不同组合能选择单词或整行并读回；在目标处理组合键时取消任务，窗口收到释放事件并确认三个按键均已弹起。应用内 Escape 能关闭 WinForms 菜单、原生菜单和模态对话框，用户亲按 Escape 会停止桌面任务。当前普通组合键需要目标已在前台。四档物理 DPI 和跨平台正式发行沿用第 4、5 节的验收要求。[操作与复验方法](computer-use.md)
 10. 标准模型的环境变量选择器已连到 Rust SDK。Windows release 和桌面表单实际验证了变量名建议、切换密钥来源、保存后保留上下文长度与自定义请求头，以及向回环服务发送认证请求。SDK 另测了四种模型协议。本轮验证使用独立测试变量。
+11. Rust 终端可用 `/model add <id> <base_url> [api_key_env] [--provider <transport>]` 添加标准模型，默认使用 OpenAI Chat。验证时用同一模型名创建 OpenAI Chat、OpenAI Responses、Anthropic 和 Gemini 四份配置，按配置 ID 选中，逐一检查实际 HTTP 路径、认证头、请求体及终端收到的回复。各厂商的在线目录、账户登录和真实模型质量仍按第 2.3 节跟踪。
 
 提交 `b2923f4` 的 Windows release 通过 164 项 Cargo 测试和 28 组已有 smoke，Cargo 单独标记的 OAuth、LSP、MCP 三项由对应 smoke 执行。四个平台均通过 Skills/Motion，六个 CI 作业全部成功。Windows SDK 在应用内关闭了两种菜单和一个模态对话框，随后继续任务。该批次的两次实体 Esc 人工验收都到时由 SDK 停止。[四平台 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46087861812)
 

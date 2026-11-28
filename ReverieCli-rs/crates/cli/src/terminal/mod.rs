@@ -236,7 +236,8 @@ impl Tui {
                 self.request("resolveUserInput", json!({"questionId":panel.source["question_id"],"runId":panel.source["run_id"],"sessionId":panel.source["session_id"],"answer":answer,"cancelled":cancelled})).await?;
             }
             PanelKind::Models if !cancelled => {
-                self.request("selectModel", json!({"sessionId":self.session,"source":"standard","modelId":panel.source[index]["id"]})).await?;
+                let row = &panel.source[index];
+                self.request("selectModel", json!({"sessionId":self.session,"source":"standard","modelId":row["id"],"profileId":row["profile_id"]})).await?;
             }
             PanelKind::Sessions if !cancelled => {
                 self.session = panel.source[index]["id"]
@@ -304,16 +305,23 @@ impl Tui {
         match args.first().map(String::as_str) {
             Some("/quit" | "/exit" | "/q") => { self.stop().await?; self.quitting = true; }
             Some("/stop" | "/cancel") => self.stop().await?,
-            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env]\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
+            Some("/help" | "/h") => self.screen.print("/model [id] · /model add <id> <base_url> [api_key_env] [--provider <transport>]\nTransports: openai-chat (default), openai-responses, anthropic, gemini\n/session new [name] · /sessions · /settings\n/permission strict|normal|auto|full_access · /permission fallback wait|deny · /context index · /context usage · /compact [focus] · /resume\n/skills help · /markets help · /plugins help · /mcp help · /connectors help · /stop · /quit\nEnter sends; Shift+Enter, Alt+Enter or Ctrl+J inserts a newline. Paste never submits.\nArrow keys edit; Up/Down recalls prompts on one line. Native terminal scrollback and copy remain available.")?,
             Some("/resume") => {
                 if args.len() != 1 { return Err("Use /resume without replacement prompt text.".into()); }
                 self.start_resume()?;
             }
             Some("/model") if args.get(1).is_some_and(|value| value == "add") => {
-                let model = args.get(2).ok_or("Supply a model id and base URL.")?;
-                let base = args.get(3).ok_or("Supply a model base URL.")?;
-                self.request("addStandardModel", json!({"model":{"model":model,"base_url":base,"provider":"openai-chat","api_key_env":args.get(4)}})).await?;
-                self.request("selectModel", json!({"sessionId":self.session,"source":"standard","modelId":model})).await?;
+                let (fields, provider) = match args[2..].split_last_chunk::<2>() {
+                    Some((fields, [flag, name])) if flag == "--provider" => (fields, reverie_core::provider::transport_name(name)?),
+                    _ => (&args[2..], "openai-chat"),
+                };
+                let (model, base, key) = match fields {
+                    [model, base] if !base.starts_with("--") => (model, base, None),
+                    [model, base, key] if !base.starts_with("--") && !key.starts_with("--") => (model, base, Some(key)),
+                    _ => return Err("Use /model add <id> <base_url> [api_key_env] [--provider <transport>].".into()),
+                };
+                let added = self.request("addStandardModel", json!({"model":{"model":model,"base_url":base,"provider":provider,"api_key_env":key}})).await?;
+                self.request("selectModel", json!({"sessionId":self.session,"source":"standard","modelId":model,"profileId":added["profile_id"]})).await?;
                 self.refresh().await?;
             }
             Some("/model") if args.len() > 1 => {
@@ -322,7 +330,7 @@ impl Tui {
             }
             Some("/model" | "/models") => {
                 let models = self.request("getModelSources", json!({"sessionId":self.session})).await?["models"]["sources"][0]["models"].clone();
-                let labels = models.as_array().into_iter().flatten().map(|model| model["display_name"].as_str().unwrap_or_default().into()).collect::<Vec<_>>();
+                let labels = models.as_array().into_iter().flatten().map(|model| format!("{} ({})", model["display_name"].as_str().unwrap_or_default(), model["transport"].as_str().unwrap_or("openai-chat"))).collect::<Vec<_>>();
                 if labels.is_empty() { return Err("No models configured. Use /model add <id> <base_url> [api_key_env].".into()); }
                 self.panel(PanelKind::Models, "Choose model".into(), labels, models, false);
             }

@@ -9,6 +9,10 @@ mod request;
 mod responses;
 use request::Transport;
 
+pub fn transport_name(name: &str) -> Result<&'static str> {
+    Ok(Transport::parse(name)?.name())
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolCall {
     pub id: String,
@@ -213,7 +217,7 @@ impl ProviderClient {
         cancel: &CancellationToken,
         emit: impl Fn(Value),
     ) -> Result<ModelTurn> {
-        let transport = Transport::from_model(model)?;
+        let transport = Transport::parse(model["provider"].as_str().unwrap_or("openai-chat"))?;
         let stream = config["stream_responses"].as_bool().unwrap_or(true);
         let address = transport.address(model, stream)?;
         let body = transport.body(model, messages, tools, stream)?;

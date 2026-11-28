@@ -343,9 +343,10 @@ impl Tui {
             }
             Some("/model" | "/models") => self.show_model_catalog(None).await?,
             Some("/modelscope") => self.modelscope_command(&args[1..]).await?,
-            Some("/session" | "/new") if args.first().is_some_and(|value| value == "/new") || args.get(1).is_some_and(|value| value == "new") => {
+            Some("/session" | "/new") if args[0] == "/new" || args.get(1).is_some_and(|value| value == "new") => {
                 if self.active.is_some() || self.compaction_owner.is_some() { return Err("Stop the active run before switching conversations.".into()); }
-                let session = self.request("createSession", json!({"name":args.iter().skip(2).cloned().collect::<Vec<_>>().join(" ")})).await?["session"].clone();
+                let name = if args[0] == "/new" { &args[1..] } else { &args[2..] };
+                let session = self.request("createSession", json!({"name":name.join(" ")})).await?["session"].clone();
                 self.session = session["id"].as_str().unwrap().into();
                 self.refresh().await?;
             }

@@ -473,6 +473,10 @@ try {
     assert.deepEqual((await readSnapshot(future)).model_ref,activeRef());
     await sendFrom(future, 'Qwen3.8-27B · After named provider activation', 'VERIFY_NEW_ROUTE');
     assert.equal(activationRoutes.length, 3);
+    terminal.write('/new "Alias session" 后续\r');
+    const aliasSession = database.prepare("SELECT id FROM conversations WHERE name='Alias session 后续' AND deleted=0");
+    await wait(() => aliasSession.get(), '/new preserves the complete quoted conversation name');
+    assert.deepEqual((await readSnapshot(aliasSession.get().id)).model_ref, activeRef());
     await sdk('selectModel',{source:'standard',modelId:'tui-fixture',profileId:'tui-profile'});
     checks.push('Cancelled activation preserved current and default sources; successful activation updated both and a new session inherited it, leaving the older session snapshot intact');
     checks.push('The terminal footer and authenticated requests match each selected conversation after activation: current ModelScope, older standard, newly created ModelScope');

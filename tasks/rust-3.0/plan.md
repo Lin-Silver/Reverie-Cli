@@ -33,6 +33,10 @@
 
 Windows 解包内核 `dc97928` 的终端进一步实测了第 14 项的实际发送行为。启用当下的会话和之后从终端新建的会话均向 `/named/v1/chat/completions` 发送 Qwen 请求。重新打开的旧会话向 `/v1/chat/completions` 发送原标准模型请求。三次都核对了终端底栏、服务端收到的模型和鉴权、写回原会话的回复。同批解包 CLI 的隐式目录共 10,615 个字符，26 项各出现一次；真实 Chrome 完成 8 帧 Motion 预览和导出。Windows Cargo 通过 171 项，3 个专用夹具由各自 smoke 执行，28 组现有功能 smoke 全部通过。
 
+两种新建命令 `/session new [name]` 和 `/new [name]` 都保留完整名称并继承默认模型。修复前，`/new "Alias session" 后续` 在数据库中只保存“后续”。修复后的 Windows release 通过真实终端创建了“Alias session 后续”，并核对了它继承的 ModelScope 配置。
+
+旧格式兼容已用实际 SDK 导入复验：带有模型快照的旧会话继续使用原模型。缺少快照且标记为 `legacy-workspace-default` 的会话在现行实现中沿用默认来源。该格式没有独立的历史模型标识，启用时是否固化其当时的有效模型需单独确认。
+
 第 13 项的 Windows 独立及桌面解包 release 分别通过了 28 次回环 HTTP 请求，覆盖内联和分文件配置、四个模型家族、会话重启、密钥切换、慢请求期间换地址、空目录和禁用来源。独立终端、实际 Electron 窗口及指定独立 ModelScope 审批模型也已验收。桌面在 Qwen 的思考菜单选择“低”后，服务收到 `/named/v1/chat/completions`、正确的鉴权和 `reasoning_effort=low`。这批使用本机夹具凭据，厂商账户、配额和线上可用模型按第 2.3 节继续跟踪。[SDK 复验入口](../../scripts/verification/rust-modelscope-smoke.mjs)
 
 同批 Windows 解包 CLI 的普通请求列出全部 26 个有效技能，共 10,519 字符。实际浏览器完成 Motion 预览后，命令导出 CSS、WAAPI 和类型声明；Strict、只读和审计也通过。上一开发提交 `8d5b23d` 的四平台 Rust、桌面和文档共六个 CI 作业均通过。[Skills 验收入口](../../scripts/verification/rust-skills-smoke.mjs) · [上一提交 CI](https://github.com/Lin-Silver/Reverie-Cli/actions/runs/46104855421)

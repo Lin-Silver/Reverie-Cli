@@ -95,6 +95,7 @@ export function applyModelSelection(
     if (active) return {
       ...source, active, custom_providers,
       selected_model_id: selection.model.id,
+      selected_profile_id: selection.model.profile_id,
       selected_reasoning: selection.model.reasoning,
       config: selection.provider ? source.config : selection.config ?? source.config,
     };
@@ -103,8 +104,12 @@ export function applyModelSelection(
   return { ...current, workspace, models: { active_source, active_model, sources } };
 }
 
+export function isSelectedModel(source: ModelSource, model: ModelRecord): boolean {
+  return source.selected_model_id === model.id && (!source.selected_profile_id || source.selected_profile_id === model.profile_id);
+}
+
 export function modelReasoningForPicker(source: ModelSource, model: ModelRecord): ModelRecord['reasoning'] {
-  if (source.selected_model_id === model.id && source.selected_reasoning.options.length) return source.selected_reasoning;
+  if (isSelectedModel(source, model) && source.selected_reasoning.options.length) return source.selected_reasoning;
   const values = source.config?.values;
   const preferred = model.reasoning.control === "toggle" && typeof values?.enable_thinking === "boolean"
     ? String(values.enable_thinking)

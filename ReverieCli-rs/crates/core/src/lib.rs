@@ -130,6 +130,7 @@ pub const ACTIONS: &[&str] = &[
     "refreshMarket",
     "stopMarketRefresh",
     "getModelSources",
+    "refreshModelSources",
     "listApiKeyEnvironmentVariables",
     "selectModel",
     "addStandardModel",
@@ -728,7 +729,7 @@ impl Kernel {
                     json!({"models":models::sources(&config),"workspace":self.workspace(&config),"settings":models::settings(&config,&self.config.path,self.workspace_mode)}),
                 ))
             }
-            "getModelSources" => {
+            "getModelSources" | "refreshModelSources" => {
                 let config = self.effective_config(payload["sessionId"].as_str())?;
                 Ok(("models", json!({"models":models::sources(&config)})))
             }
@@ -744,26 +745,16 @@ impl Kernel {
                     .as_str()
                     .or_else(|| payload["model"].as_str())
                     .ok_or("Model id is required.")?;
-                let profile = match payload.get("profileId") {
-                    None | Some(Value::Null) => None,
-                    Some(value) => Some(
-                        value
-                            .as_str()
-                            .filter(|id| !id.is_empty())
-                            .ok_or("Invalid model profile id.")?,
-                    ),
-                };
-                let index = selected["models"]
-                    .as_array()
-                    .ok_or("Model inventory is missing.")?
-                    .iter()
-                    .position(|m| {
-                        m["model"] == model && profile.is_none_or(|id| m["profile_id"] == id)
-                    })
-                    .ok_or("Model not found.")?;
-                selected["active_model_source"] = json!(source);
-                selected["active_model_index"] = json!(index);
                 if let Some(id) = payload["sessionId"].as_str() {
+                    let index = models::selection_index(
+                        selected["models"]
+                            .as_array()
+                            .ok_or("Model inventory is missing.")?,
+                        model,
+                        &payload["profileId"],
+                    )?;
+                    selected["active_model_source"] = json!(source);
+                    selected["active_model_index"] = json!(index);
                     let page = self.session_store()?.page(id, None, 1)?;
                     let mut snapshot = page
                         .metadata
@@ -778,49 +769,31 @@ impl Kernel {
                         page.revision,
                     )?;
                 } else {
-                    self.config.update(|fields| {
-                        fields.insert("active_model_source".into(), json!(source));
-                        fields.insert("active_model_index".into(), json!(index));
+                    self.config.update_standard_models(true, |items, active| {
+                        *active = models::selection_index(items, model, &payload["profileId"])?;
+                        selected["models"] = json!(items);
+                        selected["active_model_index"] = json!(*active);
+                        selected["active_model_source"] = json!(source);
                         Ok(())
                     })?;
                 }
+                let model = models::active(&selected).ok_or("Selected model is unavailable.")?;
                 Ok((
                     "model.selected",
-                    json!({"models":models::sources(&selected),"selected":models::without_secrets(&selected["models"][index]),"workspace":self.workspace(&selected)}),
+                    json!({"models":models::sources(&selected),"selected":models::without_secrets(model),"workspace":self.workspace(&selected)}),
                 ))
             }
             "addStandardModel" | "updateStandardModel" | "deleteStandardModel" => {
                 self.config.effective()?;
-                let raw = self.config.load()?;
-                let profile = raw["provider_files"]["standard"].as_str().map(|filename| {
-                    config::ConfigStore::at(
-                        self.config
-                            .path
-                            .parent()
-                            .unwrap()
-                            .join("Providers")
-                            .join(filename),
-                    )
-                });
-                let store = profile.as_ref().unwrap_or(&self.config);
-                let action = action.to_string();
                 let mut edited_index = 0;
                 let mut added_profile = None;
-                store.update(|fields| {
-                    let items = fields
-                        .entry("models")
-                        .or_insert(json!([]))
-                        .as_array_mut()
-                        .ok_or_else(|| io::Error::other("Models must be an array."))?;
+                self.config.update_standard_models(false, |items, active| {
                     if action == "deleteStandardModel" {
-                        let index = payload["index"]
-                            .as_u64()
-                            .ok_or_else(|| io::Error::other("Model index is required."))?
-                            as usize;
-                        if index >= items.len() {
-                            return Err(io::Error::other("Model index is out of range."));
-                        }
+                        let index = models::edit_index(items, payload)?;
                         items.remove(index);
+                        *active = active
+                            .saturating_sub(usize::from(index < *active))
+                            .min(items.len().saturating_sub(1));
                         edited_index = index;
                     } else {
                         let mut model = payload
@@ -840,21 +813,22 @@ impl Kernel {
                             return Err(io::Error::other("Model id is required."));
                         }
                         if action == "addStandardModel" {
-                            added_profile = model
-                                .entry("profile_id")
-                                .or_insert_with(|| json!(uuid::Uuid::new_v4().simple().to_string()))
+                            let profile = model.entry("profile_id").or_insert_with(|| {
+                                json!(uuid::Uuid::new_v4().simple().to_string())
+                            });
+                            let id = profile
                                 .as_str()
-                                .map(str::to_owned);
+                                .filter(|id| !id.is_empty())
+                                .ok_or_else(|| io::Error::other("Invalid model profile id."))?;
+                            if items.iter().any(|item| item["profile_id"] == id) {
+                                return Err(io::Error::other("Model profile id already exists."));
+                            }
+                            added_profile = Some(id.to_owned());
                             edited_index = items.len();
                             items.push(json!(model));
                         } else {
-                            let index = payload["index"]
-                                .as_u64()
-                                .ok_or_else(|| io::Error::other("Model index is required."))?
-                                as usize;
-                            let existing = items
-                                .get_mut(index)
-                                .ok_or_else(|| io::Error::other("Model index is out of range."))?;
+                            let index = models::edit_index(items, payload)?;
+                            let existing = &mut items[index];
                             let profile = existing["profile_id"].clone();
                             edited_index = index;
                             let mut values = existing.as_object().cloned().unwrap_or_default();

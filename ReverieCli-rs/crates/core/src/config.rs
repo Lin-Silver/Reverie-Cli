@@ -111,6 +111,26 @@ pub struct ConfigStore {
     backup_taken: AtomicBool,
 }
 
+// Once both replacements have committed, the main index remains editable by older clients.
+// During a split-file write the newer inventory carries the index that belongs to its rows.
+fn pending_standard_index(
+    root: &Map<String, Value>,
+    profile: &Map<String, Value>,
+) -> Option<usize> {
+    let revision = profile.get("selection_revision")?.as_str()?;
+    if root
+        .get("standard_selection_revision")
+        .and_then(Value::as_str)
+        == Some(revision)
+    {
+        return None;
+    }
+    profile
+        .get("active_model_index")?
+        .as_u64()
+        .map(|index| index as usize)
+}
+
 impl ConfigStore {
     pub fn new(app: &Path) -> Self {
         Self::at(app.join(".reverie/config.json"))
@@ -186,6 +206,72 @@ impl ConfigStore {
         Ok(value)
     }
 
+    fn provider_path(&self, filename: &Value) -> io::Result<PathBuf> {
+        let filename = filename
+            .as_str()
+            .ok_or_else(|| io::Error::other("Provider profile filename must be text."))?;
+        if !filename.ends_with(".json")
+            || filename.contains(['/', '\\', ':'])
+            || filename.starts_with('.')
+        {
+            return Err(io::Error::other("Invalid provider profile filename."));
+        }
+        Ok(self.path.parent().unwrap().join("Providers").join(filename))
+    }
+
+    pub fn update_standard_models(
+        &self,
+        select: bool,
+        edit: impl FnOnce(&mut Vec<Value>, &mut usize) -> io::Result<()>,
+    ) -> io::Result<()> {
+        self.update(|root| {
+            let mut active = root
+                .get("active_model_index")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let apply = |fields: &mut Map<String, Value>, active: &mut usize| {
+                let items = fields
+                    .entry("models")
+                    .or_insert_with(|| json!([]))
+                    .as_array_mut()
+                    .ok_or_else(|| io::Error::other("Models must be an array."))?;
+                crate::models::fill_profile_ids(items);
+                edit(items, active)
+            };
+            if let Some(file) = root
+                .get("provider_files")
+                .and_then(|files| files.get("standard"))
+            {
+                let store = Self::at(self.provider_path(file)?);
+                let revision = Uuid::new_v4().simple().to_string();
+                store.update(|profile| {
+                    if profile.get("provider_id") != Some(&json!("standard"))
+                        || !profile.get("models").is_some_and(Value::is_array)
+                    {
+                        return Err(io::Error::other("Invalid standard provider inventory."));
+                    }
+                    if let Some(saved) = pending_standard_index(root, profile) {
+                        active = saved;
+                    }
+                    apply(profile, &mut active)?;
+                    // The inventory and its index must survive a process exit between file replacements.
+                    profile.insert("active_model_index".into(), json!(active));
+                    profile.insert("selection_revision".into(), json!(revision));
+                    Ok(())
+                })?;
+                root.insert("standard_selection_revision".into(), json!(revision));
+            } else {
+                apply(root, &mut active)?;
+            }
+            root.insert("active_model_index".into(), json!(active));
+            if select {
+                root.insert("active_model_source".into(), json!("standard"));
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     pub fn effective(&self) -> io::Result<Value> {
         let mut value = self.load()?;
         let files = value
@@ -194,17 +280,7 @@ impl ConfigStore {
             .cloned()
             .unwrap_or_default();
         for (source, filename) in files {
-            let filename = filename
-                .as_str()
-                .ok_or_else(|| io::Error::other("Provider profile filename must be text."))?;
-            if !filename.ends_with(".json")
-                || filename.contains(['/', '\\', ':'])
-                || filename == ".json"
-                || filename.starts_with('.')
-            {
-                return Err(io::Error::other("Invalid provider profile filename."));
-            }
-            let path = self.path.parent().unwrap().join("Providers").join(filename);
+            let path = self.provider_path(&filename)?;
             let bytes = fs::read(path)?;
             let profile: Value =
                 serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))?;
@@ -216,9 +292,17 @@ impl ConfigStore {
                     return Err(io::Error::other("Provider inventory must be an array."));
                 }
                 value["models"] = profile["models"].clone();
+                if let Some(index) =
+                    pending_standard_index(value.as_object().unwrap(), profile.as_object().unwrap())
+                {
+                    value["active_model_index"] = json!(index);
+                }
             } else if let Some(chat) = profile.get("chat") {
                 value[&source] = chat.clone();
             }
+        }
+        if let Some(items) = value["models"].as_array_mut() {
+            crate::models::fill_profile_ids(items);
         }
         Ok(value)
     }
@@ -227,6 +311,26 @@ impl ConfigStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_inventory_recovers_its_index_until_the_main_file_is_committed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(dir.path());
+        let mut root = json!({"active_model_index":0, "standard_selection_revision":"old", "provider_files":{"standard":"manual.json"}});
+        atomic_json(&store.path, &root).unwrap();
+        atomic_json(
+            &store.provider_path(&json!("manual.json")).unwrap(),
+            &json!({
+                "provider_id":"standard", "models":[{"model":"one"},{"model":"two"}],
+                "active_model_index":1, "selection_revision":"new"
+            }),
+        )
+        .unwrap();
+        assert_eq!(store.effective().unwrap()["active_model_index"], 1);
+        root["standard_selection_revision"] = json!("new");
+        atomic_json(&store.path, &root).unwrap();
+        assert_eq!(store.effective().unwrap()["active_model_index"], 0);
+    }
 
     #[test]
     fn updates_preserve_unknown_configuration_and_backup_original_bytes() {

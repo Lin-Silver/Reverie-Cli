@@ -209,6 +209,51 @@ try {
   const restored=(await request('getSession',{sessionId:saved.sessions.current_session_id,select:false})).session;
   assert(restored.interrupted_streams.some(item=>item.content==='unfinished😀'));
   checks.push('New native process restores interrupted output and configuration');
+  for(const split of [false,true]) {
+    const legacyModels=['A','B','C'].map(label=>({model:'same-name',model_display_name:label,base_url:base,provider:'openai-chat'}));
+    const inventoryFile=split?path.join(appRoot,'.reverie/Providers/standard.json'):modelFile;
+    if(split) {
+      fs.mkdirSync(path.dirname(inventoryFile),{recursive:true});
+      fs.writeFileSync(inventoryFile,JSON.stringify({provider_id:'standard',models:legacyModels}));
+    }
+    fs.writeFileSync(modelFile,JSON.stringify({active_model_index:1,active_model_source:'standard',
+      ...(split?{provider_files:{standard:'standard.json'}}:{models:legacyModels})}));
+    const raw=fs.readFileSync(inventoryFile);
+    const catalog=(await request('getWorkspaceConfig')).models.sources[0];
+    const [a,b,c]=catalog.models.map(row=>row.profile_id);
+    assert.equal(new Set([a,b,c]).size,3); assert.equal(catalog.selected_profile_id,b);
+    assert(raw.equals(fs.readFileSync(inventoryFile)));
+    await request('deleteStandardModel',{index:0,profileId:a});
+    const changed=await request('updateStandardModel',{index:2,profileId:c,model:{model_display_name:'C edited'}});
+    assert.equal(changed.index,1);
+    assert.deepEqual(changed.models.sources[0].models.map(m=>[m.profile_id,m.display_name]),[[b,'B'],[c,'C edited']]);
+    assert.equal(changed.workspace.active_model.profile_id,b);
+    for(const action of ['deleteStandardModel','updateStandardModel']) {
+      const inventoryBefore=fs.readFileSync(inventoryFile),rootBefore=fs.readFileSync(modelFile);
+      const stale=await bridge.request(action,{index:0,profileId:a,model:{description:'missing target'}});
+      assert.equal(stale.type,'error'); assert.match(stale.error,/profile not found/i);
+      assert(inventoryBefore.equals(fs.readFileSync(inventoryFile))); assert(rootBefore.equals(fs.readFileSync(modelFile)));
+    }
+    const duplicate=await bridge.request('addStandardModel',{model:{model:'same-name',profile_id:c}});
+    assert.equal(duplicate.type,'error');
+    await request('selectModel',{source:'standard',modelId:'same-name',profileId:c});
+    if(split) {
+      const selectedRoot=JSON.parse(fs.readFileSync(modelFile));
+      fs.writeFileSync(modelFile,JSON.stringify({...selectedRoot,active_model_index:0}));
+      assert.equal((await request('getWorkspaceConfig')).workspace.active_model.profile_id,b);
+      fs.writeFileSync(modelFile,JSON.stringify(selectedRoot));
+    }
+    const remaining=await request('deleteStandardModel',{index:0}); // Legacy index-only SDK call.
+    assert.equal(remaining.workspace.active_model.profile_id,c);
+    assert.equal(JSON.parse(fs.readFileSync(modelFile)).active_model_index,0);
+    const fresh=(await request('createSession',{name:'inventory '+(split?'split':'inline')})).session;
+    assert.equal((await request('getConversationConfig',{sessionId:fresh.id})).configuration.model_ref.profile_id,c);
+    await request('updateStandardModel',{profileId:c,model:{model:'renamed-model'}});
+    const renamed=(await request('getConversationConfig',{sessionId:fresh.id})).workspace.active_model;
+    assert.equal(renamed.id,'renamed-model'); assert.equal(renamed.profile_id,c);
+    if(split)assert(!('models' in JSON.parse(fs.readFileSync(modelFile))));
+    checks.push((split?'Split':'Inline')+' legacy inventory, stable profile edit after row removal, missing-target rejection, preserved workspace default and new-session identity');
+  }
   fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({passed:true,scope:'actual Rust HTTP, tools, persistence and transport fixtures; no external service or cryptographic model verification',sha256:crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),checks,requests:Object.fromEntries(counts)},null,2)+'\n');
   console.log(JSON.stringify({passed:true,checks:checks.length,report:path.join(root,'report.json')}));
 } catch(error) {

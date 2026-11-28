@@ -215,6 +215,7 @@ export interface WorkspaceState {
 
 export interface ActiveModel {
   id: string;
+  profile_id?: string;
   display_name: string;
   provider: string;
 }
@@ -233,6 +234,7 @@ export interface ReasoningCapability {
 
 export interface ModelRecord {
   id: string;
+  profile_id?: string;
   model?: string;
   display_name: string;
   description: string;
@@ -347,6 +349,7 @@ export interface ModelSource {
   display_name: string;
   active: boolean;
   selected_model_id: string;
+  selected_profile_id?: string | null;
   selected_reasoning: ReasoningCapability;
   models: ModelRecord[];
   config_fields: ConfigField[];

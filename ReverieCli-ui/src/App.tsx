@@ -205,6 +205,7 @@ import {
   coreSourceId,
   customProviderIdOf,
   expandModelSources,
+  isSelectedModel,
   modelReasoningForPicker,
   settingsModelSources,
 } from "./model-sources";
@@ -978,9 +979,9 @@ function ModelPicker({
             {visibleModels.map((model, index) => (
               <button
                 type="button"
-                key={model.id}
+                key={model.profile_id || model.id}
                 disabled={selecting || refreshing}
-                className={source.active && source.selected_model_id === model.id ? "active" : ""}
+                className={source.active && isSelectedModel(source, model) ? "active" : ""}
                 style={virtualized ? { position: "absolute", top: (firstModel + index) * rowHeight + 10, left: 10, width: "calc(100% - 20px)", height: rowHeight } : undefined}
                 onClick={() => {
                   if (model.reasoning.options.length > 0) {
@@ -999,7 +1000,7 @@ function ModelPicker({
                     {model.reasoning.control !== "none" ? ` · ${t(model.reasoning.control)}` : ""}
                   </small>
                 </div>
-                {source.active && source.selected_model_id === model.id && <Check size={16} />}
+                {source.active && isSelectedModel(source, model) && <Check size={16} />}
               </button>
             ))}
             {models.length === 0 && <div className="empty-list">{t("没有匹配的模型")}</div>}
@@ -3040,7 +3041,7 @@ function ProviderSettings({
   revealSecret: RevealSecret;
   addStandard: () => void;
   editStandard: (index: number, model: ModelRecord) => void;
-  deleteStandard: (index: number) => void;
+  deleteStandard: (index: number, profileId?: string) => void;
   customProviders: CustomProviderControls;
 }) {
   const { t } = useI18n();
@@ -3076,17 +3077,17 @@ function ProviderSettings({
         </div>
         <div className="settings-model-grid">
           {source.models.map((model, index) => (
-            <div className={`settings-model-card ${source.active && source.selected_model_id === model.id ? "active" : ""}`} key={model.id}>
+            <div className={`settings-model-card ${source.active && isSelectedModel(source, model) ? "active" : ""}`} key={model.profile_id || model.id}>
               <button type="button" className="model-card-main" onClick={() => selectModel(source, model)}>
                 <div><strong>{model.display_name}</strong><span title={model.id}>{model.id}</span></div>
-                {source.active && source.selected_model_id === model.id ? <CheckCircle2 size={16} /> : <Circle size={14} />}
+                {source.active && isSelectedModel(source, model) ? <CheckCircle2 size={16} /> : <Circle size={14} />}
               </button>
               <p>{t(model.description)}</p>
               <div className="tag-row"><span>{formatTokens(model.context_length)} {t("上下文")}</span>{model.vision && <span>{t("视觉")}</span>}{model.tool_calling && <span>{t("工具")}</span>}{model.reasoning.control !== "none" && <span>{t(model.reasoning.control)}</span>}</div>
               {source.id === "standard" && (
                 <div className="model-card-actions">
                   <button type="button" className="edit-model" onClick={() => editStandard(index, model)} aria-label={t("编辑标准模型")} title={t("编辑标准模型")}><Pencil size={13} /></button>
-                  <button type="button" className="delete-model" onClick={() => deleteStandard(index)} aria-label={t("删除")} title={t("删除")}><Trash2 size={13} /></button>
+                  <button type="button" className="delete-model" onClick={() => deleteStandard(index, model.profile_id)} aria-label={t("删除")} title={t("删除")}><Trash2 size={13} /></button>
                 </div>
               )}
             </div>
@@ -3231,7 +3232,7 @@ function SettingsView({
   revealSecret: RevealSecret;
   addStandard: () => void;
   editStandard: (index: number, model: ModelRecord) => void;
-  deleteStandard: (index: number) => void;
+  deleteStandard: (index: number, profileId?: string) => void;
   customProviders: CustomProviderControls;
   paths: DesktopPaths | null;
   selectCoreData: () => void;
@@ -5077,6 +5078,7 @@ export default function App() {
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   /** `null` while closed; `{ target: null }` to add; `{ target }` to edit in place. */
   const [standardModelForm, setStandardModelForm] = useState<{ target: { index: number; model: ModelRecord } | null } | null>(null);
+  const [standardInventoryRevision, setStandardInventoryRevision] = useState(0);
   const [providerModal, setProviderModal] = useState<{ provider: CustomProviderRecord | null } | null>(null);
   const [contextLimitModal, setContextLimitModal] = useState<{ provider: CustomProviderRecord; model: CustomProviderModel; reasoning?: string } | null>(null);
   const [providerProbes, setProviderProbes] = useState<Record<string, ProviderProbe>>({});
@@ -5200,7 +5202,7 @@ export default function App() {
       }
     });
     return () => { cancelled = true; };
-  }, [projectRoot,session?.id,view==='settings' && settingsTarget==='workspace']);
+  }, [projectRoot,session?.id,view==='settings' && settingsTarget==='workspace',standardInventoryRevision]);
   useEffect(() => {
     setQueue(loadQueue(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID,assistantId));
     setQueuePaused(!authorizedQueues.current.has(ownerKey(projectRoot, session?.id ?? NEW_SESSION_DRAFT_ID,assistantId)));
@@ -5722,7 +5724,7 @@ export default function App() {
     const sources = state?.models;
     const source = sources?.sources.find(item => item.id === sources.active_source);
     const provider = source?.custom_providers?.find(item => item.active);
-    const selected = (provider?.models ?? source?.models)?.find(item => item.id === source?.selected_model_id);
+    const selected = source && (provider?.models ?? source.models).find(item => isSelectedModel(source, item));
     return JSON.stringify([sources?.active_source, sources?.active_model, provider?.id, selected?.context_length, source?.selected_reasoning.value]);
   }, [state?.models]);
   useEffect(() => {
@@ -6568,7 +6570,7 @@ export default function App() {
     const owner=ownerKey(projectRoot,session?.id || NEW_SESSION_DRAFT_ID,assistantId);
     const sequence=++configurationRequestSequence.current;
     try {
-      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, reasoning, compact: true, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) });
+      const response = await window.reverie.request("selectModel", { source: coreSourceId(source), modelId: source.selected_model_id, profileId: source.selected_profile_id ?? undefined, reasoning, compact: true, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}) });
       conversationViews.current.delete(owner);
       if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       setState((current) => applyModelSelection(current, response));
@@ -6601,6 +6603,12 @@ export default function App() {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
   }, [t, toast]);
 
+  const standardInventoryChanged = useCallback((response: Pick<DesktopState, "models" | "workspace">) => {
+    conversationViews.current.clear();
+    setState(current => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+    setStandardInventoryRevision(revision => revision + 1);
+  }, []);
+
   const saveStandard = useCallback(async (model: Record<string, unknown>, clearApiKey = false) => {
     // One handler for both directions: the modal only knows the draft, and the
     // core preserves an omitted API key on update, so a blank key stays intact
@@ -6610,19 +6618,20 @@ export default function App() {
       const response = target
         ? await window.reverie.request("updateStandardModel", {
             index: target.index,
+            profileId: target.model.profile_id,
             model,
             ...(clearApiKey ? { clearFields: ["api_key"] } : {}),
           })
         : await window.reverie.request("addStandardModel", { model });
-      setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current);
+      standardInventoryChanged(response);
       setStandardModelForm(null);
       toast(target ? t("标准模型已更新") : t("标准模型已添加"), "success");
     } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); }
-  }, [standardModelForm, t, toast]);
+  }, [standardModelForm, standardInventoryChanged, t, toast]);
 
-  const deleteStandard = useCallback((index: number) => {
-    setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index }); setState((current) => current ? { ...current, models: response.models, workspace: response.workspace } : current); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
-  }, [t, toast]);
+  const deleteStandard = useCallback((index: number, profileId?: string) => {
+    setConfirmation({ title: t("删除标准模型？"), message: t("这会从 Reverie 内核配置中移除该模型，但不会删除任何远端数据。"), label: t("删除模型"), danger: true, action: () => { void (async () => { try { const response = await window.reverie.request("deleteStandardModel", { index, profileId }); standardInventoryChanged(response); toast(t("模型已删除"), "success"); } catch (error) { toast(error instanceof Error ? error.message : String(error), "error"); } })(); } });
+  }, [standardInventoryChanged, t, toast]);
 
   const saveCustomProvider = useCallback(async (values: { name: string; base_url: string; api_key: string; api_key_env: string; format: string }, clearApiKey = false) => {
     const editing = providerModal?.provider ?? null;
@@ -6739,7 +6748,7 @@ export default function App() {
           ? capability.value
           : capability.options[0]?.id
       );
-      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, compact: true, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}), ...(reasoning ? { reasoning } : {}) });
+      const response = await window.reverie.request("selectModel", { source: source.id, modelId: model.id, profileId: model.profile_id, compact: true, projectRoot, sessionId:configurationSessionId,...(configurationSessionId && session?.metadata.assistant_id==='aio'?{assistantId:'aio' as const}:{}), ...(reasoning ? { reasoning } : {}) });
       conversationViews.current.delete(owner);
       if(sequence!==configurationRequestSequence.current || ownerKey(draftOwner.current.root,draftOwner.current.id,draftOwner.current.assistantId)!==owner)return;
       setSession(current=>current?{...current,config_error:''}:current);
@@ -7148,7 +7157,7 @@ export default function App() {
       moveQueue: (index, direction) => { const next = [...queue]; const [item] = next.splice(index, 1); next.splice(index + direction, 0, item); updateQueue(next); },
       deleteQueue: index => { updateQueue(queue.filter((_, i) => i !== index)); },
       forceStop: () => { setConfirmation({ title: t("强制停止核心？"), message: t("当前操作可能尚未完成；只保存最后持久化记录，队列保持暂停。"), label: t("强制停止"), danger: true, action: () => { setQueuePaused(true); void window.reverie.cancel({projectRoot:state.workspace.project_root,sessionId:session?.id || ""}); } }); },
-      vision: selectedModelSource?.models.find(model => model.id === selectedModelSource.selected_model_id)?.vision,
+      vision: selectedModelSource?.models.find(model => isSelectedModel(selectedModelSource, model))?.vision,
       running, approval: Boolean(approval), sessionStates, steer: () => void sendPrompt("steer"),
   } : null;
 

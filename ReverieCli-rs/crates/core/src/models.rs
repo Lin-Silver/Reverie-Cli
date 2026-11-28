@@ -139,8 +139,87 @@ pub fn active(config: &Value) -> Option<&Value> {
         .get(config["active_model_index"].as_u64().unwrap_or(0) as usize)
 }
 
+// Match Python ModelConfig.from_dict's UUIDv5 for inventories predating profile_id.
+// Python's json.dumps uses ", " and escapes non-ASCII characters as UTF-16.
+pub(crate) fn fill_profile_ids(items: &mut [Value]) {
+    for model in items {
+        if !model.is_object()
+            || model["profile_id"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        {
+            continue;
+        }
+        let parts = [
+            "provider",
+            "base_url",
+            "endpoint",
+            "model",
+            "model_display_name",
+        ]
+        .map(|key| model[key].to_string());
+        let mut name = String::new();
+        for ch in format!("[{}]", parts.join(", ")).chars() {
+            if ch < '\u{7f}' {
+                name.push(ch);
+            } else {
+                for unit in ch.encode_utf16(&mut [0; 2]) {
+                    use std::fmt::Write;
+                    write!(name, "\\u{unit:04x}").unwrap();
+                }
+            }
+        }
+        model["profile_id"] = json!(
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, name.as_bytes())
+                .simple()
+                .to_string()
+        );
+    }
+}
+
+pub(crate) fn profile_index(items: &[Value], id: &Value) -> io::Result<usize> {
+    let id = id
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| io::Error::other("Invalid model profile id."))?;
+    let mut matches = items
+        .iter()
+        .enumerate()
+        .filter(|(_, model)| model["profile_id"] == id);
+    let (index, _) = matches
+        .next()
+        .ok_or_else(|| io::Error::other("Model profile not found."))?;
+    if matches.next().is_some() {
+        return Err(io::Error::other("Ambiguous model profile id."));
+    }
+    Ok(index)
+}
+
+pub(crate) fn edit_index(items: &[Value], payload: &Value) -> io::Result<usize> {
+    if let Some(id) = payload.get("profileId") {
+        return profile_index(items, id);
+    }
+    payload["index"]
+        .as_u64()
+        .and_then(|i| usize::try_from(i).ok())
+        .filter(|i| *i < items.len())
+        .ok_or_else(|| io::Error::other("Missing or out-of-range model index."))
+}
+
+pub(crate) fn selection_index(items: &[Value], name: &str, profile: &Value) -> io::Result<usize> {
+    if !profile.is_null() {
+        let index = profile_index(items, profile)?;
+        if items[index]["model"] == name {
+            return Ok(index);
+        }
+    } else if let Some(index) = items.iter().position(|m| m["model"] == name) {
+        return Ok(index);
+    }
+    Err(io::Error::other("Model not found."))
+}
+
 pub fn active_summary(config: &Value) -> Value {
-    active(config).map(|model| json!({"id":model["model"],"display_name":model.get("model_display_name").unwrap_or(&model["model"]),"provider":model.get("provider").and_then(Value::as_str).unwrap_or("openai-chat")})).unwrap_or(Value::Null)
+    active(config).map(|model| json!({"id":model["model"],"profile_id":model["profile_id"],"display_name":model.get("model_display_name").unwrap_or(&model["model"]),"provider":model.get("provider").and_then(Value::as_str).unwrap_or("openai-chat")})).unwrap_or(Value::Null)
 }
 
 pub fn sources(config: &Value) -> Value {
@@ -169,7 +248,7 @@ pub fn sources(config: &Value) -> Value {
         })
         .collect();
     let active = active_summary(config);
-    json!({"active_source":config["active_model_source"].as_str().unwrap_or("standard"),"active_model":active,"sources":[{"id":"standard","display_name":"Manual Model","active":config["active_model_source"].as_str().unwrap_or("standard")=="standard","selected_model_id":active["id"],"selected_reasoning":{"control":"none","options":[],"value":""},"models":models,"config_fields":[],"catalog_live":false}]})
+    json!({"active_source":config["active_model_source"].as_str().unwrap_or("standard"),"active_model":active,"sources":[{"id":"standard","display_name":"Manual Model","active":config["active_model_source"].as_str().unwrap_or("standard")=="standard","selected_model_id":active["id"],"selected_profile_id":active["profile_id"],"selected_reasoning":{"control":"none","options":[],"value":""},"models":models,"config_fields":[],"catalog_live":false}]})
 }
 
 pub fn capture(config: &Value) -> Value {
@@ -216,13 +295,11 @@ pub fn resolve(defaults: &Value, snapshot: &Value) -> Result<Value> {
             .iter()
             .enumerate()
             .filter_map(|(index, item)| {
-                (item["model"] == model
-                    && (reference["profile_id"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .is_empty()
-                        || item["profile_id"] == reference["profile_id"]))
-                    .then_some(index)
+                let same = match reference["profile_id"].as_str().filter(|id| !id.is_empty()) {
+                    Some(id) => item["profile_id"] == id,
+                    None => item["model"] == model,
+                };
+                same.then_some(index)
             })
             .collect();
         if matches.len() != 1 {
@@ -331,4 +408,40 @@ pub fn settings(config: &Value, path: &std::path::Path, workspace_mode: bool) ->
         json!({"name":"Auto review fallback","key":"auto_review_fallback","kind":"choice","value":crate::permissions::fallback(security),"choices":crate::permissions::FALLBACKS,"labels":{"wait":"Wait for a human","deny":"Deny and continue"},"description":"Wait for human approval or deny the call while independent work continues."})
     ]);
     json!({"items":items,"config_path":path,"workspace_mode":workspace_mode})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_profile_identity_matches_python_and_survives_edits() {
+        let mut rows = [
+            json!({"provider":"openai-chat","base_url":"http://localhost/v1","model":"same","model_display_name":"中文😀"}),
+        ];
+        fill_profile_ids(&mut rows);
+        let expected = "28da62b68cf25fbf933ad8dad118d54e";
+        assert_eq!(rows[0]["profile_id"], expected);
+        rows[0]["model_display_name"] = json!("edited");
+        fill_profile_ids(&mut rows);
+        assert_eq!(rows[0]["profile_id"], expected);
+    }
+
+    #[test]
+    fn explicit_profile_never_falls_back_to_a_name_or_index() {
+        let mut rows = [
+            json!({"model":"same","profile_id":"a"}),
+            json!({"model":"same","profile_id":"b"}),
+        ];
+        assert_eq!(selection_index(&rows, "same", &json!("b")).unwrap(), 1);
+        assert_eq!(
+            edit_index(&rows, &json!({"index":0,"profileId":"b"})).unwrap(),
+            1
+        );
+        assert!(edit_index(&rows, &json!({"index":0,"profileId":"gone"})).is_err());
+        assert_eq!(edit_index(&rows, &json!({"index":0})).unwrap(), 0);
+        rows[0]["profile_id"] = json!("b");
+        assert!(selection_index(&rows, "same", &json!("b")).is_err());
+        assert!(edit_index(&rows, &json!({"index":0,"profileId":"b"})).is_err());
+    }
 }

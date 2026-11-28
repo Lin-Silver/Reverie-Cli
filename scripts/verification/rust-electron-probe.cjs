@@ -74,8 +74,10 @@ app.whenReady().then(async()=>{
     const modelsTab=`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='模型与提供商')`;
     await evaluate(`${modelsTab}.click()`);
     await wait("!!document.querySelector('.settings-model-card .edit-model')",'The standard model was missing from settings');
-    await evaluate("document.querySelector('.settings-model-card .edit-model').click()");
+    const card=name=>`Array.from(document.querySelectorAll('.settings-model-card')).find(card=>card.querySelector('strong')?.textContent===${JSON.stringify(name)})`;
+    await evaluate(`${card('Rust 本地验收模型')}.querySelector('.edit-model').click()`);
     await wait("!!document.querySelector('.api-key-environment-field button')",'The standard model edit dialog did not open');
+    await evaluate("window.reverie.request('deleteStandardModel',{index:0,profileId:'before-edit'})");
     await evaluate("document.querySelector('.api-key-environment-field button').click()");
     await wait("!!document.querySelector('datalist option[value=REVERIE_DESKTOP_TEST_KEY]')",'The native environment suggestion did not reach the real model form');
     await evaluate(`(() => {
@@ -90,6 +92,18 @@ app.whenReady().then(async()=>{
     if(savedModel.api_key || savedModel.api_key_env!=='REVERIE_DESKTOP_TEST_KEY' || savedModel.max_context_tokens!==65536
         || savedModel.custom_headers?.['x-fixture-saved']!=='preserve')throw new Error('Saving the environment reference changed other model settings or retained the literal key');
     checks.push('Editing the named standard model lists actual native environment references, saves the selected name and preserves its context size and redacted headers');
+    await evaluate(`${card('delete-target')}.querySelector('.delete-model').click()`);
+    await wait("!!document.querySelector('.confirm-modal')",'The delete confirmation did not open');
+    await evaluate("window.reverie.request('deleteStandardModel',{index:1,profileId:'before-delete'})");
+    await evaluate("document.querySelector('.confirm-modal .danger-button').click()");
+    await wait("document.querySelectorAll('.settings-model-card').length===2",'Deleting the original target after the index shifted failed');
+    const inventory=JSON.parse(fs.readFileSync(path.join(options.appRoot,'.reverie/config.json'),'utf8'));
+    if(inventory.models.map(m=>m.profile_id).join(',')!=='desktop-profile,alternate-profile'||inventory.active_model_index!==0)throw new Error('Stale dialog changed a neighboring profile or the workspace selection');
+    for(const name of ['Alternate profile','Rust 本地验收模型']) {
+      await evaluate(`${card(name)}.querySelector('.model-card-main').click()`);
+      await wait(`document.querySelectorAll('.settings-model-card.active').length===1 && ${card(name)}.classList.contains('active')`,'Expected exactly the chosen profile to be active in settings');
+    }
+    checks.push('Real edit and deletion dialogs target their original profiles after a preceding row disappears, preserve the default, and select each same-name settings card independently');
     await evaluate('document.querySelector(".footer-settings").click()');
     checks.push('All four native permission modes and the two selectable Auto fallback choices are present in the actual settings window');
     await evaluate(`Array.from(document.querySelectorAll('.main-nav button')).find(button=>button.textContent.trim()==='技能').click()`);
@@ -169,6 +183,31 @@ app.whenReady().then(async()=>{
     await screenshot('answer.png');
     await wait('window.__reverieProbeEvents.filter(event=>event?.type==="run.finished" && event.state==="completed").length===1','The answered conversation did not complete');
     checks.push('Keyboard prompt, three choices plus custom, explicit answer and visible newlines');
+    const profileSession=(await evaluate('window.reverie.request("getState",{}).then(response=>response.state)')).sessions.current_session_id;
+    await evaluate("document.querySelector('.model-trigger').click()");
+    await wait("document.querySelectorAll('.model-option-list[data-source=standard] button').length===2",'The same-name profiles did not reach the picker');
+    await evaluate("Array.from(document.querySelectorAll('.model-option-list button')).find(button=>button.innerText.includes('Alternate profile')).click()");
+    await wait("!document.querySelector('.model-picker')",'The selected profile did not close the picker');
+    const selection=await evaluate(`window.reverie.request('getConversationConfig',{sessionId:${JSON.stringify(profileSession)}})`);
+    if(selection.configuration.model_ref.profile_id!=='alternate-profile')throw new Error('Clicked Alternate profile but session saved '+JSON.stringify(selection.configuration.model_ref));
+    await evaluate("document.querySelector('.model-trigger').click()");
+    await wait("document.querySelectorAll('.model-option-list button.active').length===1 && document.querySelector('.model-option-list button.active').innerText.includes('Alternate profile')",'The picker did not highlight only the selected profile');
+    await evaluate("window.reverie.request('updateStandardModel',{index:0,profileId:'desktop-profile',model:{description:'Inventory changed while picker was open'}})");
+    await evaluate("document.querySelector('.model-picker-sources button').click()");
+    await wait("document.querySelector('.model-option-list')?.innerText.includes('Inventory changed while picker was open') && document.querySelector('.model-option-list button.active')?.innerText.includes('Alternate profile')",'Refreshing the real inventory lost the session selection or returned stale rows');
+    await screenshot('selected-model-profile.png');
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+    await wait("!document.querySelector('.model-picker')",'The picker did not close');
+    await evaluate("document.querySelector('.footer-settings').click()");
+    await wait(`!!${modelsTab}`,'Settings did not reopen');
+    await evaluate(`${modelsTab}.click()`);
+    await wait(`!!${card('Rust 本地验收模型')}`,'The profiles did not return to settings');
+    await evaluate(`${card('Rust 本地验收模型')}.querySelector('.edit-model').click()`);
+    await wait("!!document.querySelector('.form-modal button[type=submit]:enabled')",'The existing model was not editable');
+    await evaluate("document.querySelector('.form-modal button[type=submit]').click()");
+    await wait(`!document.querySelector('.form-modal') && document.querySelectorAll('.settings-model-card.active').length===1 && ${card('Alternate profile')}.classList.contains('active')`,'Editing the workspace inventory lost the active conversation selection');
+    await evaluate("document.querySelector('.footer-settings').click()");
+    checks.push('Same-name picker selection, single active row and saved conversation profile; subsequent turns use its distinct loopback endpoint');
     await prompt('WRITE');
     await wait('!!document.querySelector(".approval-panel:not(.user-question-panel)")','The write tool bypassed its approval');
     if(fs.existsSync(options.outputFile))throw new Error('Write occurred before approval.');

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -28,6 +29,7 @@ const answer = '用户自定义第四项\n第二行 😀';
 const fileContent = '完整文件\r\n保持换行 😀';
 const outputFile = path.join(projectRoot,'desktop-output.txt');
 const held = new Set();
+const routes = new Map();
 let fixtureFailure;
 const server = http.createServer(async(request,response)=>{
   try {
@@ -35,6 +37,9 @@ const server = http.createServer(async(request,response)=>{
     const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
     assert.equal(request.headers.authorization,'Bearer desktop-environment-fixture');
     const prompt=body.messages.findLast(message=>message.role==='user').content;
+    assert.equal(body.model,'desktop-fixture');
+    assert.equal(request.url,prompt==='QUESTION'?'/v1/chat/completions':'/alternate/chat/completions');
+    routes.set(prompt,request.url);
     const last=body.messages.at(-1);
     response.writeHead(200,{'content-type':'text/event-stream'});
     const event=(delta,finish_reason=null)=>response.write(`data: ${JSON.stringify({choices:[{index:0,delta,finish_reason}]})}\n\n`);
@@ -50,8 +55,11 @@ const server = http.createServer(async(request,response)=>{
   }catch(error){fixtureFailure=error;response.destroy(error);}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({models:[{model:'desktop-fixture',profile_id:'desktop-profile',provider:'openai-chat',model_display_name:'Rust 本地验收模型',
-  base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'fixture-only',max_context_tokens:65536,custom_headers:{'x-fixture-saved':'preserve'}}],active_model_source:'standard',active_model_index:0,
+const disposable=id=>({model:id,profile_id:id,model_display_name:id,provider:'openai-chat'});
+fs.writeFileSync(path.join(appRoot,'.reverie/config.json'),JSON.stringify({models:[disposable('before-edit'),{model:'desktop-fixture',profile_id:'desktop-profile',provider:'openai-chat',model_display_name:'Rust 本地验收模型',
+  base_url:`http://127.0.0.1:${server.address().port}/v1`,api_key:'fixture-only',max_context_tokens:65536,custom_headers:{'x-fixture-saved':'preserve'}},
+  disposable('before-delete'),{model:'desktop-fixture',profile_id:'alternate-profile',provider:'openai-chat',model_display_name:'Alternate profile',supports_vision:true,
+    base_url:`http://127.0.0.1:${server.address().port}/alternate`,api_key_env:'REVERIE_DESKTOP_TEST_KEY',max_context_tokens:32768},disposable('delete-target')],active_model_source:'standard',active_model_index:1,
   mode:'reverie',auto_index:false,stream_responses:true,security:{permission_mode:'strict',permission_level:'full_control'}}));
 fs.writeFileSync(path.join(runtimeRoot,'desktop-settings.json'),JSON.stringify({projectRoot,coreAppRoot:appRoot,ui:{language:'zh-CN',startupMode:'gui',uiVariant:'classic',classicTheme:'dark'}}));
 const options={uiRoot,runtimeRoot,projectRoot,outputRoot:root,appRoot,answer,fileContent,outputFile};
@@ -75,7 +83,13 @@ try {
   fs.writeFileSync(path.join(root,'electron.log'),output);
   if(fixtureFailure)throw fixtureFailure;
   if(code!==0 || !fs.existsSync(path.join(root,'report.json')))throw new Error(`Actual Electron verification failed (${code}): ${output.slice(-2200)}`);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root,'report.json'),'utf8')).passed,true);
+  const reportFile=path.join(root,'report.json');
+  const report=JSON.parse(fs.readFileSync(reportFile,'utf8'));
+  assert.equal(report.passed,true);
+  assert.deepEqual([...routes.keys()],['QUESTION','WRITE','COMMAND','WAIT']);
+  report.routes=Object.fromEntries(routes);
+  report.kernel_sha256=createHash('sha256').update(fs.readFileSync(report.paths.kernelPath)).digest('hex');
+  fs.writeFileSync(reportFile,JSON.stringify(report,null,2)+'\n');
   console.log(JSON.stringify({passed:true,report:path.join(root,'report.json')}));
 }finally{
   clearTimeout(timer);

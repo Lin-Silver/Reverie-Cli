@@ -32,6 +32,8 @@
 14. Rust 终端的 `/modelscope status` 显示当前模型、连接地址和凭据来源。`/modelscope key` 在遮罩输入框接受密钥或 `env:变量名`，`/modelscope endpoint` 可编辑或恢复默认地址。按维护者确认，`/modelscope activate` 切换当前会话，并设置以后新会话的默认来源，其他已有会话保留原选择。`/modelscope model <id>` 只切换当前会话。Windows release 的伪终端验收分别读取了三个会话的配置，并验证取消启用、两种凭据发起的实际请求，以及录入密钥期间到达的模型提问。[终端验收入口](../../scripts/verification/rust-tui-smoke.mjs)
 15. 在 Rust 终端用 `/model` 查看标准模型编号，用 `/model delete <编号>` 或 `/model remove <编号>` 删除配置。确认框默认选中取消，并显示模型、协议和配置 ID。Windows release 已验证同名配置、确认期间移除前一项、目标被另一客户端删除和越界编号。删除当前会话使用的配置后，重启终端能打开原会话，重新选择之前发出的模型请求数为零；选择替代配置后，回环服务收到请求，回复写回原会话。[终端回归](../../scripts/verification/rust-tui-smoke.mjs)
 
+功能提交 `4e29505` 的 Windows release、桌面暂存和解包 CLI 三处 SHA-256 一致。解包版隐式目录为 26 项、10,605 个字符；Chrome 156 生成 8 帧并导出三种文件。Cargo 有 172 项通过，3 个专用夹具由各自 smoke 执行，28 组原有功能 smoke 正常退出；具名 ModelScope、独立浏览器、Electron 侧栏和 Computer Use 状态也已复验。Linux CI 首次在第二个伪终端启动时缺少光标位置应答，夹具现为每次新进程恢复启动握手，启动后继续验证关闭应答时的正常输入。
+
 Windows 解包内核 `dc97928` 的终端进一步实测了第 14 项的实际发送行为。启用当下的会话和之后从终端新建的会话均向 `/named/v1/chat/completions` 发送 Qwen 请求。重新打开的旧会话向 `/v1/chat/completions` 发送原标准模型请求。三次都核对了终端底栏、服务端收到的模型和鉴权、写回原会话的回复。同批解包 CLI 的隐式目录共 10,615 个字符，26 项各出现一次；真实 Chrome 完成 8 帧 Motion 预览和导出。Windows Cargo 通过 171 项，3 个专用夹具由各自 smoke 执行，28 组现有功能 smoke 全部通过。
 
 两种新建命令 `/session new [name]` 和 `/new [name]` 都保留完整名称并继承默认模型。修复前，`/new "Alias session" 后续` 在数据库中只保存“后续”。修复后的 Windows release 通过真实终端创建了“Alias session 后续”，并核对了它继承的 ModelScope 配置。

@@ -161,6 +161,7 @@ function markPhase(label) {
 }
 function openTerminal(sessionId) {
   terminalExit = undefined;
+  cursorRepliesEnabled = true;
   const args = ['--project', project, '--no-index'];
   if (sessionId) args.push('--session', sessionId);
   terminal = pty.spawn(executable, args, {name: 'xterm-256color', cols: display.cols, rows: display.rows, cwd: project, env: environment});
@@ -552,6 +553,7 @@ try {
     openTerminal(aliasId);
     await wait(() => stripVTControlCharacters(output.slice(restartOffset)).includes('Use /help for commands.')
       && viewportText().includes('Choose a model with /model'), 'restarted terminal reopened the original conversation');
+    cursorRepliesEnabled = false;
     terminal.write('/model\r');
     await wait(() => viewportText().includes('Choose model'), 'replacement picker in the affected conversation');
     terminal.write('\r');
